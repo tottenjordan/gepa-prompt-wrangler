@@ -109,18 +109,39 @@ Results are saved to `outputs/monitors/monitor_<timestamp>.json`:
 }
 ```
 
+## Known Limitations
+
+### Console-created vs API-created evaluators
+
+**Online evaluators created via the REST API (`wrangler.online_evaluators create`) report as ACTIVE but do not produce evaluation results.** Only evaluators created through the Agent Engine console UI produce scores that appear in the Observability tab and Cloud Logging.
+
+This is a platform limitation as of May 2026. The API-created evaluators pass all validation, show `state: ACTIVE`, and are associated with the correct agent — but they never score traces.
+
+**Workaround:** Create online evaluators manually through the console for each agent:
+1. Navigate to the agent in Agent Engine console
+2. Go to the Observability tab
+3. Click "Create evaluator" (or "New evaluation")
+4. Select the metrics you want (quality, hallucination, safety, tool_use)
+5. Submit
+
+This must be done per agent. The `wrangler.online_evaluators` CLI is still useful for listing, verifying, and cleaning up evaluators, but `create` results should be created through the console.
+
+### Trace format compatibility
+
+The console evaluator may reject traces from agents that use AgentTool delegation (sub-agents wrapped as tools). The error `"Dynamic system instructions are not supported"` appears when the trace contains instruction changes from AgentTool invocations. Single-agent traces (no delegation) evaluate successfully.
+
 ## Recommended Setup
 
 For a complete monitoring strategy:
 
-1. **Create online evaluators** for all agents → continuous scoring of live traffic
+1. **Create online evaluators through the console** for each agent → continuous scoring of live traffic
 2. **Generate traffic** periodically → ensures evaluators have traces to score
 3. **Run monitors** before/after prompt changes → regression detection
 4. **Check the Observability tab** → visual dashboard of agent quality over time
 
 ```bash
-# One-time setup
-uv run python -m wrangler.online_evaluators create
+# One-time setup (evaluators must be created through console — see known limitations)
+# uv run python -m wrangler.online_evaluators create  # API-created don't produce results
 
 # Periodic health check
 uv run python -m wrangler.online_monitors $LITE_ENGINE_ID
