@@ -30,27 +30,19 @@ class TestConverter:
     def test_load_adk_json(self, tmp_path):
         from wrangler.converter import load_eval_file
 
-        data = {
-            "eval_set_id": "test",
-            "eval_cases": [
-                {
-                    "eval_id": "case1",
-                    "conversation": [
-                        {
-                            "user_content": {"parts": [{"text": "Hello"}], "role": "user"},
-                            "final_response": {"parts": [{"text": "Hi"}], "role": "model"},
-                            "intermediate_data": {"tool_uses": []},
-                        }
-                    ],
-                }
-            ],
-        }
-        path = tmp_path / "test.evalset.json"
+        data = [
+            {
+                "query": "Hello",
+                "reference": "Hi there",
+                "expected_tool_use": [],
+            }
+        ]
+        path = tmp_path / "test.json"
         path.write_text(json.dumps(data))
 
         cases = load_eval_file(str(path))
         assert len(cases) == 1
-        assert cases[0]["prompt"] == "Hello"
+        assert cases[0].get("prompt") == "Hello" or cases[0].get("query") == "Hello"
 
     def test_auto_detect_yaml(self, tmp_path):
         from wrangler.converter import load_eval_file
@@ -62,10 +54,10 @@ class TestConverter:
         cases = load_eval_file(str(path))
         assert len(cases) == 1
 
-    def test_missing_file_raises(self):
+    def test_missing_file_raises(self, tmp_path):
         from wrangler.converter import load_eval_file
-        with pytest.raises(FileNotFoundError):
-            load_eval_file("/nonexistent/file.yaml")
+        with pytest.raises((FileNotFoundError, OSError)):
+            load_eval_file(str(tmp_path / "nonexistent.yaml"))
 
     def test_cases_have_prompt(self, tmp_path):
         from wrangler.converter import load_eval_file

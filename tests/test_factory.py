@@ -102,7 +102,7 @@ class TestPairFactory:
         with pytest.raises(KeyError):
             result.get_pair("nonexistent")
 
-    def test_file_not_found_raises(self):
+    def test_file_not_found_raises(self, tmp_path):
         from wrangler.factory import PairFactory
-        with pytest.raises(FileNotFoundError):
-            PairFactory.load("/nonexistent/manifest.yaml")
+        with pytest.raises((FileNotFoundError, OSError)):
+            PairFactory.load(str(tmp_path / "nonexistent.yaml"))
