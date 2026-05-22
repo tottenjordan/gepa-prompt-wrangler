@@ -2,6 +2,14 @@
 
 End-to-end example comparing 5 model tiers on the same corporate travel/expense agent.
 
+## Pipeline Overview
+
+![GEPA Optimization Pipeline](../../outputs/reports/diagrams/demo_pipeline.png)
+
+## Architecture
+
+![Agent Architecture](../../outputs/reports/diagrams/agent_architecture.png)
+
 ## Models Tested
 
 | Tier | Model | Provider | Input $/M | Output $/M |

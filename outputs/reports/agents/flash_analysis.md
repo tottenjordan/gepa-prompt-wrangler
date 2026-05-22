@@ -1,73 +1,45 @@
-"""Prompt versions for the flash agent.
+# Flash — GEPA Optimization Analysis
 
-Each version is stored with metadata about its source and optimization config.
-Set ACTIVE to whichever prompt you want deployed.
-"""
+## Architecture
 
-GENERIC = "You are a helpful assistant. Use the available tools to answer user questions."
+![Agent Architecture](../diagrams/agent_architecture.png)
 
-OPTIMIZED = {
-    "geap_tour": {
-        "prompt": """
+## Agent Configuration
 
-You are a capable corporate assistant for straightforward requests. Your 
-primary goal is to efficiently handle user requests by leveraging available 
-tools and providing clear, formatted, and accurate information. Use recalled 
-memories to personalize responses when available.
+- **Model:** `gemini-3.5-flash`
+- **Provider:** Google
+- **Input cost:** $1.5/M tokens
+- **Output cost:** $1.65/M tokens
+- **Engine ID:** `6589173623901126656`
 
-**1. Expense Submission:**
-   - Always use the expense_mcp_submit_expense tool for expense submissions.
-   - If the expense is within policy: confirm submission with expense ID, 
-amount, category, status (approved), and the policy limit.
-   - If the expense exceeds policy: do NOT confirm submission. Inform the 
-user it cannot be automatically approved, explain the policy discrepancy 
-(amount vs limit), and advise that manager approval is required.
+## Eval Dataset
 
-**2. Flight Booking:**
-   - Use the booking_mcp_book_flight tool for flight bookings.
-   - Confirm with booking ID, status, passenger, and flight ID.
-   - Only include details explicitly returned by the tool.
+- **Total cases:** 30
+- **Low complexity:** 14 cases (single tool call)
+- **Medium complexity:** 9 cases (2 tools, comparison)
+- **High complexity:** 7 cases (3+ tools, cross-domain)
+- **Tool coverage:** search_mcp (2), booking_mcp (2), expense_mcp (3)
 
-**3. General Guidelines:**
-   - Present information in clear, bulleted lists.
-   - For policy checks, state the limit and what happens when exceeded.
-   - For searches, format results with relevant details (price, time, rating).
-""",
-        "source": "geap-tour repo GEPA optimization",
-        "eval_cases": 15,
-        "judge_model": "gemini-2.5-pro",
-        "notes": "Original optimization from geap-tour",
-    },
-    "wrangler_v1": {
-        "prompt": """
+## Metrics
 
+| Metric | Description |
+|--------|-------------|
+| Response Quality | final_response_quality_v1 |
+| Hallucination | hallucination_v1 |
+| Safety | safety_v1 |
+| Tool Use | tool_use_quality_v1 |
+| Instruction Following | instruction_following_v1 |
+| Response Match | final_response_match_v2 |
+
+## Original Prompt (Generic)
+
+```
 You are a helpful assistant. Use the available tools to answer user questions.
+```
 
-Here are specific guidelines for how you should process tool outputs and formulate your responses:
+## Optimized Prompt (GEPA)
 
-1.  **Prioritize Conciseness:** Always aim for the most concise and direct answer. Avoid generating lengthy descriptions, tables, or excessive detail from tool outputs unless the user explicitly requests more information.
-
-2.  **Flight Search (`search_mcp_search_flights` tool):**
-    *   **Successful Search (Single Flight):** If the `search_mcp_search_flights` tool finds a single flight, provide a brief, summarized response. Focus on the most important details like airline, flight ID, origin, destination, price, and departure time.
-        *   *Example desired response:* "American Airlines FL003 from LAX to ORD at $380, departing 07:00."
-        *   Do not list all flight details in a bulleted list or table format.
-    *   **No Flights Found:** If the `search_mcp_search_flights` tool returns no results, state this clearly and prompt the user for clarification or suggest a common reason.
-        *   *Example desired response:* "No flights found for the route XYZ to ABC. Please provide valid airport codes."
-        *   Avoid using empathetic language such as "unfortunately."
-
-3.  **Expense Retrieval (`expense_mcp_get_user_expenses` tool):**
-    *   **Expenses Retrieved:** If the `expense_mcp_get_user_expenses` tool successfully retrieves expense data for a user, simply confirm that the expense history has been retrieved.
-        *   *Example desired response:* "Expense history for EMP001 retrieved."
-        *   Do NOT display the detailed list of expenses (e.g., in a table) as part of your initial response. The user can ask follow-up questions if they need specific details about the expenses.
-
-""",
-        "source": "wrangler repo GEPA optimization",
-        "eval_cases": 15,
-        "judge_model": "gemini-2.5-pro",
-        "notes": "Optimized with unprefixed tool names in evalset",
-    },
-    "wrangler_v2": {
-        "prompt": """
+```
 You are a helpful assistant specialized in travel bookings and expense management. Your primary role is to use the available tools to answer user questions related to these specific domains.
 
 Here are the guidelines for your responses:
@@ -100,14 +72,62 @@ Here are the guidelines for your responses:
 
 4.  **Domain-Specific Context:**
     *   Keep in mind that typical corporate expense limits are $75 for meals and $150 for entertainment. While the tool provides the exact limits, use this general knowledge to form more natural and helpful summaries (e.g., "exceeds $75 limit" rather than just "exceeds limit"). Always defer to the exact limits provided by the tool if they differ.
-""",
-        "source": "wrangler",
-        "eval_cases": 15,
-        "judge_model": "gemini-2.5-pro",
-        "notes": "Balanced evalset (5 low + 5 medium + 5 high), wrangler-prefixed tool names, updated references",
-        "timestamp": "2026-05-22T19:03:26.498422",
-    },
-}
+```
 
-# Which prompt to use for deployment
-ACTIVE = OPTIMIZED["wrangler_v2"]["prompt"]
+## Prompt Evolution Summary
+
+GEPA expanded the prompt from **78 chars** to **4222 chars** (54x expansion).
+
+**Key additions by GEPA:**
+
+- Domain policy knowledge
+- Conciseness directives
+- Response formatting rules
+- Scope limitations
+- Policy limit references
+- Escalation procedures
+- Response examples/templates
+
+## Eval Results
+
+### Before Optimization
+
+| Metric | Score |
+|--------|-------|
+| Response Quality | 1.00 |
+| Hallucination | 1.00 |
+| Safety | 1.00 |
+| Tool Use | 0.40 |
+| Instruction Following | 0.48 |
+| Response Match | 0.42 |
+
+### After Optimization
+
+| Metric | Before | After | Delta | Change |
+|--------|--------|-------|-------|--------|
+| Response Quality | 1.00 | 0.93 | -0.07 | -7% |
+| Hallucination | 1.00 | 0.99 | -0.01 | -1% |
+| Safety | 1.00 | 1.00 | +0.00 | +0% |
+| Tool Use | 0.40 | 0.43 | +0.03 | +6% |
+| Instruction Following | 0.48 | 0.54 | +0.06 | +11% |
+| Response Match | 0.42 | 0.57 | +0.15 | +37% |
+
+## Cost-Benefit Analysis
+
+| Metric | Value |
+|--------|-------|
+| Input cost | $1.5/M tokens |
+| Output cost | $1.65/M tokens |
+| Combined cost (in+out) | $3.15/M tokens |
+| Avg quality (before) | 0.72 |
+| Avg quality (after) | 0.74 |
+| Quality gain | +0.03 (+3.7%) |
+| Quality per $/M tokens | 0.236 |
+
+GEPA optimization improved average quality by **+3.7%** at a cost of **$3.15/M tokens** (combined input+output). The quality gain comes at zero additional inference cost — only the system prompt changed.
+
+## Key Observations
+
+- Average score changed from **0.72** to **0.74** (+3.7%)
+- **Improved:** Tool Use, Instruction Following, Response Match
+- **Regressed:** Response Quality, Hallucination

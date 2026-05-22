@@ -26,8 +26,11 @@ env/
 .DS_Store
 Thumbs.db
 
-# Project outputs
-outputs/
+# Project outputs — track reports/, ignore everything else
+outputs/*
+!outputs/reports/
+outputs/reports/diagrams/run_*/
+examples/outputs/
 eval_outputs/
 
 # uv

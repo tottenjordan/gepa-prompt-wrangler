@@ -29,6 +29,8 @@ def generate_diagram(source_path: str, caption: str, output_dir: str = None):
     output_dir = output_dir or DIAGRAMS_DIR
     Path(output_dir).mkdir(parents=True, exist_ok=True)
 
+    dest = Path(output_dir) / f"{Path(source_path).stem}.png"
+
     env = os.environ.copy()
     env["GOOGLE_CLOUD_PROJECT"] = PAPERBANANA_PROJECT
     env["GOOGLE_CLOUD_LOCATION"] = PAPERBANANA_LOCATION
@@ -37,6 +39,7 @@ def generate_diagram(source_path: str, caption: str, output_dir: str = None):
         "uv", "run", "paperbanana", "generate",
         "-i", source_path,
         "-c", caption,
+        "-o", str(dest),
         "--vlm-provider", "gemini",
         "--image-provider", "google_imagen",
         "-n", "2",
@@ -49,16 +52,22 @@ def generate_diagram(source_path: str, caption: str, output_dir: str = None):
         print(f"    Error: {result.stderr[-200:]}")
         return None
 
-    for line in result.stdout.split("\n"):
-        if "final_output" in line and ".png" in line:
-            output_path = line.split("output=")[-1].split(" ")[0] if "output=" in line else None
-            if output_path:
-                dest = Path(output_dir) / f"{Path(source_path).stem}.png"
-                os.rename(output_path, str(dest))
-                print(f"    Saved: {dest}")
-                return str(dest)
+    # PaperBanana may write to a run-specific dir instead of -o path
+    if not dest.exists():
+        import glob
+        run_dirs = sorted(glob.glob(str(Path(output_dir) / "run_*")), reverse=True)
+        for run_dir in run_dirs:
+            final = Path(run_dir) / "final_output.png"
+            if final.exists():
+                import shutil
+                shutil.copy2(str(final), str(dest))
+                break
 
-    print(f"    Output path not found in: {result.stdout[-200:]}")
+    if dest.exists():
+        print(f"    Saved: {dest}")
+        return str(dest)
+
+    print(f"    Output not found. Stdout: {result.stdout[-200:]}")
     return None
 
 
