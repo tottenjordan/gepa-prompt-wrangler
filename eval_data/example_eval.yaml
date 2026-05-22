@@ -7,90 +7,90 @@ eval_cases:
   - prompt: "Find flights from SFO to JFK"
     expected_response: "United FL001 at $450 departing 08:00 and Delta FL002 at $520 departing 10:30."
     expected_tools:
-      - name: search_flights
+      - name: search_mcp_search_flights
         args: {origin: SFO, destination: JFK}
 
   - prompt: "Search for flights from LAX to Chicago"
     expected_response: "American Airlines FL003 from LAX to ORD at $380, departing 07:00."
     expected_tools:
-      - name: search_flights
+      - name: search_mcp_search_flights
         args: {origin: LAX, destination: ORD}
 
   - prompt: "Are there flights from SFO to Los Angeles?"
     expected_response: "Southwest FL005 from SFO to LAX at $150, departing 06:00."
     expected_tools:
-      - name: search_flights
+      - name: search_mcp_search_flights
         args: {origin: SFO, destination: LAX}
 
   # Hotel search
   - prompt: "Search for hotels in New York"
     expected_response: "Grand Hyatt New York at $320/night (4.5 rating) and Budget Inn Downtown at $120/night (3.2 rating)."
     expected_tools:
-      - name: search_hotels
+      - name: search_mcp_search_hotels
         args: {city: New York}
 
   - prompt: "Find hotels in New York under $200 per night"
     expected_response: "Budget Inn Downtown at $120/night (3.2 rating)."
     expected_tools:
-      - name: search_hotels
+      - name: search_mcp_search_hotels
         args: {city: New York, max_price: 200}
 
   - prompt: "Find me a hotel in Miami"
     expected_response: "Fontainebleau Miami at $400/night with a 4.7 rating."
     expected_tools:
-      - name: search_hotels
+      - name: search_mcp_search_hotels
         args: {city: Miami}
 
   # Expense policy
   - prompt: "What is the corporate meal expense limit?"
     expected_response: "The corporate meal expense limit is $75. Amounts above require manager review."
     expected_tools:
-      - name: check_expense_policy
+      - name: expense_mcp_check_expense_policy
         args: {category: meals, amount: 75}
 
   - prompt: "Is a $50 transport expense within policy?"
     expected_response: "A $50 transport expense is within the corporate policy limit of $200."
     expected_tools:
-      - name: check_expense_policy
+      - name: expense_mcp_check_expense_policy
         args: {category: transport, amount: 50}
 
   - prompt: "What's the lodging policy limit?"
     expected_response: "The corporate lodging policy limit is $400 per night."
     expected_tools:
-      - name: check_expense_policy
+      - name: expense_mcp_check_expense_policy
         args: {category: lodging, amount: 400}
 
   # Booking
   - prompt: "Book flight FL001 for Alice Johnson"
     expected_response: "Flight FL001 booked and confirmed for Alice Johnson."
     expected_tools:
-      - name: book_flight
+      - name: booking_mcp_book_flight
         args: {flight_id: FL001, passenger_name: Alice Johnson}
 
   # Expense history
   - prompt: "Show expenses for user EMP001"
     expected_response: "Expense history for EMP001 retrieved."
     expected_tools:
-      - name: get_user_expenses
+      - name: expense_mcp_get_user_expenses
         args: {user_id: EMP001}
 
   # Edge cases
   - prompt: "Find flights from XYZ to ABC"
     expected_response: "No flights found for the route XYZ to ABC. Please provide valid airport codes."
     expected_tools:
-      - name: search_flights
+      - name: search_mcp_search_flights
         args: {origin: XYZ, destination: ABC}
 
   - prompt: "Search hotels in Atlantis"
     expected_response: "No hotels found in Atlantis. Please try a different city."
     expected_tools:
-      - name: search_hotels
+      - name: search_mcp_search_hotels
         args: {city: Atlantis}
 
   - prompt: "Check policy for $500 in the 'unknown' category"
     expected_response: "The category 'unknown' is not valid. Valid categories: meals, transport, lodging, supplies, entertainment."
     expected_tools:
-      - name: check_expense_policy
+      - name: expense_mcp_check_expense_policy
         args: {category: unknown, amount: 500}
 
   # ============================================================
@@ -101,73 +101,73 @@ eval_cases:
   - prompt: "Submit a $45 meals expense for lunch meeting, user ID EMP001"
     expected_response: "Policy checked ($45 within $75 limit). Expense submitted for EMP001, status: approved."
     expected_tools:
-      - name: check_expense_policy
+      - name: expense_mcp_check_expense_policy
         args: {category: meals, amount: 45}
-      - name: submit_expense
+      - name: expense_mcp_submit_expense
         args: {user_id: EMP001, category: meals, amount: 45, description: lunch meeting}
 
   # Over-limit submission
   - prompt: "Submit a $500 entertainment expense for team event, user ID EMP002"
     expected_response: "A $500 entertainment expense exceeds the $150 limit. Requires manager approval."
     expected_tools:
-      - name: check_expense_policy
+      - name: expense_mcp_check_expense_policy
         args: {category: entertainment, amount: 500}
 
   # Flight comparison
   - prompt: "Find flights to JFK and compare the cheapest options by airline"
     expected_response: "United FL001 at $450 vs Delta FL002 at $520. United is $70 cheaper (13.5% savings)."
     expected_tools:
-      - name: search_flights
+      - name: search_mcp_search_flights
         args: {destination: JFK}
 
   # Search + policy cross-check
   - prompt: "Search hotels in New York, then check if the nightly rate fits our lodging policy"
     expected_response: "Grand Hyatt $320/night within $400 policy. Budget Inn $120/night within policy."
     expected_tools:
-      - name: search_hotels
+      - name: search_mcp_search_hotels
         args: {city: New York}
-      - name: check_expense_policy
+      - name: expense_mcp_check_expense_policy
         args: {category: lodging, amount: 400}
 
   # Multi-category policy check
   - prompt: "Check if a $100 meal and a $250 entertainment expense are both within policy"
     expected_response: "Meals $100 exceeds $75 limit. Entertainment $250 exceeds $150 limit. Both need manager review."
     expected_tools:
-      - name: check_expense_policy
+      - name: expense_mcp_check_expense_policy
         args: {category: meals, amount: 100}
-      - name: check_expense_policy
+      - name: expense_mcp_check_expense_policy
         args: {category: entertainment, amount: 250}
 
   # History + analysis
   - prompt: "Show expense history for EMP001 and flag any items that exceeded policy limits"
     expected_response: "EMP001 expenses reviewed against policy limits. Violations flagged."
     expected_tools:
-      - name: get_user_expenses
+      - name: expense_mcp_get_user_expenses
         args: {user_id: EMP001}
 
   # Price savings analysis
   - prompt: "Find the cheapest flight from SFO to JFK and tell me how much I'd save vs the most expensive"
     expected_response: "Cheapest: United FL001 at $450. Most expensive: Delta FL002 at $520. Savings: $70 (13.5%)."
     expected_tools:
-      - name: search_flights
+      - name: search_mcp_search_flights
         args: {origin: SFO, destination: JFK}
 
   # Book + policy verify
   - prompt: "Book hotel HT002 for Bob Smith June 15-18, and check if the rate is within lodging policy"
     expected_response: "Hotel HT002 (Palmer House, $250/night) booked for Bob Smith. Rate within $400 lodging policy."
     expected_tools:
-      - name: book_hotel
+      - name: booking_mcp_book_hotel
         args: {hotel_id: HT002, guest_name: Bob Smith, checkin: "2026-06-15", checkout: "2026-06-18"}
-      - name: check_expense_policy
+      - name: expense_mcp_check_expense_policy
         args: {category: lodging, amount: 250}
 
   # Expense submission within policy
   - prompt: "Submit a $90 supplies expense for office materials, user ID EMP003"
     expected_response: "Expense submitted: $90 supplies for EMP003. Status: approved (within $100 policy limit)."
     expected_tools:
-      - name: check_expense_policy
+      - name: expense_mcp_check_expense_policy
         args: {category: supplies, amount: 90}
-      - name: submit_expense
+      - name: expense_mcp_submit_expense
         args: {user_id: EMP003, category: supplies, amount: 90, description: office materials}
 
   # ============================================================
@@ -178,72 +178,72 @@ eval_cases:
   - prompt: "Book flight FL001 for Alice, check if Grand Hyatt ($320) is within lodging policy, and submit a $75 meals expense for EMP001"
     expected_response: "FL001 booked for Alice. Grand Hyatt $320 within $400 policy. $75 meals submitted, approved."
     expected_tools:
-      - name: book_flight
+      - name: booking_mcp_book_flight
         args: {flight_id: FL001, passenger_name: Alice}
-      - name: check_expense_policy
+      - name: expense_mcp_check_expense_policy
         args: {category: lodging, amount: 320}
-      - name: check_expense_policy
+      - name: expense_mcp_check_expense_policy
         args: {category: meals, amount: 75}
-      - name: submit_expense
+      - name: expense_mcp_submit_expense
         args: {user_id: EMP001, category: meals, amount: 75}
 
   # Multi-route comparison with hotels
   - prompt: "Compare flights from SFO to JFK vs LAX to ORD, and find hotels in each destination city"
     expected_response: "SFO-JFK: FL001 $450, FL002 $520. NYC hotels: Grand Hyatt $320, Budget Inn $120. LAX-ORD: FL003 $380. Chicago hotels: Palmer House $250."
     expected_tools:
-      - name: search_flights
+      - name: search_mcp_search_flights
         args: {origin: SFO, destination: JFK}
-      - name: search_flights
+      - name: search_mcp_search_flights
         args: {origin: LAX, destination: ORD}
-      - name: search_hotels
+      - name: search_mcp_search_hotels
         args: {city: New York}
-      - name: search_hotels
+      - name: search_mcp_search_hotels
         args: {city: Chicago}
 
   # Budget-constrained trip planning
   - prompt: "I have a $2000 budget for a London trip. Find flights from JFK, hotels, and check lodging and meal policies. Can I afford it?"
     expected_response: "JFK-LHR: Delta FL006 at $890. London hotels: Claridge's $680/night. Lodging policy $400/night (exceeded). Meals $75/day. Budget analysis provided."
     expected_tools:
-      - name: search_flights
+      - name: search_mcp_search_flights
         args: {origin: JFK, destination: LHR}
-      - name: search_hotels
+      - name: search_mcp_search_hotels
         args: {city: London}
-      - name: check_expense_policy
+      - name: expense_mcp_check_expense_policy
         args: {category: lodging, amount: 680}
-      - name: check_expense_policy
+      - name: expense_mcp_check_expense_policy
         args: {category: meals, amount: 75}
 
   # Review + audit + submit pipeline
   - prompt: "Review EMP002's expense history, check all policy categories, and submit a $80 supplies expense for EMP002"
     expected_response: "EMP002 history reviewed. Policy limits: meals $75, transport $200, lodging $400, supplies $100, entertainment $150. Supplies $80 submitted, approved."
     expected_tools:
-      - name: get_user_expenses
+      - name: expense_mcp_get_user_expenses
         args: {user_id: EMP002}
-      - name: check_expense_policy
+      - name: expense_mcp_check_expense_policy
         args: {category: supplies, amount: 80}
-      - name: submit_expense
+      - name: expense_mcp_submit_expense
         args: {user_id: EMP002, category: supplies, amount: 80}
 
   # End-to-end trip booking
   - prompt: "Find the cheapest SFO-JFK flight, book it for Bob Smith, find a hotel within lodging policy, and submit a pre-trip expense estimate"
     expected_response: "Cheapest: FL001 $450. Booked for Bob Smith. Grand Hyatt $320 within $400 policy. Pre-trip estimate submitted."
     expected_tools:
-      - name: search_flights
+      - name: search_mcp_search_flights
         args: {origin: SFO, destination: JFK}
-      - name: book_flight
+      - name: booking_mcp_book_flight
         args: {flight_id: FL001, passenger_name: Bob Smith}
-      - name: search_hotels
+      - name: search_mcp_search_hotels
         args: {city: New York}
-      - name: check_expense_policy
+      - name: expense_mcp_check_expense_policy
         args: {category: lodging, amount: 320}
 
   # Multi-user expense audit
   - prompt: "Pull expense histories for EMP001 and EMP002, flag any policy violations, and summarize total overspend"
     expected_response: "EMP001 and EMP002 expenses reviewed. Violations flagged with overage amounts. Total overspend summarized by category."
     expected_tools:
-      - name: get_user_expenses
+      - name: expense_mcp_get_user_expenses
         args: {user_id: EMP001}
-      - name: get_user_expenses
+      - name: expense_mcp_get_user_expenses
         args: {user_id: EMP002}
 
   # Out of scope
