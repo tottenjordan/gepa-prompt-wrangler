@@ -233,7 +233,63 @@ eval_cases:
 }
 ```
 
-The converter auto-detects the format. Use simplified YAML for authoring, ADK JSON for advanced tool-use evaluation.
+### Format Auto-Detection
+
+The converter auto-detects the format based on file extension and structure:
+- `.yaml` / `.yml` → simplified YAML
+- `.evalset.json` → ADK evalset JSON
+- Dict with `eval_cases` key → simplified YAML (even in `.yaml` files)
+- Dict with `eval_set_id` key → ADK evalset JSON
+
+### Converting Between Formats
+
+```python
+from wrangler.converter import load_eval_file, to_adk_evalset, save_adk_evalset
+
+# Load from either format (auto-detected)
+cases = load_eval_file("eval_data/example_eval.yaml")
+
+# Convert to ADK evalset JSON (required for GEPA optimization)
+save_adk_evalset(cases, "eval_data/example_eval.evalset.json", eval_set_id="my_eval")
+```
+
+### When Each Format is Used
+
+| Format | Used By | Purpose |
+|--------|---------|---------|
+| Simplified YAML | `wrangler eval`, `wrangler run`, batch eval, traffic generator | Human-authored eval cases |
+| ADK Evalset JSON | GEPA optimizer (`wrangler optimize`) | Machine-consumed eval cases for local optimization |
+
+### Tool Name Convention
+
+Tool names in eval datasets must match what the deployed agent actually calls. ADK prefixes MCP tool names with the server name:
+
+```
+FastMCP server name: "search-mcp"
+Tool function name:  "search_flights"
+Agent Registry name: "wrangler-search-mcp"
+
+→ Actual tool name in traces: "wrangler_search_mcp_search_flights"
+```
+
+Use the full prefixed name in eval datasets:
+```yaml
+expected_tools:
+  - name: wrangler_search_mcp_search_flights  # ✓ correct
+  # - name: search_flights                     # ✗ wrong — won't match traces
+```
+
+### GEPA Evalset vs Batch Eval Dataset
+
+| | GEPA Evalset | Batch Eval Dataset |
+|---|---|---|
+| Format | ADK JSON (`.evalset.json`) | Simplified YAML |
+| Location | `agents/{name}_opt/{name}_eval_set.evalset.json` | `eval_data/example_eval.yaml` |
+| Cases | 15 (balanced: 5 low + 5 medium + 5 high) | 30 (14 low + 9 medium + 7 high) |
+| Used by | Local GEPA optimizer | Vertex AI Evaluation Service |
+| Purpose | Train — optimize prompt candidates | Test — measure deployed agent quality |
+
+The GEPA evalset is a balanced subset of the batch eval dataset. This train/test split ensures GEPA-optimized prompts generalize to unseen cases.
 
 ---
 
