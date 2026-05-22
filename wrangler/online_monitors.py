@@ -135,7 +135,12 @@ def run_quick_eval(agent_id: str, num_cases: int = None) -> dict:
 
 if __name__ == "__main__":
     from dotenv import load_dotenv
+    from pathlib import Path
+
     load_dotenv()
+    example_env = Path(__file__).parent.parent / "examples" / "multi_model_agents" / ".env"
+    if example_env.exists():
+        load_dotenv(str(example_env), override=True)
 
     if len(sys.argv) < 2:
         print("Usage: python -m wrangler.online_monitors <engine-id> [--cases N]")

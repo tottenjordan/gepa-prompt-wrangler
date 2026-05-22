@@ -148,7 +148,12 @@ def generate_traffic(
 
 if __name__ == "__main__":
     from dotenv import load_dotenv
+    from pathlib import Path
+
     load_dotenv()
+    example_env = Path(__file__).parent.parent / "examples" / "multi_model_agents" / ".env"
+    if example_env.exists():
+        load_dotenv(str(example_env), override=True)
 
     parser = argparse.ArgumentParser(description="Generate traffic for deployed agents")
     parser.add_argument(

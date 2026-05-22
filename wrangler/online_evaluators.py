@@ -316,7 +316,13 @@ COMMANDS = {
 
 if __name__ == "__main__":
     from dotenv import load_dotenv
+    from pathlib import Path
+
+    # Load .env from repo root, then example dir (example overrides root)
     load_dotenv()
+    example_env = Path(__file__).parent.parent / "examples" / "multi_model_agents" / ".env"
+    if example_env.exists():
+        load_dotenv(str(example_env), override=True)
 
     if len(sys.argv) < 2 or sys.argv[1] not in COMMANDS:
         print(f"Usage: python -m wrangler.online_evaluators <command>")
