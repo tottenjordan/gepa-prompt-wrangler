@@ -17,6 +17,11 @@ class ToolSpec:
     description: str
     parameters: dict[str, Any] = field(default_factory=dict)
     tool_type: str = "function"
+    eval_name: str = ""
+
+    def __post_init__(self):
+        if not self.eval_name:
+            self.eval_name = self.name
 
 
 @dataclass
@@ -57,6 +62,36 @@ def _inspect_function_tool(tool) -> ToolSpec:
     )
 
 
+def _detect_mcp_eval_name(tool) -> str | None:
+    """Try to compute the prefixed eval name for an MCP toolset.
+
+    MCP tools registered via Agent Registry get prefixed as:
+    {server_name}_{tool_name} (hyphens replaced with underscores).
+    """
+    server_name = None
+
+    if hasattr(tool, "connection_params"):
+        cp = tool.connection_params
+        if hasattr(cp, "resource_name"):
+            parts = cp.resource_name.rsplit("/", 1)
+            if len(parts) == 2:
+                server_name = parts[-1]
+        elif hasattr(cp, "url"):
+            url = str(cp.url)
+            for segment in url.rstrip("/").rsplit("/", 3):
+                if segment and not segment.startswith("http"):
+                    server_name = segment
+                    break
+
+    if hasattr(tool, "name"):
+        if server_name is None:
+            server_name = getattr(tool, "name", "")
+        if server_name:
+            return server_name.replace("-", "_")
+
+    return None
+
+
 class AgentInspector:
     @staticmethod
     def inspect(agent_module_path: str) -> AgentSpec:
@@ -85,13 +120,24 @@ class AgentInspector:
         tools = []
         for tool in (agent.tools or []):
             try:
-                if hasattr(tool, "func"):
+                if callable(tool) and not hasattr(tool, "func") and not hasattr(tool, "agent"):
+                    tools.append(_inspect_function_tool(tool))
+                elif hasattr(tool, "func"):
                     tools.append(_inspect_function_tool(tool))
                 elif hasattr(tool, "agent"):
                     tools.append(ToolSpec(
                         name=tool.agent.name,
                         description=getattr(tool.agent, "description", ""),
                         tool_type="agent_tool",
+                    ))
+                elif hasattr(tool, "connection_params"):
+                    mcp_prefix = _detect_mcp_eval_name(tool)
+                    tool_name = getattr(tool, "name", type(tool).__name__)
+                    tools.append(ToolSpec(
+                        name=tool_name,
+                        description=f"MCP toolset ({tool_name})",
+                        tool_type="mcp_toolset",
+                        eval_name=mcp_prefix or tool_name,
                     ))
                 else:
                     tools.append(ToolSpec(
@@ -126,6 +172,7 @@ class AgentInspector:
                         "name": t.name,
                         "description": t.description,
                         "type": t.tool_type,
+                        **({"eval_name": t.eval_name} if t.eval_name != t.name else {}),
                         **({"parameters": t.parameters} if t.parameters else {}),
                     }
                     for t in spec.tools
@@ -133,3 +180,62 @@ class AgentInspector:
             }
         }
         return yaml.dump(data, default_flow_style=False, sort_keys=False, width=100)
+
+    @staticmethod
+    def generate_manifest_stub(spec: AgentSpec, agent_module_path: str) -> dict:
+        """Generate a pre-populated manifest dict from an inspected agent."""
+        return {
+            "name": f"{spec.name}-optimization",
+            "description": f"Prompt optimization for {spec.name}",
+            "agent_module": agent_module_path,
+            "eval_data": "eval_cases.yaml",
+            "pairs": [
+                {
+                    "id": spec.name,
+                    "model": spec.model,
+                    "system_prompt": spec.instruction or "You are a helpful assistant.",
+                },
+            ],
+            "eval_config": {
+                "judge_model": "gemini-2.5-pro",
+                "response_match_threshold": 0.5,
+                "safety_threshold": 0.8,
+            },
+        }
+
+    @staticmethod
+    def generate_eval_skeleton(spec: AgentSpec, count: int = 5) -> list[dict]:
+        """Generate skeleton eval cases using discovered tool names."""
+        cases = []
+        function_tools = [t for t in spec.tools if t.tool_type == "function"]
+        mcp_tools = [t for t in spec.tools if t.tool_type == "mcp_toolset"]
+
+        for i, tool in enumerate(function_tools[:count]):
+            param_names = list(tool.parameters.keys())
+            param_example = ", ".join(f"{p}=..." for p in param_names[:2])
+            cases.append({
+                "prompt": f"TODO: Write a query that triggers {tool.name}({param_example})",
+                "expected_response": "TODO: Expected agent response",
+                "expected_tools": [
+                    {"name": tool.eval_name, "args": {p: "TODO" for p in param_names[:2]}},
+                ],
+            })
+
+        for tool in mcp_tools[:max(count - len(cases), 1)]:
+            cases.append({
+                "prompt": f"TODO: Write a query that uses the {tool.name} MCP toolset",
+                "expected_response": "TODO: Expected agent response",
+                "expected_tools": [
+                    {"name": f"{tool.eval_name}_TOOL_NAME", "args": {}},
+                ],
+                "_note": f"MCP tools are prefixed: {tool.eval_name}_<tool_function_name>",
+            })
+
+        if not cases:
+            cases.append({
+                "prompt": "TODO: Write a test query for your agent",
+                "expected_response": "TODO: Expected agent response",
+                "expected_tools": [],
+            })
+
+        return cases

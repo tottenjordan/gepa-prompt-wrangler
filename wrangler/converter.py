@@ -161,3 +161,173 @@ def save_adk_evalset(cases: list[dict[str, Any]], path: str | Path) -> None:
     evalset = to_adk_evalset(cases)
     with open(path, "w") as f:
         json.dump(evalset, f, indent=2)
+
+
+# ---------------------------------------------------------------------------
+# GEPA Evalset Generation
+# ---------------------------------------------------------------------------
+
+
+def _sample_balanced(cases: list[dict], count: int, seed: int = 42) -> list[dict]:
+    """Sample a balanced subset across complexity levels.
+
+    If cases have a 'complexity' or 'category' field, sample proportionally.
+    Otherwise distribute evenly by position (first third = low, etc.).
+    """
+    import random
+    rng = random.Random(seed)
+
+    has_complexity = any(c.get("complexity") for c in cases)
+
+    if has_complexity:
+        buckets: dict[str, list[dict]] = {}
+        for c in cases:
+            level = c.get("complexity", "medium")
+            buckets.setdefault(level, []).append(c)
+    else:
+        third = max(len(cases) // 3, 1)
+        buckets = {
+            "low": cases[:third],
+            "medium": cases[third:2*third],
+            "high": cases[2*third:],
+        }
+
+    per_bucket = max(count // len(buckets), 1)
+    remainder = count - per_bucket * len(buckets)
+
+    sampled = []
+    for i, (level, bucket) in enumerate(sorted(buckets.items())):
+        n = per_bucket + (1 if i < remainder else 0)
+        n = min(n, len(bucket))
+        sampled.extend(rng.sample(bucket, n))
+
+    return sampled[:count]
+
+
+def _case_to_gepa_conversation(case: dict, app_name: str) -> dict:
+    """Convert a simplified eval case to GEPA conversation format."""
+    prompt = case.get("prompt") or case.get("query", "")
+    reference = case.get("reference") or case.get("expected_response", "")
+
+    tool_uses = []
+    for tool in case.get("expected_tools", []):
+        if isinstance(tool, dict):
+            tool_uses.append({
+                "name": tool.get("name", ""),
+                "args": tool.get("args", {}),
+            })
+        elif isinstance(tool, str):
+            tool_uses.append({"name": tool, "args": {}})
+
+    if not tool_uses and case.get("expected_tool"):
+        tool_uses.append({"name": case["expected_tool"], "args": {}})
+
+    return {
+        "user_content": {
+            "parts": [{"text": prompt}],
+            "role": "user",
+        },
+        "final_response": {
+            "parts": [{"text": reference}],
+            "role": "model",
+        },
+        "intermediate_data": {
+            "tool_uses": tool_uses,
+        },
+    }
+
+
+def generate_gepa_evalset(
+    cases: list[dict],
+    output_dir: str | Path,
+    eval_set_id: str = "eval_set",
+    app_name: str = "agent_opt",
+    count: int = 15,
+    balanced: bool = True,
+) -> str:
+    """Generate a GEPA-compatible evalset JSON from simplified cases.
+
+    Args:
+        cases: Simplified eval cases (from load_eval_file).
+        output_dir: Directory to write the evalset JSON.
+        eval_set_id: Identifier for the evalset (used in filename).
+        app_name: App name for session_input (must match optimizer directory name).
+        count: Number of cases to include.
+        balanced: If True, sample across complexity levels.
+
+    Returns:
+        Path to the generated evalset JSON file.
+    """
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    if balanced and len(cases) > count:
+        selected = _sample_balanced(cases, count)
+    else:
+        selected = cases[:count]
+
+    eval_cases = []
+    for i, case in enumerate(selected):
+        complexity = case.get("complexity", "")
+        eval_id = f"case_{i+1}_{complexity}" if complexity else f"case_{i+1}"
+        eval_cases.append({
+            "eval_id": eval_id,
+            "conversation": [_case_to_gepa_conversation(case, app_name)],
+            "session_input": {
+                "app_name": app_name,
+                "user_id": "eval_user",
+            },
+        })
+
+    evalset = {
+        "eval_set_id": eval_set_id,
+        "eval_cases": eval_cases,
+    }
+
+    evalset_path = output_dir / f"{eval_set_id}.evalset.json"
+    with open(evalset_path, "w") as f:
+        json.dump(evalset, f, indent=2)
+
+    return str(evalset_path)
+
+
+def generate_sampler_config(
+    app_name: str,
+    eval_set_name: str = "eval_set",
+    judge_model: str = "gemini-2.5-pro",
+    output_dir: str | Path | None = None,
+) -> dict:
+    """Generate a GEPA sampler config.
+
+    Args:
+        app_name: Must match the optimizer directory name.
+        eval_set_name: Must match the evalset JSON filename stem (without .evalset.json).
+        judge_model: Model used for response match scoring.
+        output_dir: If provided, writes the config to sampler_config.json.
+
+    Returns:
+        The sampler config dict.
+    """
+    config = {
+        "eval_config": {
+            "criteria": {
+                "response_match_score": 0.1,
+                "final_response_match_v2": {
+                    "threshold": 0.5,
+                    "judge_model_options": {"judge_model": judge_model},
+                },
+                "safety_v1": 0.8,
+            }
+        },
+        "app_name": app_name,
+        "train_eval_set": eval_set_name,
+    }
+
+    if output_dir:
+        output_dir = Path(output_dir)
+        output_dir.mkdir(parents=True, exist_ok=True)
+        config_path = output_dir / "sampler_config.json"
+        with open(config_path, "w") as f:
+            json.dump(config, f, indent=2)
+
+    return config

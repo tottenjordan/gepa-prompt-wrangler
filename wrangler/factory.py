@@ -19,6 +19,7 @@ class AgentPromptPair:
     temperature: float = 1.0
     description: str = ""
     tags: list[str] = field(default_factory=list)
+    engine_id: str = ""
 
     def summary(self) -> str:
         """One-line summary for display."""
@@ -86,6 +87,7 @@ class PairFactory:
                     temperature=float(entry.get("temperature", 1.0)),
                     description=entry.get("description", ""),
                     tags=entry.get("tags", []),
+                    engine_id=entry.get("engine_id", ""),
                 )
             )
 

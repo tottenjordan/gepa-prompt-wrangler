@@ -43,16 +43,31 @@ class WranglerPipeline:
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
 
+        from .config import resolve_model
+
         if hasattr(module, "create_agent"):
             return module.create_agent(pair.model, pair.system_prompt)
-        elif hasattr(module, "agent"):
+
+        agent = None
+        if hasattr(module, "agent") and hasattr(module.agent, "root_agent"):
             agent = module.agent.root_agent
-            from .config import resolve_model
+        elif hasattr(module, "root_agent"):
+            agent = module.root_agent
+
+        if agent is not None:
             agent.model = resolve_model(pair.model)
             agent.instruction = pair.system_prompt
             return agent
-        else:
-            raise ValueError(f"Agent module must export create_agent() or agent.root_agent")
+
+        exports = [k for k in dir(module) if not k.startswith("_")]
+        raise ValueError(
+            f"Could not load agent from {agent_path}.\n"
+            f"  Module exports: {exports}\n"
+            f"  Expected one of:\n"
+            f"    1. create_agent(model, instruction) — factory function (recommended)\n"
+            f"    2. agent.root_agent — SimpleNamespace wrapping an LlmAgent\n"
+            f"    3. root_agent — LlmAgent directly"
+        )
 
     def run(self) -> dict:
         """Execute the full 6-phase pipeline."""
@@ -75,9 +90,13 @@ class WranglerPipeline:
         # Phase 1: Deploy
         print(f"\n--- Phase 1: Deploy to GEAP ---")
         for pair in self.manifest.pairs:
-            agent = self._load_agent(pair)
-            engine_id = deployer.deploy_agent(agent, display_name=pair.id)
-            self.results[pair.id]["engine_id"] = engine_id
+            if pair.engine_id:
+                print(f"  [{pair.id}] Using existing engine: {pair.engine_id}")
+                self.results[pair.id]["engine_id"] = pair.engine_id
+            else:
+                agent = self._load_agent(pair)
+                engine_id = deployer.deploy_agent(agent, display_name=pair.id)
+                self.results[pair.id]["engine_id"] = engine_id
 
         # Phase 2: Baseline eval
         print(f"\n--- Phase 2: Baseline Evaluation ---")
@@ -104,7 +123,7 @@ class WranglerPipeline:
         for pair in self.manifest.pairs:
             engine_id = self.results[pair.id]["engine_id"]
             agent = self._load_agent(pair)
-            deployer.update_agent(agent, engine_id)
+            deployer.update_agent(agent, engine_id, display_name=pair.id)
 
         # Phase 5: Post-optimization eval
         print(f"\n--- Phase 5: Post-Optimization Evaluation ---")

@@ -1,0 +1,32 @@
+eval_cases:
+  # Replace these with real queries for your MCP tools.
+  #
+  # IMPORTANT: MCP tool names are prefixed by the server name.
+  # Run `wrangler inspect .` to discover the exact names.
+  #
+  # Example: if your server is "my-api-server" with tool "search_items",
+  # the eval name is "my_api_server_search_items"
+
+  - prompt: "TODO: Write a query that uses your MCP tool"
+    expected_response: "TODO: Expected agent response"
+    expected_tools:
+      - name: "my_server_name_tool_function"
+        args: {param1: value1}
+
+  - prompt: "TODO: Write another query"
+    expected_response: "TODO: Expected response"
+    expected_tools:
+      - name: "my_server_name_another_tool"
+        args: {}
+
+  - prompt: "TODO: Multi-step query using multiple tools"
+    expected_response: "TODO: Expected response covering both tool results"
+    expected_tools:
+      - name: "my_server_name_tool_function"
+        args: {param1: value1}
+      - name: "my_server_name_another_tool"
+        args: {}
+
+  - prompt: "TODO: Out-of-scope query"
+    expected_response: "I can only help with [your domain]. For other tasks, please use a different tool."
+    expected_tools: []

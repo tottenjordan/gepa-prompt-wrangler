@@ -52,12 +52,33 @@ cp .env.example .env
 # Generate a starter manifest
 wrangler init
 
-# Inspect an agent's tools
+# Or auto-detect from your agent
+wrangler init --agent-dir my_agent/
+
+# Inspect an agent's tools (shows eval-ready tool names)
 wrangler inspect agents/example_agent
+
+# Generate GEPA evalset from eval cases
+wrangler generate-evalset --from eval_cases.yaml --output my_agent_opt/ -n 15
 
 # Run the full pipeline
 wrangler run manifests/example_manifest.yaml
+
+# Or evaluate an already-deployed agent (no manifest needed)
+wrangler eval --engine-id <ENGINE_ID> --eval-data eval_cases.yaml
 ```
+
+### Bring Your Own Agent
+
+Three ways to get started with your existing ADK agent:
+
+| Path | Starting Point | Command |
+|------|---------------|---------|
+| **Function tools** | Agent with Python functions | `wrangler init --agent-dir my_agent/` |
+| **MCP tools** | Agent with MCP servers | `wrangler init --agent-dir my_agent/` + use prefixed tool names |
+| **Already deployed** | Agent on Agent Engine | `wrangler eval --engine-id <ID> --eval-data eval.yaml` |
+
+Templates are available at `templates/function_tools/` and `templates/mcp_tools/`. See the full guide at [docs/bring_your_own_agent.md](docs/bring_your_own_agent.md).
 
 ### Multi-Model Example (End-to-End)
 
@@ -137,7 +158,12 @@ gepa-prompt-wrangler/
 │   ├── prompts/                     # Before/after prompt snapshots
 │   └── reports/                     # Markdown reports + charts
 │
+├── templates/                       # BYOA starter templates
+│   ├── function_tools/              # Agent with Python function tools
+│   └── mcp_tools/                   # Agent with MCP tool servers
+│
 ├── docs/
+│   ├── bring_your_own_agent.md      # Full BYOA guide (3 paths + troubleshooting)
 │   ├── gepa_prompt_wrangler_banner.png
 │   └── diagram_sources/             # PaperBanana diagram descriptions
 │

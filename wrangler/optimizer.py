@@ -90,6 +90,7 @@ def optimize(
     agent_module_path: str,
     evalset_path: str = None,
     sampler_config_path: str = None,
+    eval_data_path: str = None,
 ) -> str:
     """Run GEPA optimization. Returns the optimized instruction string.
 
@@ -97,6 +98,7 @@ def optimize(
         agent_module_path: Path to agent wrapper module (must export agent.root_agent)
         evalset_path: Path to evalset JSON (ignored if sampler_config_path is set)
         sampler_config_path: Path to sampler config JSON file
+        eval_data_path: Path to simplified eval YAML (for auto-generating GEPA evalset)
     """
     print("  [1/3] Applying ADK patches...")
     _patch_adk()
@@ -113,13 +115,40 @@ def optimize(
 
     print("  [2/3] Loading agent and configs...")
     agent_module_path = str(Path(agent_module_path).resolve())
-    spec = importlib.util.spec_from_file_location(
-        "agent_mod", os.path.join(agent_module_path, "__init__.py")
-    )
+    init_file = os.path.join(agent_module_path, "__init__.py")
+    if not os.path.exists(init_file):
+        raise FileNotFoundError(
+            f"Agent module not found: {init_file}\n"
+            f"  The optimizer expects a directory with an __init__.py that exports agent.root_agent.\n"
+            f"  Directory contents: {os.listdir(agent_module_path) if os.path.isdir(agent_module_path) else 'NOT A DIRECTORY'}"
+        )
+
+    spec = importlib.util.spec_from_file_location("agent_mod", init_file)
     module = importlib.util.module_from_spec(spec)
     sys.modules["agent_mod"] = module
-    spec.loader.exec_module(module)
-    root_agent = module.agent.root_agent
+    try:
+        spec.loader.exec_module(module)
+    except Exception as e:
+        raise RuntimeError(
+            f"Failed to import agent module at {init_file}: {e}\n"
+            f"  Common causes:\n"
+            f"    - Missing dependencies (check imports in __init__.py)\n"
+            f"    - Relative imports that don't resolve (use absolute paths or sys.path)"
+        ) from e
+
+    root_agent = None
+    if hasattr(module, "agent") and hasattr(module.agent, "root_agent"):
+        root_agent = module.agent.root_agent
+    elif hasattr(module, "root_agent"):
+        root_agent = module.root_agent
+
+    if root_agent is None:
+        exports = [k for k in dir(module) if not k.startswith("_")]
+        raise ValueError(
+            f"Could not find root_agent in {agent_module_path}\n"
+            f"  Module exports: {exports}\n"
+            f"  Expected: agent.root_agent (SimpleNamespace) or root_agent (LlmAgent)"
+        )
     print(f"    Agent: {root_agent.name}")
 
     app_name = os.path.basename(agent_module_path)
@@ -148,9 +177,39 @@ def optimize(
             "train_eval_set": evalset_stem,
         }
 
-    sampler_cfg = LocalEvalSamplerConfig.model_validate(sampler_config)
+    try:
+        sampler_cfg = LocalEvalSamplerConfig.model_validate(sampler_config)
+    except Exception as e:
+        raise ValueError(
+            f"Invalid sampler config: {e}\n"
+            f"  Config: {json.dumps(sampler_config, indent=2) if 'json' in dir() else sampler_config}\n"
+            f"  If using a sampler_config.json, check that app_name and train_eval_set match your directory structure."
+        ) from e
+
     if sampler_cfg.app_name != app_name:
         sampler_cfg.app_name = app_name
+
+    evalset_dir = os.path.join(agents_dir, app_name)
+    evalset_files = [f for f in os.listdir(evalset_dir) if f.endswith(".evalset.json")] if os.path.isdir(evalset_dir) else []
+    if not evalset_files and eval_data_path:
+        print(f"    No evalset files in {evalset_dir} — auto-generating from {eval_data_path}")
+        from .converter import load_eval_file, generate_gepa_evalset, generate_sampler_config
+        cases = load_eval_file(eval_data_path)
+        eval_set_id = f"{app_name}_eval_set"
+        generate_gepa_evalset(cases, evalset_dir, eval_set_id=eval_set_id, app_name=app_name)
+        if not sampler_config_path:
+            generate_sampler_config(app_name, eval_set_id, output_dir=evalset_dir)
+            sampler_config_path_auto = os.path.join(evalset_dir, "sampler_config.json")
+            with open(sampler_config_path_auto) as f:
+                sampler_config = json.load(f)
+            sampler_cfg = LocalEvalSamplerConfig.model_validate(sampler_config)
+            if sampler_cfg.app_name != app_name:
+                sampler_cfg.app_name = app_name
+        print(f"    Auto-generated evalset at {evalset_dir}")
+    elif not evalset_files:
+        log.warning(f"No .evalset.json files found in {evalset_dir}. GEPA may fail.")
+        print(f"    WARNING: No evalset files in {evalset_dir}")
+        print(f"    Run: wrangler generate-evalset --from <eval.yaml> --output {evalset_dir}")
 
     optimizer_config = GEPARootAgentPromptOptimizerConfig()
     eval_sets_manager = LocalEvalSetsManager(agents_dir=agents_dir)
@@ -158,7 +217,19 @@ def optimize(
     optimizer = GEPARootAgentPromptOptimizer(optimizer_config)
 
     print("  [3/3] Running GEPA optimization...")
-    optimization_result = asyncio.run(optimizer.optimize(root_agent, sampler))
+    try:
+        optimization_result = asyncio.run(optimizer.optimize(root_agent, sampler))
+    except Exception as e:
+        error_msg = str(e)
+        if "ValidationError" in type(e).__name__ or "validation" in error_msg.lower():
+            raise RuntimeError(
+                f"GEPA optimization failed with validation error: {e}\n"
+                f"  Common causes:\n"
+                f"    - Evalset JSON has fields GEPA doesn't expect (check .evalset.json format)\n"
+                f"    - Tool names in evalset don't match agent's actual tool names\n"
+                f"    - Run: wrangler inspect <agent_dir> to see correct tool names"
+            ) from e
+        raise
 
     best_idx = optimization_result.gepa_result["best_idx"]
     best_agent = optimization_result.optimized_agents[best_idx]
