@@ -62,12 +62,23 @@ wrangler run manifests/example_manifest.yaml
 ### Multi-Model Example (End-to-End)
 
 ```bash
-# Deploy MCP tool servers (search, booking, expense)
-bash examples/multi_model_agents/scripts/deploy_mcp_servers.sh
+# Step 1: Configure environment
+cd examples/multi_model_agents
+cp .env.example .env
+# Edit .env with your GCP project ID, region, and project number
 
-# Run 5-model comparison experiment
+# Step 2: Deploy MCP tool servers (wrangler-prefixed Cloud Run services)
+bash scripts/deploy_mcp_servers.sh
+
+# Step 3: Deploy all 5 agents to Agent Engine
+cd ../..
+uv run python examples/multi_model_agents/deploy_agents.py
+
+# Step 4: Run the full optimization experiment
 wrangler run examples/multi_model_agents/manifest.yaml
 ```
+
+See [examples/multi_model_agents/README.md](examples/multi_model_agents/README.md) for detailed walkthrough.
 
 ---
 
