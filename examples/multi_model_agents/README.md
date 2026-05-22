@@ -71,7 +71,20 @@ This creates:
 
 The script auto-updates `.env` with the deployed service URLs.
 
-### Step 2: Create Staging Bucket
+### Step 2: Register MCP Servers in Agent Registry
+
+Register each MCP server so deployed agents can discover tools by resource name:
+
+```bash
+bash scripts/register_agent_registry.sh
+```
+
+This:
+- Registers each server with its tool specs in Agent Registry
+- Looks up the assigned resource names
+- Auto-updates `.env` with `SEARCH_MCP_SERVER`, `BOOKING_MCP_SERVER`, `EXPENSE_MCP_SERVER`
+
+### Step 3: Create Staging Bucket (if needed)
 
 The deploy script creates the staging bucket automatically. If you need to create it manually:
 
@@ -79,7 +92,7 @@ The deploy script creates the staging bucket automatically. If you need to creat
 gsutil mb -p $GCP_PROJECT_ID -l $GCP_REGION gs://$GCP_STAGING_BUCKET
 ```
 
-### Step 3: Deploy All 5 Agents
+### Step 4: Deploy All 5 Agents
 
 Deploy all agents to Vertex AI Agent Engine:
 
