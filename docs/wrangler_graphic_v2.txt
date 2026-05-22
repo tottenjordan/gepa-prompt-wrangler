@@ -1,0 +1,27 @@
+GEPA Prompt Wrangler — Banner Graphic v2
+
+A cosmic cowboy (space wrangler) riding through a stylized landscape that
+represents the evolutionary prompt optimization process.
+
+Visual elements:
+- A cowboy figure in a space suit lassoing glowing prompt DNA strands that
+  are evolving and mutating across generations
+- The lasso wraps around multiple prompt variants, pulling the best ones
+  forward while weaker variants fade into the background
+- Behind the cowboy, a trail of iteratively improving prompts is visible —
+  each generation slightly better than the last, shown as glowing text
+  fragments growing brighter and more refined
+- Multiple AI model icons orbit like planets: Gemini twin-stars and Claude
+  shields, representing multi-model comparison
+- A large eval scorecard or dashboard floats nearby showing metrics improving
+  across iterations (bar charts going up)
+- The landscape below is a neural network terrain with tool server outposts
+- The 6-step pipeline flows across the bottom as glowing waypoints:
+  Deploy → Eval → Optimize → Redeploy → Eval → Report
+- Color palette: deep space purples and blues with warm orange/gold accents,
+  neon green for the evolving prompt strands
+- Title "GEPA PROMPT WRANGLER" at the top in a weathered serif font with glow
+- Subtitle: "Evolve your prompts across the model universe"
+- The overall feeling should convey: evolutionary selection, iterative
+  improvement, measuring against objectives, and wrangling the best prompts
+  from a population of candidates
