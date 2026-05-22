@@ -86,62 +86,64 @@ def generate_traffic(
     if count:
         queries = queries[:count]
 
-    total = len(queries) * len(agent_ids)
+    total = len(queries)
     errors = 0
     query_num = 0
+
+    # Pre-load agent connections
+    agents = {}
+    for agent_id in agent_ids:
+        resource = _resolve_resource(agent_id)
+        agents[agent_id] = agent_engines.get(resource)
 
     print(f"{'=' * 60}")
     print(f"TRAFFIC GENERATOR")
     print(f"{'=' * 60}")
-    print(f"  Agents:    {len(agent_ids)}")
-    print(f"  Queries:   {len(queries)} per agent ({total} total)")
+    print(f"  Agents:    {len(agent_ids)} (round-robin)")
+    print(f"  Queries:   {total} total")
     print(f"  Interval:  {interval}s between queries")
     print(f"  Sessions:  new session + unique user per query")
     print()
 
-    for agent_id in agent_ids:
-        resource = _resolve_resource(agent_id)
-        agent = agent_engines.get(resource)
+    for i, (query, complexity) in enumerate(queries):
+        query_num += 1
+        agent_id = agent_ids[i % len(agent_ids)]
+        agent = agents[agent_id]
         agent_short = agent_id[-8:]
+        user_id = f"traffic-{uuid.uuid4().hex[:8]}"
 
-        print(f"\n--- Agent {agent_short} ---")
+        print(f"  [{query_num}/{total}] → {agent_short} ({complexity}) {query[:55]}")
 
-        for i, (query, complexity) in enumerate(queries):
-            query_num += 1
-            user_id = f"traffic-{uuid.uuid4().hex[:8]}"
+        try:
+            session = agent.create_session(user_id=user_id)
+            session_id = session["id"] if isinstance(session, dict) else session.id
 
-            print(f"  [{query_num}/{total}] ({complexity}) {query[:60]}")
+            response = agent.stream_query(
+                user_id=user_id,
+                session_id=session_id,
+                message=query,
+            )
+            full_response = ""
+            for chunk in response:
+                if hasattr(chunk, "text"):
+                    full_response += chunk.text
+                elif isinstance(chunk, dict) and "text" in chunk:
+                    full_response += chunk["text"]
 
-            try:
-                session = agent.create_session(user_id=user_id)
-                session_id = session["id"] if isinstance(session, dict) else session.id
+            print(f"    -> {full_response[:80]}...")
+        except Exception as e:
+            errors += 1
+            print(f"    x Error: {e}")
 
-                response = agent.stream_query(
-                    user_id=user_id,
-                    session_id=session_id,
-                    message=query,
-                )
-                full_response = ""
-                for chunk in response:
-                    if hasattr(chunk, "text"):
-                        full_response += chunk.text
-                    elif isinstance(chunk, dict) and "text" in chunk:
-                        full_response += chunk["text"]
-
-                print(f"    -> {full_response[:80]}...")
-            except Exception as e:
-                errors += 1
-                print(f"    x Error: {e}")
-
-            if interval > 0 and i < len(queries) - 1:
-                time.sleep(interval)
+        if interval > 0 and i < len(queries) - 1:
+            time.sleep(interval)
 
     print(f"\n{'=' * 60}")
     print(f"TRAFFIC COMPLETE")
     print(f"{'=' * 60}")
     print(f"  Total queries: {query_num}")
     print(f"  Errors:        {errors}")
-    print(f"  Agents:        {len(agent_ids)}")
+    print(f"  Agents:        {len(agent_ids)} (round-robin)")
 
 
 if __name__ == "__main__":
