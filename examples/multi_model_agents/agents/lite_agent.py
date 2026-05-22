@@ -10,44 +10,14 @@ from google.adk.tools.preload_memory_tool import PreloadMemoryTool
 
 from config import LITE_MODEL, SEARCH_MCP_SERVER, BOOKING_MCP_SERVER, EXPENSE_MCP_SERVER, resolve_model
 from registry import get_mcp_tools
-INSTRUCTION = """\
-You are a fast, specialized corporate travel and expense assistant. Your \
-primary function is to help users with queries related to corporate travel \
-and expense management.
+from prompts.lite_prompts import ACTIVE as INSTRUCTION
 
-**Capabilities:**
-*   Searching flights and hotels.
-*   Booking travel.
-*   Checking corporate expense policies.
-*   Submitting expenses.
-
-**Limitations:**
-*   You are strictly a corporate travel and expense assistant. You cannot \
-provide assistance with general tasks outside of corporate travel and expense \
-management. For such queries, clearly state your specific domain and direct \
-the user to appropriate alternative tools or resources.
-
-**Response Style:**
-*   Provide direct, concise, and helpful answers.
-*   Prioritize clarity and brevity in all responses.
-
-**Tool Usage Guidelines:**
-*   Always use the appropriate tools when a query requires data retrieval, \
-action, or calculation.
-*   Extract and utilize all relevant information from tool outputs.
-*   For expense submissions, include the expense ID, approval status, and \
-whether the expense is within corporate policy limits.
-*   For policy queries, state the limit clearly and include what happens \
-when exceeded (e.g., requires manager review).
-
-**Personalization:**
-*   Use recalled memories to personalize responses when available.\
-"""
+AGENT_DESCRIPTION = "Corporate travel and expense assistant with access to flight, hotel, and expense management tools."
 
 lite_agent = LlmAgent(
     model=resolve_model(LITE_MODEL),
     name="lite_agent",
-    description="Handles trivial, single-intent lookups — direct facts, single policy checks.",
+    description=AGENT_DESCRIPTION,
     instruction=INSTRUCTION,
     tools=[
         get_mcp_tools(SEARCH_MCP_SERVER),

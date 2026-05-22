@@ -5,7 +5,7 @@ eval_cases:
 
   # Flight search
   - prompt: "Find flights from SFO to JFK"
-    expected_response: "United FL001 at $450 departing 08:00 and Delta FL002 at $520 departing 10:30."
+    expected_response: "I found flights from SFO to JFK: United FL001 departing 08:00 at $450, and Delta FL002 departing 10:30 at $520."
     expected_tools:
       - name: wrangler_search_mcp_search_flights
         args: {origin: SFO, destination: JFK}
@@ -43,7 +43,7 @@ eval_cases:
 
   # Expense policy
   - prompt: "What is the corporate meal expense limit?"
-    expected_response: "The corporate meal expense limit is $75. Amounts above require manager review."
+    expected_response: "The corporate meal expense limit is $75.00. Amounts exceeding this limit require manager review and approval."
     expected_tools:
       - name: wrangler_expense_mcp_check_expense_policy
         args: {category: meals, amount: 75}
@@ -62,14 +62,14 @@ eval_cases:
 
   # Booking
   - prompt: "Book flight FL001 for Alice Johnson"
-    expected_response: "Flight FL001 booked and confirmed for Alice Johnson."
+    expected_response: "Flight FL001 has been successfully booked for Alice Johnson. Booking confirmed."
     expected_tools:
       - name: wrangler_booking_mcp_book_flight
         args: {flight_id: FL001, passenger_name: Alice Johnson}
 
   # Expense history
   - prompt: "Show expenses for user EMP001"
-    expected_response: "Expense history for EMP001 retrieved."
+    expected_response: "Here are the expenses for user EMP001, showing expense ID, amount, category, description, date, and approval status for each entry."
     expected_tools:
       - name: wrangler_expense_mcp_get_user_expenses
         args: {user_id: EMP001}
@@ -99,7 +99,7 @@ eval_cases:
 
   # Submit with policy check
   - prompt: "Submit a $45 meals expense for lunch meeting, user ID EMP001"
-    expected_response: "Policy checked ($45 within $75 limit). Expense submitted for EMP001, status: approved."
+    expected_response: "The $45 meals expense is within the $75 corporate policy limit. The expense has been successfully submitted for EMP001 and approved."
     expected_tools:
       - name: wrangler_expense_mcp_check_expense_policy
         args: {category: meals, amount: 45}
@@ -140,7 +140,7 @@ eval_cases:
 
   # History + analysis
   - prompt: "Show expense history for EMP001 and flag any items that exceeded policy limits"
-    expected_response: "EMP001 expenses reviewed against policy limits. Violations flagged."
+    expected_response: "Here are the expenses for EMP001. I've reviewed each against the corporate policy limits and flagged any items that exceed the allowed amounts."
     expected_tools:
       - name: wrangler_expense_mcp_get_user_expenses
         args: {user_id: EMP001}
@@ -239,7 +239,7 @@ eval_cases:
 
   # Multi-user expense audit
   - prompt: "Pull expense histories for EMP001 and EMP002, flag any policy violations, and summarize total overspend"
-    expected_response: "EMP001 and EMP002 expenses reviewed. Violations flagged with overage amounts. Total overspend summarized by category."
+    expected_response: "I've pulled expense histories for both EMP001 and EMP002. After reviewing against policy limits, I've identified any violations and summarized the total overspend by category."
     expected_tools:
       - name: wrangler_expense_mcp_get_user_expenses
         args: {user_id: EMP001}

@@ -10,37 +10,14 @@ from google.adk.tools.preload_memory_tool import PreloadMemoryTool
 
 from config import SONNET_MODEL, SEARCH_MCP_SERVER, BOOKING_MCP_SERVER, EXPENSE_MCP_SERVER, resolve_model
 from registry import get_mcp_tools
-INSTRUCTION = """\
-You are an advanced corporate assistant specialized in travel and expense \
-management. Your primary goal is to provide comprehensive, accurate, and \
-actionable insights by analyzing information across multiple domains.
+from prompts.sonnet_prompts import ACTIVE as INSTRUCTION
 
-**Core Principles:**
-1. **Multi-Domain Analysis:** Consider all relevant aspects including \
-flights, hotels, transport, and expense policies. Infer missing details \
-like destination cities from airport codes (JFK→New York, ORD→Chicago).
-2. **Detailed Structured Output:** Use markdown headings, tables, bullet \
-points, and bold text. Summarize key insights and provide recommendations.
-3. **Actionable Recommendations:** Highlight "best options" based on \
-criteria (cheapest, most convenient, policy-compliant) and suggest next steps.
-4. **Expense Policy Compliance:** State corporate limits explicitly, \
-compare proposed costs against them, and indicate policy compliance. \
-Use $75/day for meals, $400/night for lodging as standard targets.
-5. **Scenario Planning:** For comparisons, evaluate different scenarios \
-(budget vs premium, varying durations) to provide a holistic view.
-6. **Personalization:** Integrate recalled memories and preferences.
-7. **Follow-Up:** Conclude by offering relevant next actions.
-
-**Task Guidance:**
-- Use specific IDs (FL001, HT001) when referencing or booking.
-- For bookings, confirm each item with booking ID, details, and status.
-- For comparisons, include a head-to-head summary table.\
-"""
+AGENT_DESCRIPTION = "Corporate travel and expense assistant with access to flight, hotel, and expense management tools."
 
 sonnet_agent = LlmAgent(
     model=resolve_model(SONNET_MODEL),
     name="sonnet_agent",
-    description="Handles complex, multi-intent requests requiring cross-domain analysis.",
+    description=AGENT_DESCRIPTION,
     instruction=INSTRUCTION,
     tools=[
         get_mcp_tools(SEARCH_MCP_SERVER),
