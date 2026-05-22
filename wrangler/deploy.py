@@ -53,7 +53,7 @@ def deploy_agent(agent, display_name: str | None = None, env_vars: dict | None =
     return engine_id
 
 
-def update_agent(agent, engine_id: str, display_name: str | None = None) -> str:
+def update_agent(agent, engine_id: str, display_name: str | None = None, env_vars: dict | None = None) -> str:
     """Update an existing agent on GEAP. Returns the resource name."""
     vertexai.init(
         project=GCP_PROJECT_ID,
@@ -68,6 +68,15 @@ def update_agent(agent, engine_id: str, display_name: str | None = None) -> str:
         "staging_bucket": f"gs://{GCP_STAGING_BUCKET}",
         "requirements": REQUIREMENTS,
         "display_name": display_name or agent.name,
+        "env_vars": {
+            "GCP_PROJECT_ID": GCP_PROJECT_ID,
+            "GCP_REGION": GCP_REGION,
+            "GOOGLE_GENAI_USE_VERTEXAI": "1",
+            "GOOGLE_CLOUD_AGENT_ENGINE_ENABLE_TELEMETRY": "true",
+            "OTEL_SEMCONV_STABILITY_OPT_IN": "gen_ai_latest_experimental",
+            "OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT": "EVENT_ONLY",
+            **(env_vars or {}),
+        },
     }
 
     print(f"  Updating {agent.name} ({engine_id.split('/')[-1]})...")
