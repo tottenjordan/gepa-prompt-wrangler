@@ -148,6 +148,26 @@ uv run python -m wrangler.online_evaluators verify
 
 See [docs/online_eval_guide.md](../../docs/online_eval_guide.md) for details on evaluators vs monitors.
 
+### Step 5: Register in App Hub (Optional)
+
+Register wrangler agents and MCP servers in App Hub to populate the **Topology tab** in the Agent Engine console:
+
+```bash
+bash scripts/setup_apphub.sh
+```
+
+This creates:
+- App Hub application: `gepa-wrangler` (REGIONAL scope)
+- 5 agent workloads (auto-discovered from deployed Reasoning Engines)
+- 3 MCP service registrations (auto-discovered from Cloud Run)
+
+Dry run to preview commands:
+```bash
+bash scripts/setup_apphub.sh --dry-run
+```
+
+Once registered, the topology tab shows agent-to-MCP-server relationships after traffic flows through.
+
 ### Step 6: Run the Experiment
 
 ```bash

@@ -1,41 +1,35 @@
 #!/usr/bin/env bash
-# Register Agent Engine deployments in App Hub for topology visualization.
+# Register wrangler agents and MCP servers in App Hub for topology visualization.
 #
-# App Hub provides the Topology tab in the Agent Engine console by
-# tracking relationships between services and workloads. Reasoning
-# Engines are auto-discovered as workloads but must be explicitly
-# registered to an App Hub application.
+# App Hub powers the Topology tab in the Agent Engine console by tracking
+# relationships between agents and MCP tool servers. Resources are auto-discovered
+# but must be explicitly registered to an App Hub application.
 #
-# Steps:
-#   1. Create an App Hub application (idempotent)
-#   2. List discovered workloads to find Reasoning Engines
-#   3. Register each agent as a workload in the application
+# This script:
+#   1. Creates a wrangler-specific App Hub application
+#   2. Discovers and registers all 5 wrangler agents as workloads
+#   3. Discovers and registers all 3 wrangler MCP servers as services
+#   4. Verifies registration
 #
 # Usage:
-#   bash scripts/setup_apphub.sh
-#   bash scripts/setup_apphub.sh --dry-run
+#   bash examples/multi_model_agents/scripts/setup_apphub.sh
+#   bash examples/multi_model_agents/scripts/setup_apphub.sh --dry-run
 
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
-if [ -f "${REPO_ROOT}/.env" ]; then
+EXAMPLE_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+
+if [ -f "${EXAMPLE_DIR}/.env" ]; then
     set -a
-    source "${REPO_ROOT}/.env"
+    source "${EXAMPLE_DIR}/.env"
     set +a
 fi
 
 PROJECT_ID="${GCP_PROJECT_ID:-hybrid-vertex}"
 PROJECT_NUMBER="${PROJECT_NUMBER:-934903580331}"
 REGION="${GCP_REGION:-us-central1}"
-APP_NAME="${APPHUB_APP_NAME:-geap-workshop}"
-COORDINATOR_ID="${COORDINATOR_AGENT_ID:-8296365537139621888}"
-ROUTER_ID="${ROUTER_ENGINE_ID:-${AGENT_ENGINE_ID:-4709107696450666496}}"
-LITE_ID="${LITE_ENGINE_ID:-}"
-FLASH_ID="${FLASH_ENGINE_ID:-}"
-PRO_ID="${PRO_ENGINE_ID:-}"
-SONNET_ID="${SONNET_ENGINE_ID:-}"
-OPUS_ID="${OPUS_ENGINE_ID:-}"
+APP_NAME="${APPHUB_APP_NAME:-gepa-wrangler}"
 
 DRY_RUN=false
 for arg in "$@"; do
@@ -47,13 +41,11 @@ done
 BLUE='\033[0;34m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
-RED='\033[0;31m'
 NC='\033[0m'
 
 info()  { echo -e "${BLUE}  $1${NC}"; }
 ok()    { echo -e "${GREEN}  ✓ $1${NC}"; }
 warn()  { echo -e "${YELLOW}  ⚠ $1${NC}"; }
-fail()  { echo -e "${RED}  ✗ $1${NC}"; }
 
 run_cmd() {
     if $DRY_RUN; then
@@ -64,18 +56,13 @@ run_cmd() {
 }
 
 echo "=============================================="
-echo " App Hub Registration"
+echo " Wrangler — App Hub Registration"
 echo "=============================================="
 echo "  Project:      $PROJECT_ID"
 echo "  Region:       $REGION"
 echo "  Application:  $APP_NAME"
-echo "  Coordinator:  $COORDINATOR_ID"
-echo "  Router:       $ROUTER_ID"
-echo "  Lite:         ${LITE_ID:-(not set)}"
-echo "  Flash:        ${FLASH_ID:-(not set)}"
-echo "  Pro:          ${PRO_ID:-(not set)}"
-echo "  Sonnet:       ${SONNET_ID:-(not set)}"
-echo "  Opus:         ${OPUS_ID:-(not set)}"
+echo "  Agents:       lite, flash, pro, sonnet, opus"
+echo "  MCP Servers:  wrangler-search-mcp, wrangler-booking-mcp, wrangler-expense-mcp"
 echo ""
 
 # --- Step 1: Create App Hub application ---
@@ -94,53 +81,22 @@ else
         --project="$PROJECT_ID" \
         --location="$REGION" \
         --scope-type=REGIONAL \
-        --display-name="GEAP Workshop Agents"
+        --display-name="GEPA Prompt Wrangler"
     ok "Application created"
 fi
 echo ""
 
-# --- Step 2: List discovered workloads ---
-echo "--- Step 2: List discovered workloads ---"
+# --- Step 2: Discover and register agents ---
+echo "--- Step 2: Register agent workloads ---"
 
-info "Searching for Reasoning Engine workloads..."
-discovered=$(gcloud apphub discovered-workloads list \
-    --project="$PROJECT_ID" \
-    --location="$REGION" \
-    --format="table(name,workloadReference.uri)" 2>/dev/null || true)
-
-echo "$discovered"
-echo ""
-
-# Find discovered workload IDs for our agents
 find_discovered_workload() {
     local engine_id="$1"
-    local uri_pattern="reasoningEngines/${engine_id}"
     gcloud apphub discovered-workloads list \
         --project="$PROJECT_ID" \
         --location="$REGION" \
         --format="value(name)" \
-        --filter="workloadReference.uri~'${uri_pattern}'" 2>/dev/null || true
+        --filter="workloadReference.uri~'reasoningEngines/${engine_id}'" 2>/dev/null || true
 }
-
-COORDINATOR_DISCOVERED=$(find_discovered_workload "$COORDINATOR_ID")
-ROUTER_DISCOVERED=$(find_discovered_workload "$ROUTER_ID")
-LITE_DISCOVERED=$([ -n "$LITE_ID" ] && find_discovered_workload "$LITE_ID" || true)
-FLASH_DISCOVERED=$([ -n "$FLASH_ID" ] && find_discovered_workload "$FLASH_ID" || true)
-PRO_DISCOVERED=$([ -n "$PRO_ID" ] && find_discovered_workload "$PRO_ID" || true)
-SONNET_DISCOVERED=$([ -n "$SONNET_ID" ] && find_discovered_workload "$SONNET_ID" || true)
-OPUS_DISCOVERED=$([ -n "$OPUS_ID" ] && find_discovered_workload "$OPUS_ID" || true)
-
-[ -n "$COORDINATOR_DISCOVERED" ] && ok "Found coordinator: $COORDINATOR_DISCOVERED" || warn "Coordinator not found"
-[ -n "$ROUTER_DISCOVERED" ] && ok "Found router: $ROUTER_DISCOVERED" || warn "Router not found"
-[ -n "$LITE_DISCOVERED" ] && ok "Found lite: $LITE_DISCOVERED" || [ -n "$LITE_ID" ] && warn "Lite not found" || true
-[ -n "$FLASH_DISCOVERED" ] && ok "Found flash: $FLASH_DISCOVERED" || [ -n "$FLASH_ID" ] && warn "Flash not found" || true
-[ -n "$PRO_DISCOVERED" ] && ok "Found pro: $PRO_DISCOVERED" || [ -n "$PRO_ID" ] && warn "Pro not found" || true
-[ -n "$SONNET_DISCOVERED" ] && ok "Found sonnet: $SONNET_DISCOVERED" || [ -n "$SONNET_ID" ] && warn "Sonnet not found" || true
-[ -n "$OPUS_DISCOVERED" ] && ok "Found opus: $OPUS_DISCOVERED" || [ -n "$OPUS_ID" ] && warn "Opus not found" || true
-echo ""
-
-# --- Step 3: Register workloads ---
-echo "--- Step 3: Register workloads to application ---"
 
 register_workload() {
     local workload_name="$1"
@@ -172,17 +128,25 @@ register_workload() {
     fi
 }
 
-register_workload "coordinator-agent" "Coordinator Agent" "$COORDINATOR_DISCOVERED"
-register_workload "router-agent" "Router Agent" "$ROUTER_DISCOVERED"
-register_workload "lite-agent" "Lite Agent" "${LITE_DISCOVERED:-}"
-register_workload "flash-agent" "Flash Agent" "${FLASH_DISCOVERED:-}"
-register_workload "pro-agent" "Pro Agent" "${PRO_DISCOVERED:-}"
-register_workload "sonnet-agent" "Sonnet Agent" "${SONNET_DISCOVERED:-}"
-register_workload "opus-agent" "Opus Agent" "${OPUS_DISCOVERED:-}"
+for agent in lite flash pro sonnet opus; do
+    VAR="${agent^^}_ENGINE_ID"
+    ENGINE_ID="${!VAR:-}"
+    if [ -z "$ENGINE_ID" ]; then
+        warn "$agent: no ENGINE_ID set, skipping"
+        continue
+    fi
+    DISCOVERED=$(find_discovered_workload "$ENGINE_ID")
+    if [ -n "$DISCOVERED" ]; then
+        ok "Found $agent: $DISCOVERED"
+    else
+        warn "$agent ($ENGINE_ID) not found in discovered workloads"
+    fi
+    register_workload "wrangler-${agent}-agent" "Wrangler ${agent^} Agent" "${DISCOVERED:-}"
+done
 echo ""
 
-# --- Step 3b: Register MCP servers as services ---
-echo "--- Step 3b: Register MCP services to application ---"
+# --- Step 3: Register MCP servers ---
+echo "--- Step 3: Register MCP services ---"
 
 find_discovered_service() {
     local service_pattern="$1"
@@ -223,17 +187,11 @@ register_service() {
     fi
 }
 
-SEARCH_MCP_DISCOVERED=$(find_discovered_service "search-mcp")
-BOOKING_MCP_DISCOVERED=$(find_discovered_service "booking-mcp")
-EXPENSE_MCP_DISCOVERED=$(find_discovered_service "expense-mcp")
-
-[ -n "$SEARCH_MCP_DISCOVERED" ] && ok "Found search-mcp: $SEARCH_MCP_DISCOVERED" || warn "search-mcp not found"
-[ -n "$BOOKING_MCP_DISCOVERED" ] && ok "Found booking-mcp: $BOOKING_MCP_DISCOVERED" || warn "booking-mcp not found"
-[ -n "$EXPENSE_MCP_DISCOVERED" ] && ok "Found expense-mcp: $EXPENSE_MCP_DISCOVERED" || warn "expense-mcp not found"
-
-register_service "search-mcp" "Search MCP Server" "$SEARCH_MCP_DISCOVERED"
-register_service "booking-mcp" "Booking MCP Server" "$BOOKING_MCP_DISCOVERED"
-register_service "expense-mcp" "Expense MCP Server" "$EXPENSE_MCP_DISCOVERED"
+for server in search booking expense; do
+    DISCOVERED=$(find_discovered_service "wrangler-${server}-mcp")
+    [ -n "$DISCOVERED" ] && ok "Found wrangler-${server}-mcp: $DISCOVERED" || warn "wrangler-${server}-mcp not found"
+    register_service "wrangler-${server}-mcp" "Wrangler ${server^} MCP" "${DISCOVERED:-}"
+done
 echo ""
 
 # --- Step 4: Verify ---
