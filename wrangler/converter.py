@@ -76,15 +76,22 @@ def _load_simplified_yaml(path: Path) -> list[dict[str, Any]]:
     with open(path) as f:
         data = yaml.safe_load(f)
 
+    if isinstance(data, dict) and "eval_cases" in data:
+        data = data["eval_cases"]
     if not isinstance(data, list):
         raise ValueError(f"Expected a YAML list of eval cases, got {type(data).__name__}")
 
     cases = []
     for item in data:
+        prompt = item.get("prompt") or item.get("query", "")
+        reference = item.get("expected_response") or item.get("reference", "")
         cases.append({
-            "query": item["query"],
-            "expected_response": item.get("expected_response", ""),
+            "prompt": prompt,
+            "reference": reference,
+            "expected_tool": item.get("expected_tool", ""),
             "expected_tools": item.get("expected_tools", []),
+            "description": item.get("description", ""),
+            "category": item.get("category", ""),
             "tags": item.get("tags", []),
         })
     return cases

@@ -45,13 +45,28 @@ def update_env(key: str, value: str):
         f.writelines(lines)
 
 
-def deploy_single(name: str):
+def deploy_single(name: str, generic: bool = False, update: bool = False):
     module_name, agent_attr = AGENTS[name]
     mod = __import__(module_name, fromlist=[agent_attr])
     agent = getattr(mod, agent_attr)
 
-    from wrangler.deploy import deploy_agent
-    engine_id = deploy_agent(agent, display_name=f"wrangler-{name}-agent")
+    if generic:
+        from generic_prompts import GENERIC_PROMPT
+        agent.instruction = GENERIC_PROMPT
+        print(f"  Using generic prompt")
+
+    if update:
+        engine_id = os.environ.get(f"{name.upper()}_ENGINE_ID", "")
+        if not engine_id:
+            print(f"  No ENGINE_ID for {name}, deploying new instead")
+            from wrangler.deploy import deploy_agent
+            engine_id = deploy_agent(agent, display_name=f"wrangler-{name}-agent")
+        else:
+            from wrangler.deploy import update_agent
+            update_agent(agent, engine_id, display_name=f"wrangler-{name}-agent")
+    else:
+        from wrangler.deploy import deploy_agent
+        engine_id = deploy_agent(agent, display_name=f"wrangler-{name}-agent")
 
     env_key = f"{name.upper()}_ENGINE_ID"
     update_env(env_key, engine_id)
@@ -63,6 +78,8 @@ if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser()
     parser.add_argument("agents", nargs="*", default=list(AGENTS.keys()))
+    parser.add_argument("--generic", action="store_true", help="Use generic prompts instead of optimized")
+    parser.add_argument("--update", action="store_true", help="Update existing agents instead of creating new")
     args = parser.parse_args()
 
     print(f"Project: {GCP_PROJECT_ID}")
@@ -74,7 +91,8 @@ if __name__ == "__main__":
         if name not in AGENTS:
             print(f"  Unknown agent: {name}. Available: {list(AGENTS.keys())}")
             continue
-        print(f"\n--- Deploying {name} ---")
-        deploy_single(name)
+        action = "Updating" if args.update else "Deploying"
+        print(f"\n--- {action} {name} {'(generic prompt)' if args.generic else ''} ---")
+        deploy_single(name, generic=args.generic, update=args.update)
 
     print("\nDone.")

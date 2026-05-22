@@ -280,14 +280,16 @@ wrangler eval manifest.yaml --engine-id ID  # Eval against specific engine
 
 ## Supported Models
 
-| Model | Provider | Endpoint | Cost (output $/M) |
-|-------|----------|----------|-------------------|
-| `gemini-2.5-flash` | Google | Regional | ~$0.60 |
-| `gemini-3.1-flash-lite` | Google | Global (LiteLLM) | $0.30 |
-| `gemini-3.5-flash` | Google | Global (LiteLLM) | $0.60 |
-| `gemini-3.1-pro-preview` | Google | Global (LiteLLM) | ~$10.00 |
-| `claude-sonnet-4-6` | Anthropic | Global (LiteLLM) | ~$15.00 |
-| `claude-opus-4-6` | Anthropic | Global (LiteLLM) | $75.00 |
+| Model | Provider | Endpoint | Input $/M | Output $/M |
+|-------|----------|----------|----------|-----------|
+| `gemini-2.5-flash` | Google | Regional | — | — |
+| `gemini-3.1-flash-lite` | Google | Global (LiteLLM) | $0.25 | $1.50 |
+| `gemini-3.5-flash` | Google | Global (LiteLLM) | $1.50 | $1.65 |
+| `gemini-3.1-pro-preview` | Google | Global (LiteLLM) | $4.00 | $18.00 |
+| `claude-sonnet-4-6` | Anthropic | Global (LiteLLM) | $3.00 | $15.00 |
+| `claude-opus-4-6` | Anthropic | Global (LiteLLM) | $5.00 | $25.00 |
+
+*Source: [GEAP Model Pricing](https://cloud.google.com/gemini-enterprise-agent-platform/generative-ai/pricing)*
 
 Gemini 2.x uses regional Vertex AI endpoints (passed as strings). All other models route through `LiteLlm` with `vertex_location="global"`.
 

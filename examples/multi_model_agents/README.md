@@ -4,13 +4,15 @@ End-to-end example comparing 5 model tiers on the same corporate travel/expense 
 
 ## Models Tested
 
-| Tier | Model | Provider | Output $/M |
-|------|-------|----------|-----------|
-| 1 | gemini-3.1-flash-lite | Google | $0.30 |
-| 2 | gemini-3.5-flash | Google | $0.60 |
-| 3 | gemini-3.1-pro-preview | Google | $10.00 |
-| 4 | claude-sonnet-4-6 | Anthropic | $15.00 |
-| 5 | claude-opus-4-6 | Anthropic | $75.00 |
+| Tier | Model | Provider | Input $/M | Output $/M |
+|------|-------|----------|----------|-----------|
+| 1 | gemini-3.1-flash-lite | Google | $0.25 | $1.50 |
+| 2 | gemini-3.5-flash | Google | $1.50 | $1.65 |
+| 3 | gemini-3.1-pro-preview | Google | $4.00 | $18.00 |
+| 4 | claude-sonnet-4-6 | Anthropic | $3.00 | $15.00 |
+| 5 | claude-opus-4-6 | Anthropic | $5.00 | $25.00 |
+
+*Source: [GEAP Model Pricing](https://cloud.google.com/gemini-enterprise-agent-platform/generative-ai/pricing)*
 
 ## What's Included
 
