@@ -2,25 +2,35 @@
 
 ![GEPA Prompt Wrangler](docs/gepa_prompt_wrangler_banner.png)
 
-A prompt optimization harness for [Google ADK](https://google.github.io/adk-docs/) agents. Define multiple model + system-prompt pairs in a YAML manifest, evaluate them against a shared eval set, and let the harness find the best-performing combination -- then deploy the winner to Vertex AI Agent Engine with a single command.
+A prompt optimization harness for [Google ADK](https://google.github.io/adk-docs/) agents. Define multiple model + system-prompt pairs in a YAML manifest, evaluate them against a shared eval set, optimize with GEPA, and deploy the winners to the Gemini Enterprise Agent Platform (GEAP).
 
 ---
 
 ## Default Workflow
 
 ```
-1. Define     write a manifest with model/prompt pairs
-2. Deploy     wrangler run manifest.yaml
-3. Evaluate   wrangler eval manifest.yaml
-4. Optimize   wrangler optimize manifest.yaml
-5. Re-eval    wrangler eval manifest.yaml
-6. Report     wrangler report manifest.yaml
+1. Deploy      Deploy agent(s) to GEAP
+2. Eval        Run batch eval against deployed agent (baseline)
+3. Optimize    Run local GEPA optimization with eval dataset
+4. Redeploy    Update agent with optimized prompt
+5. Re-eval     Run batch eval again (measure improvement)
+6. Report      Generate comparative analysis report
 ```
 
-The optimize step rewrites system prompts using an LLM judge's feedback, then you re-evaluate to confirm improvement. When satisfied, deploy the winning pair:
+Run the full pipeline in one command:
 
+```bash
+wrangler run manifest.yaml
 ```
-wrangler deploy manifest.yaml --pair gemini-flash-concise
+
+Or step by step:
+
+```bash
+wrangler deploy manifest.yaml
+wrangler eval manifest.yaml --engine-id <ID>
+wrangler optimize manifest.yaml
+wrangler deploy manifest.yaml --pair gemini-flash
+wrangler report outputs/
 ```
 
 ---
@@ -29,10 +39,10 @@ wrangler deploy manifest.yaml --pair gemini-flash-concise
 
 ```bash
 # Clone the repo
-git clone <repo-url>
+git clone https://github.com/tottenjordan/gepa-prompt-wrangler.git
 cd gepa-prompt-wrangler
 
-# Install dependencies with uv
+# Install dependencies
 uv sync
 
 # Configure environment
@@ -40,15 +50,23 @@ cp .env.example .env
 # Edit .env with your GCP project, region, and staging bucket
 
 # Generate a starter manifest
-uv run wrangler init
+wrangler init
 
-# Inspect the manifest
-uv run wrangler inspect manifest.yaml
+# Inspect an agent's tools
+wrangler inspect agents/example_agent
 
-# Run the example end-to-end
-uv run wrangler run manifests/example_manifest.yaml
-uv run wrangler eval manifests/example_manifest.yaml
-uv run wrangler report manifests/example_manifest.yaml
+# Run the full pipeline
+wrangler run manifests/example_manifest.yaml
+```
+
+### Multi-Model Example (End-to-End)
+
+```bash
+# Deploy MCP tool servers (search, booking, expense)
+bash examples/multi_model_agents/scripts/deploy_mcp_servers.sh
+
+# Run 5-model comparison experiment
+wrangler run examples/multi_model_agents/manifest.yaml
 ```
 
 ---
@@ -57,235 +75,256 @@ uv run wrangler report manifests/example_manifest.yaml
 
 ```
 gepa-prompt-wrangler/
-├── pyproject.toml              # Project config (uv, dependencies, scripts)
-├── .env.example                # Environment variable template
-├── .gitignore
-├── README.md
+├── pyproject.toml
+├── .env.example
 │
-├── wrangler/                   # Core library
-│   ├── __init__.py
-│   ├── cli.py                  # Click-based CLI entry point
-│   ├── config.py               # GCP config, resolve_model(), disable_pyopenssl()
-│   ├── converter.py            # YAML ↔ ADK evalset format conversion
-│   └── factory.py              # Manifest parser and AgentPromptPair dataclass
+├── wrangler/                        # Core library
+│   ├── cli.py                       # Click CLI (init, inspect, run, eval, optimize, report, deploy)
+│   ├── config.py                    # GCP config, resolve_model(), disable_pyopenssl()
+│   ├── factory.py                   # Manifest parser, AgentPromptPair dataclass
+│   ├── converter.py                 # YAML ↔ ADK evalset format auto-conversion
+│   ├── evaluator.py                 # Batch eval against deployed GEAP agents (6 metrics)
+│   ├── optimizer.py                 # GEPA wrapper with ADK patches
+│   ├── runner.py                    # Full 6-phase pipeline orchestrator
+│   ├── reporter.py                  # Matplotlib charts + markdown report generation
+│   ├── deploy.py                    # Deploy/update agents on GEAP
+│   └── inspector.py                 # Auto-discover agent tools via introspection
 │
-├── agents/                     # Agent modules (one directory per agent)
-│   └── example_agent/
-│       ├── __init__.py
-│       └── agent.py            # Example travel agent with mock tools
+├── agents/                          # User-defined agent modules
+│   └── example_agent/               # Example travel agent with mock tools
 │
-├── manifests/                  # Optimization manifests
-│   └── example_manifest.yaml
+├── manifests/                       # Experiment configs
+│   └── example_manifest.yaml        # 2-pair example (Gemini Flash vs Claude Sonnet)
 │
-├── eval_data/                  # Eval datasets (YAML or ADK JSON)
-│   └── example_eval.yaml
+├── eval_data/                       # Eval datasets
+│   └── example_eval.yaml            # 5 simplified eval cases
 │
-├── tests/                      # Test suite
-│   └── __init__.py
+├── examples/                        # Reference implementations
+│   ├── multi_model_agents/          # Full 5-model comparison (lite → opus)
+│   │   ├── manifest.yaml
+│   │   ├── agents/                  # 5 standalone agents with GEPA-optimized prompts
+│   │   ├── mcp_servers/             # 3 MCP tool servers (Cloud Run + OTel)
+│   │   ├── eval_data/              # 10 eval cases (low/medium/high complexity)
+│   │   └── scripts/                # Deployment scripts
+│   ├── gemini_vs_claude/
+│   ├── multi_model_tier/
+│   └── minimal/
 │
-├── outputs/                    # Generated reports (gitignored)
-├── eval_outputs/               # Eval results (gitignored)
-├── examples/                   # Additional usage examples
-└── scripts/                    # Utility scripts
+├── outputs/                         # Generated artifacts (gitignored)
+│   ├── baselines/                   # Pre-optimization eval results
+│   ├── optimized/                   # Post-optimization eval results
+│   ├── prompts/                     # Before/after prompt snapshots
+│   └── reports/                     # Markdown reports + charts
+│
+├── docs/
+│   └── gepa_prompt_wrangler_banner.png
+│
+└── tests/
+    ├── test_factory.py              # Manifest parsing tests
+    └── test_converter.py            # Eval format conversion tests
 ```
 
 ---
 
 ## Manifest Format
 
-A manifest defines one optimization run. It specifies the agent module, eval data, and one or more model + system-prompt pairs to compare.
-
 ```yaml
-name: travel-agent-prompt-comparison
-description: Compare Gemini Flash and Claude Sonnet on travel queries.
+name: travel-agent-model-comparison
+description: Compare Gemini Flash vs Claude Sonnet on travel agent tasks
 
-agent_module: agents.example_agent
+agent_module: agents/example_agent
 eval_data: eval_data/example_eval.yaml
 
 pairs:
-  - id: gemini-flash-concise
+  - id: gemini-flash
     model: gemini-3.5-flash
-    description: Concise directive prompt style.
     system_prompt: |
-      You are a corporate travel assistant. Use the available tools to
-      search flights, find hotels, check travel policies, create bookings,
-      and manage expense reports.
-    temperature: 1.0
-    tags: [gemini, concise]
+      You are a corporate travel assistant.
+      Use tools to search flights and book hotels.
 
-  - id: claude-sonnet-detailed
+  - id: claude-sonnet
     model: claude-sonnet-4-6
-    description: Detailed persona-driven prompt style.
     system_prompt: |
-      You are TravelBot, a friendly and thorough corporate travel assistant
-      employed by Acme Corp...
-    tags: [claude, detailed]
+      You are a corporate travel assistant.
+      Use tools to search flights and book hotels.
 
 eval_config:
-  metrics:
-    - tool_trajectory
-    - response_match
-  judge_model: gemini-2.5-flash
+  judge_model: gemini-2.5-pro
+  response_match_threshold: 0.5
+  safety_threshold: 0.8
+
+deploy:
+  project: my-gcp-project
+  region: us-central1
+  staging_bucket: my-staging-bucket
 ```
 
-### Required fields
+### Required Fields
 
-| Field          | Description                                        |
-|----------------|----------------------------------------------------|
-| `name`         | Unique name for this optimization run              |
-| `agent_module` | Python module path to the agent (must export `agent`) |
-| `pairs`        | List of model + system-prompt pairs                |
-
-### Pair fields
-
-| Field           | Required | Description                          |
-|-----------------|----------|--------------------------------------|
-| `id`            | Yes      | Unique identifier for the pair       |
-| `model`         | Yes      | Model string (see Supported Models)  |
-| `system_prompt` | Yes      | System prompt text                   |
-| `temperature`   | No       | Sampling temperature (default 1.0)   |
-| `description`   | No       | Human-readable description           |
-| `tags`          | No       | Tags for filtering and grouping      |
+| Field | Description |
+|-------|-------------|
+| `name` | Unique name for this experiment |
+| `agent_module` | Path to the agent module directory |
+| `pairs` | List of model + system-prompt pairs |
+| `pairs[].id` | Unique identifier for the pair |
+| `pairs[].model` | Model string (see Supported Models) |
+| `pairs[].system_prompt` | System prompt text |
 
 ---
 
 ## Eval Data Formats
 
-### Simplified YAML (recommended for authoring)
+### Simplified YAML (recommended)
 
 ```yaml
-- query: "Find flights from SFO to JFK on June 15"
-  expected_response: "Found available flights from SFO to JFK"
-  expected_tools:
-    - search_flights
-  tags:
-    - search
+eval_cases:
+  - prompt: "Find flights from SFO to JFK"
+    expected_response: "Flights from SFO to JFK: United FL001 at $450."
+    expected_tools:
+      - name: search_flights
+        args: {origin: SFO, destination: JFK}
 
-- query: "Does a $450 one-way domestic flight comply with our travel policy?"
-  expected_response: "policy"
-  expected_tools:
-    - check_policy
-  tags:
-    - policy
+  - prompt: "Book flight FL001 for Alice Johnson"
+    expected_response: "Flight FL001 booked and confirmed."
+    expected_tools:
+      - name: book_flight
+        args: {flight_id: FL001, passenger_name: "Alice Johnson"}
 ```
 
-### ADK JSON (native evaluation format)
+### ADK Evalset JSON
 
 ```json
-[
-  {
-    "query": "Find flights from SFO to JFK on June 15",
-    "reference": "Found available flights from SFO to JFK",
-    "expected_tool_use": [
-      { "tool_name": "search_flights", "tool_input": {} }
-    ]
-  }
-]
+{
+  "eval_set_id": "my_eval",
+  "eval_cases": [
+    {
+      "eval_id": "flight_search",
+      "conversation": [
+        {
+          "user_content": {"parts": [{"text": "Find flights from SFO to JFK"}], "role": "user"},
+          "final_response": {"parts": [{"text": "Flights found."}], "role": "model"},
+          "intermediate_data": {"tool_uses": [{"name": "search_flights", "args": {"origin": "SFO"}}]}
+        }
+      ]
+    }
+  ]
+}
 ```
 
-The converter module auto-detects the format and translates between them. Use the simplified YAML for authoring eval cases and let the harness convert to ADK JSON at evaluation time.
+The converter auto-detects the format. Use simplified YAML for authoring, ADK JSON for advanced tool-use evaluation.
 
 ---
 
 ## CLI Commands
 
-| Command    | Description                                              |
-|------------|----------------------------------------------------------|
-| `init`     | Create a starter `manifest.yaml` in the current directory |
-| `inspect`  | Parse and display a manifest's structure                 |
-| `run`      | Deploy agents defined in the manifest                    |
-| `eval`     | Run ADK evaluation against deployed agents               |
-| `optimize` | Rewrite prompts using eval feedback (grid, bayesian, llm)|
-| `report`   | Generate a comparison report (HTML, JSON, or CSV)        |
-| `deploy`   | Deploy the winning pair to Agent Engine                   |
+| Command | Description |
+|---------|-------------|
+| `wrangler init` | Create a starter manifest.yaml |
+| `wrangler inspect <agent_path>` | Auto-discover agent tools, generate YAML scaffold |
+| `wrangler run <manifest>` | Full pipeline: deploy → eval → optimize → redeploy → eval → report |
+| `wrangler eval <manifest>` | Run batch eval against a deployed agent |
+| `wrangler optimize <manifest>` | Run GEPA optimization for each pair |
+| `wrangler report <outputs_dir>` | Generate analysis report from results |
+| `wrangler deploy <manifest>` | Deploy agent pairs to GEAP |
 
-### Common options
+### Options
 
 ```bash
-# Show version
-wrangler --version
-
-# Run a specific pair only
-wrangler run manifest.yaml --pair gemini-flash-concise
-
-# Dry run (validate without executing)
-wrangler run manifest.yaml --dry-run
-
-# Custom output directory for reports
-wrangler report manifest.yaml --output-dir ./my-reports --format csv
-
-# Deploy with existing engine
-wrangler deploy manifest.yaml --pair gemini-flash-concise --engine-id 12345
+wrangler run manifest.yaml --dry-run       # Validate without executing
+wrangler deploy manifest.yaml --pair flash  # Deploy specific pair
+wrangler eval manifest.yaml --engine-id ID  # Eval against specific engine
 ```
+
+---
+
+## Evaluation Metrics
+
+### Default metrics (6)
+
+| Metric | What it measures |
+|--------|-----------------|
+| `final_response_quality` | Overall response quality |
+| `hallucination` | Factual accuracy |
+| `safety` | Content safety |
+| `tool_use_quality` | Correct tool selection and parameters |
+| `instruction_following` | Adherence to system prompt |
+| `final_response_match` | Match against reference response |
+
+### GEPA optimization metrics
+
+| Metric | Purpose |
+|--------|---------|
+| `response_match_score` | Primary optimization target |
+| `final_response_match_v2` | LLM-judged similarity (uses judge model) |
+| `safety_v1` | Constraint — don't sacrifice safety for quality |
 
 ---
 
 ## Supported Models
 
-All models are resolved through `resolve_model()` which handles Vertex AI routing automatically.
+| Model | Provider | Endpoint | Cost (output $/M) |
+|-------|----------|----------|-------------------|
+| `gemini-2.5-flash` | Google | Regional | ~$0.60 |
+| `gemini-3.1-flash-lite` | Google | Global (LiteLLM) | $0.30 |
+| `gemini-3.5-flash` | Google | Global (LiteLLM) | $0.60 |
+| `gemini-3.1-pro-preview` | Google | Global (LiteLLM) | ~$10.00 |
+| `claude-sonnet-4-6` | Anthropic | Global (LiteLLM) | ~$15.00 |
+| `claude-opus-4-6` | Anthropic | Global (LiteLLM) | $75.00 |
 
-### Gemini (Google)
-
-| Model                       | Notes                                   |
-|-----------------------------|-----------------------------------------|
-| `gemini-2.5-flash`         | Regional endpoint, passed as string     |
-| `gemini-3.5-flash`         | Global endpoint via LiteLLM             |
-| `gemini-3.1-flash-lite`    | Global endpoint via LiteLLM             |
-| `gemini-3.1-pro-preview`   | Global endpoint via LiteLLM             |
-
-### Claude (Anthropic via Vertex AI)
-
-| Model                       | Notes                                   |
-|-----------------------------|-----------------------------------------|
-| `claude-sonnet-4-6`        | Global endpoint via LiteLLM             |
-| `claude-opus-4-6`          | Global endpoint via LiteLLM             |
-
-Gemini 2.x models use regional Vertex AI endpoints and are passed as plain strings. All other models (Gemini 3.x, Claude) route through `LiteLlm` with `vertex_location="global"`.
+Gemini 2.x uses regional Vertex AI endpoints (passed as strings). All other models route through `LiteLlm` with `vertex_location="global"`.
 
 ---
 
 ## Examples
 
-### Compare two prompt styles
+### Multi-Model Comparison (5 tiers)
+
+Full end-to-end example comparing lite → flash → pro → sonnet → opus on the same travel/expense agent with shared MCP tools.
 
 ```bash
-# 1. Write a manifest with a concise vs. verbose prompt pair
-# 2. Deploy both
-uv run wrangler run manifests/example_manifest.yaml
+# Deploy wrangler-prefixed MCP servers
+bash examples/multi_model_agents/scripts/deploy_mcp_servers.sh
 
-# 3. Evaluate both against the same eval set
-uv run wrangler eval manifests/example_manifest.yaml
-
-# 4. Generate a side-by-side report
-uv run wrangler report manifests/example_manifest.yaml --format html
+# Run the experiment
+wrangler run examples/multi_model_agents/manifest.yaml
 ```
 
-### Optimize a prompt iteratively
+See [examples/multi_model_agents/README.md](examples/multi_model_agents/README.md) for details.
+
+### Agent Inspection
 
 ```bash
-# Run 3 rounds of LLM-guided prompt optimization
-uv run wrangler optimize manifests/example_manifest.yaml \
-    --strategy llm \
-    --iterations 3
+# Auto-discover tools from an existing agent
+wrangler inspect agents/example_agent
 
-# Re-evaluate after optimization
-uv run wrangler eval manifests/example_manifest.yaml
-
-# Deploy the winner
-uv run wrangler deploy manifests/example_manifest.yaml \
-    --pair gemini-flash-concise
+# Output:
+# agent:
+#   name: example_travel_agent
+#   tools:
+#     - name: search_flights
+#       description: Search available flights
+#       parameters:
+#         origin: {type: string, required: true}
+#         destination: {type: string, required: true}
 ```
 
-### Convert eval formats
+### Python API
 
 ```python
-from wrangler.converter import load_eval_file, save_adk_evalset
+from wrangler.factory import PairFactory
+from wrangler.converter import load_eval_file
+from wrangler.evaluator import run_batch_eval
 
-# Load simplified YAML
-cases = load_eval_file("eval_data/example_eval.yaml")
+# Parse manifest
+manifest = PairFactory.load("manifest.yaml")
 
-# Export as ADK JSON
-save_adk_evalset(cases, "eval_data/example_eval.json")
+# Load eval cases (auto-detects format)
+cases = load_eval_file("eval_data/my_eval.yaml")
+
+# Run eval against deployed agent
+scores = run_batch_eval(engine_id="1234567890", eval_cases=cases)
+print(scores)
+# {'final_response_quality_v1': 0.85, 'hallucination_v1': 0.94, ...}
 ```
 
 ---
@@ -294,37 +333,25 @@ save_adk_evalset(cases, "eval_data/example_eval.json")
 
 1. Fork the repository and create a feature branch.
 2. Install dev dependencies: `uv sync`.
-3. Write tests in `tests/` for any new functionality.
-4. Run the test suite: `uv run pytest`.
-5. Submit a pull request with a clear description of the change.
-
-### Code style
-
-- Follow PEP 8 with a 100-character line limit.
-- Use type hints for all function signatures.
-- Docstrings for all public functions and classes.
+3. Write tests: `tests/test_*.py`.
+4. Run tests: `uv run pytest`.
+5. Submit a pull request.
 
 ---
 
 ## FAQ
 
-**Q: Do I need a GCP project to use this?**
-A: Yes. The harness deploys agents to Vertex AI Agent Engine and uses Vertex AI models for evaluation. You need a GCP project with the Vertex AI API enabled.
+**Q: Do I need a GCP project?**
+A: Yes. The harness deploys agents to Vertex AI Agent Engine and uses Vertex AI models for evaluation and GEPA optimization.
 
 **Q: Can I use non-Vertex AI models?**
-A: The `resolve_model()` function currently supports Gemini and Claude models via Vertex AI. To add other providers, extend `resolve_model()` with additional LiteLLM provider prefixes.
+A: Currently supports Gemini and Claude via Vertex AI. Extend `resolve_model()` in `config.py` to add other LiteLLM-supported providers.
 
-**Q: What is the difference between `run` and `deploy`?**
-A: `run` deploys all pairs in a manifest for evaluation purposes. `deploy` promotes a single winning pair to a production Agent Engine instance.
+**Q: What is GEPA?**
+A: Gemini Evolutionary Prompt Algorithm — an evolutionary optimization algorithm that iteratively improves agent system prompts by generating variants, evaluating them against your eval dataset, and selecting the best performers across generations.
 
-**Q: How does the optimizer work?**
-A: The `optimize` command supports three strategies:
-- `grid` -- exhaustive search over prompt variations.
-- `bayesian` -- Bayesian optimization of prompt parameters.
-- `llm` -- an LLM judge reviews eval failures and rewrites the system prompt to address them.
+**Q: How do I use my own agent?**
+A: Create a directory under `agents/` with an `__init__.py` that exports `agent.root_agent` (an ADK `LlmAgent`), then set `agent_module` in your manifest. Or implement a `create_agent(model, instruction)` factory function for dynamic model/prompt injection.
 
-**Q: Can I add custom eval metrics?**
-A: The `eval_config.metrics` field accepts standard ADK eval metrics (`tool_trajectory`, `response_match`). Custom metrics can be added by extending the evaluation pipeline.
-
-**Q: How do I use my own agent instead of the example?**
-A: Create a new directory under `agents/` with an `__init__.py` that exports an `agent` object, then set `agent_module` in your manifest to point to it (e.g., `agents.my_agent`).
+**Q: What's the difference between `run` and `deploy`?**
+A: `run` executes the full 6-phase pipeline (deploy → eval → optimize → redeploy → eval → report). `deploy` just deploys agents without evaluation or optimization.
