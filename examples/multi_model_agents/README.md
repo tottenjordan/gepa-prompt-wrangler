@@ -41,7 +41,8 @@ multi_model_agents/
     ├── deploy_mcp_servers.sh  # Deploy MCP servers to Cloud Run
     ├── deploy_agents.py       # Deploy agents to Agent Engine
     ├── deploy_all.sh          # Full infrastructure deployment
-    └── setup_apphub.sh        # App Hub topology registration
+    ├── setup_apphub.sh        # App Hub topology registration
+    └── setup_logging_sink.sh  # BigQuery logging sink for eval history
 ```
 
 ## Quick Start
@@ -99,7 +100,42 @@ Each agent is deployed with:
 - OTel telemetry enabled
 - Engine ID auto-written to `.env`
 
-### Step 4: Run the Experiment
+### Step 4: Setup Logging Sink (Optional)
+
+Routes agent traces from Cloud Logging to BigQuery for historical analysis and SQL queries:
+
+```bash
+bash scripts/setup_logging_sink.sh
+```
+
+This creates:
+- BigQuery dataset: `gepa_wrangler_logs`
+- Cloud Logging sink: `gepa-agent-traces`
+- IAM binding for the sink writer
+
+Once configured, you can query eval results:
+```sql
+SELECT * FROM `hybrid-vertex.gepa_wrangler_logs.online_eval_results`
+WHERE timestamp > TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 24 HOUR)
+```
+
+### Step 5: Setup Online Evaluators (Optional)
+
+Creates always-on evaluators that score OTel traces every 10 minutes:
+
+```bash
+# From the repo root
+uv run python -m wrangler.online_evaluators create
+```
+
+Verify they're active:
+```bash
+uv run python -m wrangler.online_evaluators verify
+```
+
+See [docs/online_eval_guide.md](../../docs/online_eval_guide.md) for details on evaluators vs monitors.
+
+### Step 6: Run the Experiment
 
 ```bash
 # Full pipeline: eval → optimize → redeploy → eval → report
