@@ -39,6 +39,8 @@ def deploy_agent(agent, display_name: str | None = None, env_vars: dict | None =
             "GCP_REGION": GCP_REGION,
             "GOOGLE_GENAI_USE_VERTEXAI": "1",
             "GOOGLE_CLOUD_AGENT_ENGINE_ENABLE_TELEMETRY": "true",
+            "OTEL_SEMCONV_STABILITY_OPT_IN": "gen_ai_latest_experimental",
+            "OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT": "EVENT_ONLY",
             **(env_vars or {}),
         },
     }
