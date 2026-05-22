@@ -1,12 +1,15 @@
 """Opus Agent — handles expert-level requests using Claude Opus."""
 
+import os
+import sys
+
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+
 from google.adk.agents import LlmAgent
 from google.adk.tools.preload_memory_tool import PreloadMemoryTool
 
-from src.config import OPUS_MODEL, SEARCH_MCP_SERVER, BOOKING_MCP_SERVER, EXPENSE_MCP_SERVER, resolve_model
-from src.registry import get_mcp_tools
-
-
+from config import OPUS_MODEL, SEARCH_MCP_SERVER, BOOKING_MCP_SERVER, EXPENSE_MCP_SERVER, resolve_model
+from registry import get_mcp_tools
 INSTRUCTION = """\
 You are an expert corporate assistant for the most complex, high-stakes \
 requests. Provide thorough financial and logistical analysis for business \

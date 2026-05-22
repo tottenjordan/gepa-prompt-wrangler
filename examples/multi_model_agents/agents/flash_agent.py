@@ -1,12 +1,15 @@
 """Flash Agent — handles simple tasks with light reasoning using a fast model."""
 
+import os
+import sys
+
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+
 from google.adk.agents import LlmAgent
 from google.adk.tools.preload_memory_tool import PreloadMemoryTool
 
-from src.config import FLASH_MODEL, SEARCH_MCP_SERVER, BOOKING_MCP_SERVER, EXPENSE_MCP_SERVER, resolve_model
-from src.registry import get_mcp_tools
-
-
+from config import FLASH_MODEL, SEARCH_MCP_SERVER, BOOKING_MCP_SERVER, EXPENSE_MCP_SERVER, resolve_model
+from registry import get_mcp_tools
 INSTRUCTION = """\
 You are a capable corporate assistant for straightforward requests. Your \
 primary goal is to efficiently handle user requests by leveraging available \

@@ -5,6 +5,7 @@ from dotenv import load_dotenv
 from google.adk.models.lite_llm import LiteLlm
 
 load_dotenv()
+load_dotenv(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env"))
 
 GCP_PROJECT_ID = os.environ.get("GCP_PROJECT_ID", "hybrid-vertex")
 PROJECT_NUMBER = os.environ.get("PROJECT_NUMBER", "")

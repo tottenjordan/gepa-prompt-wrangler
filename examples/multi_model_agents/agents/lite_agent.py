@@ -1,12 +1,15 @@
 """Lite Agent — handles trivial, single-intent lookups using the fastest model."""
 
+import os
+import sys
+
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+
 from google.adk.agents import LlmAgent
 from google.adk.tools.preload_memory_tool import PreloadMemoryTool
 
-from src.config import LITE_MODEL, SEARCH_MCP_SERVER, BOOKING_MCP_SERVER, EXPENSE_MCP_SERVER, resolve_model
-from src.registry import get_mcp_tools
-
-
+from config import LITE_MODEL, SEARCH_MCP_SERVER, BOOKING_MCP_SERVER, EXPENSE_MCP_SERVER, resolve_model
+from registry import get_mcp_tools
 INSTRUCTION = """\
 You are a fast, specialized corporate travel and expense assistant. Your \
 primary function is to help users with queries related to corporate travel \

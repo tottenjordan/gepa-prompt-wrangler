@@ -1,12 +1,15 @@
 """Sonnet Agent — handles complex, multi-intent requests using Claude Sonnet."""
 
+import os
+import sys
+
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+
 from google.adk.agents import LlmAgent
 from google.adk.tools.preload_memory_tool import PreloadMemoryTool
 
-from src.config import SONNET_MODEL, SEARCH_MCP_SERVER, BOOKING_MCP_SERVER, EXPENSE_MCP_SERVER, resolve_model
-from src.registry import get_mcp_tools
-
-
+from config import SONNET_MODEL, SEARCH_MCP_SERVER, BOOKING_MCP_SERVER, EXPENSE_MCP_SERVER, resolve_model
+from registry import get_mcp_tools
 INSTRUCTION = """\
 You are an advanced corporate assistant specialized in travel and expense \
 management. Your primary goal is to provide comprehensive, accurate, and \
