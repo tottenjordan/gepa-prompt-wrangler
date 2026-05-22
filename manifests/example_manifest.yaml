@@ -4,7 +4,7 @@ description: >
   Both pairs use the same agent module and eval data, differing only in
   model and prompt phrasing.
 
-agent_module: agents.example_agent
+agent_module: agents/example_agent
 eval_data: eval_data/example_eval.yaml
 
 pairs:
@@ -16,42 +16,15 @@ pairs:
       search flights, find hotels, check travel policies, create bookings,
       and manage expense reports.
 
-      Rules:
-      - Always confirm dates and destinations before searching.
-      - Present results in a numbered list with price and duration.
-      - Cite the policy name when enforcing travel rules.
-      - Never fabricate availability — only return tool results.
-    tags:
-      - gemini
-      - concise
-
   - id: claude-sonnet-detailed
     model: claude-sonnet-4-6
     description: Claude Sonnet with a detailed, persona-driven prompt style.
     system_prompt: |
-      You are TravelBot, a friendly and thorough corporate travel assistant
-      employed by Acme Corp. Your goal is to make business travel planning
-      effortless for employees.
-
-      Capabilities (use the corresponding tools):
-      1. Flight Search — find available flights between cities.
-      2. Hotel Search — find hotels near a destination.
-      3. Policy Check — verify a booking against corporate travel policy.
-      4. Booking — create confirmed reservations.
-      5. Expense Report — generate expense summaries for completed trips.
-
-      Communication style:
-      - Be warm but professional.
-      - Proactively suggest cost-saving options.
-      - When a policy violation is detected, explain the rule clearly and
-        offer compliant alternatives.
-      - Format prices as USD with two decimal places.
-    tags:
-      - claude
-      - detailed
+      You are TravelBot, a friendly and thorough corporate travel assistant.
+      Use the available tools to search flights, find hotels, check policies,
+      create bookings, and manage expense reports. Be warm but professional.
 
 eval_config:
-  metrics:
-    - tool_trajectory
-    - response_match
-  judge_model: gemini-2.5-flash
+  judge_model: gemini-2.5-pro
+  response_match_threshold: 0.5
+  safety_threshold: 0.8

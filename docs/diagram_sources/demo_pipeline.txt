@@ -1,0 +1,39 @@
+GEPA Prompt Wrangler — End-to-End Optimization Pipeline
+
+The pipeline runs in 6 phases for each agent-prompt pair:
+
+Phase 1 - Deploy: Each agent starts with a generic, intentionally weak
+instruction ("You are a helpful assistant. Use tools when needed.") and is
+deployed to the Gemini Enterprise Agent Platform (GEAP) as a Reasoning Engine.
+The agent connects to MCP tool servers (search, booking, expense) via
+Agent Registry.
+
+Phase 2 - Baseline Eval: The deployed agent is evaluated against 30 test
+cases spanning 3 complexity tiers (low: 14, medium: 9, high: 7). Six metrics
+are measured: response quality, hallucination, safety, tool use quality,
+instruction following, and response match. Evaluation runs server-side via
+the Vertex AI GenAI Evaluation Service.
+
+Phase 3 - GEPA Optimize: The Gemini Evolutionary Prompt Algorithm runs
+locally against the agent's eval dataset. GEPA generates candidate prompt
+variants, evaluates each against the eval cases using a judge model
+(gemini-2.5-pro), selects the best performers across generations, and
+produces an optimized instruction.
+
+Phase 4 - Redeploy: The agent is updated on GEAP with the GEPA-optimized
+instruction, replacing the generic prompt.
+
+Phase 5 - Post-Optimization Eval: The same 30 test cases are run again
+against the redeployed agent. Scores are compared against the baseline.
+
+Phase 6 - Report: Per-agent analysis markdowns are generated with before/after
+prompts, score tables, and delta analysis. Charts (comparison bars, cost-quality
+scatter, improvement deltas, radar charts) are produced with matplotlib.
+PaperBanana generates architecture diagrams.
+
+The pipeline supports 5 model tiers simultaneously:
+- Tier 1: gemini-3.1-flash-lite ($0.25/$1.50 per 1M tokens)
+- Tier 2: gemini-3.5-flash ($1.50/$1.65)
+- Tier 3: gemini-3.1-pro-preview ($4.00/$18.00)
+- Tier 4: claude-sonnet-4-6 ($3.00/$15.00)
+- Tier 5: claude-opus-4-6 ($5.00/$25.00)

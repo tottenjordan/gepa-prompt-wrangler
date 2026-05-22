@@ -120,3 +120,33 @@ def run_batch_eval(
             scores[short] = float(value)
 
     return scores
+
+
+def save_eval_results(
+    agent_name: str,
+    scores: dict[str, float],
+    phase: str = "baseline",
+    output_dir: str | None = None,
+) -> str:
+    """Save eval results to JSON. Returns the file path."""
+    import json
+    from datetime import datetime
+    from pathlib import Path
+
+    output_dir = Path(output_dir or "outputs")
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    filename = f"eval_{agent_name}_{phase}_{timestamp}.json"
+    path = output_dir / filename
+
+    data = {
+        "agent": agent_name,
+        "phase": phase,
+        "timestamp": datetime.now().isoformat(),
+        "scores": scores,
+    }
+    with open(path, "w") as f:
+        json.dump(data, f, indent=2, default=str)
+
+    return str(path)

@@ -91,7 +91,8 @@ gepa-prompt-wrangler/
 │
 ├── wrangler/                        # Core library
 │   ├── cli.py                       # Click CLI (init, inspect, run, eval, optimize, report, deploy)
-│   ├── config.py                    # GCP config, resolve_model(), disable_pyopenssl()
+│   ├── config.py                    # GCP config, resolve_model(), MODEL_COSTS, disable_pyopenssl()
+│   ├── analysis.py                  # Per-agent markdown report generator
 │   ├── factory.py                   # Manifest parser, AgentPromptPair dataclass
 │   ├── converter.py                 # YAML ↔ ADK evalset format auto-conversion
 │   ├── evaluator.py                 # Batch eval against deployed GEAP agents (6 metrics)
@@ -110,16 +111,21 @@ gepa-prompt-wrangler/
 ├── eval_data/                       # Eval datasets
 │   └── example_eval.yaml            # 5 simplified eval cases
 │
+├── scripts/                         # Analysis & visualization
+│   ├── generate_analysis.py         # Matplotlib charts + per-agent reports
+│   ├── generate_diagrams.py         # PaperBanana architecture diagrams
+│   └── run_full_analysis.py         # Master script chaining all analysis
+│
 ├── examples/                        # Reference implementations
-│   ├── multi_model_agents/          # Full 5-model comparison (lite → opus)
-│   │   ├── manifest.yaml
-│   │   ├── agents/                  # 5 standalone agents with GEPA-optimized prompts
-│   │   ├── mcp_servers/             # 3 MCP tool servers (Cloud Run + OTel)
-│   │   ├── eval_data/              # 10 eval cases (low/medium/high complexity)
-│   │   └── scripts/                # Deployment scripts
-│   ├── gemini_vs_claude/
-│   ├── multi_model_tier/
-│   └── minimal/
+│   └── multi_model_agents/          # Full 5-model comparison (lite → opus)
+│       ├── manifest.yaml
+│       ├── run_demo.py              # E2E demo: generic → eval → optimize → eval
+│       ├── deploy_agents.py         # Deploy all agents to GEAP
+│       ├── generic_prompts.py       # Intentionally weak starting prompts
+│       ├── agents/                  # 5 standalone agents
+│       ├── mcp_servers/             # 3 MCP tool servers (Cloud Run + OTel)
+│       ├── eval_data/               # 30 eval cases (low/medium/high)
+│       └── scripts/                 # Infrastructure deployment
 │
 ├── outputs/                         # Generated artifacts (gitignored)
 │   ├── baselines/                   # Pre-optimization eval results
@@ -128,7 +134,8 @@ gepa-prompt-wrangler/
 │   └── reports/                     # Markdown reports + charts
 │
 ├── docs/
-│   └── gepa_prompt_wrangler_banner.png
+│   ├── gepa_prompt_wrangler_banner.png
+│   └── diagram_sources/             # PaperBanana diagram descriptions
 │
 └── tests/
     ├── test_factory.py              # Manifest parsing tests

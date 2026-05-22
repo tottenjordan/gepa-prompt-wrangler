@@ -1,0 +1,48 @@
+GEPA Prompt Wrangler — Before/After Prompt Evolution
+
+This diagram shows how GEPA transforms generic prompts into specialized,
+high-performing instructions across 5 model tiers.
+
+BEFORE (Generic Prompt - identical for all models):
+"You are a helpful assistant. Use the available tools to answer user questions."
+- No tool-specific guidance
+- No domain knowledge
+- No response formatting rules
+- No edge case handling
+- No safety constraints
+
+AFTER (GEPA-Optimized - tailored per model):
+
+Lite Agent (gemini-3.1-flash-lite):
++ Added capabilities and limitations section
++ Tool usage guidelines with response formatting
++ Domain-specific policy knowledge (meals $75, lodging $400)
++ Out-of-scope handling instructions
+
+Flash Agent (gemini-3.5-flash):
++ Detailed expense submission handling with policy check logic
++ Booking confirmation format specification
++ Response presentation guidelines (bulleted lists)
+
+Pro Agent (gemini-3.1-pro-preview):
++ Problem breakdown methodology
++ Parameter validation before tool calls
++ Structured response formatting (tables, comparisons)
++ PII safety guidelines
+
+Sonnet Agent (claude-sonnet-4-6):
++ Multi-domain analysis principles
++ Scenario planning for comparisons
++ Actionable recommendations framework
++ Follow-up suggestion pattern
+
+Opus Agent (claude-opus-4-6):
++ 7-step rigorous methodology
++ Assumption documentation requirements
++ Budget comparison and policy cross-referencing
++ Strategic recommendation framework
++ Scope limitation boundaries
+
+Key insight: GEPA expanded 1-line generic prompts into 20-40 line
+specialized instructions, with each model receiving guidance matched
+to its capability level and response style.

@@ -13,8 +13,25 @@ GCP_STAGING_BUCKET = os.environ.get(
     "GCP_STAGING_BUCKET", f"{GCP_PROJECT_ID}-wrangler-staging"
 )
 
-# --- Evaluation ---
+# --- Outputs ---
+OUTPUTS_DIR = os.environ.get("OUTPUTS_DIR", "outputs")
+REPORTS_DIR = os.path.join(OUTPUTS_DIR, "reports")
+DIAGRAMS_DIR = os.path.join(REPORTS_DIR, "diagrams")
 EVAL_OUTPUT_DIR = os.environ.get("EVAL_OUTPUT_DIR", "eval_outputs")
+
+# --- Model costs per 1M tokens ---
+# Source: https://cloud.google.com/gemini-enterprise-agent-platform/generative-ai/pricing
+MODEL_COSTS = {
+    "gemini-3.1-flash-lite": {"input": 0.25, "output": 1.5},
+    "gemini-3.5-flash": {"input": 1.50, "output": 1.65},
+    "gemini-3.1-pro-preview": {"input": 4.0, "output": 18.0},
+    "claude-sonnet-4-6": {"input": 3.0, "output": 15.0},
+    "claude-opus-4-6": {"input": 5.0, "output": 25.0},
+}
+
+# --- PaperBanana ---
+PAPERBANANA_PROJECT = os.environ.get("GOOGLE_CLOUD_PROJECT", GCP_PROJECT_ID)
+PAPERBANANA_LOCATION = os.environ.get("GOOGLE_CLOUD_LOCATION", "global")
 
 
 def resolve_model(model_str: str):

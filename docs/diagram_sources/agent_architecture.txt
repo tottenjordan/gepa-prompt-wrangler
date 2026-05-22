@@ -1,0 +1,35 @@
+GEPA Prompt Wrangler — Agent Architecture
+
+The system consists of three layers connected by the optimization loop:
+
+Layer 1 - ADK Agents (deployed on Vertex AI Agent Engine):
+Five standalone LlmAgent instances, each using a different model but sharing
+the same MCP tool connections. Each agent has:
+- A model (gemini-3.1-flash-lite, gemini-3.5-flash, gemini-3.1-pro-preview,
+  claude-sonnet-4-6, or claude-opus-4-6)
+- A system instruction (initially generic, then GEPA-optimized)
+- Tools connected via Agent Registry to MCP servers
+- PreloadMemoryTool for session memory
+- OTel telemetry exporting to Cloud Trace
+
+Layer 2 - MCP Tool Servers (deployed on Cloud Run):
+Three FastMCP servers providing corporate travel and expense tools:
+- search-mcp: search_flights(origin, destination), search_hotels(city, max_price)
+- booking-mcp: book_flight(flight_id, passenger), book_hotel(hotel_id, guest, dates)
+- expense-mcp: submit_expense(amount, category, user_id), check_expense_policy(amount, category), get_user_expenses(user_id)
+Each server has OTel instrumentation exporting traces to Cloud Trace via
+authenticated gRPC to telemetry.googleapis.com.
+
+Layer 3 - GEPA Optimization Loop:
+The evolutionary optimization cycle:
+1. Agent with current instruction receives eval cases
+2. Responses are scored by the judge model (gemini-2.5-pro)
+3. GEPA generates mutated instruction variants
+4. Each variant is evaluated against the same cases
+5. Best-performing variants are selected for the next generation
+6. After N generations, the winning instruction is returned
+7. Agent is redeployed with the optimized instruction
+
+The Vertex AI GenAI Evaluation Service runs batch evaluation with 6 rubric
+metrics, producing server-side EvaluationRun resources. Results are stored
+in GCS and tracked in local JSON files.
