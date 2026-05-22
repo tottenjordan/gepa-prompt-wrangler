@@ -1,0 +1,580 @@
+{
+  "eval_set_id": "pro_eval_set",
+  "eval_cases": [
+    {
+      "eval_id": "case_1",
+      "conversation": [
+        {
+          "user_content": {
+            "parts": [
+              {
+                "text": "Find flights from SFO to JFK"
+              }
+            ],
+            "role": "user"
+          },
+          "final_response": {
+            "parts": [
+              {
+                "text": "United FL001 at $450 departing 08:00 and Delta FL002 at $520 departing 10:30."
+              }
+            ],
+            "role": "model"
+          },
+          "intermediate_data": {
+            "tool_uses": [
+              {
+                "name": "search_mcp_search_flights",
+                "args": {
+                  "origin": "SFO",
+                  "destination": "JFK"
+                }
+              }
+            ]
+          }
+        }
+      ],
+      "session_input": {
+        "app_name": "pro_opt",
+        "user_id": "eval_user"
+      }
+    },
+    {
+      "eval_id": "case_2",
+      "conversation": [
+        {
+          "user_content": {
+            "parts": [
+              {
+                "text": "Search for flights from LAX to Chicago"
+              }
+            ],
+            "role": "user"
+          },
+          "final_response": {
+            "parts": [
+              {
+                "text": "American Airlines FL003 from LAX to ORD at $380, departing 07:00."
+              }
+            ],
+            "role": "model"
+          },
+          "intermediate_data": {
+            "tool_uses": [
+              {
+                "name": "search_mcp_search_flights",
+                "args": {
+                  "origin": "LAX",
+                  "destination": "ORD"
+                }
+              }
+            ]
+          }
+        }
+      ],
+      "session_input": {
+        "app_name": "pro_opt",
+        "user_id": "eval_user"
+      }
+    },
+    {
+      "eval_id": "case_3",
+      "conversation": [
+        {
+          "user_content": {
+            "parts": [
+              {
+                "text": "Are there flights from SFO to Los Angeles?"
+              }
+            ],
+            "role": "user"
+          },
+          "final_response": {
+            "parts": [
+              {
+                "text": "Southwest FL005 from SFO to LAX at $150, departing 06:00."
+              }
+            ],
+            "role": "model"
+          },
+          "intermediate_data": {
+            "tool_uses": [
+              {
+                "name": "search_mcp_search_flights",
+                "args": {
+                  "origin": "SFO",
+                  "destination": "LAX"
+                }
+              }
+            ]
+          }
+        }
+      ],
+      "session_input": {
+        "app_name": "pro_opt",
+        "user_id": "eval_user"
+      }
+    },
+    {
+      "eval_id": "case_4",
+      "conversation": [
+        {
+          "user_content": {
+            "parts": [
+              {
+                "text": "Search for hotels in New York"
+              }
+            ],
+            "role": "user"
+          },
+          "final_response": {
+            "parts": [
+              {
+                "text": "Grand Hyatt New York at $320/night (4.5 rating) and Budget Inn Downtown at $120/night (3.2 rating)."
+              }
+            ],
+            "role": "model"
+          },
+          "intermediate_data": {
+            "tool_uses": [
+              {
+                "name": "search_mcp_search_hotels",
+                "args": {
+                  "city": "New York"
+                }
+              }
+            ]
+          }
+        }
+      ],
+      "session_input": {
+        "app_name": "pro_opt",
+        "user_id": "eval_user"
+      }
+    },
+    {
+      "eval_id": "case_5",
+      "conversation": [
+        {
+          "user_content": {
+            "parts": [
+              {
+                "text": "Find hotels in New York under $200 per night"
+              }
+            ],
+            "role": "user"
+          },
+          "final_response": {
+            "parts": [
+              {
+                "text": "Budget Inn Downtown at $120/night (3.2 rating)."
+              }
+            ],
+            "role": "model"
+          },
+          "intermediate_data": {
+            "tool_uses": [
+              {
+                "name": "search_mcp_search_hotels",
+                "args": {
+                  "city": "New York",
+                  "max_price": 200
+                }
+              }
+            ]
+          }
+        }
+      ],
+      "session_input": {
+        "app_name": "pro_opt",
+        "user_id": "eval_user"
+      }
+    },
+    {
+      "eval_id": "case_6",
+      "conversation": [
+        {
+          "user_content": {
+            "parts": [
+              {
+                "text": "Find me a hotel in Miami"
+              }
+            ],
+            "role": "user"
+          },
+          "final_response": {
+            "parts": [
+              {
+                "text": "Fontainebleau Miami at $400/night with a 4.7 rating."
+              }
+            ],
+            "role": "model"
+          },
+          "intermediate_data": {
+            "tool_uses": [
+              {
+                "name": "search_mcp_search_hotels",
+                "args": {
+                  "city": "Miami"
+                }
+              }
+            ]
+          }
+        }
+      ],
+      "session_input": {
+        "app_name": "pro_opt",
+        "user_id": "eval_user"
+      }
+    },
+    {
+      "eval_id": "case_7",
+      "conversation": [
+        {
+          "user_content": {
+            "parts": [
+              {
+                "text": "What is the corporate meal expense limit?"
+              }
+            ],
+            "role": "user"
+          },
+          "final_response": {
+            "parts": [
+              {
+                "text": "The corporate meal expense limit is $75. Amounts above require manager review."
+              }
+            ],
+            "role": "model"
+          },
+          "intermediate_data": {
+            "tool_uses": [
+              {
+                "name": "expense_mcp_check_expense_policy",
+                "args": {
+                  "category": "meals",
+                  "amount": 75
+                }
+              }
+            ]
+          }
+        }
+      ],
+      "session_input": {
+        "app_name": "pro_opt",
+        "user_id": "eval_user"
+      }
+    },
+    {
+      "eval_id": "case_8",
+      "conversation": [
+        {
+          "user_content": {
+            "parts": [
+              {
+                "text": "Is a $50 transport expense within policy?"
+              }
+            ],
+            "role": "user"
+          },
+          "final_response": {
+            "parts": [
+              {
+                "text": "A $50 transport expense is within the corporate policy limit of $200."
+              }
+            ],
+            "role": "model"
+          },
+          "intermediate_data": {
+            "tool_uses": [
+              {
+                "name": "expense_mcp_check_expense_policy",
+                "args": {
+                  "category": "transport",
+                  "amount": 50
+                }
+              }
+            ]
+          }
+        }
+      ],
+      "session_input": {
+        "app_name": "pro_opt",
+        "user_id": "eval_user"
+      }
+    },
+    {
+      "eval_id": "case_9",
+      "conversation": [
+        {
+          "user_content": {
+            "parts": [
+              {
+                "text": "What's the lodging policy limit?"
+              }
+            ],
+            "role": "user"
+          },
+          "final_response": {
+            "parts": [
+              {
+                "text": "The corporate lodging policy limit is $400 per night."
+              }
+            ],
+            "role": "model"
+          },
+          "intermediate_data": {
+            "tool_uses": [
+              {
+                "name": "expense_mcp_check_expense_policy",
+                "args": {
+                  "category": "lodging",
+                  "amount": 400
+                }
+              }
+            ]
+          }
+        }
+      ],
+      "session_input": {
+        "app_name": "pro_opt",
+        "user_id": "eval_user"
+      }
+    },
+    {
+      "eval_id": "case_10",
+      "conversation": [
+        {
+          "user_content": {
+            "parts": [
+              {
+                "text": "Book flight FL001 for Alice Johnson"
+              }
+            ],
+            "role": "user"
+          },
+          "final_response": {
+            "parts": [
+              {
+                "text": "Flight FL001 booked and confirmed for Alice Johnson."
+              }
+            ],
+            "role": "model"
+          },
+          "intermediate_data": {
+            "tool_uses": [
+              {
+                "name": "booking_mcp_book_flight",
+                "args": {
+                  "flight_id": "FL001",
+                  "passenger_name": "Alice Johnson"
+                }
+              }
+            ]
+          }
+        }
+      ],
+      "session_input": {
+        "app_name": "pro_opt",
+        "user_id": "eval_user"
+      }
+    },
+    {
+      "eval_id": "case_11",
+      "conversation": [
+        {
+          "user_content": {
+            "parts": [
+              {
+                "text": "Show expenses for user EMP001"
+              }
+            ],
+            "role": "user"
+          },
+          "final_response": {
+            "parts": [
+              {
+                "text": "Expense history for EMP001 retrieved."
+              }
+            ],
+            "role": "model"
+          },
+          "intermediate_data": {
+            "tool_uses": [
+              {
+                "name": "expense_mcp_get_user_expenses",
+                "args": {
+                  "user_id": "EMP001"
+                }
+              }
+            ]
+          }
+        }
+      ],
+      "session_input": {
+        "app_name": "pro_opt",
+        "user_id": "eval_user"
+      }
+    },
+    {
+      "eval_id": "case_12",
+      "conversation": [
+        {
+          "user_content": {
+            "parts": [
+              {
+                "text": "Find flights from XYZ to ABC"
+              }
+            ],
+            "role": "user"
+          },
+          "final_response": {
+            "parts": [
+              {
+                "text": "No flights found for the route XYZ to ABC. Please provide valid airport codes."
+              }
+            ],
+            "role": "model"
+          },
+          "intermediate_data": {
+            "tool_uses": [
+              {
+                "name": "search_mcp_search_flights",
+                "args": {
+                  "origin": "XYZ",
+                  "destination": "ABC"
+                }
+              }
+            ]
+          }
+        }
+      ],
+      "session_input": {
+        "app_name": "pro_opt",
+        "user_id": "eval_user"
+      }
+    },
+    {
+      "eval_id": "case_13",
+      "conversation": [
+        {
+          "user_content": {
+            "parts": [
+              {
+                "text": "Search hotels in Atlantis"
+              }
+            ],
+            "role": "user"
+          },
+          "final_response": {
+            "parts": [
+              {
+                "text": "No hotels found in Atlantis. Please try a different city."
+              }
+            ],
+            "role": "model"
+          },
+          "intermediate_data": {
+            "tool_uses": [
+              {
+                "name": "search_mcp_search_hotels",
+                "args": {
+                  "city": "Atlantis"
+                }
+              }
+            ]
+          }
+        }
+      ],
+      "session_input": {
+        "app_name": "pro_opt",
+        "user_id": "eval_user"
+      }
+    },
+    {
+      "eval_id": "case_14",
+      "conversation": [
+        {
+          "user_content": {
+            "parts": [
+              {
+                "text": "Check policy for $500 in the 'unknown' category"
+              }
+            ],
+            "role": "user"
+          },
+          "final_response": {
+            "parts": [
+              {
+                "text": "The category 'unknown' is not valid. Valid categories: meals, transport, lodging, supplies, entertainment."
+              }
+            ],
+            "role": "model"
+          },
+          "intermediate_data": {
+            "tool_uses": [
+              {
+                "name": "expense_mcp_check_expense_policy",
+                "args": {
+                  "category": "unknown",
+                  "amount": 500
+                }
+              }
+            ]
+          }
+        }
+      ],
+      "session_input": {
+        "app_name": "pro_opt",
+        "user_id": "eval_user"
+      }
+    },
+    {
+      "eval_id": "case_15",
+      "conversation": [
+        {
+          "user_content": {
+            "parts": [
+              {
+                "text": "Submit a $45 meals expense for lunch meeting, user ID EMP001"
+              }
+            ],
+            "role": "user"
+          },
+          "final_response": {
+            "parts": [
+              {
+                "text": "Policy checked ($45 within $75 limit). Expense submitted for EMP001, status: approved."
+              }
+            ],
+            "role": "model"
+          },
+          "intermediate_data": {
+            "tool_uses": [
+              {
+                "name": "expense_mcp_check_expense_policy",
+                "args": {
+                  "category": "meals",
+                  "amount": 45
+                }
+              },
+              {
+                "name": "expense_mcp_submit_expense",
+                "args": {
+                  "user_id": "EMP001",
+                  "category": "meals",
+                  "amount": 45,
+                  "description": "lunch meeting"
+                }
+              }
+            ]
+          }
+        }
+      ],
+      "session_input": {
+        "app_name": "pro_opt",
+        "user_id": "eval_user"
+      }
+    }
+  ]
+}

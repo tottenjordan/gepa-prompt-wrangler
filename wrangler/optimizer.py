@@ -88,10 +88,16 @@ agent = types.SimpleNamespace(root_agent=root_agent)
 
 def optimize(
     agent_module_path: str,
-    evalset_path: str,
-    sampler_config: dict | None = None,
+    evalset_path: str = None,
+    sampler_config_path: str = None,
 ) -> str:
-    """Run GEPA optimization. Returns the optimized instruction string."""
+    """Run GEPA optimization. Returns the optimized instruction string.
+
+    Args:
+        agent_module_path: Path to agent wrapper module (must export agent.root_agent)
+        evalset_path: Path to evalset JSON (ignored if sampler_config_path is set)
+        sampler_config_path: Path to sampler config JSON file
+    """
     print("  [1/3] Applying ADK patches...")
     _patch_adk()
 
@@ -119,7 +125,14 @@ def optimize(
     app_name = os.path.basename(agent_module_path)
     agents_dir = os.path.dirname(agent_module_path)
 
-    if sampler_config is None:
+    if sampler_config_path:
+        import json as _json
+        with open(sampler_config_path) as f:
+            sampler_config = _json.load(f)
+    else:
+        evalset_stem = Path(evalset_path).stem if evalset_path else "eval_set"
+        if evalset_stem.endswith(".evalset"):
+            evalset_stem = evalset_stem[:-len(".evalset")]
         sampler_config = {
             "eval_config": {
                 "criteria": {
@@ -132,7 +145,7 @@ def optimize(
                 }
             },
             "app_name": app_name,
-            "train_eval_set": Path(evalset_path).stem,
+            "train_eval_set": evalset_stem,
         }
 
     sampler_cfg = LocalEvalSamplerConfig.model_validate(sampler_config)
