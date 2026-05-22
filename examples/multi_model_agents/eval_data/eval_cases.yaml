@@ -1,0 +1,77 @@
+eval_cases:
+  # Low complexity — single tool call
+  - prompt: "Find flights from SFO to JFK"
+    expected_response: "Flights from SFO to JFK: United FL001 at $450, Delta FL002 at $520."
+    expected_tools:
+      - name: search_flights
+        args: {origin: SFO, destination: JFK}
+
+  - prompt: "Search for hotels in New York"
+    expected_response: "Grand Hyatt at $320/night (4.5 stars) and Budget Inn at $120/night (3.2 stars)."
+    expected_tools:
+      - name: search_hotels
+        args: {city: New York}
+
+  - prompt: "What is the meal expense limit?"
+    expected_response: "The corporate meal expense limit is $75. Amounts above require manager review."
+    expected_tools:
+      - name: check_expense_policy
+        args: {category: meals, amount: 75}
+
+  - prompt: "Book flight FL001 for Alice Johnson"
+    expected_response: "Flight FL001 booked and confirmed for Alice Johnson."
+    expected_tools:
+      - name: book_flight
+        args: {flight_id: FL001, passenger_name: Alice Johnson}
+
+  - prompt: "Show expenses for user EMP001"
+    expected_response: "Expense history for EMP001 retrieved."
+    expected_tools:
+      - name: get_user_expenses
+        args: {user_id: EMP001}
+
+  # Medium complexity — 2 tools or comparison
+  - prompt: "Submit a $45 meals expense for lunch meeting, user ID EMP001"
+    expected_response: "Policy checked ($45 within $75 limit). Expense submitted for EMP001, status: approved."
+    expected_tools:
+      - name: check_expense_policy
+        args: {category: meals, amount: 45}
+      - name: submit_expense
+        args: {user_id: EMP001, category: meals, amount: 45}
+
+  - prompt: "Find flights to NYC and compare the cheapest options by airline"
+    expected_response: "United FL001 at $450 vs Delta FL002 at $520. United is $70 cheaper."
+    expected_tools:
+      - name: search_flights
+        args: {destination: JFK}
+
+  - prompt: "Search hotels in New York, then check if the nightly rate fits our lodging policy"
+    expected_response: "Grand Hyatt $320/night within $400 policy. Budget Inn $120/night within policy."
+    expected_tools:
+      - name: search_hotels
+        args: {city: New York}
+      - name: check_expense_policy
+        args: {category: lodging, amount: 400}
+
+  # High complexity — 3+ tools, cross-domain
+  - prompt: "Book flight FL001 for Alice, check if Grand Hyatt is within lodging policy, and submit a $75 meals expense for EMP001"
+    expected_response: "FL001 booked. Grand Hyatt $320 within $400 policy. $75 meals submitted, approved."
+    expected_tools:
+      - name: book_flight
+        args: {flight_id: FL001, passenger_name: Alice}
+      - name: check_expense_policy
+        args: {category: lodging, amount: 320}
+      - name: submit_expense
+        args: {user_id: EMP001, category: meals, amount: 75}
+
+  - prompt: "Compare flights from SFO to JFK vs LAX to ORD, factoring in hotel costs in each destination city"
+    expected_response: "SFO-JFK: FL001 $450 + NYC hotels. LAX-ORD: FL003 $380 + Chicago hotels."
+    expected_tools:
+      - name: search_flights
+        args: {origin: SFO, destination: JFK}
+      - name: search_flights
+        args: {origin: LAX, destination: ORD}
+      - name: search_hotels
+        args: {city: New York}
+      - name: search_hotels
+        args: {city: Chicago}
