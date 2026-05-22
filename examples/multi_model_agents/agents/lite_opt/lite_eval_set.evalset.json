@@ -24,7 +24,7 @@
           "intermediate_data": {
             "tool_uses": [
               {
-                "name": "search_mcp_search_flights",
+                "name": "wrangler_search_mcp_search_flights",
                 "args": {
                   "origin": "SFO",
                   "destination": "JFK"
@@ -62,7 +62,7 @@
           "intermediate_data": {
             "tool_uses": [
               {
-                "name": "search_mcp_search_flights",
+                "name": "wrangler_search_mcp_search_flights",
                 "args": {
                   "origin": "LAX",
                   "destination": "ORD"
@@ -100,7 +100,7 @@
           "intermediate_data": {
             "tool_uses": [
               {
-                "name": "search_mcp_search_flights",
+                "name": "wrangler_search_mcp_search_flights",
                 "args": {
                   "origin": "SFO",
                   "destination": "LAX"
@@ -138,7 +138,7 @@
           "intermediate_data": {
             "tool_uses": [
               {
-                "name": "search_mcp_search_hotels",
+                "name": "wrangler_search_mcp_search_hotels",
                 "args": {
                   "city": "New York"
                 }
@@ -175,7 +175,7 @@
           "intermediate_data": {
             "tool_uses": [
               {
-                "name": "search_mcp_search_hotels",
+                "name": "wrangler_search_mcp_search_hotels",
                 "args": {
                   "city": "New York",
                   "max_price": 200
@@ -213,7 +213,7 @@
           "intermediate_data": {
             "tool_uses": [
               {
-                "name": "search_mcp_search_hotels",
+                "name": "wrangler_search_mcp_search_hotels",
                 "args": {
                   "city": "Miami"
                 }
@@ -250,7 +250,7 @@
           "intermediate_data": {
             "tool_uses": [
               {
-                "name": "expense_mcp_check_expense_policy",
+                "name": "wrangler_expense_mcp_check_expense_policy",
                 "args": {
                   "category": "meals",
                   "amount": 75
@@ -288,7 +288,7 @@
           "intermediate_data": {
             "tool_uses": [
               {
-                "name": "expense_mcp_check_expense_policy",
+                "name": "wrangler_expense_mcp_check_expense_policy",
                 "args": {
                   "category": "transport",
                   "amount": 50
@@ -326,7 +326,7 @@
           "intermediate_data": {
             "tool_uses": [
               {
-                "name": "expense_mcp_check_expense_policy",
+                "name": "wrangler_expense_mcp_check_expense_policy",
                 "args": {
                   "category": "lodging",
                   "amount": 400
@@ -364,7 +364,7 @@
           "intermediate_data": {
             "tool_uses": [
               {
-                "name": "booking_mcp_book_flight",
+                "name": "wrangler_booking_mcp_book_flight",
                 "args": {
                   "flight_id": "FL001",
                   "passenger_name": "Alice Johnson"
@@ -402,7 +402,7 @@
           "intermediate_data": {
             "tool_uses": [
               {
-                "name": "expense_mcp_get_user_expenses",
+                "name": "wrangler_expense_mcp_get_user_expenses",
                 "args": {
                   "user_id": "EMP001"
                 }
@@ -439,7 +439,7 @@
           "intermediate_data": {
             "tool_uses": [
               {
-                "name": "search_mcp_search_flights",
+                "name": "wrangler_search_mcp_search_flights",
                 "args": {
                   "origin": "XYZ",
                   "destination": "ABC"
@@ -477,7 +477,7 @@
           "intermediate_data": {
             "tool_uses": [
               {
-                "name": "search_mcp_search_hotels",
+                "name": "wrangler_search_mcp_search_hotels",
                 "args": {
                   "city": "Atlantis"
                 }
@@ -514,7 +514,7 @@
           "intermediate_data": {
             "tool_uses": [
               {
-                "name": "expense_mcp_check_expense_policy",
+                "name": "wrangler_expense_mcp_check_expense_policy",
                 "args": {
                   "category": "unknown",
                   "amount": 500
@@ -552,14 +552,14 @@
           "intermediate_data": {
             "tool_uses": [
               {
-                "name": "expense_mcp_check_expense_policy",
+                "name": "wrangler_expense_mcp_check_expense_policy",
                 "args": {
                   "category": "meals",
                   "amount": 45
                 }
               },
               {
-                "name": "expense_mcp_submit_expense",
+                "name": "wrangler_expense_mcp_submit_expense",
                 "args": {
                   "user_id": "EMP001",
                   "category": "meals",
