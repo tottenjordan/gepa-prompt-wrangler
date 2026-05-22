@@ -84,7 +84,12 @@ def generate_traffic(
         queries = DEFAULT_QUERIES
 
     if count:
-        queries = queries[:count]
+        if count > len(queries):
+            full_cycles = count // len(queries)
+            remainder = count % len(queries)
+            queries = queries * full_cycles + queries[:remainder]
+        else:
+            queries = queries[:count]
 
     total = len(queries)
     errors = 0
