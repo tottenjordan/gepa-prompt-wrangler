@@ -42,7 +42,8 @@ multi_model_agents/
     ├── deploy_agents.py       # Deploy agents to Agent Engine
     ├── deploy_all.sh          # Full infrastructure deployment
     ├── setup_apphub.sh        # App Hub topology registration
-    └── setup_logging_sink.sh  # BigQuery logging sink for eval history
+    ├── setup_logging_sink.sh  # BigQuery logging sink for eval history
+    └── setup_monitoring.sh    # Full monitoring stack (sink + evaluators + verify)
 ```
 
 ## Quick Start
@@ -100,32 +101,44 @@ Each agent is deployed with:
 - OTel telemetry enabled
 - Engine ID auto-written to `.env`
 
-### Step 4: Setup Logging Sink (Optional)
+### Step 4: Setup Monitoring (Optional)
 
-Routes agent traces from Cloud Logging to BigQuery for historical analysis and SQL queries:
+One command sets up the full monitoring stack:
 
 ```bash
-bash scripts/setup_logging_sink.sh
+bash scripts/setup_monitoring.sh
 ```
 
 This creates:
-- BigQuery dataset: `gepa_wrangler_logs`
-- Cloud Logging sink: `gepa-agent-traces`
-- IAM binding for the sink writer
+1. **BigQuery logging sink** — routes agent traces to `gepa_wrangler_logs` for SQL-queryable eval history
+2. **Online evaluators** — automatically score OTel traces every 10 min for all deployed agents
+3. **Verification** — confirms evaluators are ACTIVE
+4. **Health check** — runs a quick 3-case monitor against the first agent
 
-Once configured, you can query eval results:
+Skip the logging sink if already set up:
+```bash
+bash scripts/setup_monitoring.sh --skip-sink
+```
+
+Or run individual components:
+```bash
+# Logging sink only
+bash scripts/setup_logging_sink.sh
+
+# Online evaluators only (from repo root)
+uv run python -m wrangler.online_evaluators create
+
+# Verify evaluators
+uv run python -m wrangler.online_evaluators verify
+
+# On-demand health check
+uv run python -m wrangler.online_monitors $LITE_ENGINE_ID
+```
+
+Query eval results in BigQuery:
 ```sql
 SELECT * FROM `hybrid-vertex.gepa_wrangler_logs.online_eval_results`
 WHERE timestamp > TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 24 HOUR)
-```
-
-### Step 5: Setup Online Evaluators (Optional)
-
-Creates always-on evaluators that score OTel traces every 10 minutes:
-
-```bash
-# From the repo root
-uv run python -m wrangler.online_evaluators create
 ```
 
 Verify they're active:

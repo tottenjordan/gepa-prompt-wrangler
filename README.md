@@ -74,11 +74,15 @@ bash scripts/deploy_mcp_servers.sh
 cd ../..
 uv run python examples/multi_model_agents/deploy_agents.py
 
-# Step 4: Run the full optimization experiment
+# Step 4: Setup monitoring (logging sink + online evaluators)
+bash examples/multi_model_agents/scripts/setup_monitoring.sh
+
+# Step 5: Run the full optimization experiment
 wrangler run examples/multi_model_agents/manifest.yaml
 ```
 
 See [examples/multi_model_agents/README.md](examples/multi_model_agents/README.md) for detailed walkthrough.
+See [docs/online_eval_guide.md](docs/online_eval_guide.md) for evaluators vs monitors.
 
 ---
 
