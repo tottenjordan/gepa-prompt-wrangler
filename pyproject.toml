@@ -17,6 +17,7 @@ dependencies = [
     "matplotlib>=3.10.0",
     "pandas>=2.0.0",
     "click>=8.0.0",
+    "paperbanana>=0.1.2",
 ]
 
 [project.scripts]
@@ -25,6 +26,9 @@ wrangler = "wrangler.cli:main"
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["wrangler"]
 
 [tool.uv]
 dev-dependencies = [

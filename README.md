@@ -1,5 +1,7 @@
 # GEPA Prompt Wrangler
 
+![GEPA Prompt Wrangler](docs/gepa_prompt_wrangler_banner.png)
+
 A prompt optimization harness for [Google ADK](https://google.github.io/adk-docs/) agents. Define multiple model + system-prompt pairs in a YAML manifest, evaluate them against a shared eval set, and let the harness find the best-performing combination -- then deploy the winner to Vertex AI Agent Engine with a single command.
 
 ---
