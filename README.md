@@ -142,8 +142,20 @@ gepa-prompt-wrangler/
 │   └── diagram_sources/             # PaperBanana diagram descriptions
 │
 └── tests/
-    ├── test_factory.py              # Manifest parsing tests
-    └── test_converter.py            # Eval format conversion tests
+    ├── conftest.py                  # Shared test fixtures
+    ├── test_analysis.py             # Report generation + cost-benefit analysis
+    ├── test_cli.py                  # CLI command tests (Click CliRunner)
+    ├── test_config.py               # Model resolution + constants
+    ├── test_converter.py            # Eval format conversion
+    ├── test_evaluator.py            # Batch eval helpers + result saving
+    ├── test_factory.py              # Manifest parsing
+    ├── test_inspector.py            # Agent introspection + tool discovery
+    ├── test_online_evaluators.py    # Online evaluator config helpers
+    ├── test_online_monitors.py      # Online monitor helpers
+    ├── test_optimizer.py            # GEPA wrapper module creation
+    ├── test_prompt_registry.py      # Prompt versioning + registry
+    ├── test_reporter.py             # Chart generation + markdown reports
+    └── test_traffic.py              # Traffic generator helpers
 ```
 
 ---
@@ -543,8 +555,17 @@ print(scores)
 
 1. Fork the repository and create a feature branch.
 2. Install dev dependencies: `uv sync`.
-3. Write tests: `tests/test_*.py`.
-4. Run tests: `uv run pytest`.
+3. Write tests: `tests/test_*.py` (107 tests across all 15 modules).
+4. Run tests:
+   ```bash
+   # All tests
+   uv run pytest tests/ -v
+
+   # By tier
+   uv run pytest tests/test_analysis.py tests/test_config.py tests/test_prompt_registry.py -v  # Tier 1: pure logic
+   uv run pytest tests/test_inspector.py tests/test_reporter.py tests/test_cli.py -v            # Tier 2: file I/O
+   uv run pytest tests/test_traffic.py tests/test_evaluator.py tests/test_optimizer.py tests/test_online_evaluators.py tests/test_online_monitors.py -v  # Tier 3: API helpers
+   ```
 5. Submit a pull request.
 
 ---
