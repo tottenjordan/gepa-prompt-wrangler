@@ -315,6 +315,136 @@ wrangler eval manifest.yaml --engine-id ID  # Eval against specific engine
 
 ---
 
+## Running Evaluations
+
+The wrangler provides 4 evaluation options, each serving a different purpose:
+
+### Option 1: Batch Eval (Server-Side)
+
+Run the full 30-case eval dataset against a deployed agent. Scores are computed server-side by the Vertex AI Evaluation Service.
+
+```bash
+# Eval a single agent by engine ID
+uv run python -m wrangler.evaluator <engine-id> eval_data/example_eval.yaml
+
+# Or via CLI
+wrangler eval manifest.yaml --engine-id <ENGINE_ID>
+```
+
+**When to use:** Before/after prompt optimization to measure improvement. Results saved to `outputs/baselines/` or `outputs/optimized/`.
+
+### Option 2: Online Evaluators (Automatic)
+
+Always-on evaluators that score OTel traces from live traffic every 10 minutes.
+
+```bash
+# Create evaluators for all deployed agents
+uv run python -m wrangler.online_evaluators create
+
+# Check status
+uv run python -m wrangler.online_evaluators verify
+
+# List all evaluators
+uv run python -m wrangler.online_evaluators list
+
+# Delete a specific evaluator
+uv run python -m wrangler.online_evaluators delete <evaluator_id>
+
+# Remove all wrangler evaluators
+uv run python -m wrangler.online_evaluators cleanup
+```
+
+**When to use:** Continuous monitoring of production traffic quality. Results appear in the Agent Engine Observability tab.
+
+### Option 3: Online Monitors (On-Demand)
+
+Quick spot-check against a deployed agent with a small set of test queries.
+
+```bash
+# Run 8 default queries against an agent
+uv run python -m wrangler.online_monitors <engine-id>
+
+# Run fewer queries for a faster check
+uv run python -m wrangler.online_monitors <engine-id> --cases 3
+```
+
+**When to use:** Health checks, regression testing, pre/post deployment validation. Results saved to `outputs/monitors/`.
+
+### Option 4: GEPA Optimization (Local)
+
+Run the GEPA evolutionary optimizer locally against an agent's eval dataset. This is not just evaluation — it iteratively improves the prompt.
+
+```bash
+# Optimize via CLI
+wrangler optimize manifest.yaml --pair lite
+
+# Or directly
+uv run python -c "
+from wrangler.optimizer import optimize
+result = optimize(
+    'examples/multi_model_agents/agents/lite_opt',
+    sampler_config_path='examples/multi_model_agents/agents/lite_opt/sampler_config.json',
+)
+print(result)
+"
+```
+
+**When to use:** After baseline eval shows room for improvement. Uses 15 balanced eval cases (5 low + 5 medium + 5 high) with a `gemini-2.5-pro` judge.
+
+### Generating Traffic
+
+Send test queries to populate OTel traces for online evaluators:
+
+```bash
+# Send 15 default queries to one agent (1 query/sec)
+uv run python -m wrangler.traffic --agent-id <ENGINE_ID>
+
+# Round-robin across multiple agents
+uv run python -m wrangler.traffic --agent-id <ID1> <ID2> <ID3> --count 30 --interval 2
+
+# Use the eval dataset as queries
+uv run python -m wrangler.traffic --agent-id <ENGINE_ID> \
+  --eval-data examples/multi_model_agents/eval_data/eval_cases.yaml
+```
+
+Each query creates a new session with a unique user ID for clean, independent traces.
+
+### Evaluation Flow Summary
+
+```
+                    ┌─────────────────────────┐
+                    │   Deploy Agent to GEAP   │
+                    └───────────┬─────────────┘
+                                │
+                    ┌───────────▼─────────────┐
+                    │  Batch Eval (baseline)   │ ← Option 1
+                    └───────────┬─────────────┘
+                                │
+                    ┌───────────▼─────────────┐
+                    │   GEPA Optimize (local)  │ ← Option 4
+                    └───────────┬─────────────┘
+                                │
+                    ┌───────────▼─────────────┐
+                    │  Redeploy with new prompt│
+                    └───────────┬─────────────┘
+                                │
+                    ┌───────────▼─────────────┐
+                    │  Batch Eval (optimized)  │ ← Option 1
+                    └───────────┬─────────────┘
+                                │
+            ┌───────────────────┼───────────────────┐
+            │                   │                   │
+  ┌─────────▼────────┐ ┌───────▼──────┐ ┌──────────▼─────────┐
+  │ Online Evaluators │ │   Traffic    │ │  Online Monitors   │
+  │  (continuous)     │ │  Generator   │ │  (on-demand)       │
+  │  ← Option 2      │ │              │ │  ← Option 3        │
+  └──────────────────┘ └──────────────┘ └────────────────────┘
+```
+
+See [docs/online_eval_guide.md](docs/online_eval_guide.md) for details on evaluators vs monitors.
+
+---
+
 ## Evaluation Metrics
 
 ### Default metrics (6)

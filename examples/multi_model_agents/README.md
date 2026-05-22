@@ -181,24 +181,87 @@ bash scripts/setup_apphub.sh --dry-run
 
 Once registered, the topology tab shows agent-to-MCP-server relationships after traffic flows through.
 
-### Step 6: Run the Experiment
+### Step 6: Run Evaluations
+
+#### Batch Eval (Server-Side)
+
+Run the full 30-case eval dataset against deployed agents:
 
 ```bash
-# Full pipeline: eval → optimize → redeploy → eval → report
+# From the repo root — eval all 5 agents
+for agent in LITE FLASH PRO SONNET OPUS; do
+  ENGINE_VAR="${agent}_ENGINE_ID"
+  ENGINE_ID="${!ENGINE_VAR}"
+  echo "--- $agent ($ENGINE_ID) ---"
+  uv run python -c "
+from wrangler.evaluator import run_batch_eval, save_eval_results
+from wrangler.converter import load_eval_file
+from wrangler.config import disable_pyopenssl
+disable_pyopenssl()
+cases = load_eval_file('examples/multi_model_agents/eval_data/eval_cases.yaml')
+scores = run_batch_eval('${ENGINE_ID}', cases)
+save_eval_results('${agent,,}', scores, 'baseline', 'outputs/baselines')
+for m, s in sorted(scores.items()): print(f'  {m:40s} {s:.2f}')
+"
+done
+```
+
+#### Generate Traffic (for Online Evaluators)
+
+```bash
+# Send queries to all 5 agents (round-robin)
+uv run python -m wrangler.traffic \
+  --agent-id $LITE_ENGINE_ID $FLASH_ENGINE_ID $PRO_ENGINE_ID $SONNET_ENGINE_ID $OPUS_ENGINE_ID \
+  --eval-data examples/multi_model_agents/eval_data/eval_cases.yaml \
+  --count 30 --interval 2
+
+# Quick test: 5 queries to one agent
+uv run python -m wrangler.traffic --agent-id $LITE_ENGINE_ID --count 5
+```
+
+#### On-Demand Health Check
+
+```bash
+# Quick spot-check against a specific agent
+uv run python -m wrangler.online_monitors $LITE_ENGINE_ID --cases 3
+```
+
+#### GEPA Optimization (Local)
+
+```bash
+# Optimize a single agent's prompt
+uv run python -c "
+from wrangler.optimizer import optimize
+result = optimize(
+    'examples/multi_model_agents/agents/lite_opt',
+    sampler_config_path='examples/multi_model_agents/agents/lite_opt/sampler_config.json',
+)
+open('outputs/prompts/lite_optimized.txt', 'w').write(result)
+print(f'Optimized: {len(result)} chars')
+"
+```
+
+### Step 7: Run the Full Pipeline
+
+Or run everything in one command:
+
+```bash
 wrangler run examples/multi_model_agents/manifest.yaml
 ```
 
-Or step by step:
+This executes: deploy → baseline eval → GEPA optimize → redeploy → post-optimization eval → report.
+
+### Step 8: Generate Analysis Report
 
 ```bash
-# Eval a single deployed agent
-wrangler eval manifest.yaml --engine-id <ENGINE_ID>
+# Generate charts + per-agent analysis markdowns
+uv run python scripts/generate_analysis.py
 
-# Optimize prompts
-wrangler optimize manifest.yaml
+# Generate architecture diagrams (requires PaperBanana)
+uv run python scripts/generate_diagrams.py
 
-# Generate report
-wrangler report outputs/
+# Or run the full analysis pipeline
+uv run python scripts/run_full_analysis.py
 ```
 
 ## Agents
