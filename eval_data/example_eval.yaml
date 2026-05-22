@@ -1,0 +1,37 @@
+- query: "Find flights from SFO to JFK on June 15"
+  expected_response: "Found available flights from SFO to JFK"
+  expected_tools:
+    - search_flights
+  tags:
+    - search
+    - flights
+
+- query: "Search for hotels near Times Square in New York for June 15-17"
+  expected_response: "Found hotels near Times Square"
+  expected_tools:
+    - search_hotels
+  tags:
+    - search
+    - hotels
+
+- query: "Does a $450 one-way domestic flight comply with our travel policy?"
+  expected_response: "policy"
+  expected_tools:
+    - check_policy
+  tags:
+    - policy
+
+- query: "Book the United flight UA-204 departing SFO at 8am on June 15 for employee Jordan Totten"
+  expected_response: "Booking confirmed"
+  expected_tools:
+    - check_policy
+    - create_booking
+  tags:
+    - booking
+
+- query: "Generate an expense report for my New York trip from June 15-17, booking ref BK-1001"
+  expected_response: "expense report"
+  expected_tools:
+    - generate_expense_report
+  tags:
+    - expense

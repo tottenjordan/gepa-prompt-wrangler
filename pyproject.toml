@@ -1,0 +1,33 @@
+[project]
+name = "gepa-prompt-wrangler"
+version = "0.1.0"
+description = "Prompt optimization harness for ADK agents — evaluate, compare, and tune system prompts across models."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "Apache-2.0" }
+authors = [{ name = "GEPA Team" }]
+
+dependencies = [
+    "google-cloud-aiplatform[adk,agent-engines,evaluation]>=1.153.1",
+    "google-adk[a2a,agent-identity]>=1.33.0",
+    "google-genai>=1.66.0",
+    "litellm>=1.83.14",
+    "python-dotenv>=1.0.0",
+    "pyyaml>=6.0",
+    "matplotlib>=3.10.0",
+    "pandas>=2.0.0",
+    "click>=8.0.0",
+]
+
+[project.scripts]
+wrangler = "wrangler.cli:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.uv]
+dev-dependencies = [
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.24.0",
+]
