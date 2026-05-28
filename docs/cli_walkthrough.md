@@ -128,7 +128,7 @@ eval_cases:
 
 **Why it matters:** Manually creating GEPA evalset JSON is the most error-prone step in the optimization pipeline. The format requires nested conversation objects, session_input, and exact tool_use structures. This command automates the entire conversion, including balanced sampling across complexity levels.
 
-**What we expect:** Given our 30-case `eval_cases.yaml` from the multi_model example, it should produce a 15-case balanced evalset JSON and a sampler config, ready for GEPA optimization.
+**What we expect:** Given our 40-case `eval_cases.yaml` from the multi_model example, it should produce a 15-case balanced evalset JSON and a sampler config, ready for GEPA optimization.
 
 ```bash
 wrangler generate-evalset \
@@ -140,7 +140,7 @@ wrangler generate-evalset \
 **Example output:**
 
 ```
-Loaded 30 eval cases from examples/multi_model_agents/eval_data/eval_cases.yaml
+Loaded 40 eval cases from examples/multi_model_agents/eval_data/eval_cases.yaml
   Evalset: /tmp/byoa_test/agent_opt/agent_opt_eval_set.evalset.json (15 cases)
   Sampler config: /tmp/byoa_test/agent_opt/sampler_config.json
 

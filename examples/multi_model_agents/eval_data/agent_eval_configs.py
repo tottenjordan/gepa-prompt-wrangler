@@ -1,10 +1,14 @@
 """Per-agent evaluation configs — test cases, AgentInfo builders, and metric selectors."""
 
 import json
+from pathlib import Path
 
+import yaml
 from vertexai import types
 
-from src.eval.batch_eval import EVAL_CASES as COORDINATOR_EVAL_CASES, POLICY_COMPLIANCE_METRIC
+_yaml_path = Path(__file__).parent / "eval_cases.yaml"
+with open(_yaml_path) as f:
+    COORDINATOR_EVAL_CASES = yaml.safe_load(f)["eval_cases"]
 
 
 # ---------------------------------------------------------------------------
@@ -90,6 +94,54 @@ TRAVEL_EVAL_CASES = [
         "expected_tool": "search_mcp_search_flights",
         "expected_signals": ["SFO"],
         "description": "Open-ended destination search",
+    },
+    {
+        "prompt": "Find flights from SFO to Denver on June 18",
+        "reference": "United flight FL008 from SFO to DEN at $320, departing 09:00.",
+        "category": "flight_search",
+        "expected_tool": "search_mcp_search_flights",
+        "expected_signals": ["SFO", "DEN", "FL008"],
+        "description": "Denver flight search — new route",
+    },
+    {
+        "prompt": "Search for hotels in Tokyo",
+        "reference": "Park Hotel Tokyo at $280/night (4.4 rating).",
+        "category": "hotel_search",
+        "expected_tool": "search_mcp_search_hotels",
+        "expected_signals": ["Park Hotel", "Tokyo"],
+        "description": "Tokyo hotel search — new city",
+    },
+    {
+        "prompt": "Book flight FL004 for Grace Kim, then cancel the booking",
+        "reference": "Flight FL004 booked for Grace Kim. Booking successfully cancelled.",
+        "category": "cancellation",
+        "expected_tool": "booking_mcp_cancel_booking",
+        "expected_signals": ["FL004", "Grace Kim", "cancelled"],
+        "description": "Book and cancel — tests cancellation tool",
+    },
+    {
+        "prompt": "Show me all current bookings in the system",
+        "reference": "Current bookings listed (or empty if none exist).",
+        "category": "booking_list",
+        "expected_tool": "booking_mcp_list_all_bookings",
+        "expected_signals": [],
+        "description": "List all bookings — tests list_all_bookings tool",
+    },
+    {
+        "prompt": "Cancel booking BK-DOESNOTEXIST",
+        "reference": "Booking BK-DOESNOTEXIST was not found. Please verify the booking ID.",
+        "category": "error_recovery",
+        "expected_tool": "booking_mcp_cancel_booking",
+        "expected_signals": ["not found"],
+        "description": "Cancel non-existent booking — graceful error handling",
+    },
+    {
+        "prompt": "Get details for booking BK-INVALID123",
+        "reference": "Booking BK-INVALID123 was not found. Please check the booking ID.",
+        "category": "error_recovery",
+        "expected_tool": "booking_mcp_get_booking_details",
+        "expected_signals": ["not found"],
+        "description": "Lookup non-existent booking — graceful error handling",
     },
 ]
 
@@ -178,6 +230,30 @@ EXPENSE_EVAL_CASES = [
         "expected_signals": ["EMP003", "90", "supplies"],
         "description": "Supplies within $100 limit — should approve",
     },
+    {
+        "prompt": "Is a $75.00 meal expense within policy?",
+        "reference": "A $75.00 meal expense is exactly at the corporate policy limit of $75. It is within policy.",
+        "category": "policy_boundary",
+        "expected_tool": "expense_mcp_check_expense_policy",
+        "expected_signals": ["75", "within", "limit"],
+        "description": "Exact boundary test — amount equals limit",
+    },
+    {
+        "prompt": "Is a $75.01 meal expense within policy?",
+        "reference": "A $75.01 meal expense exceeds the corporate policy limit of $75 by $0.01. Requires manager review.",
+        "category": "policy_boundary",
+        "expected_tool": "expense_mcp_check_expense_policy",
+        "expected_signals": ["75.01", "exceeds"],
+        "description": "One cent over boundary — should flag",
+    },
+    {
+        "prompt": "Show expenses for user EMP999",
+        "reference": "No expenses found for user EMP999.",
+        "category": "error_recovery",
+        "expected_tool": "expense_mcp_get_user_expenses",
+        "expected_signals": ["EMP999"],
+        "description": "Unknown user — should return empty list gracefully",
+    },
 ]
 
 
@@ -232,10 +308,10 @@ ROUTER_EVAL_CASES = [
     },
     {
         "prompt": "Search hotels in Boston, then check if the nightly rate fits our lodging policy",
-        "reference": "Hotels in Boston listed with rates. The lodging policy limit is $400/night. Hotels under $400 are within policy.",
+        "reference": "The Liberty Boston at $350/night (4.6 rating). Lodging policy limit is $400/night. The Liberty Boston is within policy.",
         "category": "medium_complexity",
         "expected_tool": "search_mcp_search_hotels",
-        "expected_signals": ["Boston", "400"],
+        "expected_signals": ["Boston", "Liberty", "350", "400"],
         "expected_complexity": "medium",
         "description": "Two-step: search + policy check",
     },
@@ -267,10 +343,10 @@ ROUTER_EVAL_CASES = [
             "Factor in cancellation policies, per-diem meal expenses, and whether hotels "
             "near the conference center or downtown with transport are more cost-effective."
         ),
-        "reference": "Comparison of individual vs group bookings to Denver with cost breakdown, per-diem meal estimates within policy, and hotel location cost-effectiveness analysis.",
+        "reference": "SFO-DEN: United FL008 at $320. Denver hotel: The Crawford Denver at $210/night (within $400 lodging policy). Per-diem meals: $75/person/day. Transport policy: $200. Cost comparison provided.",
         "category": "high_complexity",
         "expected_tool": "multiple",
-        "expected_signals": ["Denver"],
+        "expected_signals": ["Denver", "FL008", "Crawford", "210"],
         "expected_complexity": "high",
         "description": "Complex multi-factor comparison",
     },
@@ -493,7 +569,7 @@ def _build_standalone_info(agent_name: str) -> types.evals.AgentInfo:
 
 STANDALONE_EVAL_CASES = TRAVEL_EVAL_CASES + EXPENSE_EVAL_CASES
 
-from src.eval.tier_eval_cases import (
+from .tier_eval_cases import (
     LOW_COMPLEXITY_CASES,
     MEDIUM_COMPLEXITY_CASES,
     HIGH_COMPLEXITY_CASES,

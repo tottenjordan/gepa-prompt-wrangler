@@ -246,6 +246,94 @@ eval_cases:
       - name: wrangler_expense_mcp_get_user_expenses
         args: {user_id: EMP002}
 
+  # ============================================================
+  # NEW CITY COVERAGE — Tokyo, Denver, Boston
+  # ============================================================
+
+  - prompt: "Find flights from SFO to Denver"
+    expected_response: "United FL008 from SFO to DEN at $320, departing 09:00."
+    expected_tools:
+      - name: wrangler_search_mcp_search_flights
+        args: {origin: SFO, destination: DEN}
+
+  - prompt: "Search for hotels in Boston"
+    expected_response: "The Liberty Boston at $350/night (4.6 rating)."
+    expected_tools:
+      - name: wrangler_search_mcp_search_hotels
+        args: {city: Boston}
+
+  # ============================================================
+  # CANCELLATION COVERAGE — cancel_booking, get_booking_details, list_all_bookings
+  # ============================================================
+
+  - prompt: "Book flight FL003 for Carol Davis, then immediately cancel the booking"
+    expected_response: "Flight FL003 booked for Carol Davis. Booking has been cancelled successfully."
+    expected_tools:
+      - name: wrangler_booking_mcp_book_flight
+        args: {flight_id: FL003, passenger_name: Carol Davis}
+      - name: wrangler_booking_mcp_cancel_booking
+        args: {}
+
+  - prompt: "Book hotel HT001 for Dave Wilson June 15-17, then show me the booking details"
+    expected_response: "Hotel HT001 booked for Dave Wilson (June 15-17). Booking details: Grand Hyatt New York, status confirmed."
+    expected_tools:
+      - name: wrangler_booking_mcp_book_hotel
+        args: {hotel_id: HT001, guest_name: Dave Wilson, checkin: "2026-06-15", checkout: "2026-06-17"}
+      - name: wrangler_booking_mcp_get_booking_details
+        args: {}
+
+  # ============================================================
+  # BOUNDARY-VALUE POLICY — exact limits and one-cent-over
+  # ============================================================
+
+  - prompt: "Is a $75 meal expense within policy?"
+    expected_response: "A $75 meal expense is exactly at the corporate policy limit of $75 and is within policy."
+    expected_tools:
+      - name: wrangler_expense_mcp_check_expense_policy
+        args: {category: meals, amount: 75}
+
+  - prompt: "Is a $75.01 meal expense within policy?"
+    expected_response: "A $75.01 meal expense exceeds the corporate policy limit of $75 by $0.01. This requires manager review."
+    expected_tools:
+      - name: wrangler_expense_mcp_check_expense_policy
+        args: {category: meals, amount: 75.01}
+
+  - prompt: "Check if these expenses are within policy: $200 transport, $400 lodging, and $150 entertainment"
+    expected_response: "Transport $200: within $200 limit. Lodging $400: within $400 limit. Entertainment $150: within $150 limit. All exactly at policy limits."
+    expected_tools:
+      - name: wrangler_expense_mcp_check_expense_policy
+        args: {category: transport, amount: 200}
+      - name: wrangler_expense_mcp_check_expense_policy
+        args: {category: lodging, amount: 400}
+      - name: wrangler_expense_mcp_check_expense_policy
+        args: {category: entertainment, amount: 150}
+
+  # ============================================================
+  # ERROR RECOVERY — non-existent bookings, unknown users, no-match routes
+  # ============================================================
+
+  - prompt: "Cancel booking BK-DOESNOTEXIST"
+    expected_response: "Booking BK-DOESNOTEXIST was not found. Please verify the booking ID and try again."
+    expected_tools:
+      - name: wrangler_booking_mcp_cancel_booking
+        args: {booking_id: BK-DOESNOTEXIST}
+
+  - prompt: "Show me the details for booking BK-INVALID123"
+    expected_response: "Booking BK-INVALID123 was not found. Please check the booking ID."
+    expected_tools:
+      - name: wrangler_booking_mcp_get_booking_details
+        args: {booking_id: BK-INVALID123}
+
+  - prompt: "Find flights from Denver to Tokyo and book the cheapest one for Sam Chen"
+    expected_response: "No flights found from Denver (DEN) to Tokyo (NRT). Unable to proceed with booking."
+    expected_tools:
+      - name: wrangler_search_mcp_search_flights
+        args: {origin: DEN, destination: NRT}
+
+  # ============================================================
+  # OUT OF SCOPE
+  # ============================================================
+
   # Out of scope
   - prompt: "Can you help me write a Python script to process CSV files?"
     expected_response: "I can only help with travel bookings and expense management. For coding assistance, please use a different tool."

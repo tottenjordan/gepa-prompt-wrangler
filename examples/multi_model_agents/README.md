@@ -41,7 +41,7 @@ multi_model_agents/
 │   ├── search/                # Flight + hotel search
 │   ├── booking/               # Flight + hotel booking
 │   └── expense/               # Expense management
-├── eval_data/                 # Eval cases (30 cases across 3 complexity tiers)
+├── eval_data/                 # Eval cases (40 cases across 3 complexity tiers)
 │   ├── eval_cases.yaml
 │   ├── agent_eval_configs.py
 │   └── tier_eval_cases.py
@@ -49,6 +49,7 @@ multi_model_agents/
     ├── deploy_mcp_servers.sh  # Deploy MCP servers to Cloud Run
     ├── deploy_agents.py       # Deploy agents to Agent Engine
     ├── deploy_all.sh          # Full infrastructure deployment
+    ├── generate_evalsets.py   # Generate evalset.json files for all model agents
     ├── setup_apphub.sh        # App Hub topology registration
     ├── setup_logging_sink.sh  # BigQuery logging sink for eval history
     └── setup_monitoring.sh    # Full monitoring stack (sink + evaluators + verify)
@@ -283,15 +284,21 @@ Each agent uses GEPA-optimized instructions tailored for its model's capability 
 
 ## Eval Dataset
 
-30 eval cases across 3 complexity tiers:
+40 eval cases across 3 complexity tiers:
 
 | Tier | Cases | Description |
 |------|-------|-------------|
-| **Low** | 14 | Single tool call — flight search, hotel search, policy checks, booking, expense history, edge cases (invalid codes, unknown categories) |
-| **Medium** | 9 | 2 tools — submit with policy check, flight comparison, multi-category policy, search + policy cross-check, book + verify, savings analysis |
+| **Low** | 20 | Single tool call — flight search, hotel search, policy checks, booking, expense history, edge cases (invalid codes, unknown categories), boundary-value policy checks (exact limit, one cent over), error recovery (non-existent bookings, unknown users) |
+| **Medium** | 13 | 2 tools — submit with policy check, flight comparison, multi-category policy, search + policy cross-check, book + verify, savings analysis, book + cancel flow, multi-boundary checks, no-match route handling |
 | **High** | 7 | 3+ tools — book + policy + expense pipeline, multi-route comparison with hotels, budget-constrained planning, multi-user audit, end-to-end trip booking |
 
 All tool names use MCP-prefixed format (e.g., `search_mcp_search_flights`) matching what the deployed agents actually call.
+
+To regenerate the per-agent evalset.json files from `eval_cases.yaml`:
+
+```bash
+python examples/multi_model_agents/scripts/generate_evalsets.py
+```
 
 ## Telemetry
 

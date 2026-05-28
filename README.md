@@ -149,8 +149,8 @@ gepa-prompt-wrangler/
 │       ├── generic_prompts.py       # Intentionally weak starting prompts
 │       ├── agents/                  # 5 standalone agents
 │       ├── mcp_servers/             # 3 MCP tool servers (Cloud Run + OTel)
-│       ├── eval_data/               # 30 eval cases (low/medium/high)
-│       └── scripts/                 # Infrastructure deployment
+│       ├── eval_data/               # 40 eval cases (low/medium/high)
+│       └── scripts/                 # Infrastructure deployment + evalset generation
 │
 ├── outputs/                         # Generated artifacts (gitignored)
 │   ├── baselines/                   # Pre-optimization eval results

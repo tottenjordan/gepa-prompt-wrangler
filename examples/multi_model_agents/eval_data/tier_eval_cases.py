@@ -1,9 +1,9 @@
 """Complexity-tiered eval cases for the cross-model experiment.
 
-Each tier contains 7 cases matched to a specific complexity level:
-- Low: single tool call, direct lookup
-- Medium: 2 tools, comparison, or multi-step reasoning
-- High: 3+ tools, cross-domain analysis, budget optimization
+Each tier contains cases matched to a specific complexity level:
+- Low: single tool call, direct lookup (11 cases)
+- Medium: 2 tools, comparison, or multi-step reasoning (10 cases)
+- High: 3+ tools, cross-domain analysis, budget optimization (9 cases)
 """
 
 LOW_COMPLEXITY_CASES = [
@@ -48,6 +48,48 @@ LOW_COMPLEXITY_CASES = [
         "reference": "Fontainebleau Miami at $400/night with a 4.7 rating.",
         "category": "low", "expected_tool": "search_mcp_search_hotels",
         "expected_signals": ["Fontainebleau", "Miami"], "description": "Simple hotel search",
+    },
+    {
+        "prompt": "Find flights from SFO to Denver",
+        "reference": "United FL008 from SFO to DEN at $320, departing 09:00.",
+        "category": "low", "expected_tool": "search_mcp_search_flights",
+        "expected_signals": ["SFO", "DEN", "FL008"], "description": "Denver flight search",
+    },
+    {
+        "prompt": "Search for hotels in Boston",
+        "reference": "The Liberty Boston at $350/night (4.6 rating).",
+        "category": "low", "expected_tool": "search_mcp_search_hotels",
+        "expected_signals": ["Liberty", "Boston"], "description": "Boston hotel search",
+    },
+    {
+        "prompt": "Is a $75.00 meal expense within policy?",
+        "reference": "$75.00 meal is exactly at the $75 policy limit. Within policy.",
+        "category": "low", "expected_tool": "expense_mcp_check_expense_policy",
+        "expected_signals": ["75", "within"], "description": "Exact boundary — at limit",
+    },
+    {
+        "prompt": "Check if a $75.01 meal expense is within policy",
+        "reference": "$75.01 exceeds the $75 meal policy limit by $0.01. Requires manager review.",
+        "category": "low", "expected_tool": "expense_mcp_check_expense_policy",
+        "expected_signals": ["75.01", "exceeds"], "description": "One cent over boundary",
+    },
+    {
+        "prompt": "Cancel booking BK-NOTFOUND99",
+        "reference": "Booking BK-NOTFOUND99 not found. Error handled gracefully.",
+        "category": "low", "expected_tool": "booking_mcp_cancel_booking",
+        "expected_signals": ["not found"], "description": "Cancel non-existent booking — error recovery",
+    },
+    {
+        "prompt": "Show expenses for user EMP999",
+        "reference": "No expenses found for user EMP999.",
+        "category": "low", "expected_tool": "expense_mcp_get_user_expenses",
+        "expected_signals": ["EMP999"], "description": "Unknown user expenses — empty result",
+    },
+    {
+        "prompt": "Show me all current bookings",
+        "reference": "No bookings currently in the system.",
+        "category": "low", "expected_tool": "booking_mcp_list_all_bookings",
+        "expected_signals": [], "description": "List bookings (empty state)",
     },
 ]
 
@@ -94,14 +136,32 @@ MEDIUM_COMPLEXITY_CASES = [
         "category": "medium", "expected_tool": "booking_mcp_book_hotel",
         "expected_signals": ["HT002", "Bob Smith", "400"], "description": "Book + policy verify",
     },
+    {
+        "prompt": "Book flight FL005 for Eve Martinez, then cancel the booking",
+        "reference": "FL005 booked for Eve Martinez. Booking cancelled. Status: cancelled.",
+        "category": "medium", "expected_tool": "booking_mcp_book_flight",
+        "expected_signals": ["FL005", "Eve Martinez", "cancelled"], "description": "Book and cancel flow",
+    },
+    {
+        "prompt": "Submit a $100.00 supplies expense for printer paper, user ID EMP001",
+        "reference": "Policy checked: $100.00 is at the $100 supplies limit. Expense submitted for EMP001, status: approved.",
+        "category": "medium", "expected_tool": "expense_mcp_submit_expense",
+        "expected_signals": ["EMP001", "100", "approved"], "description": "Submit at exact policy boundary",
+    },
+    {
+        "prompt": "Submit a $100.01 supplies expense for printer cartridge, user ID EMP002",
+        "reference": "$100.01 exceeds $100 supplies limit. Status: pending_review.",
+        "category": "medium", "expected_tool": "expense_mcp_submit_expense",
+        "expected_signals": ["EMP002", "100.01", "pending_review"], "description": "Submit one cent over policy boundary",
+    },
 ]
 
 HIGH_COMPLEXITY_CASES = [
     {
         "prompt": "Plan a 5-day trip to Tokyo for a team of 4: find flights from SFO, hotels, estimate daily meal expenses, and check entertainment policy",
-        "reference": "Flights searched. Hotels searched. Meals: $75/person/day x4 = $300/day. Entertainment limit: $150. Total estimated.",
+        "reference": "SFO-NRT: United FL007 at $1250. Hotels: Park Hotel Tokyo $280/night (within $400 policy). Meals: $75/person/day x4 = $300/day. Entertainment limit: $150. Total estimated.",
         "category": "high", "expected_tool": "multiple",
-        "expected_signals": ["Tokyo", "75", "150"], "description": "Multi-step team trip planning",
+        "expected_signals": ["Tokyo", "FL007", "Park Hotel", "280", "75", "150"], "description": "Multi-step team trip planning",
     },
     {
         "prompt": "Compare flights from SFO to JFK vs LAX to ORD, factoring in hotel costs in each destination city",
@@ -138,6 +198,18 @@ HIGH_COMPLEXITY_CASES = [
         "reference": "EMP001: no violations. EMP002: entertainment $200 exceeds $150. Total overspend: $50.",
         "category": "high", "expected_tool": "multiple",
         "expected_signals": ["EMP001", "EMP002", "150"], "description": "Multi-user expense audit",
+    },
+    {
+        "prompt": "Book flight FL001 for Frank Lee, confirm the booking details, then cancel it and verify the cancellation status",
+        "reference": "FL001 booked for Frank Lee. Booking confirmed. Booking cancelled. Status: cancelled.",
+        "category": "high", "expected_tool": "multiple",
+        "expected_signals": ["FL001", "Frank Lee", "confirmed", "cancelled"], "description": "Full booking lifecycle: book, verify, cancel, verify",
+    },
+    {
+        "prompt": "Look up booking BK-UNKNOWN1, and if it doesn't exist, search for flights from SFO to Denver and book the cheapest one for Pat Taylor",
+        "reference": "BK-UNKNOWN1 not found. Searched SFO-DEN: FL008 $320. Booked FL008 for Pat Taylor.",
+        "category": "high", "expected_tool": "multiple",
+        "expected_signals": ["not found", "FL008", "Pat Taylor", "confirmed"], "description": "Error recovery with fallback booking pipeline",
     },
 ]
 

@@ -7,6 +7,7 @@ bookings: dict[str, dict] = {}
 
 
 def create_booking(booking_type: str, item_id: str, details: dict) -> dict:
+    """item_id is not validated against the search catalogue; agents should verify IDs via search tools before booking."""
     booking_id = f"BK-{uuid.uuid4().hex[:8].upper()}"
     booking = {
         "booking_id": booking_id,
