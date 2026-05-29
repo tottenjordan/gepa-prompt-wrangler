@@ -5,7 +5,7 @@ import pytest
 from pathlib import Path
 from unittest.mock import patch
 
-from wrangler.evaluator import _build_eval_dataset, _resolve_resource_name, save_eval_results
+from wrangler.evaluator import _build_eval_dataset, _resolve_resource_name, save_eval_results, EvalResult
 
 
 class TestBuildEvalDataset:
@@ -42,6 +42,24 @@ class TestResolveResourceName:
     def test_full_resource_passthrough(self):
         full = "projects/my-proj/locations/us/reasoningEngines/123"
         assert _resolve_resource_name(full) == full
+
+
+class TestEvalResult:
+    def test_default_empty(self):
+        result = EvalResult()
+        assert result.scores == {}
+        assert result.per_case == []
+
+    def test_with_scores(self):
+        scores = {"quality": 0.85, "safety": 1.0}
+        per_case = [{"quality": 0.9}, {"quality": 0.8}]
+        result = EvalResult(scores=scores, per_case=per_case)
+        assert result.scores == scores
+        assert len(result.per_case) == 2
+
+    def test_scores_dict_access(self):
+        result = EvalResult(scores={"a": 1.0, "b": 0.5})
+        assert list(result.scores.items()) == [("a", 1.0), ("b", 0.5)]
 
 
 class TestSaveEvalResults:

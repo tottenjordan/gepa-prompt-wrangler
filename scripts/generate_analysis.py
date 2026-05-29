@@ -7,6 +7,7 @@ Usage:
 
 import argparse
 import json
+from collections import defaultdict
 from pathlib import Path
 
 import matplotlib
@@ -18,7 +19,10 @@ import sys
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from wrangler.config import MODEL_COSTS, REPORTS_DIR, OUTPUTS_DIR
-from wrangler.analysis import generate_agent_report, METRIC_LABELS
+from wrangler.analysis import (
+    generate_agent_report, generate_comparison_report,
+    compute_tier_scores, METRIC_LABELS, AGENT_ORDER, TIER_ORDER, PROVIDERS,
+)
 
 CHARTS_DIR = Path(REPORTS_DIR) / "charts"
 AGENTS_DIR = Path(REPORTS_DIR) / "agents"
@@ -35,9 +39,20 @@ def load_results(input_path: str = None) -> dict:
         return json.load(f)
 
 
+def _get_agents(results: dict) -> list[str]:
+    return [a for a in AGENT_ORDER if a in results]
+
+
+def _get_case_metadata(results: dict) -> list[dict] | None:
+    meta = results.get("_eval_metadata")
+    if meta and "cases" in meta:
+        return meta["cases"]
+    return None
+
+
 def generate_comparison_chart(results: dict):
     CHARTS_DIR.mkdir(parents=True, exist_ok=True)
-    agents = list(results.keys())
+    agents = _get_agents(results)
     metrics = list(METRIC_LABELS.keys())
     n = len(agents)
 
@@ -67,10 +82,12 @@ def generate_comparison_chart(results: dict):
 
 def generate_cost_quality_chart(results: dict):
     CHARTS_DIR.mkdir(parents=True, exist_ok=True)
-    has_after = any(results[a].get("after") for a in results)
+    has_after = any(results[a].get("after") for a in results if not a.startswith("_"))
     fig, ax = plt.subplots(figsize=(12, 7))
 
     for agent_name, data in results.items():
+        if agent_name.startswith("_"):
+            continue
         model = data.get("model", "unknown")
         cost_info = MODEL_COSTS.get(model, {"input": 0, "output": 0})
         cost = cost_info["input"] + cost_info["output"]
@@ -96,7 +113,6 @@ def generate_cost_quality_chart(results: dict):
             ax.annotate("", xy=(cost, avg_after), xytext=(cost, avg_before),
                         arrowprops=dict(arrowstyle="->", color="gray", lw=1.2, ls="--"))
 
-    from matplotlib.patches import Patch
     from matplotlib.lines import Line2D
     legend_items = [
         Line2D([0], [0], marker="o", color="w", markerfacecolor="#93C5FD",
@@ -123,7 +139,7 @@ def generate_cost_quality_chart(results: dict):
 
 def generate_improvement_chart(results: dict):
     CHARTS_DIR.mkdir(parents=True, exist_ok=True)
-    agents = [a for a in results if results[a].get("after")]
+    agents = [a for a in _get_agents(results) if results[a].get("after")]
     if not agents:
         print("  Skipping improvement chart (no after scores)")
         return
@@ -153,18 +169,176 @@ def generate_improvement_chart(results: dict):
     print(f"  Generated: improvement_delta.png")
 
 
+def generate_tier_breakdown_chart(results: dict, case_metadata: list[dict] | None):
+    """Grouped bar chart: tier × agent, colored by provider."""
+    if not case_metadata:
+        print("  Skipping tier breakdown chart (no case metadata)")
+        return
+
+    CHARTS_DIR.mkdir(parents=True, exist_ok=True)
+    agents = _get_agents(results)
+    phase = "after" if any(results[a].get("after") for a in agents) else "before"
+    per_case_key = f"{phase}_per_case"
+
+    tiers_present = [t for t in TIER_ORDER if any(m.get("tier") == t for m in case_metadata)]
+    if not tiers_present:
+        return
+
+    tier_avgs: dict[str, dict[str, float]] = {}
+    for name in agents:
+        per_case = results[name].get(per_case_key, [])
+        if per_case:
+            tier_scores = compute_tier_scores(per_case, case_metadata, "tier")
+            tier_avgs[name] = {}
+            for tier in tiers_present:
+                scores = tier_scores.get(tier, {})
+                tier_avgs[name][tier] = sum(scores.values()) / max(len(scores), 1) if scores else 0
+        else:
+            tier_avgs[name] = {t: 0 for t in tiers_present}
+
+    fig, ax = plt.subplots(figsize=(12, 7))
+    x = np.arange(len(tiers_present))
+    n_agents = len(agents)
+    width = 0.15
+    offset = -(n_agents - 1) / 2 * width
+
+    for i, name in enumerate(agents):
+        model = results[name].get("model", "")
+        is_gemini = "gemini" in model
+        color = "#2563EB" if is_gemini else "#EA580C"
+        alpha = 0.5 + 0.1 * i
+        values = [tier_avgs[name].get(t, 0) for t in tiers_present]
+        ax.bar(x + offset + i * width, values, width, label=name.title(),
+               color=color, alpha=min(alpha, 1.0), edgecolor="black", linewidth=0.5)
+
+    ax.set_xlabel("Complexity Tier")
+    ax.set_ylabel("Average Score")
+    ax.set_title(f"Per-Tier Performance — {phase.title()} Optimization")
+    ax.set_xticks(x)
+    ax.set_xticklabels([t.title() for t in tiers_present])
+    ax.legend(fontsize=8)
+    ax.set_ylim(0, 1.1)
+    ax.grid(axis="y", alpha=0.3)
+    plt.tight_layout()
+    plt.savefig(CHARTS_DIR / "tier_breakdown.png", dpi=150)
+    plt.close()
+    print(f"  Generated: tier_breakdown.png")
+
+
+def generate_category_heatmap(results: dict, case_metadata: list[dict] | None):
+    """Heatmap: category × agent, cell value = average score."""
+    if not case_metadata:
+        print("  Skipping category heatmap (no case metadata)")
+        return
+
+    CHARTS_DIR.mkdir(parents=True, exist_ok=True)
+    agents = _get_agents(results)
+    phase = "after" if any(results[a].get("after") for a in agents) else "before"
+    per_case_key = f"{phase}_per_case"
+
+    categories = sorted(set(m.get("category", "") for m in case_metadata if m.get("category")))
+    if not categories:
+        return
+
+    matrix = np.zeros((len(categories), len(agents)))
+    for j, name in enumerate(agents):
+        per_case = results[name].get(per_case_key, [])
+        if per_case:
+            cat_scores = compute_tier_scores(per_case, case_metadata, "category")
+            for i, cat in enumerate(categories):
+                scores = cat_scores.get(cat, {})
+                matrix[i, j] = sum(scores.values()) / max(len(scores), 1) if scores else 0
+
+    fig, ax = plt.subplots(figsize=(10, max(6, len(categories) * 0.8)))
+    im = ax.imshow(matrix, cmap="RdYlGn", aspect="auto", vmin=0, vmax=1)
+
+    ax.set_xticks(np.arange(len(agents)))
+    ax.set_yticks(np.arange(len(categories)))
+    ax.set_xticklabels([a.title() for a in agents])
+    ax.set_yticklabels(categories)
+
+    for i in range(len(categories)):
+        for j in range(len(agents)):
+            val = matrix[i, j]
+            color = "white" if val < 0.4 or val > 0.8 else "black"
+            ax.text(j, i, f"{val:.2f}", ha="center", va="center", color=color, fontsize=9)
+
+    ax.set_title(f"Category Capability — {phase.title()} Optimization")
+    fig.colorbar(im, ax=ax, shrink=0.8, label="Avg Score")
+    plt.tight_layout()
+    plt.savefig(CHARTS_DIR / "category_heatmap.png", dpi=150)
+    plt.close()
+    print(f"  Generated: category_heatmap.png")
+
+
+def generate_run_comparison_chart(results: dict, previous_path: str = "outputs/results_all_agents.json"):
+    """Side-by-side bars: previous run vs current run per agent."""
+    prev_file = Path(previous_path)
+    if not prev_file.exists():
+        print(f"  Skipping run comparison chart (no previous results at {previous_path})")
+        return
+
+    CHARTS_DIR.mkdir(parents=True, exist_ok=True)
+    with open(prev_file) as f:
+        prev = json.load(f)
+
+    agents = [a for a in _get_agents(results) if a in prev]
+    if not agents:
+        return
+
+    phase = "after" if any(results[a].get("after") for a in agents) else "before"
+
+    prev_avgs = []
+    curr_avgs = []
+    for name in agents:
+        ps = prev[name].get(phase, prev[name].get("before", {}))
+        cs = results[name].get(phase, results[name].get("before", {}))
+        prev_avgs.append(sum(ps.values()) / max(len(ps), 1) if ps else 0)
+        curr_avgs.append(sum(cs.values()) / max(len(cs), 1) if cs else 0)
+
+    fig, ax = plt.subplots(figsize=(12, 7))
+    x = np.arange(len(agents))
+    width = 0.35
+
+    ax.bar(x - width/2, prev_avgs, width, label="Previous Run (30 cases)", color="#93C5FD", edgecolor="black", linewidth=0.5)
+    ax.bar(x + width/2, curr_avgs, width, label="Current Run (40 cases)", color="#2563EB", edgecolor="black", linewidth=0.5)
+
+    ax.set_xlabel("Agent")
+    ax.set_ylabel("Average Score")
+    ax.set_title(f"Run Comparison — {phase.title()} Optimization (30 vs 40 eval cases)")
+    ax.set_xticks(x)
+    ax.set_xticklabels([a.title() for a in agents])
+    ax.legend(fontsize=9)
+    ax.set_ylim(0, 1.1)
+    ax.grid(axis="y", alpha=0.3)
+    plt.tight_layout()
+    plt.savefig(CHARTS_DIR / "run_comparison.png", dpi=150)
+    plt.close()
+    print(f"  Generated: run_comparison.png")
+
+
 def main(input_path: str = None):
     print("Loading results...")
     results = load_results(input_path)
-    print(f"  Loaded {len(results)} agents\n")
+    case_metadata = _get_case_metadata(results)
+    agents = _get_agents(results)
+    print(f"  Loaded {len(agents)} agents")
+    if case_metadata:
+        print(f"  Eval metadata: {len(case_metadata)} cases")
+    print()
 
     print("Generating charts...")
     generate_comparison_chart(results)
     generate_cost_quality_chart(results)
     generate_improvement_chart(results)
+    generate_tier_breakdown_chart(results, case_metadata)
+    generate_category_heatmap(results, case_metadata)
+    generate_run_comparison_chart(results)
 
     print("\nGenerating per-agent reports...")
     for agent_name, data in results.items():
+        if agent_name.startswith("_"):
+            continue
         path = generate_agent_report(
             agent_name=agent_name,
             model=data.get("model", "unknown"),
@@ -173,8 +347,15 @@ def main(input_path: str = None):
             optimized_prompt=data.get("optimized_prompt"),
             before_scores=data.get("before", {}),
             after_scores=data.get("after"),
+            before_per_case=data.get("before_per_case"),
+            after_per_case=data.get("after_per_case"),
+            case_metadata=case_metadata,
         )
         print(f"  {agent_name}: {path}")
+
+    print("\nGenerating comparison report...")
+    report_path = generate_comparison_report(results, case_metadata=case_metadata)
+    print(f"  {report_path}")
 
     print("\nDone!")
 

@@ -1,7 +1,7 @@
 """Batch evaluation — runs inference + evaluation against deployed agents on GEAP."""
 
-import json
 import time
+from dataclasses import dataclass, field
 
 import pandas as pd
 import vertexai
@@ -20,6 +20,14 @@ DEFAULT_METRICS = [
     types.RubricMetric.INSTRUCTION_FOLLOWING,
     types.RubricMetric.FINAL_RESPONSE_MATCH,
 ]
+
+
+@dataclass
+class EvalResult:
+    """Evaluation result with aggregate and per-case scores."""
+
+    scores: dict[str, float] = field(default_factory=dict)
+    per_case: list[dict[str, float]] = field(default_factory=list)
 
 
 def _build_eval_dataset(cases: list[dict]) -> pd.DataFrame:
@@ -46,12 +54,43 @@ def _resolve_resource_name(engine_id: str) -> str:
     return f"projects/{GCP_PROJECT_ID}/locations/{GCP_REGION}/reasoningEngines/{engine_id}"
 
 
+def _extract_per_case_scores(evaluation_run) -> list[dict[str, float]]:
+    """Extract per-case metric scores from evaluation run items."""
+    per_case: list[dict[str, float]] = []
+    try:
+        run_results = getattr(evaluation_run, "evaluation_run_results", None)
+        if not run_results:
+            return per_case
+        eval_items = getattr(run_results, "evaluation_items", None)
+        if not eval_items:
+            return per_case
+
+        sorted_items = sorted(
+            eval_items,
+            key=lambda item: getattr(item, "eval_case_index", 0) or 0,
+        )
+        for item in sorted_items:
+            case_scores: dict[str, float] = {}
+            metric_results = getattr(item, "metric_results", None)
+            if metric_results:
+                items_dict = metric_results if isinstance(metric_results, dict) else dict(metric_results)
+                for metric_key, metric_val in items_dict.items():
+                    short = metric_key.split("/")[-1] if "/" in metric_key else metric_key
+                    score = getattr(metric_val, "score", None) if not isinstance(metric_val, (int, float)) else metric_val
+                    if score is not None:
+                        case_scores[short] = float(score)
+            per_case.append(case_scores)
+    except Exception as e:
+        print(f"  Warning extracting per-case scores: {e}")
+    return per_case
+
+
 def run_batch_eval(
     engine_id: str,
     eval_cases: list[dict],
     metrics: list | None = None,
-) -> dict[str, float]:
-    """Run batch eval against a deployed agent. Returns {metric_name: score}."""
+) -> EvalResult:
+    """Run batch eval against a deployed agent. Returns EvalResult with aggregate and per-case scores."""
     vertexai.init(
         project=GCP_PROJECT_ID,
         location=GCP_REGION,
@@ -93,7 +132,7 @@ def run_batch_eval(
     if "FAILED" in state:
         err = getattr(evaluation_run, "error", None)
         print(f"  ERROR: {err}")
-        return {}
+        return EvalResult()
 
     evaluation_run = client.evals.get_evaluation_run(
         name=evaluation_run.name,
@@ -119,7 +158,9 @@ def run_batch_eval(
             short = metric_name.split("/")[-1] if "/" in metric_name else metric_name
             scores[short] = float(value)
 
-    return scores
+    per_case = _extract_per_case_scores(evaluation_run)
+
+    return EvalResult(scores=scores, per_case=per_case)
 
 
 def save_eval_results(

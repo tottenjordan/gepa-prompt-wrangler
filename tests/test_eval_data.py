@@ -57,6 +57,27 @@ class TestEvalCasesYaml:
         cases = _load_yaml_cases()
         assert len(cases) == 40, f"Expected 40 cases, got {len(cases)}"
 
+    def test_all_cases_have_tier(self):
+        for case in _load_yaml_cases():
+            assert "tier" in case and case["tier"] in {"low", "medium", "high"}, (
+                f"Missing or invalid 'tier' in case: {case['prompt'][:50]}"
+            )
+
+    def test_all_cases_have_category(self):
+        valid = {"search", "policy", "booking", "expense", "planning",
+                 "cancellation", "boundary", "error_handling"}
+        for case in _load_yaml_cases():
+            assert "category" in case and case["category"] in valid, (
+                f"Missing or invalid 'category' in case: {case['prompt'][:50]}"
+            )
+
+    def test_tier_distribution(self):
+        from collections import Counter
+        counts = Counter(c["tier"] for c in _load_yaml_cases())
+        assert counts["low"] == 21, f"Expected 21 low, got {counts['low']}"
+        assert counts["medium"] == 13, f"Expected 13 medium, got {counts['medium']}"
+        assert counts["high"] == 6, f"Expected 6 high, got {counts['high']}"
+
 
 # ---------------------------------------------------------------------------
 # tier_eval_cases.py

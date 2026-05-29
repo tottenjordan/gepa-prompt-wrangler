@@ -1,15 +1,26 @@
 """Pipeline runner — orchestrates the full deploy → eval → optimize → redeploy → eval → report workflow."""
 
 import json
+import time
+from collections import Counter
+from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
 
 from .factory import PairFactory, AgentPromptPair, Manifest
 from .converter import load_eval_file
-from .evaluator import run_batch_eval
+from .evaluator import run_batch_eval, EvalResult
 from .optimizer import optimize
 from .reporter import generate_report
 from . import deploy as deployer
+
+
+def _fmt_duration(seconds: float) -> str:
+    """Format seconds as 'Xm Ys' or 'Xs' for short durations."""
+    if seconds < 60:
+        return f"{seconds:.0f}s"
+    m, s = divmod(int(seconds), 60)
+    return f"{m}m {s:02d}s"
 
 
 class WranglerPipeline:
@@ -17,6 +28,20 @@ class WranglerPipeline:
         self.manifest = PairFactory.load(manifest_path)
         self.manifest_dir = Path(manifest_path).parent
         self.results: dict[str, dict] = {}
+        self._phase_times: list[tuple[str, float]] = []
+        self._pipeline_start: float = 0.0
+
+    @contextmanager
+    def _phase(self, name: str):
+        """Context manager that tracks and prints phase timing."""
+        print(f"\n--- {name} ---")
+        t0 = time.time()
+        yield
+        elapsed = time.time() - t0
+        self._phase_times.append((name, elapsed))
+        total = time.time() - self._pipeline_start
+        print(f"\n  >> {name} complete ({_fmt_duration(elapsed)}) "
+              f"[total elapsed: {_fmt_duration(total)}]")
 
     def _load_eval_cases(self) -> list[dict]:
         eval_path = self.manifest_dir / self.manifest.eval_data
@@ -69,8 +94,29 @@ class WranglerPipeline:
             f"    3. root_agent — LlmAgent directly"
         )
 
+    def _preflight(self, eval_cases: list[dict]):
+        """Validate eval data before running the pipeline."""
+        tier_counts = Counter(c.get("tier", "") for c in eval_cases)
+        cat_counts = Counter(c.get("category", "") for c in eval_cases)
+
+        missing_tier = [i for i, c in enumerate(eval_cases) if not c.get("tier")]
+        missing_cat = [i for i, c in enumerate(eval_cases) if not c.get("category")]
+
+        print(f"  Cases:      {len(eval_cases)}")
+        print(f"  Tiers:      {dict(tier_counts)}")
+        print(f"  Categories: {dict(cat_counts)}")
+
+        if missing_tier:
+            raise ValueError(f"Cases missing 'tier' field at indices: {missing_tier[:5]}")
+        if missing_cat:
+            raise ValueError(f"Cases missing 'category' field at indices: {missing_cat[:5]}")
+
+        print(f"  Pre-flight: PASSED")
+
     def run(self) -> dict:
-        """Execute the full 6-phase pipeline."""
+        """Execute the full pipeline with progress tracking."""
+        self._pipeline_start = time.time()
+
         print(f"{'=' * 60}")
         print(f"GEPA PROMPT WRANGLER")
         print(f"{'=' * 60}")
@@ -79,7 +125,7 @@ class WranglerPipeline:
         print()
 
         eval_cases = self._load_eval_cases()
-        print(f"  Eval cases: {len(eval_cases)}")
+        n_pairs = len(self.manifest.pairs)
 
         for pair in self.manifest.pairs:
             self.results[pair.id] = {
@@ -87,67 +133,104 @@ class WranglerPipeline:
                 "original_prompt": pair.system_prompt,
             }
 
+        # Store eval case metadata for downstream analysis
+        self.results["_eval_metadata"] = {
+            "case_count": len(eval_cases),
+            "cases": [
+                {"tier": c.get("tier", ""), "category": c.get("category", ""), "prompt": c.get("prompt", "")}
+                for c in eval_cases
+            ],
+        }
+
+        # Phase 0: Pre-flight validation
+        with self._phase("Phase 0: Pre-flight Validation"):
+            self._preflight(eval_cases)
+
         # Phase 1: Deploy
-        print(f"\n--- Phase 1: Deploy to GEAP ---")
-        for pair in self.manifest.pairs:
-            if pair.engine_id:
-                print(f"  [{pair.id}] Using existing engine: {pair.engine_id}")
-                self.results[pair.id]["engine_id"] = pair.engine_id
-            else:
-                agent = self._load_agent(pair)
-                engine_id = deployer.deploy_agent(agent, display_name=pair.id)
-                self.results[pair.id]["engine_id"] = engine_id
+        with self._phase("Phase 1: Deploy to GEAP"):
+            for i, pair in enumerate(self.manifest.pairs, 1):
+                if pair.engine_id:
+                    print(f"  [{pair.id}] ({i}/{n_pairs}) Using existing engine: {pair.engine_id}")
+                    self.results[pair.id]["engine_id"] = pair.engine_id
+                else:
+                    print(f"  [{pair.id}] ({i}/{n_pairs}) Deploying...", end="", flush=True)
+                    t0 = time.time()
+                    agent = self._load_agent(pair)
+                    engine_id = deployer.deploy_agent(agent, display_name=pair.id)
+                    self.results[pair.id]["engine_id"] = engine_id
+                    print(f" {_fmt_duration(time.time() - t0)}")
 
         # Phase 2: Baseline eval
-        print(f"\n--- Phase 2: Baseline Evaluation ---")
-        for pair in self.manifest.pairs:
-            engine_id = self.results[pair.id]["engine_id"]
-            print(f"\n  [{pair.id}]")
-            scores = run_batch_eval(engine_id, eval_cases)
-            self.results[pair.id]["before"] = scores
-            for m, s in sorted(scores.items()):
-                print(f"    {m:40s} {s:.2f}")
+        with self._phase("Phase 2: Baseline Evaluation"):
+            for i, pair in enumerate(self.manifest.pairs, 1):
+                engine_id = self.results[pair.id]["engine_id"]
+                print(f"\n  [{pair.id}] ({i}/{n_pairs})")
+                t0 = time.time()
+                result = run_batch_eval(engine_id, eval_cases)
+                self.results[pair.id]["before"] = result.scores
+                self.results[pair.id]["before_per_case"] = result.per_case
+                avg = sum(result.scores.values()) / max(len(result.scores), 1)
+                print(f"  [{pair.id}] ({i}/{n_pairs}) Done ({_fmt_duration(time.time() - t0)}) "
+                      f"— avg score: {avg:.2f}")
+                for m, s in sorted(result.scores.items()):
+                    print(f"    {m:40s} {s:.2f}")
 
         # Phase 3: GEPA optimize
-        print(f"\n--- Phase 3: GEPA Optimization ---")
-        for pair in self.manifest.pairs:
-            print(f"\n  [{pair.id}]")
-            agent_path = self.manifest_dir / self.manifest.agent_module
-            eval_path = self.manifest_dir / self.manifest.eval_data
-            optimized = optimize(str(agent_path), str(eval_path))
-            self.results[pair.id]["optimized_prompt"] = optimized
-            pair.system_prompt = optimized
+        with self._phase("Phase 3: GEPA Optimization"):
+            for i, pair in enumerate(self.manifest.pairs, 1):
+                print(f"\n  [{pair.id}] ({i}/{n_pairs}) Optimizing...", flush=True)
+                t0 = time.time()
+                agent_path = self.manifest_dir / self.manifest.agent_module
+                eval_path = self.manifest_dir / self.manifest.eval_data
+                optimized = optimize(str(agent_path), str(eval_path))
+                self.results[pair.id]["optimized_prompt"] = optimized
+                pair.system_prompt = optimized
+                print(f"  [{pair.id}] ({i}/{n_pairs}) Done ({_fmt_duration(time.time() - t0)}) "
+                      f"— {len(optimized)} chars")
 
         # Phase 4: Redeploy with optimized prompt
-        print(f"\n--- Phase 4: Redeploy with Optimized Prompt ---")
-        for pair in self.manifest.pairs:
-            engine_id = self.results[pair.id]["engine_id"]
-            agent = self._load_agent(pair)
-            deployer.update_agent(agent, engine_id, display_name=pair.id)
+        with self._phase("Phase 4: Redeploy with Optimized Prompt"):
+            for i, pair in enumerate(self.manifest.pairs, 1):
+                print(f"  [{pair.id}] ({i}/{n_pairs}) Redeploying...", end="", flush=True)
+                t0 = time.time()
+                engine_id = self.results[pair.id]["engine_id"]
+                agent = self._load_agent(pair)
+                deployer.update_agent(agent, engine_id, display_name=pair.id)
+                print(f" {_fmt_duration(time.time() - t0)}")
 
         # Phase 5: Post-optimization eval
-        print(f"\n--- Phase 5: Post-Optimization Evaluation ---")
-        for pair in self.manifest.pairs:
-            engine_id = self.results[pair.id]["engine_id"]
-            print(f"\n  [{pair.id}]")
-            scores = run_batch_eval(engine_id, eval_cases)
-            self.results[pair.id]["after"] = scores
-            for m, s in sorted(scores.items()):
-                print(f"    {m:40s} {s:.2f}")
+        with self._phase("Phase 5: Post-Optimization Evaluation"):
+            for i, pair in enumerate(self.manifest.pairs, 1):
+                engine_id = self.results[pair.id]["engine_id"]
+                print(f"\n  [{pair.id}] ({i}/{n_pairs})")
+                t0 = time.time()
+                result = run_batch_eval(engine_id, eval_cases)
+                self.results[pair.id]["after"] = result.scores
+                self.results[pair.id]["after_per_case"] = result.per_case
+                avg = sum(result.scores.values()) / max(len(result.scores), 1)
+                print(f"  [{pair.id}] ({i}/{n_pairs}) Done ({_fmt_duration(time.time() - t0)}) "
+                      f"— avg score: {avg:.2f}")
+                for m, s in sorted(result.scores.items()):
+                    print(f"    {m:40s} {s:.2f}")
 
         # Phase 6: Generate report
-        print(f"\n--- Phase 6: Generate Report ---")
-        generate_report(self.results, self.manifest.name)
+        with self._phase("Phase 6: Generate Report"):
+            generate_report(self.results, self.manifest.name)
 
         # Save raw results
         output_path = Path("outputs") / f"results_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
         output_path.parent.mkdir(parents=True, exist_ok=True)
         with open(output_path, "w") as f:
             json.dump(self.results, f, indent=2, default=str)
-        print(f"Results saved to: {output_path}")
+        print(f"\nResults saved to: {output_path}")
 
+        # Final timing summary
+        total = time.time() - self._pipeline_start
         print(f"\n{'=' * 60}")
-        print(f"COMPLETE")
+        print(f"PIPELINE COMPLETE — Total: {_fmt_duration(total)}")
+        print(f"{'=' * 60}")
+        for phase_name, phase_time in self._phase_times:
+            print(f"  {phase_name:40s} {_fmt_duration(phase_time):>8s}")
         print(f"{'=' * 60}")
 
         return self.results

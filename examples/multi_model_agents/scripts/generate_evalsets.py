@@ -4,57 +4,21 @@
 Usage:
     python examples/multi_model_agents/scripts/generate_evalsets.py
 
-Reads eval_cases.yaml and produces a balanced 20-case evalset for each model
-agent (lite, flash, pro, sonnet, opus), writing to their respective *_opt/ dirs.
+Reads eval_cases.yaml (which has tier/category metadata on each case) and
+produces a balanced evalset for each model agent (lite, flash, pro, sonnet,
+opus), writing to their respective *_opt/ dirs.
 """
 
 import json
-import sys
 from pathlib import Path
 
 import yaml
 
-REPO_ROOT = Path(__file__).resolve().parents[3]
 EXAMPLE_ROOT = Path(__file__).resolve().parents[1]
 EVAL_DATA_DIR = EXAMPLE_ROOT / "eval_data"
 AGENTS_DIR = EXAMPLE_ROOT / "agents"
 
 MODELS = ["lite", "flash", "pro", "sonnet", "opus"]
-
-TIER_KEYWORDS = {
-    "low": [
-        "Find flights from SFO to JFK",
-        "Search for hotels in New York",
-        "What's the lodging policy limit?",
-        "Is a $50 transport expense within policy?",
-        "Can you help me write a Python script",
-        "Is a $75 meal expense within policy?",
-        "Is a $75.01 meal expense within policy?",
-        "Cancel booking BK-DOESNOTEXIST",
-        "Show me the details for booking BK-INVALID123",
-        "Find flights from SFO to Denver",
-        "Search for hotels in Boston",
-    ],
-    "medium": [
-        "Search hotels in New York, then check if the nightly rate fits our lodging policy",
-        "Submit a $45 meals expense for lunch meeting",
-        "Submit a $90 supplies expense for office materials",
-        "Check if a $100 meal and a $250 entertainment expense",
-        "Book flight FL003 for Carol Davis, then immediately cancel",
-        "Book hotel HT001 for Dave Wilson June 15-17",
-        "Check if these expenses are within policy",
-        "Find flights from Denver to Tokyo",
-    ],
-    "high": [
-        "Book flight FL001 for Alice, check if Grand Hyatt",
-        "Find the cheapest SFO-JFK flight, book it for Bob Smith",
-        "Review EMP002's expense history, check all policy categories",
-        "I have a $2000 budget for a London trip",
-        "Compare flights from SFO to JFK vs LAX to ORD",
-        "Pull expense histories for EMP001 and EMP002",
-        "Look up booking BK-UNKNOWN1",
-    ],
-}
 
 
 def load_yaml_cases() -> list[dict]:
@@ -64,28 +28,11 @@ def load_yaml_cases() -> list[dict]:
     return data["eval_cases"]
 
 
-def classify_case(case: dict) -> str | None:
-    prompt = case["prompt"]
-    for tier, keywords in TIER_KEYWORDS.items():
-        for kw in keywords:
-            if prompt.startswith(kw):
-                return tier
-    return None
-
-
 def select_cases(all_cases: list[dict]) -> list[tuple[str, dict]]:
-    buckets: dict[str, list[dict]] = {"low": [], "medium": [], "high": []}
-
-    for case in all_cases:
-        tier = classify_case(case)
-        if tier:
-            buckets[tier].append(case)
-
     selected = []
-    for tier, cases in buckets.items():
-        for case in cases:
-            selected.append((tier, case))
-
+    for case in all_cases:
+        tier = case.get("tier", "low")
+        selected.append((tier, case))
     return selected
 
 
@@ -137,7 +84,7 @@ def main():
     all_cases = load_yaml_cases()
     selected = select_cases(all_cases)
 
-    tier_counts = {}
+    tier_counts: dict[str, int] = {}
     for tier, _ in selected:
         tier_counts[tier] = tier_counts.get(tier, 0) + 1
 

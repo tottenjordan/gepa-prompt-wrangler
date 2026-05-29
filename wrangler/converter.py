@@ -91,6 +91,7 @@ def _load_simplified_yaml(path: Path) -> list[dict[str, Any]]:
             "expected_tool": item.get("expected_tool", ""),
             "expected_tools": item.get("expected_tools", []),
             "description": item.get("description", ""),
+            "tier": item.get("tier", ""),
             "category": item.get("category", ""),
             "tags": item.get("tags", []),
         })

@@ -1,5 +1,7 @@
 """Per-agent and cross-model analysis report generators."""
 
+import json
+from collections import defaultdict
 from pathlib import Path
 
 from .config import MODEL_COSTS, REPORTS_DIR
@@ -30,6 +32,151 @@ MODEL_MAP = {
     "sonnet": "claude-sonnet-4-6",
     "opus": "claude-opus-4-6",
 }
+
+TIER_ORDER = ["low", "medium", "high"]
+
+
+def compute_tier_scores(
+    per_case_scores: list[dict[str, float]],
+    case_metadata: list[dict],
+    group_key: str = "tier",
+) -> dict[str, dict[str, float]]:
+    """Compute average metric scores grouped by tier or category.
+
+    Returns: {"low": {"final_response_quality_v1": 0.85, ...}, ...}
+    """
+    buckets: dict[str, list[dict[str, float]]] = defaultdict(list)
+    for i, scores in enumerate(per_case_scores):
+        if i < len(case_metadata) and scores:
+            group = case_metadata[i].get(group_key, "unknown")
+            buckets[group].append(scores)
+
+    result: dict[str, dict[str, float]] = {}
+    for group, score_list in buckets.items():
+        if not score_list:
+            continue
+        all_metrics = set()
+        for s in score_list:
+            all_metrics.update(s.keys())
+        avg: dict[str, float] = {}
+        for metric in all_metrics:
+            values = [s[metric] for s in score_list if metric in s]
+            avg[metric] = sum(values) / len(values) if values else 0.0
+        result[group] = avg
+    return result
+
+
+def _eval_dataset_section(case_metadata: list[dict] | None) -> list[str]:
+    """Generate the eval dataset info section with dynamic counts."""
+    lines = []
+    lines.append("## Eval Dataset\n")
+    if case_metadata:
+        tier_counts: dict[str, int] = defaultdict(int)
+        cat_counts: dict[str, int] = defaultdict(int)
+        for m in case_metadata:
+            tier_counts[m.get("tier", "unknown")] += 1
+            cat_counts[m.get("category", "unknown")] += 1
+        lines.append(f"- **Total cases:** {len(case_metadata)}")
+        for tier in TIER_ORDER:
+            if tier in tier_counts:
+                lines.append(f"- **{tier.title()} complexity:** {tier_counts[tier]} cases")
+        lines.append(f"- **Categories:** {', '.join(sorted(cat_counts.keys()))}")
+    else:
+        lines.append("- See eval_cases.yaml for case details")
+    lines.append("")
+    return lines
+
+
+def _tier_breakdown_section(
+    before_per_case: list[dict] | None,
+    after_per_case: list[dict] | None,
+    case_metadata: list[dict] | None,
+) -> list[str]:
+    """Generate per-tier breakdown tables."""
+    if not before_per_case or not case_metadata:
+        return []
+
+    lines = []
+    lines.append("## Per-Tier Breakdown\n")
+
+    tier_before = compute_tier_scores(before_per_case, case_metadata, "tier")
+
+    if after_per_case:
+        tier_after = compute_tier_scores(after_per_case, case_metadata, "tier")
+
+        lines.append("### After Optimization — By Tier\n")
+        header = "| Metric |" + " | ".join(t.title() for t in TIER_ORDER if t in tier_after) + " |"
+        sep = "|--------|" + " | ".join("------" for t in TIER_ORDER if t in tier_after) + " |"
+        lines.append(header)
+        lines.append(sep)
+        for key, label in METRIC_LABELS.items():
+            row = f"| {label} |"
+            for tier in TIER_ORDER:
+                if tier in tier_after:
+                    row += f" {tier_after[tier].get(key, 0):.2f} |"
+            lines.append(row)
+        lines.append("")
+
+        lines.append("### Improvement Delta — By Tier\n")
+        lines.append(header)
+        lines.append(sep)
+        for key, label in METRIC_LABELS.items():
+            row = f"| {label} |"
+            for tier in TIER_ORDER:
+                if tier in tier_after:
+                    b = tier_before.get(tier, {}).get(key, 0)
+                    a = tier_after[tier].get(key, 0)
+                    row += f" {a - b:+.2f} |"
+            lines.append(row)
+        lines.append("")
+    else:
+        lines.append("### Baseline — By Tier\n")
+        tiers_present = [t for t in TIER_ORDER if t in tier_before]
+        header = "| Metric |" + " | ".join(t.title() for t in tiers_present) + " |"
+        sep = "|--------|" + " | ".join("------" for _ in tiers_present) + " |"
+        lines.append(header)
+        lines.append(sep)
+        for key, label in METRIC_LABELS.items():
+            row = f"| {label} |"
+            for tier in tiers_present:
+                row += f" {tier_before[tier].get(key, 0):.2f} |"
+            lines.append(row)
+        lines.append("")
+
+    return lines
+
+
+def _category_section(
+    per_case_scores: list[dict],
+    case_metadata: list[dict] | None,
+    phase_label: str = "Post-Optimization",
+) -> list[str]:
+    """Generate per-category capability table."""
+    if not per_case_scores or not case_metadata:
+        return []
+
+    cat_scores = compute_tier_scores(per_case_scores, case_metadata, "category")
+    if not cat_scores:
+        return []
+
+    lines = []
+    lines.append(f"## Per-Category Capability ({phase_label})\n")
+
+    sorted_cats = sorted(cat_scores.keys())
+    lines.append("| Category | Avg Score | Cases |")
+    lines.append("|----------|-----------|-------|")
+
+    cat_counts: dict[str, int] = defaultdict(int)
+    for m in case_metadata:
+        cat_counts[m.get("category", "unknown")] += 1
+
+    for cat in sorted_cats:
+        scores = cat_scores[cat]
+        avg = sum(scores.values()) / max(len(scores), 1)
+        lines.append(f"| {cat} | {avg:.2f} | {cat_counts.get(cat, 0)} |")
+    lines.append("")
+
+    return lines
 
 
 def _prompt_evolution_summary(original: str, optimized: str) -> list[str]:
@@ -113,6 +260,9 @@ def generate_agent_report(
     before_scores: dict[str, float],
     after_scores: dict[str, float] | None,
     output_dir: str | None = None,
+    before_per_case: list[dict] | None = None,
+    after_per_case: list[dict] | None = None,
+    case_metadata: list[dict] | None = None,
 ) -> str:
     """Generate a per-agent analysis markdown file. Returns the file path."""
     output_dir = Path(output_dir or REPORTS_DIR) / "agents"
@@ -134,12 +284,7 @@ def generate_agent_report(
     lines.append(f"- **Output cost:** ${cost['output']}/M tokens")
     lines.append(f"- **Engine ID:** `{engine_id}`\n")
 
-    lines.append("## Eval Dataset\n")
-    lines.append("- **Total cases:** 30")
-    lines.append("- **Low complexity:** 14 cases (single tool call)")
-    lines.append("- **Medium complexity:** 9 cases (2 tools, comparison)")
-    lines.append("- **High complexity:** 7 cases (3+ tools, cross-domain)")
-    lines.append("- **Tool coverage:** search_mcp (2), booking_mcp (2), expense_mcp (3)\n")
+    lines.extend(_eval_dataset_section(case_metadata))
 
     lines.append("## Metrics\n")
     lines.append("| Metric | Description |")
@@ -192,6 +337,14 @@ def generate_agent_report(
             lines.append(f"- **Regressed:** {', '.join(METRIC_LABELS[k] for k in regressed)}")
         lines.append("")
 
+    # Per-tier breakdown
+    lines.extend(_tier_breakdown_section(before_per_case, after_per_case, case_metadata))
+
+    # Per-category capability
+    best_per_case = after_per_case or before_per_case
+    phase_label = "Post-Optimization" if after_per_case else "Baseline"
+    lines.extend(_category_section(best_per_case or [], case_metadata, phase_label))
+
     report_path = output_dir / f"{agent_name}_analysis.md"
     with open(report_path, "w") as f:
         f.write("\n".join(lines))
@@ -199,9 +352,146 @@ def generate_agent_report(
     return str(report_path)
 
 
+def _comparison_tier_section(
+    all_results: dict[str, dict],
+    ordered: list[str],
+    case_metadata: list[dict] | None,
+) -> list[str]:
+    """Generate cross-model per-tier comparison section."""
+    if not case_metadata:
+        return []
+
+    lines = []
+    lines.append("## Per-Tier Score Comparison\n")
+
+    phase = "after" if any(all_results[n].get("after") for n in ordered) else "before"
+    per_case_key = f"{phase}_per_case"
+
+    for tier in TIER_ORDER:
+        tier_case_count = sum(1 for m in case_metadata if m.get("tier") == tier)
+        if tier_case_count == 0:
+            continue
+
+        lines.append(f"### {tier.title()} Complexity ({tier_case_count} cases)\n")
+        header = "| Metric |" + " | ".join(n.title() for n in ordered) + " |"
+        sep = "|--------|" + " | ".join("------" for _ in ordered) + " |"
+        lines.append(header)
+        lines.append(sep)
+
+        agent_tier_scores: dict[str, dict[str, float]] = {}
+        for name in ordered:
+            per_case = all_results[name].get(per_case_key, [])
+            if per_case:
+                tier_scores = compute_tier_scores(per_case, case_metadata, "tier")
+                agent_tier_scores[name] = tier_scores.get(tier, {})
+            else:
+                agent_tier_scores[name] = {}
+
+        for key, label in METRIC_LABELS.items():
+            row = f"| {label} |"
+            for name in ordered:
+                s = agent_tier_scores[name].get(key, 0)
+                row += f" {s:.2f} |"
+            lines.append(row)
+        lines.append("")
+
+    return lines
+
+
+def _category_heatmap_section(
+    all_results: dict[str, dict],
+    ordered: list[str],
+    case_metadata: list[dict] | None,
+) -> list[str]:
+    """Generate cross-model category capability matrix."""
+    if not case_metadata:
+        return []
+
+    phase = "after" if any(all_results[n].get("after") for n in ordered) else "before"
+    per_case_key = f"{phase}_per_case"
+
+    all_cats = sorted(set(m.get("category", "") for m in case_metadata if m.get("category")))
+    if not all_cats:
+        return []
+
+    cat_counts: dict[str, int] = defaultdict(int)
+    for m in case_metadata:
+        cat_counts[m.get("category", "unknown")] += 1
+
+    agent_cat_scores: dict[str, dict[str, dict[str, float]]] = {}
+    for name in ordered:
+        per_case = all_results[name].get(per_case_key, [])
+        if per_case:
+            agent_cat_scores[name] = compute_tier_scores(per_case, case_metadata, "category")
+        else:
+            agent_cat_scores[name] = {}
+
+    lines = []
+    lines.append("## Category Capability Matrix\n")
+    lines.append(f"Average score across all metrics per category ({phase} optimization).\n")
+
+    header = "| Category | Cases |" + " | ".join(n.title() for n in ordered) + " |"
+    sep = "|----------|-------|" + " | ".join("------" for _ in ordered) + " |"
+    lines.append(header)
+    lines.append(sep)
+
+    for cat in all_cats:
+        row = f"| {cat} | {cat_counts.get(cat, 0)} |"
+        for name in ordered:
+            scores = agent_cat_scores[name].get(cat, {})
+            avg = sum(scores.values()) / max(len(scores), 1) if scores else 0
+            row += f" {avg:.2f} |"
+        lines.append(row)
+    lines.append("")
+
+    return lines
+
+
+def _previous_run_comparison_section(
+    current_results: dict[str, dict],
+    ordered: list[str],
+    previous_path: str = "outputs/results_all_agents.json",
+) -> list[str]:
+    """Compare current results against a previous run."""
+    prev_path = Path(previous_path)
+    if not prev_path.exists():
+        return []
+
+    try:
+        with open(prev_path) as f:
+            prev = json.load(f)
+    except (json.JSONDecodeError, OSError):
+        return []
+
+    common = [n for n in ordered if n in prev]
+    if not common:
+        return []
+
+    lines = []
+    lines.append("## Comparison with Previous Run\n")
+    lines.append(f"Comparing against previous results from `{previous_path}`.\n")
+
+    phase = "after" if any(current_results[n].get("after") for n in common) else "before"
+
+    lines.append(f"### Average Score Comparison ({phase.title()})\n")
+    lines.append("| Agent | Previous | Current | Delta |")
+    lines.append("|-------|----------|---------|-------|")
+    for name in common:
+        prev_scores = prev[name].get(phase, prev[name].get("before", {}))
+        curr_scores = current_results[name].get(phase, current_results[name].get("before", {}))
+        prev_avg = sum(prev_scores.values()) / max(len(prev_scores), 1) if prev_scores else 0
+        curr_avg = sum(curr_scores.values()) / max(len(curr_scores), 1) if curr_scores else 0
+        delta = curr_avg - prev_avg
+        lines.append(f"| {name.title()} | {prev_avg:.2f} | {curr_avg:.2f} | {delta:+.2f} |")
+    lines.append("")
+
+    return lines
+
+
 def generate_comparison_report(
     all_results: dict[str, dict],
     output_dir: str | None = None,
+    case_metadata: list[dict] | None = None,
 ) -> str:
     """Generate a cross-model comparison report with cost-benefit and recommendations."""
     output_dir = Path(output_dir or REPORTS_DIR)
@@ -234,6 +524,9 @@ def generate_comparison_report(
     lines.append("")
 
     lines.append("![Before/After Overview](diagrams/before_after_overview.png)\n")
+
+    # --- Eval Dataset ---
+    lines.extend(_eval_dataset_section(case_metadata))
 
     # --- Before/After Score Comparison ---
     lines.append("## Baseline vs Optimized Scores\n")
@@ -272,7 +565,7 @@ def generate_comparison_report(
                 b = all_results[name].get("before", {}).get(key, 0)
                 a = all_results[name].get("after", {}).get(key, 0)
                 d = a - b
-                row += f" {d:+.2f} |"
+                row += f" {d:+.02f} |"
             lines.append(row)
 
         avg_row = "| **Average** |"
@@ -281,9 +574,15 @@ def generate_comparison_report(
             after = all_results[name].get("after", {})
             avg_b = sum(before.values()) / max(len(before), 1) if before else 0
             avg_a = sum(after.values()) / max(len(after), 1) if after else 0
-            avg_row += f" **{avg_a - avg_b:+.2f}** |"
+            avg_row += f" **{avg_a - avg_b:+.02f}** |"
         lines.append(avg_row)
         lines.append("")
+
+    # --- Per-Tier Comparison ---
+    lines.extend(_comparison_tier_section(all_results, ordered, case_metadata))
+
+    # --- Category Capability Matrix ---
+    lines.extend(_category_heatmap_section(all_results, ordered, case_metadata))
 
     # --- Cost-Benefit Analysis ---
     lines.append("## Cost-Benefit Analysis\n")
@@ -301,7 +600,7 @@ def generate_comparison_report(
         avg_a = sum(after.values()) / max(len(after), 1) if after else 0
         gain = avg_a - avg_b
         qpd = avg_a / max(combined, 0.01)
-        lines.append(f"| {name.title()} | `{model}` | ${cost['input']:.2f} | ${cost['output']:.2f} | ${combined:.2f} | {avg_b:.2f} | {avg_a:.2f} | {gain:+.2f} | {qpd:.3f} |")
+        lines.append(f"| {name.title()} | `{model}` | ${cost['input']:.2f} | ${cost['output']:.2f} | ${combined:.2f} | {avg_b:.2f} | {avg_a:.2f} | {gain:+.02f} | {qpd:.3f} |")
     lines.append("")
 
     lines.append("### Cost-Quality Tradeoff\n")
@@ -337,11 +636,19 @@ def generate_comparison_report(
         lines.append("### Optimization Impact\n")
         lines.append("![Improvement Delta](charts/improvement_delta.png)\n")
 
+        lines.append("### Tier Breakdown\n")
+        lines.append("![Tier Breakdown](charts/tier_breakdown.png)\n")
+
+        lines.append("### Category Heatmap\n")
+        lines.append("![Category Heatmap](charts/category_heatmap.png)\n")
+
+    # --- Previous Run Comparison ---
+    lines.extend(_previous_run_comparison_section(all_results, ordered))
+
     # --- Key Findings & Recommendations ---
     lines.append("## Key Findings and Recommendations\n")
 
     if has_after:
-        # Compute stats for findings
         best_gain_name = max(ordered, key=lambda n: (
             sum(all_results[n].get("after", {}).values()) / max(len(all_results[n].get("after", {})), 1)
             - sum(all_results[n].get("before", {}).values()) / max(len(all_results[n].get("before", {})), 1)

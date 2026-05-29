@@ -6,6 +6,7 @@ from pathlib import Path
 from wrangler.analysis import (
     _prompt_evolution_summary,
     _cost_benefit_section,
+    compute_tier_scores,
     generate_agent_report,
     generate_comparison_report,
     METRIC_LABELS,
@@ -13,6 +14,50 @@ from wrangler.analysis import (
     AGENT_ORDER,
     MODEL_MAP,
 )
+
+
+class TestComputeTierScores:
+    def test_groups_by_tier(self):
+        per_case = [
+            {"quality": 0.8, "safety": 1.0},
+            {"quality": 0.6, "safety": 0.9},
+            {"quality": 0.9, "safety": 1.0},
+        ]
+        metadata = [
+            {"tier": "low"}, {"tier": "low"}, {"tier": "high"},
+        ]
+        result = compute_tier_scores(per_case, metadata, "tier")
+        assert "low" in result
+        assert "high" in result
+        assert abs(result["low"]["quality"] - 0.7) < 0.01
+        assert abs(result["high"]["quality"] - 0.9) < 0.01
+
+    def test_groups_by_category(self):
+        per_case = [
+            {"quality": 0.5}, {"quality": 0.9}, {"quality": 0.7},
+        ]
+        metadata = [
+            {"category": "search"}, {"category": "policy"}, {"category": "search"},
+        ]
+        result = compute_tier_scores(per_case, metadata, "category")
+        assert abs(result["search"]["quality"] - 0.6) < 0.01
+        assert abs(result["policy"]["quality"] - 0.9) < 0.01
+
+    def test_empty_inputs(self):
+        assert compute_tier_scores([], [], "tier") == {}
+
+    def test_mismatched_lengths(self):
+        per_case = [{"quality": 0.8}]
+        metadata = [{"tier": "low"}, {"tier": "high"}]
+        result = compute_tier_scores(per_case, metadata, "tier")
+        assert "low" in result
+        assert "high" not in result
+
+    def test_skips_empty_scores(self):
+        per_case = [{"quality": 0.8}, {}]
+        metadata = [{"tier": "low"}, {"tier": "low"}]
+        result = compute_tier_scores(per_case, metadata, "tier")
+        assert abs(result["low"]["quality"] - 0.8) < 0.01
 
 
 class TestPromptEvolutionSummary:
@@ -167,6 +212,31 @@ class TestGenerateAgentReport:
         assert "Improved:" in content
         assert "Regressed:" in content
         assert "Safety" in content
+
+
+    def test_report_with_per_case_data(self, tmp_path, sample_scores_before, sample_scores_after):
+        case_metadata = [
+            {"tier": "low", "category": "search"},
+            {"tier": "medium", "category": "policy"},
+        ]
+        per_case = [
+            {"final_response_quality_v1": 0.9, "safety_v1": 1.0},
+            {"final_response_quality_v1": 0.7, "safety_v1": 0.8},
+        ]
+        path = generate_agent_report(
+            "lite", "gemini-3.1-flash-lite", "123",
+            "Generic prompt",
+            "Optimized prompt with tool guidance.",
+            sample_scores_before, sample_scores_after,
+            output_dir=str(tmp_path),
+            before_per_case=per_case,
+            after_per_case=per_case,
+            case_metadata=case_metadata,
+        )
+        content = Path(path).read_text()
+        assert "Per-Tier Breakdown" in content
+        assert "Per-Category Capability" in content
+        assert "Total cases:" in content
 
 
 class TestGenerateComparisonReport:

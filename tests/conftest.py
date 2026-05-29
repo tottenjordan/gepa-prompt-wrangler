@@ -97,6 +97,30 @@ def manifest_dict():
 
 
 @pytest.fixture
+def sample_case_metadata():
+    return [
+        {"tier": "low", "category": "search", "prompt": "Find flights from SFO to JFK"},
+        {"tier": "low", "category": "search", "prompt": "Search hotels in Chicago"},
+        {"tier": "medium", "category": "policy", "prompt": "Check expense policy for meals"},
+        {"tier": "medium", "category": "expense", "prompt": "Submit $200 lodging expense"},
+        {"tier": "high", "category": "planning", "prompt": "Plan a 3-city trip with budget"},
+        {"tier": "high", "category": "planning", "prompt": "Compare flight+hotel packages"},
+    ]
+
+
+@pytest.fixture
+def sample_per_case_scores():
+    return [
+        {"final_response_quality_v1": 0.90, "safety_v1": 1.0, "tool_use_quality_v1": 0.80},
+        {"final_response_quality_v1": 0.85, "safety_v1": 0.95, "tool_use_quality_v1": 0.75},
+        {"final_response_quality_v1": 0.70, "safety_v1": 1.0, "tool_use_quality_v1": 0.60},
+        {"final_response_quality_v1": 0.75, "safety_v1": 0.90, "tool_use_quality_v1": 0.65},
+        {"final_response_quality_v1": 0.60, "safety_v1": 0.85, "tool_use_quality_v1": 0.50},
+        {"final_response_quality_v1": 0.55, "safety_v1": 0.80, "tool_use_quality_v1": 0.45},
+    ]
+
+
+@pytest.fixture
 def prompt_module_dir(tmp_path):
     def _create(agent_name="test"):
         prompts_dir = tmp_path / "prompts"

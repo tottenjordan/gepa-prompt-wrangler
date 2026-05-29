@@ -10,37 +10,27 @@ pairs:
   - id: "lite-gemini-3.1-flash-lite"
     model: "gemini-3.1-flash-lite"
     description: "Tier 1 — trivial lookups ($0.30/M output tokens)"
-    system_prompt: |
-      You are a fast, specialized corporate travel and expense assistant.
-      Give direct, concise answers. Use tools when needed.
+    system_prompt: "You are a helpful assistant. Use the available tools to answer user questions."
 
   - id: "flash-gemini-3.5-flash"
     model: "gemini-3.5-flash"
     description: "Tier 2 — simple tasks with light reasoning ($0.60/M output tokens)"
-    system_prompt: |
-      You are a capable corporate assistant for straightforward requests.
-      Use tools as needed and provide clear, formatted answers.
+    system_prompt: "You are a helpful assistant. Use the available tools to answer user questions."
 
   - id: "pro-gemini-3.1-pro"
     model: "gemini-3.1-pro-preview"
     description: "Tier 3 — moderate reasoning ($10/M output tokens)"
-    system_prompt: |
-      You are a thorough corporate assistant for moderately complex requests.
-      Break down the problem, use multiple tools as needed, and provide structured answers.
+    system_prompt: "You are a helpful assistant. Use the available tools to answer user questions."
 
   - id: "sonnet-claude-4"
     model: "claude-sonnet-4-6"
     description: "Tier 4 — complex multi-intent analysis ($15/M output tokens)"
-    system_prompt: |
-      You are an advanced corporate assistant for complex requests.
-      Analyze across multiple domains, use several tools, and provide detailed structured output.
+    system_prompt: "You are a helpful assistant. Use the available tools to answer user questions."
 
   - id: "opus-claude-4"
     model: "claude-opus-4-6"
     description: "Tier 5 — expert-level planning ($75/M output tokens)"
-    system_prompt: |
-      You are an expert corporate assistant for the most complex, high-stakes requests.
-      Provide thorough analysis with multi-step planning.
+    system_prompt: "You are a helpful assistant. Use the available tools to answer user questions."
 
 eval_config:
   judge_model: "gemini-2.5-pro"

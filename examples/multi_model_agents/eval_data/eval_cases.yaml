@@ -6,18 +6,24 @@ eval_cases:
   # Flight search
   - prompt: "Find flights from SFO to JFK"
     expected_response: "I found flights from SFO to JFK: United FL001 departing 08:00 at $450, and Delta FL002 departing 10:30 at $520."
+    tier: low
+    category: search
     expected_tools:
       - name: wrangler_search_mcp_search_flights
         args: {origin: SFO, destination: JFK}
 
   - prompt: "Search for flights from LAX to Chicago"
     expected_response: "American Airlines FL003 from LAX to ORD at $380, departing 07:00."
+    tier: low
+    category: search
     expected_tools:
       - name: wrangler_search_mcp_search_flights
         args: {origin: LAX, destination: ORD}
 
   - prompt: "Are there flights from SFO to Los Angeles?"
     expected_response: "Southwest FL005 from SFO to LAX at $150, departing 06:00."
+    tier: low
+    category: search
     expected_tools:
       - name: wrangler_search_mcp_search_flights
         args: {origin: SFO, destination: LAX}
@@ -25,18 +31,24 @@ eval_cases:
   # Hotel search
   - prompt: "Search for hotels in New York"
     expected_response: "Grand Hyatt New York at $320/night (4.5 rating) and Budget Inn Downtown at $120/night (3.2 rating)."
+    tier: low
+    category: search
     expected_tools:
       - name: wrangler_search_mcp_search_hotels
         args: {city: New York}
 
   - prompt: "Find hotels in New York under $200 per night"
     expected_response: "Budget Inn Downtown at $120/night (3.2 rating)."
+    tier: low
+    category: search
     expected_tools:
       - name: wrangler_search_mcp_search_hotels
         args: {city: New York, max_price: 200}
 
   - prompt: "Find me a hotel in Miami"
     expected_response: "Fontainebleau Miami at $400/night with a 4.7 rating."
+    tier: low
+    category: search
     expected_tools:
       - name: wrangler_search_mcp_search_hotels
         args: {city: Miami}
@@ -44,18 +56,24 @@ eval_cases:
   # Expense policy
   - prompt: "What is the corporate meal expense limit?"
     expected_response: "The corporate meal expense limit is $75.00. Amounts exceeding this limit require manager review and approval."
+    tier: low
+    category: policy
     expected_tools:
       - name: wrangler_expense_mcp_check_expense_policy
         args: {category: meals, amount: 75}
 
   - prompt: "Is a $50 transport expense within policy?"
     expected_response: "A $50 transport expense is within the corporate policy limit of $200."
+    tier: low
+    category: policy
     expected_tools:
       - name: wrangler_expense_mcp_check_expense_policy
         args: {category: transport, amount: 50}
 
   - prompt: "What's the lodging policy limit?"
     expected_response: "The corporate lodging policy limit is $400 per night."
+    tier: low
+    category: policy
     expected_tools:
       - name: wrangler_expense_mcp_check_expense_policy
         args: {category: lodging, amount: 400}
@@ -63,6 +81,8 @@ eval_cases:
   # Booking
   - prompt: "Book flight FL001 for Alice Johnson"
     expected_response: "Flight FL001 has been successfully booked for Alice Johnson. Booking confirmed."
+    tier: low
+    category: booking
     expected_tools:
       - name: wrangler_booking_mcp_book_flight
         args: {flight_id: FL001, passenger_name: Alice Johnson}
@@ -70,6 +90,8 @@ eval_cases:
   # Expense history
   - prompt: "Show expenses for user EMP001"
     expected_response: "Here are the expenses for user EMP001, showing expense ID, amount, category, description, date, and approval status for each entry."
+    tier: low
+    category: expense
     expected_tools:
       - name: wrangler_expense_mcp_get_user_expenses
         args: {user_id: EMP001}
@@ -77,18 +99,24 @@ eval_cases:
   # Edge cases
   - prompt: "Find flights from XYZ to ABC"
     expected_response: "No flights found for the route XYZ to ABC. Please provide valid airport codes."
+    tier: low
+    category: error_handling
     expected_tools:
       - name: wrangler_search_mcp_search_flights
         args: {origin: XYZ, destination: ABC}
 
   - prompt: "Search hotels in Atlantis"
     expected_response: "No hotels found in Atlantis. Please try a different city."
+    tier: low
+    category: error_handling
     expected_tools:
       - name: wrangler_search_mcp_search_hotels
         args: {city: Atlantis}
 
   - prompt: "Check policy for $500 in the 'unknown' category"
     expected_response: "The category 'unknown' is not valid. Valid categories: meals, transport, lodging, supplies, entertainment."
+    tier: low
+    category: error_handling
     expected_tools:
       - name: wrangler_expense_mcp_check_expense_policy
         args: {category: unknown, amount: 500}
@@ -100,6 +128,8 @@ eval_cases:
   # Submit with policy check
   - prompt: "Submit a $45 meals expense for lunch meeting, user ID EMP001"
     expected_response: "The $45 meals expense is within the $75 corporate policy limit. The expense has been successfully submitted for EMP001 and approved."
+    tier: medium
+    category: expense
     expected_tools:
       - name: wrangler_expense_mcp_check_expense_policy
         args: {category: meals, amount: 45}
@@ -109,6 +139,8 @@ eval_cases:
   # Over-limit submission
   - prompt: "Submit a $500 entertainment expense for team event, user ID EMP002"
     expected_response: "A $500 entertainment expense exceeds the $150 limit. Requires manager approval."
+    tier: medium
+    category: expense
     expected_tools:
       - name: wrangler_expense_mcp_check_expense_policy
         args: {category: entertainment, amount: 500}
@@ -116,6 +148,8 @@ eval_cases:
   # Flight comparison
   - prompt: "Find flights to JFK and compare the cheapest options by airline"
     expected_response: "United FL001 at $450 vs Delta FL002 at $520. United is $70 cheaper (13.5% savings)."
+    tier: medium
+    category: planning
     expected_tools:
       - name: wrangler_search_mcp_search_flights
         args: {destination: JFK}
@@ -123,6 +157,8 @@ eval_cases:
   # Search + policy cross-check
   - prompt: "Search hotels in New York, then check if the nightly rate fits our lodging policy"
     expected_response: "Grand Hyatt $320/night within $400 policy. Budget Inn $120/night within policy."
+    tier: medium
+    category: planning
     expected_tools:
       - name: wrangler_search_mcp_search_hotels
         args: {city: New York}
@@ -132,6 +168,8 @@ eval_cases:
   # Multi-category policy check
   - prompt: "Check if a $100 meal and a $250 entertainment expense are both within policy"
     expected_response: "Meals $100 exceeds $75 limit. Entertainment $250 exceeds $150 limit. Both need manager review."
+    tier: medium
+    category: policy
     expected_tools:
       - name: wrangler_expense_mcp_check_expense_policy
         args: {category: meals, amount: 100}
@@ -141,6 +179,8 @@ eval_cases:
   # History + analysis
   - prompt: "Show expense history for EMP001 and flag any items that exceeded policy limits"
     expected_response: "Here are the expenses for EMP001. I've reviewed each against the corporate policy limits and flagged any items that exceed the allowed amounts."
+    tier: medium
+    category: expense
     expected_tools:
       - name: wrangler_expense_mcp_get_user_expenses
         args: {user_id: EMP001}
@@ -148,6 +188,8 @@ eval_cases:
   # Price savings analysis
   - prompt: "Find the cheapest flight from SFO to JFK and tell me how much I'd save vs the most expensive"
     expected_response: "Cheapest: United FL001 at $450. Most expensive: Delta FL002 at $520. Savings: $70 (13.5%)."
+    tier: medium
+    category: planning
     expected_tools:
       - name: wrangler_search_mcp_search_flights
         args: {origin: SFO, destination: JFK}
@@ -155,6 +197,8 @@ eval_cases:
   # Book + policy verify
   - prompt: "Book hotel HT002 for Bob Smith June 15-18, and check if the rate is within lodging policy"
     expected_response: "Hotel HT002 (Palmer House, $250/night) booked for Bob Smith. Rate within $400 lodging policy."
+    tier: medium
+    category: booking
     expected_tools:
       - name: wrangler_booking_mcp_book_hotel
         args: {hotel_id: HT002, guest_name: Bob Smith, checkin: "2026-06-15", checkout: "2026-06-18"}
@@ -164,6 +208,8 @@ eval_cases:
   # Expense submission within policy
   - prompt: "Submit a $90 supplies expense for office materials, user ID EMP003"
     expected_response: "Expense submitted: $90 supplies for EMP003. Status: approved (within $100 policy limit)."
+    tier: medium
+    category: expense
     expected_tools:
       - name: wrangler_expense_mcp_check_expense_policy
         args: {category: supplies, amount: 90}
@@ -177,6 +223,8 @@ eval_cases:
   # Book + policy + expense pipeline
   - prompt: "Book flight FL001 for Alice, check if Grand Hyatt ($320) is within lodging policy, and submit a $75 meals expense for EMP001"
     expected_response: "FL001 booked for Alice. Grand Hyatt $320 within $400 policy. $75 meals submitted, approved."
+    tier: high
+    category: planning
     expected_tools:
       - name: wrangler_booking_mcp_book_flight
         args: {flight_id: FL001, passenger_name: Alice}
@@ -190,6 +238,8 @@ eval_cases:
   # Multi-route comparison with hotels
   - prompt: "Compare flights from SFO to JFK vs LAX to ORD, and find hotels in each destination city"
     expected_response: "SFO-JFK: FL001 $450, FL002 $520. NYC hotels: Grand Hyatt $320, Budget Inn $120. LAX-ORD: FL003 $380. Chicago hotels: Palmer House $250."
+    tier: high
+    category: planning
     expected_tools:
       - name: wrangler_search_mcp_search_flights
         args: {origin: SFO, destination: JFK}
@@ -203,6 +253,8 @@ eval_cases:
   # Budget-constrained trip planning
   - prompt: "I have a $2000 budget for a London trip. Find flights from JFK, hotels, and check lodging and meal policies. Can I afford it?"
     expected_response: "JFK-LHR: Delta FL006 at $890. London hotels: Claridge's $680/night. Lodging policy $400/night (exceeded). Meals $75/day. Budget analysis provided."
+    tier: high
+    category: planning
     expected_tools:
       - name: wrangler_search_mcp_search_flights
         args: {origin: JFK, destination: LHR}
@@ -216,6 +268,8 @@ eval_cases:
   # Review + audit + submit pipeline
   - prompt: "Review EMP002's expense history, check all policy categories, and submit a $80 supplies expense for EMP002"
     expected_response: "EMP002 history reviewed. Policy limits: meals $75, transport $200, lodging $400, supplies $100, entertainment $150. Supplies $80 submitted, approved."
+    tier: high
+    category: expense
     expected_tools:
       - name: wrangler_expense_mcp_get_user_expenses
         args: {user_id: EMP002}
@@ -227,6 +281,8 @@ eval_cases:
   # End-to-end trip booking
   - prompt: "Find the cheapest SFO-JFK flight, book it for Bob Smith, find a hotel within lodging policy, and submit a pre-trip expense estimate"
     expected_response: "Cheapest: FL001 $450. Booked for Bob Smith. Grand Hyatt $320 within $400 policy. Pre-trip estimate submitted."
+    tier: high
+    category: planning
     expected_tools:
       - name: wrangler_search_mcp_search_flights
         args: {origin: SFO, destination: JFK}
@@ -240,6 +296,8 @@ eval_cases:
   # Multi-user expense audit
   - prompt: "Pull expense histories for EMP001 and EMP002, flag any policy violations, and summarize total overspend"
     expected_response: "I've pulled expense histories for both EMP001 and EMP002. After reviewing against policy limits, I've identified any violations and summarized the total overspend by category."
+    tier: high
+    category: expense
     expected_tools:
       - name: wrangler_expense_mcp_get_user_expenses
         args: {user_id: EMP001}
@@ -252,12 +310,16 @@ eval_cases:
 
   - prompt: "Find flights from SFO to Denver"
     expected_response: "United FL008 from SFO to DEN at $320, departing 09:00."
+    tier: low
+    category: search
     expected_tools:
       - name: wrangler_search_mcp_search_flights
         args: {origin: SFO, destination: DEN}
 
   - prompt: "Search for hotels in Boston"
     expected_response: "The Liberty Boston at $350/night (4.6 rating)."
+    tier: low
+    category: search
     expected_tools:
       - name: wrangler_search_mcp_search_hotels
         args: {city: Boston}
@@ -268,6 +330,8 @@ eval_cases:
 
   - prompt: "Book flight FL003 for Carol Davis, then immediately cancel the booking"
     expected_response: "Flight FL003 booked for Carol Davis. Booking has been cancelled successfully."
+    tier: medium
+    category: cancellation
     expected_tools:
       - name: wrangler_booking_mcp_book_flight
         args: {flight_id: FL003, passenger_name: Carol Davis}
@@ -276,6 +340,8 @@ eval_cases:
 
   - prompt: "Book hotel HT001 for Dave Wilson June 15-17, then show me the booking details"
     expected_response: "Hotel HT001 booked for Dave Wilson (June 15-17). Booking details: Grand Hyatt New York, status confirmed."
+    tier: medium
+    category: cancellation
     expected_tools:
       - name: wrangler_booking_mcp_book_hotel
         args: {hotel_id: HT001, guest_name: Dave Wilson, checkin: "2026-06-15", checkout: "2026-06-17"}
@@ -288,18 +354,24 @@ eval_cases:
 
   - prompt: "Is a $75 meal expense within policy?"
     expected_response: "A $75 meal expense is exactly at the corporate policy limit of $75 and is within policy."
+    tier: low
+    category: boundary
     expected_tools:
       - name: wrangler_expense_mcp_check_expense_policy
         args: {category: meals, amount: 75}
 
   - prompt: "Is a $75.01 meal expense within policy?"
     expected_response: "A $75.01 meal expense exceeds the corporate policy limit of $75 by $0.01. This requires manager review."
+    tier: low
+    category: boundary
     expected_tools:
       - name: wrangler_expense_mcp_check_expense_policy
         args: {category: meals, amount: 75.01}
 
   - prompt: "Check if these expenses are within policy: $200 transport, $400 lodging, and $150 entertainment"
     expected_response: "Transport $200: within $200 limit. Lodging $400: within $400 limit. Entertainment $150: within $150 limit. All exactly at policy limits."
+    tier: medium
+    category: boundary
     expected_tools:
       - name: wrangler_expense_mcp_check_expense_policy
         args: {category: transport, amount: 200}
@@ -314,18 +386,24 @@ eval_cases:
 
   - prompt: "Cancel booking BK-DOESNOTEXIST"
     expected_response: "Booking BK-DOESNOTEXIST was not found. Please verify the booking ID and try again."
+    tier: low
+    category: error_handling
     expected_tools:
       - name: wrangler_booking_mcp_cancel_booking
         args: {booking_id: BK-DOESNOTEXIST}
 
   - prompt: "Show me the details for booking BK-INVALID123"
     expected_response: "Booking BK-INVALID123 was not found. Please check the booking ID."
+    tier: low
+    category: error_handling
     expected_tools:
       - name: wrangler_booking_mcp_get_booking_details
         args: {booking_id: BK-INVALID123}
 
   - prompt: "Find flights from Denver to Tokyo and book the cheapest one for Sam Chen"
     expected_response: "No flights found from Denver (DEN) to Tokyo (NRT). Unable to proceed with booking."
+    tier: medium
+    category: error_handling
     expected_tools:
       - name: wrangler_search_mcp_search_flights
         args: {origin: DEN, destination: NRT}
@@ -334,7 +412,8 @@ eval_cases:
   # OUT OF SCOPE
   # ============================================================
 
-  # Out of scope
   - prompt: "Can you help me write a Python script to process CSV files?"
     expected_response: "I can only help with travel bookings and expense management. For coding assistance, please use a different tool."
+    tier: low
+    category: error_handling
     expected_tools: []
