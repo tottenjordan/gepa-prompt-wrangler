@@ -1,4 +1,4 @@
-# Flash — GEPA Optimization Analysis
+# Flash — GEPA Optimization Analysis (wrangler_v3)
 
 ## Architecture
 
@@ -10,11 +10,12 @@
 - **Provider:** Google
 - **Input cost:** $1.5/M tokens
 - **Output cost:** $1.65/M tokens
-- **Engine ID:** `6589173623901126656`
+- **Engine ID:** `4703001008869998592`
 
 ## Eval Dataset
 
-- See eval_cases.yaml for case details
+- 40 cases from eval_cases.yaml (28 train / 12 val split)
+- GEPA local eval score: 0.667 (val set, seeded with lite v3 prompt)
 
 ## Metrics
 
@@ -30,32 +31,36 @@
 ## Original Prompt (Generic)
 
 ```
-
+You are a helpful assistant. Use the available tools to answer user questions.
 ```
+
+## Optimized Prompt (wrangler_v3)
+
+5004 characters — seeded from lite v3 prompt, expanded with hotel/flight booking, expense summaries, and list processing guidelines.
 
 ## Eval Results
 
-### Before Optimization
+### Before Optimization (Baseline)
 
 | Metric | Score |
 |--------|-------|
-| Response Quality | 1.00 |
+| Response Quality | 0.92 |
 | Hallucination | 1.00 |
-| Safety | 1.00 |
-| Tool Use | 0.40 |
-| Instruction Following | 0.48 |
-| Response Match | 0.42 |
+| Safety | 0.98 |
+| Tool Use | 0.41 |
+| Instruction Following | 0.80 |
+| Response Match | 0.78 |
 
-### After Optimization
+### After Optimization (wrangler_v3)
 
 | Metric | Before | After | Delta | Change |
 |--------|--------|-------|-------|--------|
-| Response Quality | 1.00 | 0.93 | -0.07 | -7% |
-| Hallucination | 1.00 | 0.99 | -0.01 | -1% |
-| Safety | 1.00 | 1.00 | +0.00 | +0% |
-| Tool Use | 0.40 | 0.43 | +0.03 | +6% |
-| Instruction Following | 0.48 | 0.54 | +0.06 | +11% |
-| Response Match | 0.42 | 0.57 | +0.15 | +37% |
+| Response Quality | 0.92 | 0.84 | -0.08 | -8% |
+| Hallucination | 1.00 | 0.95 | -0.05 | -5% |
+| Safety | 0.98 | 0.96 | -0.02 | -2% |
+| Tool Use | 0.41 | 0.47 | +0.06 | +15% |
+| Instruction Following | 0.80 | 0.78 | -0.02 | -3% |
+| Response Match | 0.78 | 0.82 | +0.04 | +6% |
 
 ## Cost-Benefit Analysis
 
@@ -64,15 +69,17 @@
 | Input cost | $1.5/M tokens |
 | Output cost | $1.65/M tokens |
 | Combined cost (in+out) | $3.15/M tokens |
-| Avg quality (before) | 0.72 |
-| Avg quality (after) | 0.74 |
-| Quality gain | +0.03 (+3.7%) |
-| Quality per $/M tokens | 0.236 |
+| Avg quality (before) | 0.82 |
+| Avg quality (after) | 0.80 |
+| Quality gain | -0.02 (-1.8%) |
+| Quality per $/M tokens | 0.255 |
 
-GEPA optimization improved average quality by **+3.7%** at a cost of **$3.15/M tokens** (combined input+output). The quality gain comes at zero additional inference cost — only the system prompt changed.
+GEPA optimization produced a slight overall regression (-1.8%) while improving tool use and response match. Flash had the hardest time with GEPA optimization — the optimizer struggled to beat baseline in both generic-seeded and lite-seeded runs.
 
 ## Key Observations
 
-- Average score changed from **0.72** to **0.74** (+3.7%)
-- **Improved:** Tool Use, Instruction Following, Response Match
-- **Regressed:** Response Quality, Hallucination
+- Average score decreased slightly from **0.82** to **0.80** (-1.8%)
+- **Improved:** Tool Use (+15%), Response Match (+6%)
+- **Regressed:** Response Quality (-8%), Hallucination (-5%), Safety (-2%), Instruction Following (-3%)
+- GEPA hit a ceiling at 0.667 local val score regardless of seed prompt
+- Flash may benefit more from few-shot examples than system prompt optimization
