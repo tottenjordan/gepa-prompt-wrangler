@@ -110,7 +110,7 @@ class TestCostBenefitSection:
         lines = _cost_benefit_section("gemini-3.5-flash", before, after)
         joined = "\n".join(lines)
         assert "$1.5" in joined or "$1.50" in joined
-        assert "$1.65" in joined
+        assert "$9.0" in joined
 
     def test_unknown_model_uses_zero_costs(self):
         before = {"final_response_quality_v1": 0.5}

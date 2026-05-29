@@ -23,7 +23,7 @@ EVAL_OUTPUT_DIR = os.environ.get("EVAL_OUTPUT_DIR", "eval_outputs")
 # Source: https://cloud.google.com/gemini-enterprise-agent-platform/generative-ai/pricing
 MODEL_COSTS = {
     "gemini-3.1-flash-lite": {"input": 0.25, "output": 1.5},
-    "gemini-3.5-flash": {"input": 1.50, "output": 1.65},
+    "gemini-3.5-flash": {"input": 1.50, "output": 9.0},
     "gemini-3.1-pro-preview": {"input": 4.0, "output": 18.0},
     "claude-sonnet-4-6": {"input": 3.0, "output": 15.0},
     "claude-opus-4-6": {"input": 5.0, "output": 25.0},

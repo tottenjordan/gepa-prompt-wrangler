@@ -322,12 +322,12 @@ expected_tools:
 | | GEPA Evalset | Batch Eval Dataset |
 |---|---|---|
 | Format | ADK JSON (`.evalset.json`) | Simplified YAML |
-| Location | `agents/{name}_opt/{name}_eval_set.evalset.json` | `eval_data/example_eval.yaml` |
-| Cases | 15 (balanced: 5 low + 5 medium + 5 high) | 30 (14 low + 9 medium + 7 high) |
+| Location | `agents/{name}_opt/{name}_eval_set.evalset.json` | `eval_data/eval_cases.yaml` |
+| Cases | 40 (28 train / 12 val, stratified split) | 40 (21 low + 13 medium + 6 high) |
 | Used by | Local GEPA optimizer | Vertex AI Evaluation Service |
 | Purpose | Train — optimize prompt candidates | Test — measure deployed agent quality |
 
-The GEPA evalset is a balanced subset of the batch eval dataset. This train/test split ensures GEPA-optimized prompts generalize to unseen cases.
+The GEPA evalset uses all 40 cases with a stratified train/val split (28/12). The train set is used for optimization; the validation set provides an unbiased estimate of generalization.
 
 ---
 
@@ -512,7 +512,7 @@ See [docs/online_eval_guide.md](docs/online_eval_guide.md) for details on evalua
 |-------|----------|----------|----------|-----------|
 | `gemini-2.5-flash` | Google | Regional | — | — |
 | `gemini-3.1-flash-lite` | Google | Global (LiteLLM) | $0.25 | $1.50 |
-| `gemini-3.5-flash` | Google | Global (LiteLLM) | $1.50 | $1.65 |
+| `gemini-3.5-flash` | Google | Global (LiteLLM) | $1.50 | $9.00 |
 | `gemini-3.1-pro-preview` | Google | Global (LiteLLM) | $4.00 | $18.00 |
 | `claude-sonnet-4-6` | Anthropic | Global (LiteLLM) | $3.00 | $15.00 |
 | `claude-opus-4-6` | Anthropic | Global (LiteLLM) | $5.00 | $25.00 |
