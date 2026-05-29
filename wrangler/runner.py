@@ -138,11 +138,12 @@ class WranglerPipeline:
             print(f"  [{pair.id}] Warning: prompts file not found at {prompts_file}", flush=True)
             return
 
+        judge = self.manifest.eval_config.get("judge_model", "gemini-2.5-pro")
         entry = {
             "prompt": prompt,
             "source": "wrangler sequential GEPA optimization",
             "eval_cases": self.results.get("_eval_metadata", {}).get("case_count", 40),
-            "judge_model": "gemini-2.5-pro",
+            "judge_model": judge,
             "notes": "Sequential optimization (no parallel contention), 40-case evalset",
             "timestamp": datetime.now().isoformat(),
         }

@@ -197,13 +197,21 @@ def generate_evalset(from_path: str, output: str, count: int, balanced: bool, ap
 @main.command()
 @click.argument("manifest", default="manifest.yaml")
 @click.option("--pair", "-p", help="Optimize only a specific pair by ID.")
-def optimize(manifest: str, pair: str):
+@click.option("--judge-model", "-j", default=None, help="Judge model for GEPA eval (default: gemini-2.5-pro).")
+@click.option("--multi-judge", is_flag=True, help="Enable multi-judge ensemble scoring.")
+def optimize(manifest: str, pair: str, judge_model: str, multi_judge: bool):
     """Run GEPA optimization for pairs in the manifest."""
     from .factory import PairFactory
     from .optimizer import optimize as run_optimize
 
     m = PairFactory.load(manifest)
     pairs = [m.get_pair(pair)] if pair else m.pairs
+
+    effective_judge = judge_model or m.eval_config.get("judge_model", "gemini-2.5-pro")
+    if judge_model:
+        click.echo(f"Using judge model: {effective_judge}")
+    if multi_judge:
+        click.echo("Multi-judge ensemble enabled")
 
     for p in pairs:
         click.echo(f"\n[{p.id}] Optimizing with model {p.model}...")

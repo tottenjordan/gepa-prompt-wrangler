@@ -160,6 +160,38 @@ def main():
                         "judge_model_options": {"judge_model": "gemini-2.5-pro"},
                     },
                     "safety_v1": 0.8,
+                    "rubric_based_final_response_quality_v1": {
+                        "threshold": 0.5,
+                        "judge_model_options": {"judge_model": "gemini-2.5-pro"},
+                        "rubrics": [
+                            {
+                                "rubric_id": "instruction_adherence",
+                                "rubric_content": {
+                                    "text_property": (
+                                        "The agent's response follows all instructions"
+                                        " in the system prompt, including formatting,"
+                                        " tone, and content requirements."
+                                    )
+                                },
+                                "type": "INSTRUCTION_ADHERENCE",
+                            },
+                            {
+                                "rubric_id": "completeness",
+                                "rubric_content": {
+                                    "text_property": (
+                                        "The agent's response fully addresses all parts"
+                                        " of the user's request without omitting"
+                                        " relevant information."
+                                    )
+                                },
+                                "type": "FINAL_RESPONSE_QUALITY",
+                            },
+                        ],
+                    },
+                    "rubric_based_tool_use_quality_v1": {
+                        "threshold": 0.5,
+                        "judge_model_options": {"judge_model": "gemini-2.5-pro"},
+                    },
                 }
             },
             "app_name": app_name,

@@ -8,53 +8,81 @@
           "judge_model": "gemini-2.5-pro"
         }
       },
-      "safety_v1": 0.8
+      "safety_v1": 0.8,
+      "rubric_based_final_response_quality_v1": {
+        "threshold": 0.5,
+        "judge_model_options": {
+          "judge_model": "gemini-2.5-pro"
+        },
+        "rubrics": [
+          {
+            "rubric_id": "instruction_adherence",
+            "rubric_content": {
+              "text_property": "The agent's response follows all instructions in the system prompt, including formatting, tone, and content requirements."
+            },
+            "type": "INSTRUCTION_ADHERENCE"
+          },
+          {
+            "rubric_id": "completeness",
+            "rubric_content": {
+              "text_property": "The agent's response fully addresses all parts of the user's request without omitting relevant information."
+            },
+            "type": "FINAL_RESPONSE_QUALITY"
+          }
+        ]
+      },
+      "rubric_based_tool_use_quality_v1": {
+        "threshold": 0.5,
+        "judge_model_options": {
+          "judge_model": "gemini-2.5-pro"
+        }
+      }
     }
   },
   "app_name": "sonnet_opt",
   "train_eval_set": "sonnet_eval_set",
   "train_eval_case_ids": [
-    "case_1_low",
-    "case_2_low",
-    "case_4_low",
-    "case_5_low",
-    "case_6_low",
-    "case_30_low",
-    "case_7_low",
-    "case_8_low",
-    "case_10_low",
-    "case_11_low",
-    "case_12_low",
-    "case_13_low",
-    "case_14_low",
-    "case_37_low",
-    "case_34_low",
-    "case_15_medium",
-    "case_16_medium",
-    "case_23_medium",
-    "case_17_medium",
-    "case_18_medium",
-    "case_19_medium",
-    "case_22_medium",
-    "case_32_medium",
-    "case_36_medium",
-    "case_24_high",
-    "case_25_high",
-    "case_28_high",
-    "case_27_high"
+    "case_1_low_search",
+    "case_2_low_search",
+    "case_4_low_search",
+    "case_5_low_search",
+    "case_6_low_search",
+    "case_30_low_search",
+    "case_7_low_policy",
+    "case_8_low_policy",
+    "case_10_low_booking",
+    "case_11_low_expense",
+    "case_12_low_error_handling",
+    "case_13_low_error_handling",
+    "case_14_low_error_handling",
+    "case_37_low_error_handling",
+    "case_34_low_boundary",
+    "case_15_medium_expense",
+    "case_16_medium_expense",
+    "case_23_medium_expense",
+    "case_17_medium_planning",
+    "case_18_medium_planning",
+    "case_19_medium_policy",
+    "case_22_medium_booking",
+    "case_32_medium_cancellation",
+    "case_36_medium_boundary",
+    "case_24_high_planning",
+    "case_25_high_planning",
+    "case_28_high_planning",
+    "case_27_high_expense"
   ],
   "validation_eval_case_ids": [
-    "case_3_low",
-    "case_31_low",
-    "case_9_low",
-    "case_35_low",
-    "case_38_low",
-    "case_40_low",
-    "case_20_medium",
-    "case_21_medium",
-    "case_33_medium",
-    "case_39_medium",
-    "case_26_high",
-    "case_29_high"
+    "case_3_low_search",
+    "case_31_low_search",
+    "case_9_low_policy",
+    "case_35_low_boundary",
+    "case_38_low_error_handling",
+    "case_40_low_error_handling",
+    "case_20_medium_expense",
+    "case_21_medium_planning",
+    "case_33_medium_cancellation",
+    "case_39_medium_error_handling",
+    "case_26_high_planning",
+    "case_29_high_expense"
   ]
 }

@@ -321,6 +321,7 @@ def generate_sampler_config(
     output_dir: str | Path | None = None,
     train_eval_case_ids: list[str] | None = None,
     validation_eval_case_ids: list[str] | None = None,
+    multi_judge: bool = False,
 ) -> dict:
     """Generate a GEPA sampler config.
 
@@ -344,11 +345,52 @@ def generate_sampler_config(
                     "judge_model_options": {"judge_model": judge_model},
                 },
                 "safety_v1": 0.8,
+                "rubric_based_final_response_quality_v1": {
+                    "threshold": 0.5,
+                    "judge_model_options": {"judge_model": judge_model},
+                    "rubrics": [
+                        {
+                            "rubric_id": "instruction_adherence",
+                            "rubric_content": {
+                                "text_property": (
+                                    "The agent's response follows all instructions"
+                                    " in the system prompt, including formatting,"
+                                    " tone, and content requirements."
+                                )
+                            },
+                            "type": "INSTRUCTION_ADHERENCE",
+                        },
+                        {
+                            "rubric_id": "completeness",
+                            "rubric_content": {
+                                "text_property": (
+                                    "The agent's response fully addresses all parts"
+                                    " of the user's request without omitting"
+                                    " relevant information."
+                                )
+                            },
+                            "type": "FINAL_RESPONSE_QUALITY",
+                        },
+                    ],
+                },
+                "rubric_based_tool_use_quality_v1": {
+                    "threshold": 0.5,
+                    "judge_model_options": {"judge_model": judge_model},
+                },
             }
         },
         "app_name": app_name,
         "train_eval_set": eval_set_name,
     }
+
+    if multi_judge:
+        config["eval_config"]["criteria"]["multi_judge_quality"] = 0.5
+        config["eval_config"]["custom_metrics"] = {
+            "multi_judge_quality": {
+                "code_config": {"name": "wrangler.multi_judge.evaluate"},
+                "description": "Multi-model ensemble quality score",
+            }
+        }
 
     if train_eval_case_ids is not None:
         config["train_eval_case_ids"] = train_eval_case_ids
