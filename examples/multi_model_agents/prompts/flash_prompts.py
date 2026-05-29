@@ -150,6 +150,6 @@ Here's how to operate:
         "eval_cases": 40,
         "judge_model": "gemini-2.5-pro",
         "notes": "Solo re-run with train/val split (28/12), 40-case evalset",
-        "timestamp": "2026-05-29T14:35:32.111667",
+        "timestamp": "2026-05-29T20:45:10.023557",
     },
 }

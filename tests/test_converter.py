@@ -192,6 +192,11 @@ class TestSamplerConfig:
         assert "instruction_adherence" in rubric_ids
         assert "completeness" in rubric_ids
 
+        tool_rubrics = criteria["rubric_based_tool_use_quality_v1"]["rubrics"]
+        tool_rubric_ids = [r["rubric_id"] for r in tool_rubrics]
+        assert "correct_tool_selection" in tool_rubric_ids
+        assert "correct_parameters" in tool_rubric_ids
+
     def test_judge_model_propagated(self):
         from wrangler.converter import generate_sampler_config
 

@@ -376,6 +376,28 @@ def generate_sampler_config(
                 "rubric_based_tool_use_quality_v1": {
                     "threshold": 0.5,
                     "judge_model_options": {"judge_model": judge_model},
+                    "rubrics": [
+                        {
+                            "rubric_id": "correct_tool_selection",
+                            "rubric_content": {
+                                "text_property": (
+                                    "The agent selected the correct tool(s)"
+                                    " for the user's request."
+                                )
+                            },
+                            "type": "TOOL_USE_QUALITY",
+                        },
+                        {
+                            "rubric_id": "correct_parameters",
+                            "rubric_content": {
+                                "text_property": (
+                                    "The agent provided accurate and complete"
+                                    " parameters to the tool(s)."
+                                )
+                            },
+                            "type": "TOOL_USE_QUALITY",
+                        },
+                    ],
                 },
             }
         },
