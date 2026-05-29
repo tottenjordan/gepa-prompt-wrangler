@@ -1,7 +1,13 @@
 """Global configuration — GCP project settings, MCP server URLs, model configs, and eval params."""
 
 import os
+import warnings
 from dotenv import load_dotenv
+
+os.environ.setdefault("ADK_SUPPRESS_GEMINI_LITELLM_WARNINGS", "true")
+warnings.filterwarnings("ignore", message=".*EXPERIMENTAL.*")
+warnings.filterwarnings("ignore", message=".*GEMINI_VIA_LITELLM.*")
+
 from google.adk.models.lite_llm import LiteLlm
 
 load_dotenv()

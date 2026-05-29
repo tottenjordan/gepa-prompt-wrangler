@@ -1,7 +1,7 @@
 """Prompt versions for the flash agent.
 
 Each version is stored with metadata about its source and optimization config.
-Set ACTIVE to whichever prompt you want deployed.
+Pipeline uses manifest.yaml system_prompt; agents import GENERIC directly.
 """
 
 GENERIC = "You are a helpful assistant. Use the available tools to answer user questions."
@@ -108,6 +108,3 @@ Here are the guidelines for your responses:
         "timestamp": "2026-05-22T19:03:26.498422",
     },
 }
-
-# Which prompt to use for deployment
-ACTIVE = OPTIMIZED["wrangler_v2"]["prompt"]

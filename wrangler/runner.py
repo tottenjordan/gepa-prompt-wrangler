@@ -1,11 +1,18 @@
 """Pipeline runner — orchestrates the full deploy → eval → optimize → redeploy → eval → report workflow."""
 
 import json
+import os
 import time
+import warnings
 from collections import Counter
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
+
+os.environ.setdefault("ADK_SUPPRESS_GEMINI_LITELLM_WARNINGS", "true")
+warnings.filterwarnings("ignore", message=".*EXPERIMENTAL.*")
+warnings.filterwarnings("ignore", message=".*GEMINI_VIA_LITELLM.*")
 
 from .factory import PairFactory, AgentPromptPair, Manifest
 from .converter import load_eval_file
@@ -54,15 +61,21 @@ class WranglerPipeline:
         import importlib.util
         import sys
 
-        agent_path = self.manifest_dir / self.manifest.agent_module
+        module_ref = pair.agent_module or self.manifest.agent_module
+        agent_path = self.manifest_dir / module_ref
         if not agent_path.exists():
-            agent_path = Path(self.manifest.agent_module)
+            agent_path = Path(module_ref)
 
-        init_file = agent_path / "__init__.py"
-        if not init_file.exists():
-            for py_file in agent_path.glob("*.py"):
-                init_file = py_file
-                break
+        if agent_path.is_file():
+            init_file = agent_path
+        elif not agent_path.suffix and (agent_path.with_suffix(".py")).is_file():
+            init_file = agent_path.with_suffix(".py")
+        else:
+            init_file = agent_path / "__init__.py"
+            if not init_file.exists():
+                for py_file in agent_path.glob("*.py"):
+                    init_file = py_file
+                    break
 
         spec = importlib.util.spec_from_file_location(f"_agent_{pair.id}", str(init_file))
         module = importlib.util.module_from_spec(spec)
@@ -93,6 +106,36 @@ class WranglerPipeline:
             f"    2. agent.root_agent — SimpleNamespace wrapping an LlmAgent\n"
             f"    3. root_agent — LlmAgent directly"
         )
+
+    def _run_eval_parallel(self, eval_cases: list[dict], n_pairs: int, phase: str, max_concurrent: int = 2):
+        """Run batch eval for all agents in staggered parallel batches."""
+        score_key = "before" if phase == "before" else "after"
+        per_case_key = f"{score_key}_per_case"
+
+        def _eval_one(pair: AgentPromptPair) -> tuple[str, EvalResult, float]:
+            engine_id = self.results[pair.id]["engine_id"]
+            t0 = time.time()
+            result = run_batch_eval(engine_id, eval_cases, agent_name=pair.id)
+            elapsed = time.time() - t0
+            return pair.id, result, elapsed
+
+        pairs = list(self.manifest.pairs)
+        for batch_start in range(0, len(pairs), max_concurrent):
+            batch = pairs[batch_start:batch_start + max_concurrent]
+            batch_num = batch_start // max_concurrent + 1
+            total_batches = (len(pairs) + max_concurrent - 1) // max_concurrent
+            print(f"\n  --- Batch {batch_num}/{total_batches} ({len(batch)} agents) ---", flush=True)
+
+            with ThreadPoolExecutor(max_workers=max_concurrent) as pool:
+                futures = {pool.submit(_eval_one, pair): pair for pair in batch}
+                for future in as_completed(futures):
+                    pair_id, result, elapsed = future.result()
+                    self.results[pair_id][score_key] = result.scores
+                    self.results[pair_id][per_case_key] = result.per_case
+                    avg = sum(result.scores.values()) / max(len(result.scores), 1)
+                    print(f"  [{pair_id}] Done ({_fmt_duration(elapsed)}) — avg score: {avg:.2f}")
+                    for m, s in sorted(result.scores.items()):
+                        print(f"    {m:40s} {s:.2f}")
 
     def _preflight(self, eval_cases: list[dict]):
         """Validate eval data before running the pipeline."""
@@ -160,20 +203,9 @@ class WranglerPipeline:
                     self.results[pair.id]["engine_id"] = engine_id
                     print(f" {_fmt_duration(time.time() - t0)}")
 
-        # Phase 2: Baseline eval
+        # Phase 2: Baseline eval (parallel)
         with self._phase("Phase 2: Baseline Evaluation"):
-            for i, pair in enumerate(self.manifest.pairs, 1):
-                engine_id = self.results[pair.id]["engine_id"]
-                print(f"\n  [{pair.id}] ({i}/{n_pairs})")
-                t0 = time.time()
-                result = run_batch_eval(engine_id, eval_cases)
-                self.results[pair.id]["before"] = result.scores
-                self.results[pair.id]["before_per_case"] = result.per_case
-                avg = sum(result.scores.values()) / max(len(result.scores), 1)
-                print(f"  [{pair.id}] ({i}/{n_pairs}) Done ({_fmt_duration(time.time() - t0)}) "
-                      f"— avg score: {avg:.2f}")
-                for m, s in sorted(result.scores.items()):
-                    print(f"    {m:40s} {s:.2f}")
+            self._run_eval_parallel(eval_cases, n_pairs, phase="before")
 
         # Phase 3: GEPA optimize
         with self._phase("Phase 3: GEPA Optimization"):
@@ -198,20 +230,9 @@ class WranglerPipeline:
                 deployer.update_agent(agent, engine_id, display_name=pair.id)
                 print(f" {_fmt_duration(time.time() - t0)}")
 
-        # Phase 5: Post-optimization eval
+        # Phase 5: Post-optimization eval (parallel)
         with self._phase("Phase 5: Post-Optimization Evaluation"):
-            for i, pair in enumerate(self.manifest.pairs, 1):
-                engine_id = self.results[pair.id]["engine_id"]
-                print(f"\n  [{pair.id}] ({i}/{n_pairs})")
-                t0 = time.time()
-                result = run_batch_eval(engine_id, eval_cases)
-                self.results[pair.id]["after"] = result.scores
-                self.results[pair.id]["after_per_case"] = result.per_case
-                avg = sum(result.scores.values()) / max(len(result.scores), 1)
-                print(f"  [{pair.id}] ({i}/{n_pairs}) Done ({_fmt_duration(time.time() - t0)}) "
-                      f"— avg score: {avg:.2f}")
-                for m, s in sorted(result.scores.items()):
-                    print(f"    {m:40s} {s:.2f}")
+            self._run_eval_parallel(eval_cases, n_pairs, phase="after")
 
         # Phase 6: Generate report
         with self._phase("Phase 6: Generate Report"):

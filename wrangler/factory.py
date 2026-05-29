@@ -20,6 +20,7 @@ class AgentPromptPair:
     description: str = ""
     tags: list[str] = field(default_factory=list)
     engine_id: str = ""
+    agent_module: str = ""
 
     def summary(self) -> str:
         """One-line summary for display."""
@@ -88,6 +89,7 @@ class PairFactory:
                     description=entry.get("description", ""),
                     tags=entry.get("tags", []),
                     engine_id=entry.get("engine_id", ""),
+                    agent_module=entry.get("agent_module", ""),
                 )
             )
 

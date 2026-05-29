@@ -10,26 +10,36 @@ pairs:
   - id: "lite-gemini-3.1-flash-lite"
     model: "gemini-3.1-flash-lite"
     description: "Tier 1 — trivial lookups ($0.30/M output tokens)"
+    agent_module: "examples/multi_model_agents/agents/lite_agent.py"
+    engine_id: "8685308979372359680"
     system_prompt: "You are a helpful assistant. Use the available tools to answer user questions."
 
   - id: "flash-gemini-3.5-flash"
     model: "gemini-3.5-flash"
     description: "Tier 2 — simple tasks with light reasoning ($0.60/M output tokens)"
+    agent_module: "examples/multi_model_agents/agents/flash_agent.py"
+    engine_id: "4703001008869998592"
     system_prompt: "You are a helpful assistant. Use the available tools to answer user questions."
 
   - id: "pro-gemini-3.1-pro"
     model: "gemini-3.1-pro-preview"
     description: "Tier 3 — moderate reasoning ($10/M output tokens)"
+    agent_module: "examples/multi_model_agents/agents/pro_agent.py"
+    engine_id: "6112627692236963840"
     system_prompt: "You are a helpful assistant. Use the available tools to answer user questions."
 
   - id: "sonnet-claude-4"
     model: "claude-sonnet-4-6"
     description: "Tier 4 — complex multi-intent analysis ($15/M output tokens)"
+    agent_module: "examples/multi_model_agents/agents/sonnet_agent.py"
+    engine_id: "1374840884243202048"
     system_prompt: "You are a helpful assistant. Use the available tools to answer user questions."
 
   - id: "opus-claude-4"
     model: "claude-opus-4-6"
     description: "Tier 5 — expert-level planning ($75/M output tokens)"
+    agent_module: "examples/multi_model_agents/agents/opus_agent.py"
+    engine_id: "4549878621539401728"
     system_prompt: "You are a helpful assistant. Use the available tools to answer user questions."
 
 eval_config:

@@ -156,7 +156,7 @@ def eval_cmd(manifest: str, pair: str, engine_id: str, eval_data: str):
         click.echo("Error: --engine-id is required. Deploy the agent first with 'wrangler deploy'.")
         raise SystemExit(1)
 
-    result = run_batch_eval(engine_id, eval_cases)
+    result = run_batch_eval(engine_id, eval_cases, agent_name=engine_id)
     click.echo(f"\nResults:")
     for metric, score in sorted(result.scores.items()):
         click.echo(f"  {metric:40s} {score:.2f}")

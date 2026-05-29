@@ -1,7 +1,12 @@
 """Batch evaluation — runs inference + evaluation against deployed agents on GEAP."""
 
 import time
+import warnings
 from dataclasses import dataclass, field
+
+warnings.filterwarnings("ignore", category=DeprecationWarning, module="vertexai")
+warnings.filterwarnings("ignore", message=".*ExperimentalWarning.*")
+warnings.filterwarnings("ignore", message=".*experimental.*")
 
 import pandas as pd
 import vertexai
@@ -85,12 +90,23 @@ def _extract_per_case_scores(evaluation_run) -> list[dict[str, float]]:
     return per_case
 
 
+def _fmt_elapsed(t0: float) -> str:
+    s = int(time.time() - t0)
+    if s < 60:
+        return f"{s}s"
+    m, s = divmod(s, 60)
+    return f"{m}m {s:02d}s"
+
+
 def run_batch_eval(
     engine_id: str,
     eval_cases: list[dict],
     metrics: list | None = None,
+    agent_name: str = "",
 ) -> EvalResult:
     """Run batch eval against a deployed agent. Returns EvalResult with aggregate and per-case scores."""
+    tag = f"[{agent_name}] " if agent_name else ""
+
     vertexai.init(
         project=GCP_PROJECT_ID,
         location=GCP_REGION,
@@ -103,37 +119,45 @@ def run_batch_eval(
 
     eval_df = _build_eval_dataset(eval_cases)
 
-    print(f"  Running inference ({len(eval_cases)} cases)...", end="", flush=True)
+    print(f"  {tag}Inference: sending {len(eval_cases)} cases to engine {engine_id}...", flush=True)
     t0 = time.time()
     inference_result = client.evals.run_inference(
         agent=agent_resource,
         src=eval_df,
     )
-    print(f" {time.time() - t0:.0f}s")
+    print(f"  {tag}Inference complete ({_fmt_elapsed(t0)})", flush=True)
 
-    print(f"  Creating evaluation run...", end="", flush=True)
+    print(f"  {tag}Scoring: creating evaluation run ({len(metrics)} metrics)...", flush=True)
+    eval_t0 = time.time()
     evaluation_run = client.evals.create_evaluation_run(
         dataset=inference_result,
         agent=agent_resource,
         metrics=metrics,
         dest=GCS_EVAL_DEST,
     )
+    run_id = evaluation_run.name.split("/")[-1] if evaluation_run.name else "unknown"
+    print(f"  {tag}Scoring: eval run {run_id} created, polling for results...", flush=True)
 
     poll_start = time.time()
+    poll_count = 0
     while time.time() - poll_start < MAX_POLL_SECONDS:
         evaluation_run = client.evals.get_evaluation_run(name=evaluation_run.name)
         state = str(getattr(evaluation_run, "state", ""))
         if "SUCCEEDED" in state or "FAILED" in state or "CANCELLED" in state:
             break
-        print(".", end="", flush=True)
+        poll_count += 1
+        if poll_count % 4 == 0:
+            print(f"  {tag}Scoring: still waiting... ({_fmt_elapsed(eval_t0)})", flush=True)
         time.sleep(15)
-    print(f" {state}")
+
+    print(f"  {tag}Scoring: {state} ({_fmt_elapsed(eval_t0)})", flush=True)
 
     if "FAILED" in state:
         err = getattr(evaluation_run, "error", None)
-        print(f"  ERROR: {err}")
+        print(f"  {tag}ERROR: {err}")
         return EvalResult()
 
+    print(f"  {tag}Fetching per-case results...", flush=True)
     evaluation_run = client.evals.get_evaluation_run(
         name=evaluation_run.name,
         include_evaluation_items=True,
@@ -149,7 +173,7 @@ def run_batch_eval(
                 if nested:
                     raw_metrics = dict(nested) if not isinstance(nested, dict) else nested
     except Exception as e:
-        print(f"  Warning: {e}")
+        print(f"  {tag}Warning: {e}")
 
     scores = {}
     for key, value in raw_metrics.items():
@@ -160,6 +184,7 @@ def run_batch_eval(
 
     per_case = _extract_per_case_scores(evaluation_run)
 
+    print(f"  {tag}Eval complete — total: {_fmt_elapsed(t0)}, {len(scores)} metrics, {len(per_case)} cases", flush=True)
     return EvalResult(scores=scores, per_case=per_case)
 
 

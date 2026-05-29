@@ -10,7 +10,7 @@ from google.adk.tools.preload_memory_tool import PreloadMemoryTool
 
 from config import LITE_MODEL, SEARCH_MCP_SERVER, BOOKING_MCP_SERVER, EXPENSE_MCP_SERVER, resolve_model
 from registry import get_mcp_tools
-from prompts.lite_prompts import ACTIVE as INSTRUCTION
+from prompts.lite_prompts import GENERIC as INSTRUCTION
 
 AGENT_DESCRIPTION = "Corporate travel and expense assistant with access to flight, hotel, and expense management tools."
 

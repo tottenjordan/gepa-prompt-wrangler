@@ -1,7 +1,7 @@
 """Prompt versions for the lite agent.
 
 Each version is stored with metadata about its source and optimization config.
-Set ACTIVE to whichever prompt you want deployed.
+Pipeline uses manifest.yaml system_prompt; agents import GENERIC directly.
 """
 
 GENERIC = "You are a helpful assistant. Use the available tools to answer user questions."
@@ -98,6 +98,3 @@ Here are some specific guidelines and known policy details to assist you:
         "timestamp": "2026-05-22T17:18:56.059383",
     },
 }
-
-# Which prompt to use for deployment
-ACTIVE = OPTIMIZED["wrangler_v2"]["prompt"]
