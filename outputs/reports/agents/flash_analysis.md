@@ -8,8 +8,8 @@
 
 - **Model:** `gemini-3.5-flash`
 - **Provider:** Google
-- **Input cost:** $1.5/M tokens
-- **Output cost:** $1.65/M tokens
+- **Input cost:** $1.50/M tokens
+- **Output cost:** $9.00/M tokens
 - **Engine ID:** `4703001008869998592`
 
 ## Eval Dataset
@@ -66,13 +66,13 @@ You are a helpful assistant. Use the available tools to answer user questions.
 
 | Metric | Value |
 |--------|-------|
-| Input cost | $1.5/M tokens |
-| Output cost | $1.65/M tokens |
-| Combined cost (in+out) | $3.15/M tokens |
+| Input cost | $1.50/M tokens |
+| Output cost | $9.00/M tokens |
+| Combined cost (in+out) | $10.50/M tokens |
 | Avg quality (before) | 0.82 |
 | Avg quality (after) | 0.80 |
 | Quality gain | -0.02 (-1.8%) |
-| Quality per $/M tokens | 0.255 |
+| Quality per $/M tokens | 0.076 |
 
 GEPA optimization produced a slight overall regression (-1.8%) while improving tool use and response match. Flash had the hardest time with GEPA optimization — the optimizer struggled to beat baseline in both generic-seeded and lite-seeded runs.
 

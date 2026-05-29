@@ -73,8 +73,8 @@ GEPA expanded this into specialized, model-tailored instructions using a 28/12 t
 | Agent | Model | Input $/M | Output $/M | Combined $/M | Avg (Before) | Avg (After) | Delta | Quality/$ |
 |-------|-------|-----------|------------|-------------|-------------|------------|-------|----------:|
 | Lite | `gemini-3.1-flash-lite` | $0.25 | $1.50 | $1.75 | 0.80 | 0.80 | +0.00 | 0.457 |
-| Flash | `gemini-3.5-flash` | $1.50 | $1.65 | $3.15 | 0.82 | 0.80 | -0.02 | 0.255 |
-| Pro | `gemini-3.1-pro-preview` | $4.00 | $18.00 | $22.00 | 0.80 | 0.76 | -0.04 | 0.034 |
+| Flash | `gemini-3.5-flash` | $1.50 | $9.00 | $10.50 | 0.82 | 0.80 | -0.02 | 0.076 |
+| Pro | `gemini-3.1-pro-preview` | $4.00 | $18.00 | $22.00 | 0.80 | 0.76 | -0.04 | 0.035 |
 | Sonnet | `claude-sonnet-4-6` | $3.00 | $15.00 | $18.00 | 0.79 | 0.73 | -0.06 | 0.041 |
 | Opus | `claude-opus-4-6` | $5.00 | $25.00 | $30.00 | 0.77 | 0.78 | +0.01 | 0.026 |
 
@@ -85,9 +85,9 @@ GEPA expanded this into specialized, model-tailored instructions using a 28/12 t
 **Ranked by Quality/$:**
 
 1. **Lite** — 0.457 quality/$ (avg 0.80 at $1.75/M)
-2. **Flash** — 0.255 quality/$ (avg 0.80 at $3.15/M)
+2. **Flash** — 0.076 quality/$ (avg 0.80 at $10.50/M)
 3. **Sonnet** — 0.041 quality/$ (avg 0.73 at $18.00/M)
-4. **Pro** — 0.034 quality/$ (avg 0.76 at $22.00/M)
+4. **Pro** — 0.035 quality/$ (avg 0.76 at $22.00/M)
 5. **Opus** — 0.026 quality/$ (avg 0.78 at $30.00/M)
 
 ## Evaluation Charts
@@ -132,7 +132,7 @@ A notable finding: GEPA's local eval scores (used during optimization) don't dir
 
 1. **For cost-sensitive workloads:** Use **Lite** — best quality-per-dollar, stable performance.
 
-2. **For quality-critical workloads:** Use **Flash** or **Pro** — tied for highest batch eval scores (0.80/0.76), 13x cheaper than Opus.
+2. **For quality-critical workloads:** Use **Pro** or **Opus** — highest batch eval scores (0.76/0.78). Flash matches on quality (0.80) at lower cost ($10.50/M vs $22-30/M) but with less reasoning depth.
 
 3. **Investigate the instruction following / response match regression.** The consistent decline suggests GEPA's optimizer is over-indexing on conciseness at the expense of completeness. Consider adding instruction_following as an explicit GEPA optimization criterion.
 
