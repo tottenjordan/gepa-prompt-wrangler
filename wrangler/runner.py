@@ -107,6 +107,108 @@ class WranglerPipeline:
             f"    3. root_agent — LlmAgent directly"
         )
 
+    def _resolve_optimize_module(self, pair: AgentPromptPair) -> Path:
+        """Resolve the GEPA-compatible optimization directory for a pair.
+
+        Maps agent_module (e.g. agents/lite_agent.py) to the *_opt directory
+        (e.g. agents/lite_opt/) which contains __init__.py, evalset, and sampler config.
+        Falls back to the manifest-level agent_module if no *_opt directory exists.
+        """
+        agent_ref = pair.agent_module or self.manifest.agent_module
+        agent_path = Path(agent_ref)
+        stem = agent_path.stem.replace("_agent", "")
+        opt_dir = agent_path.parent / f"{stem}_opt"
+
+        for base in [self.manifest_dir, Path(".")]:
+            candidate = base / opt_dir
+            if candidate.is_dir() and (candidate / "__init__.py").exists():
+                return candidate
+
+        fallback = self.manifest_dir / self.manifest.agent_module
+        if not fallback.exists():
+            fallback = Path(self.manifest.agent_module)
+        return fallback
+
+    def _save_optimized_prompt(self, pair: AgentPromptPair, prompt: str, version: str = "wrangler_v3"):
+        """Save optimized prompt to the agent's prompts.py file."""
+        agent_ref = pair.agent_module or self.manifest.agent_module
+        stem = Path(agent_ref).stem.replace("_agent", "")
+        prompts_file = self.manifest_dir / "prompts" / f"{stem}_prompts.py"
+        if not prompts_file.exists():
+            print(f"  [{pair.id}] Warning: prompts file not found at {prompts_file}", flush=True)
+            return
+
+        entry = {
+            "prompt": prompt,
+            "source": "wrangler sequential GEPA optimization",
+            "eval_cases": self.results.get("_eval_metadata", {}).get("case_count", 40),
+            "judge_model": "gemini-2.5-pro",
+            "notes": "Sequential optimization (no parallel contention), 40-case evalset",
+            "timestamp": datetime.now().isoformat(),
+        }
+
+        content = prompts_file.read_text()
+        import ast
+        tree = ast.parse(content)
+        optimized_node = None
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Assign):
+                for target in node.targets:
+                    if isinstance(target, ast.Name) and target.id == "OPTIMIZED":
+                        optimized_node = node
+
+        if optimized_node is None:
+            print(f"  [{pair.id}] Warning: OPTIMIZED dict not found in {prompts_file}", flush=True)
+            return
+
+        optimized_dict = ast.literal_eval(content[content.index("OPTIMIZED =") + len("OPTIMIZED ="):])
+        optimized_dict[version] = entry
+
+        lines = [f'    "{version}": {{']
+        for k, v in entry.items():
+            if k == "prompt":
+                lines.append(f'        "prompt": """{v}""",')
+            elif isinstance(v, int):
+                lines.append(f'        "{k}": {v},')
+            else:
+                lines.append(f'        "{k}": "{v}",')
+        lines.append("    },")
+        new_entry = "\n".join(lines)
+
+        closing = content.rstrip()
+        if closing.endswith("}"):
+            insert_pos = closing.rfind("}")
+            updated = closing[:insert_pos] + new_entry + "\n}\n"
+        else:
+            print(f"  [{pair.id}] Warning: unexpected format in {prompts_file}", flush=True)
+            return
+
+        prompts_file.write_text(updated)
+        print(f"  [{pair.id}] Saved {version} to {prompts_file}", flush=True)
+
+    def _run_optimize_sequential(self):
+        """Run GEPA optimization for all agents sequentially."""
+        n_pairs = len(self.manifest.pairs)
+        for i, pair in enumerate(self.manifest.pairs, 1):
+            print(f"\n  [{pair.id}] ({i}/{n_pairs}) Optimizing...", flush=True)
+            agent_path = self._resolve_optimize_module(pair)
+            eval_path = self.manifest_dir / self.manifest.eval_data
+            if not eval_path.exists():
+                eval_path = Path(self.manifest.eval_data)
+            sampler_cfg = agent_path / "sampler_config.json"
+            t0 = time.time()
+            optimized = optimize(
+                str(agent_path),
+                eval_data_path=str(eval_path),
+                sampler_config_path=str(sampler_cfg) if sampler_cfg.exists() else None,
+                agent_name=pair.id,
+            )
+            elapsed = time.time() - t0
+            self.results[pair.id]["optimized_prompt"] = optimized
+            pair.system_prompt = optimized
+            self._save_optimized_prompt(pair, optimized)
+            print(f"  [{pair.id}] Done ({_fmt_duration(elapsed)}) — {len(optimized)} chars")
+
     def _run_eval_parallel(self, eval_cases: list[dict], n_pairs: int, phase: str, max_concurrent: int = 2):
         """Run batch eval for all agents in staggered parallel batches."""
         score_key = "before" if phase == "before" else "after"
@@ -207,18 +309,9 @@ class WranglerPipeline:
         with self._phase("Phase 2: Baseline Evaluation"):
             self._run_eval_parallel(eval_cases, n_pairs, phase="before")
 
-        # Phase 3: GEPA optimize
+        # Phase 3: GEPA optimize (sequential to avoid MCP/API contention)
         with self._phase("Phase 3: GEPA Optimization"):
-            for i, pair in enumerate(self.manifest.pairs, 1):
-                print(f"\n  [{pair.id}] ({i}/{n_pairs}) Optimizing...", flush=True)
-                t0 = time.time()
-                agent_path = self.manifest_dir / self.manifest.agent_module
-                eval_path = self.manifest_dir / self.manifest.eval_data
-                optimized = optimize(str(agent_path), str(eval_path))
-                self.results[pair.id]["optimized_prompt"] = optimized
-                pair.system_prompt = optimized
-                print(f"  [{pair.id}] ({i}/{n_pairs}) Done ({_fmt_duration(time.time() - t0)}) "
-                      f"— {len(optimized)} chars")
+            self._run_optimize_sequential()
 
         # Phase 4: Redeploy with optimized prompt
         with self._phase("Phase 4: Redeploy with Optimized Prompt"):

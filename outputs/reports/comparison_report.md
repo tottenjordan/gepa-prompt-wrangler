@@ -16,13 +16,17 @@ GEPA expanded this into specialized, model-tailored instructions:
 
 | Agent | Model | Before | After | Expansion |
 |-------|-------|--------|-------|-----------|
-| Lite | `gemini-3.1-flash-lite` | 78 chars | 2106 chars | 27x |
-| Flash | `gemini-3.5-flash` | 78 chars | 4222 chars | 54x |
-| Pro | `gemini-3.1-pro-preview` | 78 chars | 1926 chars | 25x |
-| Sonnet | `claude-sonnet-4-6` | 78 chars | 2369 chars | 30x |
-| Opus | `claude-opus-4-6` | 78 chars | 1930 chars | 25x |
+| Lite | `gemini-3.1-flash-lite` | 0 chars | 0 chars | — |
+| Flash | `gemini-3.5-flash` | 0 chars | 0 chars | — |
+| Pro | `gemini-3.1-pro-preview` | 0 chars | 0 chars | — |
+| Sonnet | `claude-sonnet-4-6` | 0 chars | 0 chars | — |
+| Opus | `claude-opus-4-6` | 0 chars | 0 chars | — |
 
 ![Before/After Overview](diagrams/before_after_overview.png)
+
+## Eval Dataset
+
+- See eval_cases.yaml for case details
 
 ## Baseline vs Optimized Scores
 
@@ -96,13 +100,35 @@ GEPA expanded this into specialized, model-tailored instructions:
 
 ![Improvement Delta](charts/improvement_delta.png)
 
+### Tier Breakdown
+
+![Tier Breakdown](charts/tier_breakdown.png)
+
+### Category Heatmap
+
+![Category Heatmap](charts/category_heatmap.png)
+
+## Comparison with Previous Run
+
+Comparing against previous results from `outputs/results_all_agents.json`.
+
+### Average Score Comparison (After)
+
+| Agent | Previous | Current | Delta |
+|-------|----------|---------|-------|
+| Lite | 0.80 | 0.80 | +0.00 |
+| Flash | 0.74 | 0.74 | +0.00 |
+| Pro | 0.82 | 0.82 | +0.00 |
+| Sonnet | 0.81 | 0.81 | +0.00 |
+| Opus | 0.71 | 0.71 | +0.00 |
+
 ## Key Findings and Recommendations
 
 ### Findings
 
 1. **GEPA optimization improved all agents.** Every model saw quality gains from prompt optimization, demonstrating that GEPA's evolutionary approach works across both Google (Gemini) and Anthropic (Claude) models.
 
-2. **Biggest improvement: Sonnet** gained **+31.3%** in average quality (from 0.62 to 0.81). GEPA expanded its 78-char generic prompt into a 2,369-char specialized instruction.
+2. **Biggest improvement: Sonnet** gained **+31.3%** in average quality (from 0.62 to 0.81). GEPA expanded its 78-char generic prompt into a 0-char specialized instruction.
 
 3. **Highest absolute quality: Pro** achieved the best post-optimization average score of **0.82**.
 

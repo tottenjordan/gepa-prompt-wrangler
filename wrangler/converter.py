@@ -297,6 +297,8 @@ def generate_sampler_config(
     eval_set_name: str = "eval_set",
     judge_model: str = "gemini-2.5-pro",
     output_dir: str | Path | None = None,
+    train_eval_case_ids: list[str] | None = None,
+    validation_eval_case_ids: list[str] | None = None,
 ) -> dict:
     """Generate a GEPA sampler config.
 
@@ -305,6 +307,8 @@ def generate_sampler_config(
         eval_set_name: Must match the evalset JSON filename stem (without .evalset.json).
         judge_model: Model used for response match scoring.
         output_dir: If provided, writes the config to sampler_config.json.
+        train_eval_case_ids: Subset of case IDs for training. Uses all if None.
+        validation_eval_case_ids: Subset of case IDs for validation. Uses train set if None.
 
     Returns:
         The sampler config dict.
@@ -323,6 +327,11 @@ def generate_sampler_config(
         "app_name": app_name,
         "train_eval_set": eval_set_name,
     }
+
+    if train_eval_case_ids is not None:
+        config["train_eval_case_ids"] = train_eval_case_ids
+    if validation_eval_case_ids is not None:
+        config["validation_eval_case_ids"] = validation_eval_case_ids
 
     if output_dir:
         output_dir = Path(output_dir)

@@ -20,6 +20,38 @@ AGENTS_DIR = EXAMPLE_ROOT / "agents"
 
 MODELS = ["lite", "flash", "pro", "sonnet", "opus"]
 
+# Stratified 70/30 train/val split — deterministic, balanced across tier and category.
+# Booking (2 cases) is train-only; all other categories appear in both sets.
+TRAIN_CASE_IDS = [
+    "case_1_low", "case_2_low", "case_4_low", "case_5_low", "case_6_low", "case_30_low",
+    "case_7_low", "case_8_low",
+    "case_10_low",
+    "case_11_low",
+    "case_12_low", "case_13_low", "case_14_low", "case_37_low",
+    "case_34_low",
+    "case_15_medium", "case_16_medium", "case_23_medium",
+    "case_17_medium", "case_18_medium",
+    "case_19_medium",
+    "case_22_medium",
+    "case_32_medium",
+    "case_36_medium",
+    "case_24_high", "case_25_high", "case_28_high",
+    "case_27_high",
+]
+
+VAL_CASE_IDS = [
+    "case_3_low", "case_31_low",
+    "case_9_low",
+    "case_35_low",
+    "case_38_low", "case_40_low",
+    "case_20_medium",
+    "case_21_medium",
+    "case_33_medium",
+    "case_39_medium",
+    "case_26_high",
+    "case_29_high",
+]
+
 
 def load_yaml_cases() -> list[dict]:
     yaml_path = EVAL_DATA_DIR / "eval_cases.yaml"
@@ -102,7 +134,39 @@ def main():
 
         print(f"  {out_path.relative_to(EXAMPLE_ROOT)} ({len(evalset['eval_cases'])} cases)")
 
-    print("\nDone. All evalset.json files regenerated.")
+        # Validate split covers all cases
+        all_ids = {c["eval_id"] for c in evalset["eval_cases"]}
+        train_set = set(TRAIN_CASE_IDS)
+        val_set = set(VAL_CASE_IDS)
+        assert train_set & val_set == set(), f"Train/val overlap: {train_set & val_set}"
+        assert train_set | val_set == all_ids, f"Split missing cases: {all_ids - (train_set | val_set)}"
+
+        # Write sampler config with train/val split
+        eval_set_name = f"{model}_eval_set"
+        app_name = f"{model}_opt"
+        sampler_config = {
+            "eval_config": {
+                "criteria": {
+                    "response_match_score": 0.1,
+                    "final_response_match_v2": {
+                        "threshold": 0.5,
+                        "judge_model_options": {"judge_model": "gemini-2.5-pro"},
+                    },
+                    "safety_v1": 0.8,
+                }
+            },
+            "app_name": app_name,
+            "train_eval_set": eval_set_name,
+            "train_eval_case_ids": TRAIN_CASE_IDS,
+            "validation_eval_case_ids": VAL_CASE_IDS,
+        }
+        config_path = out_dir / "sampler_config.json"
+        with open(config_path, "w") as f:
+            json.dump(sampler_config, f, indent=2)
+            f.write("\n")
+
+    print(f"\nTrain/val split: {len(TRAIN_CASE_IDS)} train / {len(VAL_CASE_IDS)} val")
+    print("Done. All evalset.json and sampler_config.json files regenerated.")
 
 
 if __name__ == "__main__":

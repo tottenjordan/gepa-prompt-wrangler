@@ -7,9 +7,18 @@ import logging
 import os
 import sys
 import tempfile
+import time
 from pathlib import Path
 
 log = logging.getLogger(__name__)
+
+
+def _fmt_elapsed(t0: float) -> str:
+    s = int(time.time() - t0)
+    if s < 60:
+        return f"{s}s"
+    m, s = divmod(s, 60)
+    return f"{m}m {s:02d}s"
 
 
 def _patch_adk():
@@ -91,6 +100,7 @@ def optimize(
     evalset_path: str = None,
     sampler_config_path: str = None,
     eval_data_path: str = None,
+    agent_name: str = "",
 ) -> str:
     """Run GEPA optimization. Returns the optimized instruction string.
 
@@ -99,8 +109,10 @@ def optimize(
         evalset_path: Path to evalset JSON (ignored if sampler_config_path is set)
         sampler_config_path: Path to sampler config JSON file
         eval_data_path: Path to simplified eval YAML (for auto-generating GEPA evalset)
+        agent_name: Display name for logging (e.g. "lite-gemini-3.1-flash-lite")
     """
-    print("  [1/3] Applying ADK patches...")
+    tag = f"  [{agent_name}] " if agent_name else "  "
+    print(f"{tag}[1/3] Applying ADK patches...", flush=True)
     _patch_adk()
 
     from google.adk.evaluation.local_eval_sets_manager import LocalEvalSetsManager
@@ -113,7 +125,7 @@ def optimize(
         LocalEvalSamplerConfig,
     )
 
-    print("  [2/3] Loading agent and configs...")
+    print(f"{tag}[2/3] Loading agent and configs...", flush=True)
     agent_module_path = str(Path(agent_module_path).resolve())
     init_file = os.path.join(agent_module_path, "__init__.py")
     if not os.path.exists(init_file):
@@ -149,7 +161,7 @@ def optimize(
             f"  Module exports: {exports}\n"
             f"  Expected: agent.root_agent (SimpleNamespace) or root_agent (LlmAgent)"
         )
-    print(f"    Agent: {root_agent.name}")
+    print(f"{tag}  Agent: {root_agent.name}", flush=True)
 
     app_name = os.path.basename(agent_module_path)
     agents_dir = os.path.dirname(agent_module_path)
@@ -192,7 +204,7 @@ def optimize(
     evalset_dir = os.path.join(agents_dir, app_name)
     evalset_files = [f for f in os.listdir(evalset_dir) if f.endswith(".evalset.json")] if os.path.isdir(evalset_dir) else []
     if not evalset_files and eval_data_path:
-        print(f"    No evalset files in {evalset_dir} — auto-generating from {eval_data_path}")
+        print(f"{tag}  No evalset files in {evalset_dir} — auto-generating from {eval_data_path}", flush=True)
         from .converter import load_eval_file, generate_gepa_evalset, generate_sampler_config
         cases = load_eval_file(eval_data_path)
         eval_set_id = f"{app_name}_eval_set"
@@ -205,18 +217,28 @@ def optimize(
             sampler_cfg = LocalEvalSamplerConfig.model_validate(sampler_config)
             if sampler_cfg.app_name != app_name:
                 sampler_cfg.app_name = app_name
-        print(f"    Auto-generated evalset at {evalset_dir}")
+        print(f"{tag}  Auto-generated evalset at {evalset_dir}", flush=True)
     elif not evalset_files:
         log.warning(f"No .evalset.json files found in {evalset_dir}. GEPA may fail.")
-        print(f"    WARNING: No evalset files in {evalset_dir}")
-        print(f"    Run: wrangler generate-evalset --from <eval.yaml> --output {evalset_dir}")
+        print(f"{tag}  WARNING: No evalset files in {evalset_dir}", flush=True)
+        print(f"{tag}  Run: wrangler generate-evalset --from <eval.yaml> --output {evalset_dir}", flush=True)
 
-    optimizer_config = GEPARootAgentPromptOptimizerConfig()
+    run_dir = os.path.join("outputs", "gepa_runs", app_name)
+    os.makedirs(run_dir, exist_ok=True)
+    optimizer_config = GEPARootAgentPromptOptimizerConfig(run_dir=run_dir)
     eval_sets_manager = LocalEvalSetsManager(agents_dir=agents_dir)
     sampler = LocalEvalSampler(sampler_cfg, eval_sets_manager)
     optimizer = GEPARootAgentPromptOptimizer(optimizer_config)
 
-    print("  [3/3] Running GEPA optimization...")
+    train_count = len(sampler.get_train_example_ids())
+    val_count = len(sampler.get_validation_example_ids())
+    max_calls = optimizer_config.max_metric_calls
+    print(f"{tag}[3/3] Running GEPA optimization...", flush=True)
+    print(f"{tag}  Train: {train_count} cases, Val: {val_count} cases, Max metric calls: {max_calls}", flush=True)
+    print(f"{tag}  Optimizer model: {optimizer_config.optimizer_model}", flush=True)
+    print(f"{tag}  Run dir: {run_dir}", flush=True)
+
+    t0 = time.time()
     try:
         optimization_result = asyncio.run(optimizer.optimize(root_agent, sampler))
     except Exception as e:
@@ -231,9 +253,21 @@ def optimize(
             ) from e
         raise
 
+    elapsed = time.time() - t0
     best_idx = optimization_result.gepa_result["best_idx"]
     best_agent = optimization_result.optimized_agents[best_idx]
     optimized_instruction = best_agent.optimized_agent.instruction
+    n_candidates = optimization_result.gepa_result.get("num_candidates", "?")
+    total_calls = optimization_result.gepa_result.get("total_metric_calls", "?")
 
-    print(f"  Best variant: {best_idx}")
+    scores_summary = ""
+    for i, agent_with_score in enumerate(optimization_result.optimized_agents):
+        marker = " <-- best" if i == best_idx else ""
+        scores_summary += f"\n{tag}    variant {i}: score={agent_with_score.overall_score:.3f}{marker}"
+
+    print(f"{tag}  Optimization complete ({_fmt_elapsed(t0)})", flush=True)
+    print(f"{tag}  Candidates: {n_candidates}, Total metric calls: {total_calls}", flush=True)
+    print(f"{tag}  Variant scores:{scores_summary}", flush=True)
+    print(f"{tag}  Best variant: {best_idx} ({len(optimized_instruction)} chars)", flush=True)
+
     return optimized_instruction
