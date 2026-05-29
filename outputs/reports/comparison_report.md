@@ -138,6 +138,49 @@ A notable finding: GEPA's local eval scores (used during optimization) don't dir
 
 4. **Consider hybrid prompts.** The batch eval data suggests combining the safety/tool-use improvements from wrangler_v3 with the instruction-following style from the baseline could yield the best overall results.
 
+## End-to-End Results Interpretation
+
+### The Central Tension: What GEPA Optimizes vs What Batch Eval Rewards
+
+GEPA optimizes for `final_response_match_v2` — a metric that rewards concise, precise responses that semantically match a reference answer. The batch evaluator averages six metrics, several of which reward different qualities: `instruction_following` and `response_quality` favor completeness, detail, and elaboration. This creates an inherent tension: GEPA-optimized prompts push models toward brevity and precision, which can hurt scores on metrics that reward thoroughness.
+
+This tension explains the most consistent pattern in wrangler_v3 results: **safety and tool use improved across all models**, while **response quality and instruction following regressed across all models**. The optimizer successfully taught models to use tools more carefully and avoid unsafe outputs, but the conciseness directives it introduced penalized scores on metrics that reward detailed, complete responses.
+
+### Model-Level Observations
+
+**Lite ($1.75/M) — the clear winner for this workload.** Matched its baseline average quality (0.80) at the lowest cost, with improved tool use (+15%) and response match (+5%). GEPA optimization was essentially free — it improved the dimensions it could without hurting overall quality. At 6x cheaper than flash and 17x cheaper than opus, lite delivers equivalent or better quality on this corporate travel/expense task.
+
+**Flash ($10.50/M) — resistant to GEPA optimization.** Scored 0.667 on GEPA's local eval regardless of seed prompt (generic or lite v3), yet achieved 0.80 on batch eval — the joint-highest score. Flash appears to have strong baseline instruction following that GEPA's evolutionary approach couldn't improve. The 3-case subsample strategy kept hitting "perfect" samples, giving no improvement signal. Flash may benefit more from few-shot examples or structured output formatting than from system prompt optimization.
+
+**Pro ($22.00/M) — largest overall regression.** Dropped from 0.80 to 0.76 average (-4.2%), with steep declines in instruction following (-15%) and response match (-14%). The optimizer's conciseness directives conflicted most sharply with pro's tendency toward detailed, structured responses. The +7% safety improvement doesn't offset the quality loss at this price point.
+
+**Sonnet ($18.00/M) — similar regression pattern to Pro.** Dropped from 0.79 to 0.73 (-6.2%), the largest regression of any model. Response match fell -25%, suggesting the optimizer's conciseness directives actively degraded Sonnet's output format. Sonnet was the only model where tool use showed no improvement (0.41 → 0.41), indicating GEPA couldn't find a prompt variant that improved tool calling for this model.
+
+**Opus ($30.00/M) — the safety story.** The only model with a net improvement (+0.6%), driven almost entirely by a dramatic safety jump from 0.70 to 1.00 (+43%). This is the single largest metric improvement across all models and versions. Opus's baseline safety score (0.70) was an outlier — the lowest of any model — and GEPA's optimizer found prompt language that eliminated the safety failures. However, at $30/M with 0.78 average quality, opus offers poor value compared to lite (0.80 at $1.75/M).
+
+### The Eval Aliasing Finding
+
+The train/val split in wrangler_v3 exposed that wrangler_v2's gains were partially inflated by eval aliasing — training and evaluating on the same 40 cases. With a proper 28/12 split, the batch eval scores are more realistic estimates of generalization. This doesn't invalidate wrangler_v2 results, but it means wrangler_v3's more modest improvements are a truer measure of what GEPA optimization delivers on unseen inputs.
+
+### GEPA Local Eval vs Batch Eval Gap
+
+The gap between GEPA's local eval score and batch eval average reveals how different the two measurement systems are:
+
+- **Opus** scored 0.917 locally but only 0.78 on batch eval (0.14 gap) — GEPA's metric rewarded opus's concise, precise style, but batch eval penalized the loss of detail.
+- **Flash** scored 0.667 locally but 0.80 on batch eval (-0.13 gap) — flash's verbosity hurt it on GEPA's precision metric but helped on batch eval's completeness metrics.
+
+This gap is not a bug — it reflects a genuine difference in what each evaluation system values. Teams choosing between GEPA optimization and manual prompt engineering should understand which metrics matter most for their use case.
+
+### Practical Recommendations
+
+1. **For cost-sensitive production workloads:** Deploy **lite** with the wrangler_v3 prompt. Best quality-per-dollar (0.457), stable performance, and improved tool use.
+
+2. **For quality-critical workloads:** Use **opus** if safety is paramount (1.00 safety score), or **flash** for the best quality-to-cost balance at a higher tier ($10.50/M, 0.80 avg).
+
+3. **For future GEPA optimization runs:** Add `instruction_following_v1` as an explicit optimization criterion alongside `final_response_match_v2`. The consistent regression in instruction following across all models suggests GEPA needs a multi-objective target to avoid over-indexing on conciseness.
+
+4. **Consider hybrid prompts:** The batch eval data suggests combining the safety/tool-use improvements from wrangler_v3 with the instruction-following style from the baseline could yield the best overall results. This would require manual prompt engineering informed by the GEPA-generated sections.
+
 ## Per-Agent Reports
 
 - [Lite Agent Analysis](agents/lite_analysis.md)
