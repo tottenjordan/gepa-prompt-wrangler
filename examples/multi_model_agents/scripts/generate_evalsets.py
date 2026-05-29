@@ -23,33 +23,35 @@ MODELS = ["lite", "flash", "pro", "sonnet", "opus"]
 # Stratified 70/30 train/val split — deterministic, balanced across tier and category.
 # Booking (2 cases) is train-only; all other categories appear in both sets.
 TRAIN_CASE_IDS = [
-    "case_1_low", "case_2_low", "case_4_low", "case_5_low", "case_6_low", "case_30_low",
-    "case_7_low", "case_8_low",
-    "case_10_low",
-    "case_11_low",
-    "case_12_low", "case_13_low", "case_14_low", "case_37_low",
-    "case_34_low",
-    "case_15_medium", "case_16_medium", "case_23_medium",
-    "case_17_medium", "case_18_medium",
-    "case_19_medium",
-    "case_22_medium",
-    "case_32_medium",
-    "case_36_medium",
-    "case_24_high", "case_25_high", "case_28_high",
-    "case_27_high",
+    "case_1_low_search", "case_2_low_search", "case_4_low_search",
+    "case_5_low_search", "case_6_low_search", "case_30_low_search",
+    "case_7_low_policy", "case_8_low_policy",
+    "case_10_low_booking",
+    "case_11_low_expense",
+    "case_12_low_error_handling", "case_13_low_error_handling",
+    "case_14_low_error_handling", "case_37_low_error_handling",
+    "case_34_low_boundary",
+    "case_15_medium_expense", "case_16_medium_expense", "case_23_medium_expense",
+    "case_17_medium_planning", "case_18_medium_planning",
+    "case_19_medium_policy",
+    "case_22_medium_booking",
+    "case_32_medium_cancellation",
+    "case_36_medium_boundary",
+    "case_24_high_planning", "case_25_high_planning", "case_28_high_planning",
+    "case_27_high_expense",
 ]
 
 VAL_CASE_IDS = [
-    "case_3_low", "case_31_low",
-    "case_9_low",
-    "case_35_low",
-    "case_38_low", "case_40_low",
-    "case_20_medium",
-    "case_21_medium",
-    "case_33_medium",
-    "case_39_medium",
-    "case_26_high",
-    "case_29_high",
+    "case_3_low_search", "case_31_low_search",
+    "case_9_low_policy",
+    "case_35_low_boundary",
+    "case_38_low_error_handling", "case_40_low_error_handling",
+    "case_20_medium_expense",
+    "case_21_medium_planning",
+    "case_33_medium_cancellation",
+    "case_39_medium_error_handling",
+    "case_26_high_planning",
+    "case_29_high_expense",
 ]
 
 
@@ -76,8 +78,11 @@ def build_eval_case(idx: int, tier: str, case: dict, app_name: str) -> dict:
             tool_entry["args"] = tool["args"]
         tool_uses.append(tool_entry)
 
+    category = case.get("category", "")
+    eval_id = f"case_{idx}_{tier}_{category}" if category else f"case_{idx}_{tier}"
+
     return {
-        "eval_id": f"case_{idx}_{tier}",
+        "eval_id": eval_id,
         "conversation": [
             {
                 "user_content": {
@@ -96,6 +101,8 @@ def build_eval_case(idx: int, tier: str, case: dict, app_name: str) -> dict:
         "session_input": {
             "app_name": app_name,
             "user_id": "eval_user",
+            "category": case.get("category", ""),
+            "tier": tier,
         },
     }
 

@@ -197,6 +197,25 @@ class TestEvalsetJsonFiles:
                 assert "conversation" in case, f"{model}: case missing conversation"
                 assert "session_input" in case, f"{model}: case missing session_input"
 
+    def test_evalset_session_input_has_category(self):
+        for model in MODELS:
+            path = AGENTS_DIR / f"{model}_opt" / f"{model}_eval_set.evalset.json"
+            with open(path) as f:
+                data = json.load(f)
+            for case in data["eval_cases"]:
+                si = case["session_input"]
+                assert "category" in si, f"{model}: {case['eval_id']} missing category in session_input"
+                assert "tier" in si, f"{model}: {case['eval_id']} missing tier in session_input"
+
+    def test_evalset_eval_ids_include_category(self):
+        for model in MODELS:
+            path = AGENTS_DIR / f"{model}_opt" / f"{model}_eval_set.evalset.json"
+            with open(path) as f:
+                data = json.load(f)
+            for case in data["eval_cases"]:
+                parts = case["eval_id"].split("_", 3)
+                assert len(parts) >= 3, f"{model}: eval_id '{case['eval_id']}' missing tier"
+
 
 # ---------------------------------------------------------------------------
 # Mock data ↔ eval case consistency

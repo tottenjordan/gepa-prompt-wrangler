@@ -2,7 +2,7 @@
   "eval_set_id": "opus_eval_set",
   "eval_cases": [
     {
-      "eval_id": "case_1_low",
+      "eval_id": "case_1_low_search",
       "conversation": [
         {
           "user_content": {
@@ -36,11 +36,13 @@
       ],
       "session_input": {
         "app_name": "opus_opt",
-        "user_id": "eval_user"
+        "user_id": "eval_user",
+        "category": "search",
+        "tier": "low"
       }
     },
     {
-      "eval_id": "case_2_low",
+      "eval_id": "case_2_low_search",
       "conversation": [
         {
           "user_content": {
@@ -74,11 +76,13 @@
       ],
       "session_input": {
         "app_name": "opus_opt",
-        "user_id": "eval_user"
+        "user_id": "eval_user",
+        "category": "search",
+        "tier": "low"
       }
     },
     {
-      "eval_id": "case_3_low",
+      "eval_id": "case_3_low_search",
       "conversation": [
         {
           "user_content": {
@@ -112,11 +116,13 @@
       ],
       "session_input": {
         "app_name": "opus_opt",
-        "user_id": "eval_user"
+        "user_id": "eval_user",
+        "category": "search",
+        "tier": "low"
       }
     },
     {
-      "eval_id": "case_4_low",
+      "eval_id": "case_4_low_search",
       "conversation": [
         {
           "user_content": {
@@ -149,11 +155,13 @@
       ],
       "session_input": {
         "app_name": "opus_opt",
-        "user_id": "eval_user"
+        "user_id": "eval_user",
+        "category": "search",
+        "tier": "low"
       }
     },
     {
-      "eval_id": "case_5_low",
+      "eval_id": "case_5_low_search",
       "conversation": [
         {
           "user_content": {
@@ -187,11 +195,13 @@
       ],
       "session_input": {
         "app_name": "opus_opt",
-        "user_id": "eval_user"
+        "user_id": "eval_user",
+        "category": "search",
+        "tier": "low"
       }
     },
     {
-      "eval_id": "case_6_low",
+      "eval_id": "case_6_low_search",
       "conversation": [
         {
           "user_content": {
@@ -224,11 +234,13 @@
       ],
       "session_input": {
         "app_name": "opus_opt",
-        "user_id": "eval_user"
+        "user_id": "eval_user",
+        "category": "search",
+        "tier": "low"
       }
     },
     {
-      "eval_id": "case_7_low",
+      "eval_id": "case_7_low_policy",
       "conversation": [
         {
           "user_content": {
@@ -262,11 +274,13 @@
       ],
       "session_input": {
         "app_name": "opus_opt",
-        "user_id": "eval_user"
+        "user_id": "eval_user",
+        "category": "policy",
+        "tier": "low"
       }
     },
     {
-      "eval_id": "case_8_low",
+      "eval_id": "case_8_low_policy",
       "conversation": [
         {
           "user_content": {
@@ -300,11 +314,13 @@
       ],
       "session_input": {
         "app_name": "opus_opt",
-        "user_id": "eval_user"
+        "user_id": "eval_user",
+        "category": "policy",
+        "tier": "low"
       }
     },
     {
-      "eval_id": "case_9_low",
+      "eval_id": "case_9_low_policy",
       "conversation": [
         {
           "user_content": {
@@ -338,11 +354,13 @@
       ],
       "session_input": {
         "app_name": "opus_opt",
-        "user_id": "eval_user"
+        "user_id": "eval_user",
+        "category": "policy",
+        "tier": "low"
       }
     },
     {
-      "eval_id": "case_10_low",
+      "eval_id": "case_10_low_booking",
       "conversation": [
         {
           "user_content": {
@@ -376,11 +394,13 @@
       ],
       "session_input": {
         "app_name": "opus_opt",
-        "user_id": "eval_user"
+        "user_id": "eval_user",
+        "category": "booking",
+        "tier": "low"
       }
     },
     {
-      "eval_id": "case_11_low",
+      "eval_id": "case_11_low_expense",
       "conversation": [
         {
           "user_content": {
@@ -413,11 +433,13 @@
       ],
       "session_input": {
         "app_name": "opus_opt",
-        "user_id": "eval_user"
+        "user_id": "eval_user",
+        "category": "expense",
+        "tier": "low"
       }
     },
     {
-      "eval_id": "case_12_low",
+      "eval_id": "case_12_low_error_handling",
       "conversation": [
         {
           "user_content": {
@@ -451,11 +473,13 @@
       ],
       "session_input": {
         "app_name": "opus_opt",
-        "user_id": "eval_user"
+        "user_id": "eval_user",
+        "category": "error_handling",
+        "tier": "low"
       }
     },
     {
-      "eval_id": "case_13_low",
+      "eval_id": "case_13_low_error_handling",
       "conversation": [
         {
           "user_content": {
@@ -488,11 +512,13 @@
       ],
       "session_input": {
         "app_name": "opus_opt",
-        "user_id": "eval_user"
+        "user_id": "eval_user",
+        "category": "error_handling",
+        "tier": "low"
       }
     },
     {
-      "eval_id": "case_14_low",
+      "eval_id": "case_14_low_error_handling",
       "conversation": [
         {
           "user_content": {
@@ -526,11 +552,13 @@
       ],
       "session_input": {
         "app_name": "opus_opt",
-        "user_id": "eval_user"
+        "user_id": "eval_user",
+        "category": "error_handling",
+        "tier": "low"
       }
     },
     {
-      "eval_id": "case_15_medium",
+      "eval_id": "case_15_medium_expense",
       "conversation": [
         {
           "user_content": {
@@ -573,11 +601,13 @@
       ],
       "session_input": {
         "app_name": "opus_opt",
-        "user_id": "eval_user"
+        "user_id": "eval_user",
+        "category": "expense",
+        "tier": "medium"
       }
     },
     {
-      "eval_id": "case_16_medium",
+      "eval_id": "case_16_medium_expense",
       "conversation": [
         {
           "user_content": {
@@ -611,11 +641,13 @@
       ],
       "session_input": {
         "app_name": "opus_opt",
-        "user_id": "eval_user"
+        "user_id": "eval_user",
+        "category": "expense",
+        "tier": "medium"
       }
     },
     {
-      "eval_id": "case_17_medium",
+      "eval_id": "case_17_medium_planning",
       "conversation": [
         {
           "user_content": {
@@ -648,11 +680,13 @@
       ],
       "session_input": {
         "app_name": "opus_opt",
-        "user_id": "eval_user"
+        "user_id": "eval_user",
+        "category": "planning",
+        "tier": "medium"
       }
     },
     {
-      "eval_id": "case_18_medium",
+      "eval_id": "case_18_medium_planning",
       "conversation": [
         {
           "user_content": {
@@ -692,11 +726,13 @@
       ],
       "session_input": {
         "app_name": "opus_opt",
-        "user_id": "eval_user"
+        "user_id": "eval_user",
+        "category": "planning",
+        "tier": "medium"
       }
     },
     {
-      "eval_id": "case_19_medium",
+      "eval_id": "case_19_medium_policy",
       "conversation": [
         {
           "user_content": {
@@ -737,11 +773,13 @@
       ],
       "session_input": {
         "app_name": "opus_opt",
-        "user_id": "eval_user"
+        "user_id": "eval_user",
+        "category": "policy",
+        "tier": "medium"
       }
     },
     {
-      "eval_id": "case_20_medium",
+      "eval_id": "case_20_medium_expense",
       "conversation": [
         {
           "user_content": {
@@ -774,11 +812,13 @@
       ],
       "session_input": {
         "app_name": "opus_opt",
-        "user_id": "eval_user"
+        "user_id": "eval_user",
+        "category": "expense",
+        "tier": "medium"
       }
     },
     {
-      "eval_id": "case_21_medium",
+      "eval_id": "case_21_medium_planning",
       "conversation": [
         {
           "user_content": {
@@ -812,11 +852,13 @@
       ],
       "session_input": {
         "app_name": "opus_opt",
-        "user_id": "eval_user"
+        "user_id": "eval_user",
+        "category": "planning",
+        "tier": "medium"
       }
     },
     {
-      "eval_id": "case_22_medium",
+      "eval_id": "case_22_medium_booking",
       "conversation": [
         {
           "user_content": {
@@ -859,11 +901,13 @@
       ],
       "session_input": {
         "app_name": "opus_opt",
-        "user_id": "eval_user"
+        "user_id": "eval_user",
+        "category": "booking",
+        "tier": "medium"
       }
     },
     {
-      "eval_id": "case_23_medium",
+      "eval_id": "case_23_medium_expense",
       "conversation": [
         {
           "user_content": {
@@ -906,11 +950,13 @@
       ],
       "session_input": {
         "app_name": "opus_opt",
-        "user_id": "eval_user"
+        "user_id": "eval_user",
+        "category": "expense",
+        "tier": "medium"
       }
     },
     {
-      "eval_id": "case_24_high",
+      "eval_id": "case_24_high_planning",
       "conversation": [
         {
           "user_content": {
@@ -966,11 +1012,13 @@
       ],
       "session_input": {
         "app_name": "opus_opt",
-        "user_id": "eval_user"
+        "user_id": "eval_user",
+        "category": "planning",
+        "tier": "high"
       }
     },
     {
-      "eval_id": "case_25_high",
+      "eval_id": "case_25_high_planning",
       "conversation": [
         {
           "user_content": {
@@ -1023,11 +1071,13 @@
       ],
       "session_input": {
         "app_name": "opus_opt",
-        "user_id": "eval_user"
+        "user_id": "eval_user",
+        "category": "planning",
+        "tier": "high"
       }
     },
     {
-      "eval_id": "case_26_high",
+      "eval_id": "case_26_high_planning",
       "conversation": [
         {
           "user_content": {
@@ -1081,11 +1131,13 @@
       ],
       "session_input": {
         "app_name": "opus_opt",
-        "user_id": "eval_user"
+        "user_id": "eval_user",
+        "category": "planning",
+        "tier": "high"
       }
     },
     {
-      "eval_id": "case_27_high",
+      "eval_id": "case_27_high_expense",
       "conversation": [
         {
           "user_content": {
@@ -1133,11 +1185,13 @@
       ],
       "session_input": {
         "app_name": "opus_opt",
-        "user_id": "eval_user"
+        "user_id": "eval_user",
+        "category": "expense",
+        "tier": "high"
       }
     },
     {
-      "eval_id": "case_28_high",
+      "eval_id": "case_28_high_planning",
       "conversation": [
         {
           "user_content": {
@@ -1191,11 +1245,13 @@
       ],
       "session_input": {
         "app_name": "opus_opt",
-        "user_id": "eval_user"
+        "user_id": "eval_user",
+        "category": "planning",
+        "tier": "high"
       }
     },
     {
-      "eval_id": "case_29_high",
+      "eval_id": "case_29_high_expense",
       "conversation": [
         {
           "user_content": {
@@ -1234,11 +1290,13 @@
       ],
       "session_input": {
         "app_name": "opus_opt",
-        "user_id": "eval_user"
+        "user_id": "eval_user",
+        "category": "expense",
+        "tier": "high"
       }
     },
     {
-      "eval_id": "case_30_low",
+      "eval_id": "case_30_low_search",
       "conversation": [
         {
           "user_content": {
@@ -1272,11 +1330,13 @@
       ],
       "session_input": {
         "app_name": "opus_opt",
-        "user_id": "eval_user"
+        "user_id": "eval_user",
+        "category": "search",
+        "tier": "low"
       }
     },
     {
-      "eval_id": "case_31_low",
+      "eval_id": "case_31_low_search",
       "conversation": [
         {
           "user_content": {
@@ -1309,11 +1369,13 @@
       ],
       "session_input": {
         "app_name": "opus_opt",
-        "user_id": "eval_user"
+        "user_id": "eval_user",
+        "category": "search",
+        "tier": "low"
       }
     },
     {
-      "eval_id": "case_32_medium",
+      "eval_id": "case_32_medium_cancellation",
       "conversation": [
         {
           "user_content": {
@@ -1350,11 +1412,13 @@
       ],
       "session_input": {
         "app_name": "opus_opt",
-        "user_id": "eval_user"
+        "user_id": "eval_user",
+        "category": "cancellation",
+        "tier": "medium"
       }
     },
     {
-      "eval_id": "case_33_medium",
+      "eval_id": "case_33_medium_cancellation",
       "conversation": [
         {
           "user_content": {
@@ -1393,11 +1457,13 @@
       ],
       "session_input": {
         "app_name": "opus_opt",
-        "user_id": "eval_user"
+        "user_id": "eval_user",
+        "category": "cancellation",
+        "tier": "medium"
       }
     },
     {
-      "eval_id": "case_34_low",
+      "eval_id": "case_34_low_boundary",
       "conversation": [
         {
           "user_content": {
@@ -1431,11 +1497,13 @@
       ],
       "session_input": {
         "app_name": "opus_opt",
-        "user_id": "eval_user"
+        "user_id": "eval_user",
+        "category": "boundary",
+        "tier": "low"
       }
     },
     {
-      "eval_id": "case_35_low",
+      "eval_id": "case_35_low_boundary",
       "conversation": [
         {
           "user_content": {
@@ -1469,11 +1537,13 @@
       ],
       "session_input": {
         "app_name": "opus_opt",
-        "user_id": "eval_user"
+        "user_id": "eval_user",
+        "category": "boundary",
+        "tier": "low"
       }
     },
     {
-      "eval_id": "case_36_medium",
+      "eval_id": "case_36_medium_boundary",
       "conversation": [
         {
           "user_content": {
@@ -1521,11 +1591,13 @@
       ],
       "session_input": {
         "app_name": "opus_opt",
-        "user_id": "eval_user"
+        "user_id": "eval_user",
+        "category": "boundary",
+        "tier": "medium"
       }
     },
     {
-      "eval_id": "case_37_low",
+      "eval_id": "case_37_low_error_handling",
       "conversation": [
         {
           "user_content": {
@@ -1558,11 +1630,13 @@
       ],
       "session_input": {
         "app_name": "opus_opt",
-        "user_id": "eval_user"
+        "user_id": "eval_user",
+        "category": "error_handling",
+        "tier": "low"
       }
     },
     {
-      "eval_id": "case_38_low",
+      "eval_id": "case_38_low_error_handling",
       "conversation": [
         {
           "user_content": {
@@ -1595,11 +1669,13 @@
       ],
       "session_input": {
         "app_name": "opus_opt",
-        "user_id": "eval_user"
+        "user_id": "eval_user",
+        "category": "error_handling",
+        "tier": "low"
       }
     },
     {
-      "eval_id": "case_39_medium",
+      "eval_id": "case_39_medium_error_handling",
       "conversation": [
         {
           "user_content": {
@@ -1633,11 +1709,13 @@
       ],
       "session_input": {
         "app_name": "opus_opt",
-        "user_id": "eval_user"
+        "user_id": "eval_user",
+        "category": "error_handling",
+        "tier": "medium"
       }
     },
     {
-      "eval_id": "case_40_low",
+      "eval_id": "case_40_low_error_handling",
       "conversation": [
         {
           "user_content": {
@@ -1663,7 +1741,9 @@
       ],
       "session_input": {
         "app_name": "opus_opt",
-        "user_id": "eval_user"
+        "user_id": "eval_user",
+        "category": "error_handling",
+        "tier": "low"
       }
     }
   ]

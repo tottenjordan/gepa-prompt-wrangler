@@ -151,6 +151,10 @@ def to_adk_evalset(cases: list[dict[str, Any]]) -> list[dict[str, Any]]:
             entry["expected_tool_use"] = [
                 {"tool_name": t, "tool_input": {}} for t in case["expected_tools"]
             ]
+        if case.get("category"):
+            entry["category"] = case["category"]
+        if case.get("tier"):
+            entry["tier"] = case["tier"]
         evalset.append(entry)
     return evalset
 
@@ -223,6 +227,15 @@ def _case_to_gepa_conversation(case: dict, app_name: str) -> dict:
     if not tool_uses and case.get("expected_tool"):
         tool_uses.append({"name": case["expected_tool"], "args": {}})
 
+    session_input: dict[str, Any] = {
+        "app_name": app_name,
+        "user_id": "eval_user",
+    }
+    if case.get("category"):
+        session_input["category"] = case["category"]
+    if case.get("tier"):
+        session_input["tier"] = case["tier"]
+
     return {
         "user_content": {
             "parts": [{"text": prompt}],
@@ -235,6 +248,7 @@ def _case_to_gepa_conversation(case: dict, app_name: str) -> dict:
         "intermediate_data": {
             "tool_uses": tool_uses,
         },
+        "session_input": session_input,
     }
 
 
@@ -269,15 +283,23 @@ def generate_gepa_evalset(
 
     eval_cases = []
     for i, case in enumerate(selected):
-        complexity = case.get("complexity", "")
-        eval_id = f"case_{i+1}_{complexity}" if complexity else f"case_{i+1}"
+        tier = case.get("tier", "") or case.get("complexity", "")
+        category = case.get("category", "")
+        if tier and category:
+            eval_id = f"case_{i+1}_{tier}_{category}"
+        elif tier:
+            eval_id = f"case_{i+1}_{tier}"
+        else:
+            eval_id = f"case_{i+1}"
+        conversation = _case_to_gepa_conversation(case, app_name)
+        session_input = conversation.pop("session_input", {
+            "app_name": app_name,
+            "user_id": "eval_user",
+        })
         eval_cases.append({
             "eval_id": eval_id,
-            "conversation": [_case_to_gepa_conversation(case, app_name)],
-            "session_input": {
-                "app_name": app_name,
-                "user_id": "eval_user",
-            },
+            "conversation": [conversation],
+            "session_input": session_input,
         })
 
     evalset = {
