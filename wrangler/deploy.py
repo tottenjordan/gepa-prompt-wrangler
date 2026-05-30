@@ -7,10 +7,10 @@ import vertexai
 from .config import GCP_PROJECT_ID, GCP_REGION, GCP_STAGING_BUCKET
 
 REQUIREMENTS = [
-    "google-cloud-aiplatform[adk,agent-engines,evaluation]>=1.153.1",
+    "google-cloud-aiplatform[adk,agent-engines,evaluation]>=1.154.0",
     "google-genai>=1.66.0",
     "google-auth>=2.52.0",
-    "google-adk[a2a,agent-identity]>=1.33.0",
+    "google-adk[a2a,agent-identity,eval]>=1.34.1",
     "litellm>=1.83.14",
     "python-dotenv>=1.0.0",
     "pydantic>=2.12.5",
