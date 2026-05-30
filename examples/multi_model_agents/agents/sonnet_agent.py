@@ -10,7 +10,8 @@ from google.adk.tools.preload_memory_tool import PreloadMemoryTool
 
 from config import SONNET_MODEL, SEARCH_MCP_SERVER, BOOKING_MCP_SERVER, EXPENSE_MCP_SERVER, resolve_model
 from registry import get_mcp_tools
-from prompts.sonnet_prompts import GENERIC as INSTRUCTION
+from prompts.sonnet_prompts import OPTIMIZED
+INSTRUCTION = OPTIMIZED["wrangler_v4"]["prompt"]
 
 AGENT_DESCRIPTION = "Corporate travel and expense assistant with access to flight, hotel, and expense management tools."
 
