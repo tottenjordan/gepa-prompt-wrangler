@@ -55,7 +55,7 @@ class TestEvalCasesYaml:
 
     def test_case_count(self):
         cases = _load_yaml_cases()
-        assert len(cases) == 40, f"Expected 40 cases, got {len(cases)}"
+        assert len(cases) == 64, f"Expected 64 cases, got {len(cases)}"
 
     def test_all_cases_have_tier(self):
         for case in _load_yaml_cases():
@@ -74,9 +74,9 @@ class TestEvalCasesYaml:
     def test_tier_distribution(self):
         from collections import Counter
         counts = Counter(c["tier"] for c in _load_yaml_cases())
-        assert counts["low"] == 21, f"Expected 21 low, got {counts['low']}"
-        assert counts["medium"] == 13, f"Expected 13 medium, got {counts['medium']}"
-        assert counts["high"] == 6, f"Expected 6 high, got {counts['high']}"
+        assert counts["low"] == 33, f"Expected 33 low, got {counts['low']}"
+        assert counts["medium"] == 22, f"Expected 22 medium, got {counts['medium']}"
+        assert counts["high"] == 9, f"Expected 9 high, got {counts['high']}"
 
 
 # ---------------------------------------------------------------------------

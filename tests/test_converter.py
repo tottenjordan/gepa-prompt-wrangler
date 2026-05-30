@@ -186,6 +186,7 @@ class TestSamplerConfig:
 
         assert "rubric_based_final_response_quality_v1" in criteria
         assert "rubric_based_tool_use_quality_v1" in criteria
+        assert "hallucinations_v1" in criteria
 
         rubrics = criteria["rubric_based_final_response_quality_v1"]["rubrics"]
         rubric_ids = [r["rubric_id"] for r in rubrics]
@@ -196,6 +197,21 @@ class TestSamplerConfig:
         tool_rubric_ids = [r["rubric_id"] for r in tool_rubrics]
         assert "correct_tool_selection" in tool_rubric_ids
         assert "correct_parameters" in tool_rubric_ids
+
+        for rubric in rubrics + tool_rubrics:
+            text = rubric["rubric_content"]["text_property"]
+            assert len(text) < 60, f"Rubric text too long: {text}"
+
+        assert "threshold" not in criteria.get("final_response_match_v2", {})
+        assert "threshold" not in criteria.get("rubric_based_final_response_quality_v1", {})
+        assert "threshold" not in criteria.get("rubric_based_tool_use_quality_v1", {})
+
+    def test_default_judge_model(self):
+        from wrangler.converter import generate_sampler_config
+
+        config = generate_sampler_config("test_opt")
+        criteria = config["eval_config"]["criteria"]
+        assert criteria["final_response_match_v2"]["judge_model_options"]["judge_model"] == "gemini-3.5-flash"
 
     def test_judge_model_propagated(self):
         from wrangler.converter import generate_sampler_config

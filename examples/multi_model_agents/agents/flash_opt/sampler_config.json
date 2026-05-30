@@ -3,51 +3,49 @@
     "criteria": {
       "response_match_score": 0.1,
       "final_response_match_v2": {
-        "threshold": 0.5,
         "judge_model_options": {
-          "judge_model": "gemini-2.5-pro"
+          "judge_model": "gemini-3.5-flash"
         }
       },
       "safety_v1": 0.8,
+      "hallucinations_v1": 0.5,
       "rubric_based_final_response_quality_v1": {
-        "threshold": 0.5,
         "judge_model_options": {
-          "judge_model": "gemini-2.5-pro"
+          "judge_model": "gemini-3.5-flash"
         },
         "rubrics": [
           {
             "rubric_id": "instruction_adherence",
             "rubric_content": {
-              "text_property": "The agent's response follows all instructions in the system prompt, including formatting, tone, and content requirements."
+              "text_property": "Response follows system prompt instructions."
             },
             "type": "INSTRUCTION_ADHERENCE"
           },
           {
             "rubric_id": "completeness",
             "rubric_content": {
-              "text_property": "The agent's response fully addresses all parts of the user's request without omitting relevant information."
+              "text_property": "Response fully addresses the user request."
             },
             "type": "FINAL_RESPONSE_QUALITY"
           }
         ]
       },
       "rubric_based_tool_use_quality_v1": {
-        "threshold": 0.5,
         "judge_model_options": {
-          "judge_model": "gemini-2.5-pro"
+          "judge_model": "gemini-3.5-flash"
         },
         "rubrics": [
           {
             "rubric_id": "correct_tool_selection",
             "rubric_content": {
-              "text_property": "The agent selected the correct tool(s) for the user's request."
+              "text_property": "Correct tools selected."
             },
             "type": "TOOL_USE_QUALITY"
           },
           {
             "rubric_id": "correct_parameters",
             "rubric_content": {
-              "text_property": "The agent provided accurate and complete parameters to the tool(s)."
+              "text_property": "Accurate tool parameters provided."
             },
             "type": "TOOL_USE_QUALITY"
           }
@@ -58,47 +56,71 @@
   "app_name": "flash_opt",
   "train_eval_set": "flash_eval_set",
   "train_eval_case_ids": [
+    "case_10_low_booking",
+    "case_22_medium_booking",
+    "case_40_medium_booking",
+    "case_43_low_booking",
+    "case_44_high_booking",
+    "case_45_low_booking",
+    "case_34_low_boundary",
+    "case_35_low_boundary",
+    "case_36_medium_boundary",
+    "case_53_low_boundary",
+    "case_54_medium_boundary",
+    "case_55_low_boundary",
+    "case_32_medium_cancellation",
+    "case_33_medium_cancellation",
+    "case_46_low_cancellation",
+    "case_48_medium_cancellation",
+    "case_50_high_cancellation",
+    "case_51_low_cancellation",
+    "case_12_low_error_handling",
+    "case_37_low_error_handling",
+    "case_38_low_error_handling",
+    "case_39_medium_error_handling",
+    "case_61_low_error_handling",
+    "case_64_low_error_handling",
+    "case_11_low_expense",
+    "case_15_medium_expense",
+    "case_20_medium_expense",
+    "case_23_medium_expense",
+    "case_29_high_expense",
+    "case_63_medium_expense",
+    "case_17_medium_planning",
+    "case_18_medium_planning",
+    "case_21_medium_planning",
+    "case_25_high_planning",
+    "case_28_high_planning",
+    "case_62_high_planning",
+    "case_7_low_policy",
+    "case_8_low_policy",
+    "case_9_low_policy",
+    "case_59_medium_policy",
+    "case_60_low_policy",
     "case_1_low_search",
     "case_2_low_search",
+    "case_3_low_search",
     "case_4_low_search",
     "case_5_low_search",
     "case_6_low_search",
     "case_30_low_search",
-    "case_7_low_policy",
-    "case_8_low_policy",
-    "case_10_low_booking",
-    "case_11_low_expense",
-    "case_12_low_error_handling",
-    "case_13_low_error_handling",
-    "case_14_low_error_handling",
-    "case_37_low_error_handling",
-    "case_34_low_boundary",
-    "case_15_medium_expense",
-    "case_16_medium_expense",
-    "case_23_medium_expense",
-    "case_17_medium_planning",
-    "case_18_medium_planning",
-    "case_19_medium_policy",
-    "case_22_medium_booking",
-    "case_32_medium_cancellation",
-    "case_36_medium_boundary",
-    "case_24_high_planning",
-    "case_25_high_planning",
-    "case_28_high_planning",
-    "case_27_high_expense"
+    "case_57_low_search"
   ],
   "validation_eval_case_ids": [
-    "case_3_low_search",
-    "case_31_low_search",
-    "case_9_low_policy",
-    "case_35_low_boundary",
-    "case_38_low_error_handling",
-    "case_40_low_error_handling",
-    "case_20_medium_expense",
-    "case_21_medium_planning",
-    "case_33_medium_cancellation",
-    "case_39_medium_error_handling",
+    "case_41_low_booking",
+    "case_42_medium_booking",
+    "case_52_low_boundary",
+    "case_56_medium_boundary",
+    "case_47_medium_cancellation",
+    "case_49_medium_cancellation",
+    "case_13_low_error_handling",
+    "case_14_low_error_handling",
+    "case_16_medium_expense",
+    "case_27_high_expense",
+    "case_24_high_planning",
     "case_26_high_planning",
-    "case_29_high_expense"
+    "case_19_medium_policy",
+    "case_31_low_search",
+    "case_58_low_search"
   ]
 }

@@ -1715,7 +1715,1101 @@
       }
     },
     {
-      "eval_id": "case_40_low_error_handling",
+      "eval_id": "case_40_medium_booking",
+      "conversation": [
+        {
+          "user_content": {
+            "parts": [
+              {
+                "text": "Book flight FL002 for Emily Garcia and FL001 for her colleague James Park"
+              }
+            ],
+            "role": "user"
+          },
+          "final_response": {
+            "parts": [
+              {
+                "text": "Flight FL002 booked for Emily Garcia. Flight FL001 booked for James Park. Both bookings confirmed."
+              }
+            ],
+            "role": "model"
+          },
+          "intermediate_data": {
+            "tool_uses": [
+              {
+                "name": "wrangler_booking_mcp_book_flight",
+                "args": {
+                  "flight_id": "FL002",
+                  "passenger_name": "Emily Garcia"
+                }
+              },
+              {
+                "name": "wrangler_booking_mcp_book_flight",
+                "args": {
+                  "flight_id": "FL001",
+                  "passenger_name": "James Park"
+                }
+              }
+            ]
+          }
+        }
+      ],
+      "session_input": {
+        "app_name": "flash_opt",
+        "user_id": "eval_user",
+        "category": "booking",
+        "tier": "medium"
+      }
+    },
+    {
+      "eval_id": "case_41_low_booking",
+      "conversation": [
+        {
+          "user_content": {
+            "parts": [
+              {
+                "text": "Book hotel HT001 for Sarah Lee from June 20 to June 25"
+              }
+            ],
+            "role": "user"
+          },
+          "final_response": {
+            "parts": [
+              {
+                "text": "Hotel HT001 (Grand Hyatt New York) booked for Sarah Lee, June 20-25. 5-night stay confirmed."
+              }
+            ],
+            "role": "model"
+          },
+          "intermediate_data": {
+            "tool_uses": [
+              {
+                "name": "wrangler_booking_mcp_book_hotel",
+                "args": {
+                  "hotel_id": "HT001",
+                  "guest_name": "Sarah Lee",
+                  "checkin": "2026-06-20",
+                  "checkout": "2026-06-25"
+                }
+              }
+            ]
+          }
+        }
+      ],
+      "session_input": {
+        "app_name": "flash_opt",
+        "user_id": "eval_user",
+        "category": "booking",
+        "tier": "low"
+      }
+    },
+    {
+      "eval_id": "case_42_medium_booking",
+      "conversation": [
+        {
+          "user_content": {
+            "parts": [
+              {
+                "text": "Search for flights from LAX to JFK, then book the cheapest one for me \u2014 my name is Tom Reyes"
+              }
+            ],
+            "role": "user"
+          },
+          "final_response": {
+            "parts": [
+              {
+                "text": "Found LAX to JFK flights. Cheapest option booked for Tom Reyes."
+              }
+            ],
+            "role": "model"
+          },
+          "intermediate_data": {
+            "tool_uses": [
+              {
+                "name": "wrangler_search_mcp_search_flights",
+                "args": {
+                  "origin": "LAX",
+                  "destination": "JFK"
+                }
+              },
+              {
+                "name": "wrangler_booking_mcp_book_flight",
+                "args": {
+                  "passenger_name": "Tom Reyes"
+                }
+              }
+            ]
+          }
+        }
+      ],
+      "session_input": {
+        "app_name": "flash_opt",
+        "user_id": "eval_user",
+        "category": "booking",
+        "tier": "medium"
+      }
+    },
+    {
+      "eval_id": "case_43_low_booking",
+      "conversation": [
+        {
+          "user_content": {
+            "parts": [
+              {
+                "text": "List all bookings for user EMP001"
+              }
+            ],
+            "role": "user"
+          },
+          "final_response": {
+            "parts": [
+              {
+                "text": "Here are the bookings for user EMP001."
+              }
+            ],
+            "role": "model"
+          },
+          "intermediate_data": {
+            "tool_uses": [
+              {
+                "name": "wrangler_booking_mcp_list_bookings",
+                "args": {
+                  "user_id": "EMP001"
+                }
+              }
+            ]
+          }
+        }
+      ],
+      "session_input": {
+        "app_name": "flash_opt",
+        "user_id": "eval_user",
+        "category": "booking",
+        "tier": "low"
+      }
+    },
+    {
+      "eval_id": "case_44_high_booking",
+      "conversation": [
+        {
+          "user_content": {
+            "parts": [
+              {
+                "text": "Book hotel HT002 for Mark Chen June 10-12 and submit a $250 lodging expense for EMP003"
+              }
+            ],
+            "role": "user"
+          },
+          "final_response": {
+            "parts": [
+              {
+                "text": "Hotel HT002 booked for Mark Chen (June 10-12). Lodging expense of $250 submitted for EMP003, within $400 policy."
+              }
+            ],
+            "role": "model"
+          },
+          "intermediate_data": {
+            "tool_uses": [
+              {
+                "name": "wrangler_booking_mcp_book_hotel",
+                "args": {
+                  "hotel_id": "HT002",
+                  "guest_name": "Mark Chen",
+                  "checkin": "2026-06-10",
+                  "checkout": "2026-06-12"
+                }
+              },
+              {
+                "name": "wrangler_expense_mcp_check_expense_policy",
+                "args": {
+                  "category": "lodging",
+                  "amount": 250
+                }
+              },
+              {
+                "name": "wrangler_expense_mcp_submit_expense",
+                "args": {
+                  "user_id": "EMP003",
+                  "category": "lodging",
+                  "amount": 250,
+                  "description": "hotel stay"
+                }
+              }
+            ]
+          }
+        }
+      ],
+      "session_input": {
+        "app_name": "flash_opt",
+        "user_id": "eval_user",
+        "category": "booking",
+        "tier": "high"
+      }
+    },
+    {
+      "eval_id": "case_45_low_booking",
+      "conversation": [
+        {
+          "user_content": {
+            "parts": [
+              {
+                "text": "Get the details for my booking \u2014 the ID is BK-001"
+              }
+            ],
+            "role": "user"
+          },
+          "final_response": {
+            "parts": [
+              {
+                "text": "Booking BK-001 details retrieved."
+              }
+            ],
+            "role": "model"
+          },
+          "intermediate_data": {
+            "tool_uses": [
+              {
+                "name": "wrangler_booking_mcp_get_booking",
+                "args": {
+                  "booking_id": "BK-001"
+                }
+              }
+            ]
+          }
+        }
+      ],
+      "session_input": {
+        "app_name": "flash_opt",
+        "user_id": "eval_user",
+        "category": "booking",
+        "tier": "low"
+      }
+    },
+    {
+      "eval_id": "case_46_low_cancellation",
+      "conversation": [
+        {
+          "user_content": {
+            "parts": [
+              {
+                "text": "Cancel booking BK-002"
+              }
+            ],
+            "role": "user"
+          },
+          "final_response": {
+            "parts": [
+              {
+                "text": "Booking BK-002 has been cancelled successfully."
+              }
+            ],
+            "role": "model"
+          },
+          "intermediate_data": {
+            "tool_uses": [
+              {
+                "name": "wrangler_booking_mcp_cancel_booking",
+                "args": {
+                  "booking_id": "BK-002"
+                }
+              }
+            ]
+          }
+        }
+      ],
+      "session_input": {
+        "app_name": "flash_opt",
+        "user_id": "eval_user",
+        "category": "cancellation",
+        "tier": "low"
+      }
+    },
+    {
+      "eval_id": "case_47_medium_cancellation",
+      "conversation": [
+        {
+          "user_content": {
+            "parts": [
+              {
+                "text": "Cancel booking BK-003 and then rebook flight FL001 for the same passenger"
+              }
+            ],
+            "role": "user"
+          },
+          "final_response": {
+            "parts": [
+              {
+                "text": "Booking BK-003 cancelled. Flight FL001 rebooked for the original passenger."
+              }
+            ],
+            "role": "model"
+          },
+          "intermediate_data": {
+            "tool_uses": [
+              {
+                "name": "wrangler_booking_mcp_cancel_booking",
+                "args": {
+                  "booking_id": "BK-003"
+                }
+              },
+              {
+                "name": "wrangler_booking_mcp_book_flight",
+                "args": {
+                  "flight_id": "FL001"
+                }
+              }
+            ]
+          }
+        }
+      ],
+      "session_input": {
+        "app_name": "flash_opt",
+        "user_id": "eval_user",
+        "category": "cancellation",
+        "tier": "medium"
+      }
+    },
+    {
+      "eval_id": "case_48_medium_cancellation",
+      "conversation": [
+        {
+          "user_content": {
+            "parts": [
+              {
+                "text": "I need to cancel my hotel booking BK-005 and find a cheaper hotel in New York instead"
+              }
+            ],
+            "role": "user"
+          },
+          "final_response": {
+            "parts": [
+              {
+                "text": "Hotel booking BK-005 cancelled. Here are cheaper hotel options in New York."
+              }
+            ],
+            "role": "model"
+          },
+          "intermediate_data": {
+            "tool_uses": [
+              {
+                "name": "wrangler_booking_mcp_cancel_booking",
+                "args": {
+                  "booking_id": "BK-005"
+                }
+              },
+              {
+                "name": "wrangler_search_mcp_search_hotels",
+                "args": {
+                  "city": "New York"
+                }
+              }
+            ]
+          }
+        }
+      ],
+      "session_input": {
+        "app_name": "flash_opt",
+        "user_id": "eval_user",
+        "category": "cancellation",
+        "tier": "medium"
+      }
+    },
+    {
+      "eval_id": "case_49_medium_cancellation",
+      "conversation": [
+        {
+          "user_content": {
+            "parts": [
+              {
+                "text": "List all bookings for EMP002 and cancel any hotel bookings"
+              }
+            ],
+            "role": "user"
+          },
+          "final_response": {
+            "parts": [
+              {
+                "text": "Retrieved bookings for EMP002. Hotel bookings identified and cancelled."
+              }
+            ],
+            "role": "model"
+          },
+          "intermediate_data": {
+            "tool_uses": [
+              {
+                "name": "wrangler_booking_mcp_list_bookings",
+                "args": {
+                  "user_id": "EMP002"
+                }
+              },
+              {
+                "name": "wrangler_booking_mcp_cancel_booking"
+              }
+            ]
+          }
+        }
+      ],
+      "session_input": {
+        "app_name": "flash_opt",
+        "user_id": "eval_user",
+        "category": "cancellation",
+        "tier": "medium"
+      }
+    },
+    {
+      "eval_id": "case_50_high_cancellation",
+      "conversation": [
+        {
+          "user_content": {
+            "parts": [
+              {
+                "text": "Cancel booking BK-004, find flights from SFO to LAX, and book the replacement flight for Lisa Wang"
+              }
+            ],
+            "role": "user"
+          },
+          "final_response": {
+            "parts": [
+              {
+                "text": "BK-004 cancelled. SFO-LAX flights found. Replacement flight booked for Lisa Wang."
+              }
+            ],
+            "role": "model"
+          },
+          "intermediate_data": {
+            "tool_uses": [
+              {
+                "name": "wrangler_booking_mcp_cancel_booking",
+                "args": {
+                  "booking_id": "BK-004"
+                }
+              },
+              {
+                "name": "wrangler_search_mcp_search_flights",
+                "args": {
+                  "origin": "SFO",
+                  "destination": "LAX"
+                }
+              },
+              {
+                "name": "wrangler_booking_mcp_book_flight",
+                "args": {
+                  "passenger_name": "Lisa Wang"
+                }
+              }
+            ]
+          }
+        }
+      ],
+      "session_input": {
+        "app_name": "flash_opt",
+        "user_id": "eval_user",
+        "category": "cancellation",
+        "tier": "high"
+      }
+    },
+    {
+      "eval_id": "case_51_low_cancellation",
+      "conversation": [
+        {
+          "user_content": {
+            "parts": [
+              {
+                "text": "Show me the details for booking BK-006 so I can decide whether to cancel it"
+              }
+            ],
+            "role": "user"
+          },
+          "final_response": {
+            "parts": [
+              {
+                "text": "Here are the details for booking BK-006."
+              }
+            ],
+            "role": "model"
+          },
+          "intermediate_data": {
+            "tool_uses": [
+              {
+                "name": "wrangler_booking_mcp_get_booking",
+                "args": {
+                  "booking_id": "BK-006"
+                }
+              }
+            ]
+          }
+        }
+      ],
+      "session_input": {
+        "app_name": "flash_opt",
+        "user_id": "eval_user",
+        "category": "cancellation",
+        "tier": "low"
+      }
+    },
+    {
+      "eval_id": "case_52_low_boundary",
+      "conversation": [
+        {
+          "user_content": {
+            "parts": [
+              {
+                "text": "Submit a $0 meals expense for water at meeting, user ID EMP001"
+              }
+            ],
+            "role": "user"
+          },
+          "final_response": {
+            "parts": [
+              {
+                "text": "A $0 expense is within the meals policy. Expense submitted for EMP001."
+              }
+            ],
+            "role": "model"
+          },
+          "intermediate_data": {
+            "tool_uses": [
+              {
+                "name": "wrangler_expense_mcp_check_expense_policy",
+                "args": {
+                  "category": "meals",
+                  "amount": 0
+                }
+              },
+              {
+                "name": "wrangler_expense_mcp_submit_expense",
+                "args": {
+                  "user_id": "EMP001",
+                  "category": "meals",
+                  "amount": 0,
+                  "description": "water at meeting"
+                }
+              }
+            ]
+          }
+        }
+      ],
+      "session_input": {
+        "app_name": "flash_opt",
+        "user_id": "eval_user",
+        "category": "boundary",
+        "tier": "low"
+      }
+    },
+    {
+      "eval_id": "case_53_low_boundary",
+      "conversation": [
+        {
+          "user_content": {
+            "parts": [
+              {
+                "text": "Check if a $9999 lodging expense is within policy"
+              }
+            ],
+            "role": "user"
+          },
+          "final_response": {
+            "parts": [
+              {
+                "text": "A $9,999 lodging expense greatly exceeds the $400 policy limit. Requires manager approval."
+              }
+            ],
+            "role": "model"
+          },
+          "intermediate_data": {
+            "tool_uses": [
+              {
+                "name": "wrangler_expense_mcp_check_expense_policy",
+                "args": {
+                  "category": "lodging",
+                  "amount": 9999
+                }
+              }
+            ]
+          }
+        }
+      ],
+      "session_input": {
+        "app_name": "flash_opt",
+        "user_id": "eval_user",
+        "category": "boundary",
+        "tier": "low"
+      }
+    },
+    {
+      "eval_id": "case_54_medium_boundary",
+      "conversation": [
+        {
+          "user_content": {
+            "parts": [
+              {
+                "text": "Submit a $200.00 transport expense for airport shuttle, user EMP002, and a $200.01 transport expense for return shuttle"
+              }
+            ],
+            "role": "user"
+          },
+          "final_response": {
+            "parts": [
+              {
+                "text": "$200 transport is at policy limit, approved. $200.01 exceeds the $200 limit by $0.01, requires review."
+              }
+            ],
+            "role": "model"
+          },
+          "intermediate_data": {
+            "tool_uses": [
+              {
+                "name": "wrangler_expense_mcp_check_expense_policy",
+                "args": {
+                  "category": "transport",
+                  "amount": 200
+                }
+              },
+              {
+                "name": "wrangler_expense_mcp_submit_expense",
+                "args": {
+                  "user_id": "EMP002",
+                  "category": "transport",
+                  "amount": 200,
+                  "description": "airport shuttle"
+                }
+              },
+              {
+                "name": "wrangler_expense_mcp_check_expense_policy",
+                "args": {
+                  "category": "transport",
+                  "amount": 200.01
+                }
+              }
+            ]
+          }
+        }
+      ],
+      "session_input": {
+        "app_name": "flash_opt",
+        "user_id": "eval_user",
+        "category": "boundary",
+        "tier": "medium"
+      }
+    },
+    {
+      "eval_id": "case_55_low_boundary",
+      "conversation": [
+        {
+          "user_content": {
+            "parts": [
+              {
+                "text": "Is a $149.99 entertainment expense within policy?"
+              }
+            ],
+            "role": "user"
+          },
+          "final_response": {
+            "parts": [
+              {
+                "text": "A $149.99 entertainment expense is within the $150 corporate policy limit."
+              }
+            ],
+            "role": "model"
+          },
+          "intermediate_data": {
+            "tool_uses": [
+              {
+                "name": "wrangler_expense_mcp_check_expense_policy",
+                "args": {
+                  "category": "entertainment",
+                  "amount": 149.99
+                }
+              }
+            ]
+          }
+        }
+      ],
+      "session_input": {
+        "app_name": "flash_opt",
+        "user_id": "eval_user",
+        "category": "boundary",
+        "tier": "low"
+      }
+    },
+    {
+      "eval_id": "case_56_medium_boundary",
+      "conversation": [
+        {
+          "user_content": {
+            "parts": [
+              {
+                "text": "Check policy for $100 supplies, then submit it for EMP003. Also check $100.01 supplies."
+              }
+            ],
+            "role": "user"
+          },
+          "final_response": {
+            "parts": [
+              {
+                "text": "$100 supplies is at the limit, approved. $100.01 exceeds the $100 supplies limit by $0.01."
+              }
+            ],
+            "role": "model"
+          },
+          "intermediate_data": {
+            "tool_uses": [
+              {
+                "name": "wrangler_expense_mcp_check_expense_policy",
+                "args": {
+                  "category": "supplies",
+                  "amount": 100
+                }
+              },
+              {
+                "name": "wrangler_expense_mcp_submit_expense",
+                "args": {
+                  "user_id": "EMP003",
+                  "category": "supplies",
+                  "amount": 100
+                }
+              },
+              {
+                "name": "wrangler_expense_mcp_check_expense_policy",
+                "args": {
+                  "category": "supplies",
+                  "amount": 100.01
+                }
+              }
+            ]
+          }
+        }
+      ],
+      "session_input": {
+        "app_name": "flash_opt",
+        "user_id": "eval_user",
+        "category": "boundary",
+        "tier": "medium"
+      }
+    },
+    {
+      "eval_id": "case_57_low_search",
+      "conversation": [
+        {
+          "user_content": {
+            "parts": [
+              {
+                "text": "Find flights from JFK to LAX on June 15"
+              }
+            ],
+            "role": "user"
+          },
+          "final_response": {
+            "parts": [
+              {
+                "text": "Flights from JFK to LAX on June 15 found."
+              }
+            ],
+            "role": "model"
+          },
+          "intermediate_data": {
+            "tool_uses": [
+              {
+                "name": "wrangler_search_mcp_search_flights",
+                "args": {
+                  "origin": "JFK",
+                  "destination": "LAX",
+                  "date": "2026-06-15"
+                }
+              }
+            ]
+          }
+        }
+      ],
+      "session_input": {
+        "app_name": "flash_opt",
+        "user_id": "eval_user",
+        "category": "search",
+        "tier": "low"
+      }
+    },
+    {
+      "eval_id": "case_58_low_search",
+      "conversation": [
+        {
+          "user_content": {
+            "parts": [
+              {
+                "text": "Search for hotels in Chicago under $300 per night"
+              }
+            ],
+            "role": "user"
+          },
+          "final_response": {
+            "parts": [
+              {
+                "text": "Palmer House Chicago at $250/night (4.4 rating)."
+              }
+            ],
+            "role": "model"
+          },
+          "intermediate_data": {
+            "tool_uses": [
+              {
+                "name": "wrangler_search_mcp_search_hotels",
+                "args": {
+                  "city": "Chicago",
+                  "max_price": 300
+                }
+              }
+            ]
+          }
+        }
+      ],
+      "session_input": {
+        "app_name": "flash_opt",
+        "user_id": "eval_user",
+        "category": "search",
+        "tier": "low"
+      }
+    },
+    {
+      "eval_id": "case_59_medium_policy",
+      "conversation": [
+        {
+          "user_content": {
+            "parts": [
+              {
+                "text": "What are the policy limits for all expense categories?"
+              }
+            ],
+            "role": "user"
+          },
+          "final_response": {
+            "parts": [
+              {
+                "text": "Meals: $75. Transport: $200. Lodging: $400. Supplies: $100. Entertainment: $150."
+              }
+            ],
+            "role": "model"
+          },
+          "intermediate_data": {
+            "tool_uses": [
+              {
+                "name": "wrangler_expense_mcp_check_expense_policy",
+                "args": {
+                  "category": "meals",
+                  "amount": 0
+                }
+              },
+              {
+                "name": "wrangler_expense_mcp_check_expense_policy",
+                "args": {
+                  "category": "transport",
+                  "amount": 0
+                }
+              },
+              {
+                "name": "wrangler_expense_mcp_check_expense_policy",
+                "args": {
+                  "category": "lodging",
+                  "amount": 0
+                }
+              },
+              {
+                "name": "wrangler_expense_mcp_check_expense_policy",
+                "args": {
+                  "category": "supplies",
+                  "amount": 0
+                }
+              },
+              {
+                "name": "wrangler_expense_mcp_check_expense_policy",
+                "args": {
+                  "category": "entertainment",
+                  "amount": 0
+                }
+              }
+            ]
+          }
+        }
+      ],
+      "session_input": {
+        "app_name": "flash_opt",
+        "user_id": "eval_user",
+        "category": "policy",
+        "tier": "medium"
+      }
+    },
+    {
+      "eval_id": "case_60_low_policy",
+      "conversation": [
+        {
+          "user_content": {
+            "parts": [
+              {
+                "text": "Is a $300 lodging expense within policy?"
+              }
+            ],
+            "role": "user"
+          },
+          "final_response": {
+            "parts": [
+              {
+                "text": "A $300 lodging expense is within the $400 policy limit."
+              }
+            ],
+            "role": "model"
+          },
+          "intermediate_data": {
+            "tool_uses": [
+              {
+                "name": "wrangler_expense_mcp_check_expense_policy",
+                "args": {
+                  "category": "lodging",
+                  "amount": 300
+                }
+              }
+            ]
+          }
+        }
+      ],
+      "session_input": {
+        "app_name": "flash_opt",
+        "user_id": "eval_user",
+        "category": "policy",
+        "tier": "low"
+      }
+    },
+    {
+      "eval_id": "case_61_low_error_handling",
+      "conversation": [
+        {
+          "user_content": {
+            "parts": [
+              {
+                "text": "Submit an expense but I forgot to mention the amount"
+              }
+            ],
+            "role": "user"
+          },
+          "final_response": {
+            "parts": [
+              {
+                "text": "I need additional information to submit an expense. Please provide the amount, category, and your user ID."
+              }
+            ],
+            "role": "model"
+          },
+          "intermediate_data": {
+            "tool_uses": []
+          }
+        }
+      ],
+      "session_input": {
+        "app_name": "flash_opt",
+        "user_id": "eval_user",
+        "category": "error_handling",
+        "tier": "low"
+      }
+    },
+    {
+      "eval_id": "case_62_high_planning",
+      "conversation": [
+        {
+          "user_content": {
+            "parts": [
+              {
+                "text": "Find the cheapest flight to New York, book it for me, check lodging policy, and find a budget hotel"
+              }
+            ],
+            "role": "user"
+          },
+          "final_response": {
+            "parts": [
+              {
+                "text": "Cheapest flight to JFK found and booked. Lodging policy checked. Budget hotel options in New York listed."
+              }
+            ],
+            "role": "model"
+          },
+          "intermediate_data": {
+            "tool_uses": [
+              {
+                "name": "wrangler_search_mcp_search_flights",
+                "args": {
+                  "destination": "JFK"
+                }
+              },
+              {
+                "name": "wrangler_expense_mcp_check_expense_policy",
+                "args": {
+                  "category": "lodging"
+                }
+              },
+              {
+                "name": "wrangler_search_mcp_search_hotels",
+                "args": {
+                  "city": "New York"
+                }
+              }
+            ]
+          }
+        }
+      ],
+      "session_input": {
+        "app_name": "flash_opt",
+        "user_id": "eval_user",
+        "category": "planning",
+        "tier": "high"
+      }
+    },
+    {
+      "eval_id": "case_63_medium_expense",
+      "conversation": [
+        {
+          "user_content": {
+            "parts": [
+              {
+                "text": "Submit a $30 transport expense for taxi to airport, user ID EMP001"
+              }
+            ],
+            "role": "user"
+          },
+          "final_response": {
+            "parts": [
+              {
+                "text": "Transport expense of $30 submitted for EMP001. Within $200 policy limit, approved."
+              }
+            ],
+            "role": "model"
+          },
+          "intermediate_data": {
+            "tool_uses": [
+              {
+                "name": "wrangler_expense_mcp_check_expense_policy",
+                "args": {
+                  "category": "transport",
+                  "amount": 30
+                }
+              },
+              {
+                "name": "wrangler_expense_mcp_submit_expense",
+                "args": {
+                  "user_id": "EMP001",
+                  "category": "transport",
+                  "amount": 30,
+                  "description": "taxi to airport"
+                }
+              }
+            ]
+          }
+        }
+      ],
+      "session_input": {
+        "app_name": "flash_opt",
+        "user_id": "eval_user",
+        "category": "expense",
+        "tier": "medium"
+      }
+    },
+    {
+      "eval_id": "case_64_low_error_handling",
       "conversation": [
         {
           "user_content": {
