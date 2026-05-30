@@ -317,7 +317,7 @@ def generate_gepa_evalset(
 def generate_sampler_config(
     app_name: str,
     eval_set_name: str = "eval_set",
-    judge_model: str = "gemini-2.5-pro",
+    judge_model: str = "gemini-3.5-flash",
     output_dir: str | Path | None = None,
     train_eval_case_ids: list[str] | None = None,
     validation_eval_case_ids: list[str] | None = None,
@@ -341,59 +341,43 @@ def generate_sampler_config(
             "criteria": {
                 "response_match_score": 0.1,
                 "final_response_match_v2": {
-                    "threshold": 0.5,
                     "judge_model_options": {"judge_model": judge_model},
                 },
                 "safety_v1": 0.8,
+                "hallucinations_v1": 0.5,
                 "rubric_based_final_response_quality_v1": {
-                    "threshold": 0.5,
                     "judge_model_options": {"judge_model": judge_model},
                     "rubrics": [
                         {
                             "rubric_id": "instruction_adherence",
                             "rubric_content": {
-                                "text_property": (
-                                    "The agent's response follows all instructions"
-                                    " in the system prompt, including formatting,"
-                                    " tone, and content requirements."
-                                )
+                                "text_property": "Response follows system prompt instructions."
                             },
                             "type": "INSTRUCTION_ADHERENCE",
                         },
                         {
                             "rubric_id": "completeness",
                             "rubric_content": {
-                                "text_property": (
-                                    "The agent's response fully addresses all parts"
-                                    " of the user's request without omitting"
-                                    " relevant information."
-                                )
+                                "text_property": "Response fully addresses the user request."
                             },
                             "type": "FINAL_RESPONSE_QUALITY",
                         },
                     ],
                 },
                 "rubric_based_tool_use_quality_v1": {
-                    "threshold": 0.5,
                     "judge_model_options": {"judge_model": judge_model},
                     "rubrics": [
                         {
                             "rubric_id": "correct_tool_selection",
                             "rubric_content": {
-                                "text_property": (
-                                    "The agent selected the correct tool(s)"
-                                    " for the user's request."
-                                )
+                                "text_property": "Correct tools selected."
                             },
                             "type": "TOOL_USE_QUALITY",
                         },
                         {
                             "rubric_id": "correct_parameters",
                             "rubric_content": {
-                                "text_property": (
-                                    "The agent provided accurate and complete"
-                                    " parameters to the tool(s)."
-                                )
+                                "text_property": "Accurate tool parameters provided."
                             },
                             "type": "TOOL_USE_QUALITY",
                         },

@@ -65,15 +65,100 @@ def _patch_adk():
     _orig_extract = sampler_mod.LocalEvalSampler._extract_eval_data
 
     def _patched_extract(self, eval_set_id, eval_results):
+        metric_totals = {}
+        metric_counts = {}
+        rubric_failures = {}
+
         for case_result in eval_results:
             for inv in getattr(case_result, "eval_metric_result_per_invocation", []):
                 for mr in getattr(inv, "eval_metric_results", []):
                     if mr.score is None:
                         mr.score = 0.0
+                    name = getattr(mr, "metric_name", "unknown")
+                    metric_totals[name] = metric_totals.get(name, 0.0) + mr.score
+                    metric_counts[name] = metric_counts.get(name, 0) + 1
+                    if hasattr(mr, "rubric_scores") and not mr.rubric_scores:
+                        rubric_failures[name] = rubric_failures.get(name, 0) + 1
+
+        if metric_totals:
+            breakdown = " | ".join(
+                f"{n.split('/')[-1][:25]}={metric_totals[n]/metric_counts[n]:.2f}"
+                for n in sorted(metric_totals)
+            )
+            log.info("Eval batch (%d cases): %s", len(eval_results), breakdown)
+
+        if rubric_failures:
+            for metric, count in rubric_failures.items():
+                log.warning(
+                    "RUBRIC MATCH FAILURE: %s had %d/%d cases with no rubric scores",
+                    metric, count, len(eval_results),
+                )
+
         return _orig_extract(self, eval_set_id, eval_results)
 
     sampler_mod.LocalEvalSampler._extract_eval_data = _patched_extract
-    log.info("ADK patches applied")
+
+    # Patch 5: Fuzzy rubric text matching — ADK's _normalize_text only does
+    # .lower().strip(), so judge-garbled text (markdown bullets, non-ASCII)
+    # causes exact match failures.  We also override
+    # convert_auto_rater_response_to_score with a substring fallback.
+    import re as _re
+    from google.adk.evaluation import rubric_based_evaluator as _rbe
+
+    def _fuzzy_normalize(text: str) -> str:
+        if not isinstance(text, str):
+            return ""
+        text = _re.sub(r'^[\s*•\-]+', '', text)
+        text = _re.sub(r'[\s*•\-]+$', '', text)
+        text = _re.sub(r'\s+', ' ', text)
+        text = text.encode('ascii', 'ignore').decode('ascii')
+        return text.lower().strip()
+
+    _rbe._normalize_text = _fuzzy_normalize
+
+    _orig_convert = _rbe.RubricBasedEvaluator.convert_auto_rater_response_to_score
+
+    def _patched_convert(self, auto_rater_response):
+        from google.adk.evaluation.rubric_based_evaluator import (
+            get_text_from_content, RubricScore, AutoRaterScore,
+            get_average_rubric_score,
+        )
+        response_text = get_text_from_content(auto_rater_response.content)
+        rubric_responses = self._auto_rater_response_parser.parse(response_text)
+        rubric_scores = []
+
+        normalized_map = {}
+        for r in self.get_effective_rubrics_list():
+            normalized_map[_fuzzy_normalize(r.rubric_content.text_property)] = r
+
+        for rubric_response in rubric_responses:
+            norm_text = _fuzzy_normalize(rubric_response.property_text)
+            rubric = normalized_map.get(norm_text)
+
+            if not rubric:
+                for config_text, r in normalized_map.items():
+                    if config_text in norm_text or norm_text in config_text:
+                        rubric = r
+                        break
+
+            if rubric:
+                rubric_scores.append(RubricScore(
+                    rubric_id=rubric.rubric_id,
+                    rationale=rubric_response.rationale,
+                    score=rubric_response.score,
+                ))
+            else:
+                log.warning(
+                    "Rubric not matched (even with fuzzy): %s",
+                    rubric_response.property_text[:80],
+                )
+
+        aggregated_score = get_average_rubric_score(rubric_scores)
+        return AutoRaterScore(score=aggregated_score, rubric_scores=rubric_scores)
+
+    _rbe.RubricBasedEvaluator.convert_auto_rater_response_to_score = _patched_convert
+
+    log.info("ADK patches applied (including fuzzy rubric matching)")
 
 
 def _create_wrapper_module(agent_module_path: str, temp_dir: str) -> str:
@@ -179,59 +264,43 @@ def optimize(
                 "criteria": {
                     "response_match_score": 0.1,
                     "final_response_match_v2": {
-                        "threshold": 0.5,
-                        "judge_model_options": {"judge_model": "gemini-2.5-pro"},
+                        "judge_model_options": {"judge_model": "gemini-3.5-flash"},
                     },
                     "safety_v1": 0.8,
+                    "hallucinations_v1": 0.5,
                     "rubric_based_final_response_quality_v1": {
-                        "threshold": 0.5,
-                        "judge_model_options": {"judge_model": "gemini-2.5-pro"},
+                        "judge_model_options": {"judge_model": "gemini-3.5-flash"},
                         "rubrics": [
                             {
                                 "rubric_id": "instruction_adherence",
                                 "rubric_content": {
-                                    "text_property": (
-                                        "The agent's response follows all instructions"
-                                        " in the system prompt, including formatting,"
-                                        " tone, and content requirements."
-                                    )
+                                    "text_property": "Response follows system prompt instructions."
                                 },
                                 "type": "INSTRUCTION_ADHERENCE",
                             },
                             {
                                 "rubric_id": "completeness",
                                 "rubric_content": {
-                                    "text_property": (
-                                        "The agent's response fully addresses all parts"
-                                        " of the user's request without omitting"
-                                        " relevant information."
-                                    )
+                                    "text_property": "Response fully addresses the user request."
                                 },
                                 "type": "FINAL_RESPONSE_QUALITY",
                             },
                         ],
                     },
                     "rubric_based_tool_use_quality_v1": {
-                        "threshold": 0.5,
-                        "judge_model_options": {"judge_model": "gemini-2.5-pro"},
+                        "judge_model_options": {"judge_model": "gemini-3.5-flash"},
                         "rubrics": [
                             {
                                 "rubric_id": "correct_tool_selection",
                                 "rubric_content": {
-                                    "text_property": (
-                                        "The agent selected the correct tool(s)"
-                                        " for the user's request."
-                                    )
+                                    "text_property": "Correct tools selected."
                                 },
                                 "type": "TOOL_USE_QUALITY",
                             },
                             {
                                 "rubric_id": "correct_parameters",
                                 "rubric_content": {
-                                    "text_property": (
-                                        "The agent provided accurate and complete"
-                                        " parameters to the tool(s)."
-                                    )
+                                    "text_property": "Accurate tool parameters provided."
                                 },
                                 "type": "TOOL_USE_QUALITY",
                             },
@@ -323,5 +392,18 @@ def optimize(
     print(f"{tag}  Candidates: {n_candidates}, Total metric calls: {total_calls}", flush=True)
     print(f"{tag}  Variant scores:{scores_summary}", flush=True)
     print(f"{tag}  Best variant: {best_idx} ({len(optimized_instruction)} chars)", flush=True)
+
+    stderr_path = os.path.join(run_dir, "run_log_stderr.txt")
+    if os.path.exists(stderr_path):
+        with open(stderr_path) as f:
+            rubric_warnings = [l for l in f if "not found in the rubrics" in l]
+        if rubric_warnings:
+            print(f"{tag}  WARNING: {len(rubric_warnings)} rubric match failures during optimization", flush=True)
+            seen = set()
+            for w in rubric_warnings:
+                short = w.strip()[:120]
+                if short not in seen:
+                    print(f"{tag}    {short}", flush=True)
+                    seen.add(short)
 
     return optimized_instruction
