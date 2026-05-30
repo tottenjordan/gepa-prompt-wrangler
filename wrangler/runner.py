@@ -31,12 +31,14 @@ def _fmt_duration(seconds: float) -> str:
 
 
 class WranglerPipeline:
-    def __init__(self, manifest_path: str):
+    def __init__(self, manifest_path: str, max_concurrent: int = 1, version: str | None = None):
         self.manifest = PairFactory.load(manifest_path)
         self.manifest_dir = Path(manifest_path).parent
         self.results: dict[str, dict] = {}
         self._phase_times: list[tuple[str, float]] = []
         self._pipeline_start: float = 0.0
+        self.max_concurrent = max_concurrent
+        self.version = version
 
     @contextmanager
     def _phase(self, name: str):
@@ -49,6 +51,36 @@ class WranglerPipeline:
         total = time.time() - self._pipeline_start
         print(f"\n  >> {name} complete ({_fmt_duration(elapsed)}) "
               f"[total elapsed: {_fmt_duration(total)}]")
+
+    def load_results(self, results_path: str):
+        """Load previous results JSON to resume from a later phase."""
+        with open(results_path) as f:
+            saved = json.load(f)
+        for key, value in saved.items():
+            if key.startswith("_"):
+                self.results[key] = value
+                continue
+            self.results[key] = value
+            for pair in self.manifest.pairs:
+                if pair.id == key:
+                    if "engine_id" in value:
+                        pair.engine_id = value["engine_id"]
+                    if "optimized_prompt" in value:
+                        pair.system_prompt = value["optimized_prompt"]
+                    break
+
+    def _next_version(self) -> str:
+        """Auto-detect the next wrangler version from existing prompt files."""
+        if self.version:
+            return self.version
+        max_ver = 0
+        prompts_dir = self.manifest_dir / "prompts"
+        if prompts_dir.exists():
+            import re
+            for py_file in prompts_dir.glob("*_prompts.py"):
+                for match in re.finditer(r"wrangler_v(\d+)", py_file.read_text()):
+                    max_ver = max(max_ver, int(match.group(1)))
+        return f"wrangler_v{max_ver + 1}"
 
     def _load_eval_cases(self) -> list[dict]:
         eval_path = self.manifest_dir / self.manifest.eval_data
@@ -129,7 +161,7 @@ class WranglerPipeline:
             fallback = Path(self.manifest.agent_module)
         return fallback
 
-    def _save_optimized_prompt(self, pair: AgentPromptPair, prompt: str, version: str = "wrangler_v3"):
+    def _save_optimized_prompt(self, pair: AgentPromptPair, prompt: str, version: str | None = None):
         """Save optimized prompt to the agent's prompts.py file."""
         agent_ref = pair.agent_module or self.manifest.agent_module
         stem = Path(agent_ref).stem.replace("_agent", "")
@@ -138,13 +170,14 @@ class WranglerPipeline:
             print(f"  [{pair.id}] Warning: prompts file not found at {prompts_file}", flush=True)
             return
 
-        judge = self.manifest.eval_config.get("judge_model", "gemini-2.5-pro")
+        version = version or self._next_version()
+        judge = self.manifest.eval_config.get("judge_model", "gemini-3.5-flash")
+        case_count = self.results.get("_eval_metadata", {}).get("case_count", 0)
         entry = {
             "prompt": prompt,
-            "source": "wrangler sequential GEPA optimization",
-            "eval_cases": self.results.get("_eval_metadata", {}).get("case_count", 40),
+            "source": "wrangler GEPA optimization",
+            "eval_cases": case_count,
             "judge_model": judge,
-            "notes": "Sequential optimization (no parallel contention), 40-case evalset",
             "timestamp": datetime.now().isoformat(),
         }
 
@@ -210,8 +243,8 @@ class WranglerPipeline:
             self._save_optimized_prompt(pair, optimized)
             print(f"  [{pair.id}] Done ({_fmt_duration(elapsed)}) — {len(optimized)} chars")
 
-    def _run_eval_parallel(self, eval_cases: list[dict], n_pairs: int, phase: str, max_concurrent: int = 2):
-        """Run batch eval for all agents in staggered parallel batches."""
+    def _run_eval(self, eval_cases: list[dict], n_pairs: int, phase: str):
+        """Run batch eval for all agents, sequentially or in batches."""
         score_key = "before" if phase == "before" else "after"
         per_case_key = f"{score_key}_per_case"
 
@@ -222,23 +255,34 @@ class WranglerPipeline:
             elapsed = time.time() - t0
             return pair.id, result, elapsed
 
-        pairs = list(self.manifest.pairs)
-        for batch_start in range(0, len(pairs), max_concurrent):
-            batch = pairs[batch_start:batch_start + max_concurrent]
-            batch_num = batch_start // max_concurrent + 1
-            total_batches = (len(pairs) + max_concurrent - 1) // max_concurrent
-            print(f"\n  --- Batch {batch_num}/{total_batches} ({len(batch)} agents) ---", flush=True)
+        def _record(pair_id, result, elapsed):
+            self.results[pair_id][score_key] = result.scores
+            self.results[pair_id][per_case_key] = result.per_case
+            avg = sum(result.scores.values()) / max(len(result.scores), 1)
+            print(f"  [{pair_id}] Done ({_fmt_duration(elapsed)}) — avg score: {avg:.2f}")
+            for m, s in sorted(result.scores.items()):
+                print(f"    {m:40s} {s:.2f}")
 
-            with ThreadPoolExecutor(max_workers=max_concurrent) as pool:
-                futures = {pool.submit(_eval_one, pair): pair for pair in batch}
-                for future in as_completed(futures):
-                    pair_id, result, elapsed = future.result()
-                    self.results[pair_id][score_key] = result.scores
-                    self.results[pair_id][per_case_key] = result.per_case
-                    avg = sum(result.scores.values()) / max(len(result.scores), 1)
-                    print(f"  [{pair_id}] Done ({_fmt_duration(elapsed)}) — avg score: {avg:.2f}")
-                    for m, s in sorted(result.scores.items()):
-                        print(f"    {m:40s} {s:.2f}")
+        pairs = list(self.manifest.pairs)
+        mc = self.max_concurrent
+
+        if mc <= 1:
+            for i, pair in enumerate(pairs, 1):
+                print(f"\n  [{pair.id}] ({i}/{n_pairs}) Evaluating...", flush=True)
+                pair_id, result, elapsed = _eval_one(pair)
+                _record(pair_id, result, elapsed)
+        else:
+            for batch_start in range(0, len(pairs), mc):
+                batch = pairs[batch_start:batch_start + mc]
+                batch_num = batch_start // mc + 1
+                total_batches = (len(pairs) + mc - 1) // mc
+                print(f"\n  --- Batch {batch_num}/{total_batches} ({len(batch)} agents) ---", flush=True)
+
+                with ThreadPoolExecutor(max_workers=mc) as pool:
+                    futures = {pool.submit(_eval_one, pair): pair for pair in batch}
+                    for future in as_completed(futures):
+                        pair_id, result, elapsed = future.result()
+                        _record(pair_id, result, elapsed)
 
     def _preflight(self, eval_cases: list[dict]):
         """Validate eval data before running the pipeline."""
@@ -259,8 +303,12 @@ class WranglerPipeline:
 
         print(f"  Pre-flight: PASSED")
 
-    def run(self) -> dict:
-        """Execute the full pipeline with progress tracking."""
+    def run(self, from_phase: int = 0) -> dict:
+        """Execute the full pipeline with progress tracking.
+
+        Args:
+            from_phase: Skip phases before this number (use with load_results()).
+        """
         self._pipeline_start = time.time()
 
         print(f"{'=' * 60}")
@@ -268,18 +316,19 @@ class WranglerPipeline:
         print(f"{'=' * 60}")
         print(f"  Experiment: {self.manifest.name}")
         print(f"  Pairs:      {len(self.manifest.pairs)}")
+        if from_phase > 0:
+            print(f"  Resuming:   from phase {from_phase}")
         print()
 
         eval_cases = self._load_eval_cases()
         n_pairs = len(self.manifest.pairs)
 
         for pair in self.manifest.pairs:
-            self.results[pair.id] = {
+            self.results.setdefault(pair.id, {
                 "model": pair.model,
                 "original_prompt": pair.system_prompt,
-            }
+            })
 
-        # Store eval case metadata for downstream analysis
         self.results["_eval_metadata"] = {
             "case_count": len(eval_cases),
             "cases": [
@@ -288,47 +337,46 @@ class WranglerPipeline:
             ],
         }
 
-        # Phase 0: Pre-flight validation
-        with self._phase("Phase 0: Pre-flight Validation"):
-            self._preflight(eval_cases)
+        if from_phase <= 0:
+            with self._phase("Phase 0: Pre-flight Validation"):
+                self._preflight(eval_cases)
 
-        # Phase 1: Deploy
-        with self._phase("Phase 1: Deploy to GEAP"):
-            for i, pair in enumerate(self.manifest.pairs, 1):
-                if pair.engine_id:
-                    print(f"  [{pair.id}] ({i}/{n_pairs}) Using existing engine: {pair.engine_id}")
-                    self.results[pair.id]["engine_id"] = pair.engine_id
-                else:
-                    print(f"  [{pair.id}] ({i}/{n_pairs}) Deploying...", end="", flush=True)
+        if from_phase <= 1:
+            with self._phase("Phase 1: Deploy to GEAP"):
+                for i, pair in enumerate(self.manifest.pairs, 1):
+                    if pair.engine_id:
+                        print(f"  [{pair.id}] ({i}/{n_pairs}) Using existing engine: {pair.engine_id}")
+                        self.results[pair.id]["engine_id"] = pair.engine_id
+                    else:
+                        print(f"  [{pair.id}] ({i}/{n_pairs}) Deploying...", end="", flush=True)
+                        t0 = time.time()
+                        agent = self._load_agent(pair)
+                        engine_id = deployer.deploy_agent(agent, display_name=pair.id)
+                        self.results[pair.id]["engine_id"] = engine_id
+                        print(f" {_fmt_duration(time.time() - t0)}")
+
+        if from_phase <= 2:
+            with self._phase("Phase 2: Baseline Evaluation"):
+                self._run_eval(eval_cases, n_pairs, phase="before")
+
+        if from_phase <= 3:
+            with self._phase("Phase 3: GEPA Optimization"):
+                self._run_optimize_sequential()
+
+        if from_phase <= 4:
+            with self._phase("Phase 4: Redeploy with Optimized Prompt"):
+                for i, pair in enumerate(self.manifest.pairs, 1):
+                    print(f"  [{pair.id}] ({i}/{n_pairs}) Redeploying...", end="", flush=True)
                     t0 = time.time()
+                    engine_id = self.results[pair.id]["engine_id"]
                     agent = self._load_agent(pair)
-                    engine_id = deployer.deploy_agent(agent, display_name=pair.id)
-                    self.results[pair.id]["engine_id"] = engine_id
+                    deployer.update_agent(agent, engine_id, display_name=pair.id)
                     print(f" {_fmt_duration(time.time() - t0)}")
 
-        # Phase 2: Baseline eval (parallel)
-        with self._phase("Phase 2: Baseline Evaluation"):
-            self._run_eval_parallel(eval_cases, n_pairs, phase="before")
+        if from_phase <= 5:
+            with self._phase("Phase 5: Post-Optimization Evaluation"):
+                self._run_eval(eval_cases, n_pairs, phase="after")
 
-        # Phase 3: GEPA optimize (sequential to avoid MCP/API contention)
-        with self._phase("Phase 3: GEPA Optimization"):
-            self._run_optimize_sequential()
-
-        # Phase 4: Redeploy with optimized prompt
-        with self._phase("Phase 4: Redeploy with Optimized Prompt"):
-            for i, pair in enumerate(self.manifest.pairs, 1):
-                print(f"  [{pair.id}] ({i}/{n_pairs}) Redeploying...", end="", flush=True)
-                t0 = time.time()
-                engine_id = self.results[pair.id]["engine_id"]
-                agent = self._load_agent(pair)
-                deployer.update_agent(agent, engine_id, display_name=pair.id)
-                print(f" {_fmt_duration(time.time() - t0)}")
-
-        # Phase 5: Post-optimization eval (parallel)
-        with self._phase("Phase 5: Post-Optimization Evaluation"):
-            self._run_eval_parallel(eval_cases, n_pairs, phase="after")
-
-        # Phase 6: Generate report
         with self._phase("Phase 6: Generate Report"):
             generate_report(self.results, self.manifest.name)
 

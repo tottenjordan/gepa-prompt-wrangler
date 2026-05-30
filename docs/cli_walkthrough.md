@@ -100,7 +100,7 @@ pairs:
   system_prompt: You are a helpful corporate travel assistant. Use the available tools
     to help employees with travel planning, booking, and expense management.
 eval_config:
-  judge_model: gemini-2.5-pro
+  judge_model: gemini-3.5-flash
   response_match_threshold: 0.5
   safety_threshold: 0.8
 ```
@@ -128,7 +128,7 @@ eval_cases:
 
 **Why it matters:** Manually creating GEPA evalset JSON is the most error-prone step in the optimization pipeline. The format requires nested conversation objects, session_input, and exact tool_use structures. This command automates the entire conversion, including balanced sampling across complexity levels.
 
-**What we expect:** Given our 40-case `eval_cases.yaml` from the multi_model example, it should produce a 15-case balanced evalset JSON and a sampler config, ready for GEPA optimization.
+**What we expect:** Given our 64-case `eval_cases.yaml` from the multi_model example, it should produce a 15-case balanced evalset JSON and a sampler config, ready for GEPA optimization.
 
 ```bash
 wrangler generate-evalset \
@@ -140,7 +140,7 @@ wrangler generate-evalset \
 **Example output:**
 
 ```
-Loaded 40 eval cases from examples/multi_model_agents/eval_data/eval_cases.yaml
+Loaded 64 eval cases from examples/multi_model_agents/eval_data/eval_cases.yaml
   Evalset: /tmp/byoa_test/agent_opt/agent_opt_eval_set.evalset.json (15 cases)
   Sampler config: /tmp/byoa_test/agent_opt/sampler_config.json
 
@@ -165,7 +165,7 @@ agent_opt/
       "response_match_score": 0.1,
       "final_response_match_v2": {
         "threshold": 0.5,
-        "judge_model_options": {"judge_model": "gemini-2.5-pro"}
+        "judge_model_options": {"judge_model": "gemini-3.5-flash"}
       },
       "safety_v1": 0.8
     }
@@ -185,7 +185,7 @@ agent_opt/
 
 **Why it matters:** This is the fastest path for users who already have agents deployed. No manifest, no agent module — just point at an engine ID and eval data. It's also how you do quick health checks.
 
-**What we expect:** Running against the lite agent (engine `4981388556929859584`) with the 30-case eval dataset should produce scores for all 6 metrics (response quality, hallucination, safety, tool use, instruction following, response match). The agent is currently running the GEPA-optimized `wrangler_v2` prompt, so we expect scores similar to our earlier post-optimization results.
+**What we expect:** Running against the lite agent (engine `4981388556929859584`) with the 64-case eval dataset should produce scores for all 6 metrics (response quality, hallucination, safety, tool use, instruction following, response match). The agent is currently running the GEPA-optimized `wrangler_v2` prompt, so we expect scores similar to our earlier post-optimization results.
 
 ```bash
 wrangler eval \
@@ -204,7 +204,7 @@ wrangler eval \
 **Example output:**
 
 ```
-  Running inference (30 cases)... 159s
+  Running inference (64 cases)... 159s
   Creating evaluation run... EvaluationRunState.SUCCEEDED
 
 Results:

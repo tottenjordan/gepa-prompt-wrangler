@@ -46,6 +46,10 @@ def main():
                         help="Path to manifest.yaml")
     parser.add_argument("--skip-diagrams", action="store_true",
                         help="Skip PaperBanana diagram generation")
+    parser.add_argument("--max-concurrent", type=int, default=1,
+                        help="Max parallel evals (default: 1 = sequential)")
+    parser.add_argument("--version", default=None,
+                        help="Version tag for saved prompts (e.g. wrangler_v5)")
     args = parser.parse_args()
 
     pipeline_start = time.time()
@@ -78,10 +82,13 @@ def main():
         return
 
     # Step 3: Run the full pipeline (deploy → eval → optimize → redeploy → eval → report)
+    run_cmd = ["uv", "run", "wrangler", "run", args.manifest,
+               "--max-concurrent", str(args.max_concurrent)]
+    if args.version:
+        run_cmd.extend(["--version", args.version])
     ok = run_step(
         "Step 3: Pipeline (deploy, eval, optimize, redeploy, eval, report)",
-        ["uv", "run", "python", "-c",
-         f"from wrangler.runner import WranglerPipeline; WranglerPipeline('{args.manifest}').run()"],
+        run_cmd,
         step_times,
     )
     if not ok:

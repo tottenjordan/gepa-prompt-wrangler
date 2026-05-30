@@ -136,10 +136,11 @@ gepa-prompt-wrangler/
 ├── eval_data/                       # Eval datasets
 │   └── example_eval.yaml            # 5 simplified eval cases
 │
-├── scripts/                         # Analysis & visualization
+├── scripts/                         # Analysis & orchestration
 │   ├── generate_analysis.py         # Matplotlib charts + per-agent reports
 │   ├── generate_diagrams.py         # PaperBanana architecture diagrams
-│   └── run_full_analysis.py         # Master script chaining all analysis
+│   ├── run_experiment_v2.py         # Full experiment: pre-flight + pipeline + analysis
+│   └── run_full_analysis.py         # Chains analysis + diagrams
 │
 ├── examples/                        # Reference implementations
 │   └── multi_model_agents/          # Full 5-model comparison (lite → opus)
@@ -149,7 +150,7 @@ gepa-prompt-wrangler/
 │       ├── generic_prompts.py       # Intentionally weak starting prompts
 │       ├── agents/                  # 5 standalone agents
 │       ├── mcp_servers/             # 3 MCP tool servers (Cloud Run + OTel)
-│       ├── eval_data/               # 40 eval cases (low/medium/high)
+│       ├── eval_data/               # 64 eval cases (low/medium/high)
 │       └── scripts/                 # Infrastructure deployment + evalset generation
 │
 ├── outputs/                         # Generated artifacts (gitignored)
@@ -209,7 +210,7 @@ pairs:
       Use tools to search flights and book hotels.
 
 eval_config:
-  judge_model: gemini-2.5-pro
+  judge_model: gemini-3.5-flash
   response_match_threshold: 0.5
   safety_threshold: 0.8
 
@@ -323,11 +324,11 @@ expected_tools:
 |---|---|---|
 | Format | ADK JSON (`.evalset.json`) | Simplified YAML |
 | Location | `agents/{name}_opt/{name}_eval_set.evalset.json` | `eval_data/eval_cases.yaml` |
-| Cases | 40 (28 train / 12 val, stratified split) | 40 (21 low + 13 medium + 6 high) |
+| Cases | 64 (49 train / 15 val, stratified split) | 64 (33 low + 22 medium + 9 high) |
 | Used by | Local GEPA optimizer | Vertex AI Evaluation Service |
 | Purpose | Train — optimize prompt candidates | Test — measure deployed agent quality |
 
-The GEPA evalset uses all 40 cases with a stratified train/val split (28/12). The train set is used for optimization; the validation set provides an unbiased estimate of generalization.
+The GEPA evalset uses all 64 cases with a stratified train/val split (49/15). The train set is used for optimization; the validation set provides an unbiased estimate of generalization.
 
 ---
 
@@ -346,9 +347,23 @@ The GEPA evalset uses all 40 cases with a stratified train/val split (28/12). Th
 ### Options
 
 ```bash
-wrangler run manifest.yaml --dry-run       # Validate without executing
-wrangler deploy manifest.yaml --pair flash  # Deploy specific pair
-wrangler eval manifest.yaml --engine-id ID  # Eval against specific engine
+# Run pipeline
+wrangler run manifest.yaml --dry-run                      # Validate without executing
+wrangler run manifest.yaml --max-concurrent 1              # Sequential evals (default)
+wrangler run manifest.yaml --version wrangler_v5           # Set prompt version tag
+
+# Resume from a previous run
+wrangler run manifest.yaml --resume-from outputs/results_20250530.json --from-phase 3
+
+# Deploy
+wrangler deploy manifest.yaml --pair flash                 # Deploy specific pair
+
+# Eval
+wrangler eval --engine-id <ID> --eval-data eval.yaml       # Standalone eval
+wrangler eval --engine-id <ID> --eval-data eval.yaml --agent-name lite  # With label
+
+# Optimize
+wrangler optimize manifest.yaml --pair lite --version wrangler_v5
 ```
 
 ---
@@ -359,7 +374,7 @@ The wrangler provides 4 evaluation options, each serving a different purpose:
 
 ### Option 1: Batch Eval (Server-Side)
 
-Run the full 30-case eval dataset against a deployed agent. Scores are computed server-side by the Vertex AI Evaluation Service.
+Run the full 64-case eval dataset against a deployed agent. Scores are computed server-side by the Vertex AI Evaluation Service.
 
 ```bash
 # Eval a single agent by engine ID
@@ -427,7 +442,7 @@ print(result)
 "
 ```
 
-**When to use:** After baseline eval shows room for improvement. Uses 15 balanced eval cases (5 low + 5 medium + 5 high) with a `gemini-2.5-pro` judge.
+**When to use:** After baseline eval shows room for improvement. Uses all 64 eval cases (49 train / 15 val) with a `gemini-3.5-flash` judge and rubric-based metrics.
 
 ### Generating Traffic
 
@@ -503,6 +518,9 @@ See [docs/online_eval_guide.md](docs/online_eval_guide.md) for details on evalua
 | `response_match_score` | Primary optimization target |
 | `final_response_match_v2` | LLM-judged similarity (uses judge model) |
 | `safety_v1` | Constraint — don't sacrifice safety for quality |
+| `hallucinations_v1` | Factual grounding constraint |
+| `rubric_based_final_response_quality_v1` | Instruction adherence + completeness rubrics |
+| `rubric_based_tool_use_quality_v1` | Correct tool selection + parameter accuracy rubrics |
 
 ---
 
@@ -581,7 +599,7 @@ print(scores)
 
 1. Fork the repository and create a feature branch.
 2. Install dev dependencies: `uv sync`.
-3. Write tests: `tests/test_*.py` (107 tests across all 15 modules).
+3. Write tests: `tests/test_*.py` (158 tests across all 15 modules).
 4. Run tests:
    ```bash
    # All tests

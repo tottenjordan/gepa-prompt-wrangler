@@ -75,7 +75,7 @@ def init(output: str, agent_dir: str):
                 },
             ],
             "eval_config": {
-                "judge_model": "gemini-2.5-pro",
+                "judge_model": "gemini-3.5-flash",
                 "response_match_threshold": 0.5,
                 "safety_threshold": 0.8,
             },
@@ -113,18 +113,31 @@ def inspect(agent_path: str, output: str):
 @main.command()
 @click.argument("manifest", default="manifest.yaml")
 @click.option("--dry-run", is_flag=True, help="Parse and validate without executing.")
-def run(manifest: str, dry_run: bool):
+@click.option("--resume-from", "resume_from", default=None, help="Path to previous results JSON to resume from.")
+@click.option("--from-phase", "from_phase", default=0, type=int, help="Start from this phase (requires --resume-from).")
+@click.option("--version", "-v", default=None, help="Version tag for saved prompts (e.g. wrangler_v5).")
+@click.option("--max-concurrent", "-c", default=1, type=int, help="Max parallel evals (default: 1 = sequential).")
+def run(manifest: str, dry_run: bool, resume_from: str, from_phase: int, version: str, max_concurrent: int):
     """Run the full pipeline: deploy -> eval -> optimize -> redeploy -> eval -> report."""
     from .runner import WranglerPipeline
 
-    pipeline = WranglerPipeline(manifest)
+    pipeline = WranglerPipeline(manifest, max_concurrent=max_concurrent, version=version)
     if dry_run:
         click.echo(f"Manifest: {pipeline.manifest.name}")
         click.echo(f"Pairs: {len(pipeline.manifest.pairs)}")
         for p in pipeline.manifest.pairs:
             click.echo(f"  {p.summary()}")
         return
-    pipeline.run()
+
+    if resume_from:
+        click.echo(f"Loading previous results from: {resume_from}")
+        pipeline.load_results(resume_from)
+
+    if from_phase > 0 and not resume_from:
+        click.echo("Error: --from-phase requires --resume-from to load previous results.")
+        raise SystemExit(1)
+
+    pipeline.run(from_phase=from_phase)
 
 
 @main.command("eval")
@@ -132,7 +145,8 @@ def run(manifest: str, dry_run: bool):
 @click.option("--pair", "-p", help="Evaluate only a specific pair by ID.")
 @click.option("--engine-id", help="Engine ID of the deployed agent.")
 @click.option("--eval-data", help="Path to eval data file (required with --engine-id without manifest).")
-def eval_cmd(manifest: str, pair: str, engine_id: str, eval_data: str):
+@click.option("--agent-name", default=None, help="Label for this agent in results (defaults to engine ID).")
+def eval_cmd(manifest: str, pair: str, engine_id: str, eval_data: str, agent_name: str):
     """Run batch evaluation against a deployed agent.
 
     Can be used two ways:
@@ -156,8 +170,9 @@ def eval_cmd(manifest: str, pair: str, engine_id: str, eval_data: str):
         click.echo("Error: --engine-id is required. Deploy the agent first with 'wrangler deploy'.")
         raise SystemExit(1)
 
-    result = run_batch_eval(engine_id, eval_cases, agent_name=engine_id)
-    click.echo(f"\nResults:")
+    label = agent_name or engine_id
+    result = run_batch_eval(engine_id, eval_cases, agent_name=label)
+    click.echo(f"\nResults for {label}:")
     for metric, score in sorted(result.scores.items()):
         click.echo(f"  {metric:40s} {score:.2f}")
 
@@ -197,9 +212,10 @@ def generate_evalset(from_path: str, output: str, count: int, balanced: bool, ap
 @main.command()
 @click.argument("manifest", default="manifest.yaml")
 @click.option("--pair", "-p", help="Optimize only a specific pair by ID.")
-@click.option("--judge-model", "-j", default=None, help="Judge model for GEPA eval (default: gemini-2.5-pro).")
+@click.option("--judge-model", "-j", default=None, help="Judge model for GEPA eval (default: gemini-3.5-flash).")
 @click.option("--multi-judge", is_flag=True, help="Enable multi-judge ensemble scoring.")
-def optimize(manifest: str, pair: str, judge_model: str, multi_judge: bool):
+@click.option("--version", "-v", default=None, help="Version tag for saved prompts (e.g. wrangler_v5).")
+def optimize(manifest: str, pair: str, judge_model: str, multi_judge: bool, version: str):
     """Run GEPA optimization for pairs in the manifest."""
     from .factory import PairFactory
     from .optimizer import optimize as run_optimize
@@ -207,11 +223,13 @@ def optimize(manifest: str, pair: str, judge_model: str, multi_judge: bool):
     m = PairFactory.load(manifest)
     pairs = [m.get_pair(pair)] if pair else m.pairs
 
-    effective_judge = judge_model or m.eval_config.get("judge_model", "gemini-2.5-pro")
+    effective_judge = judge_model or m.eval_config.get("judge_model", "gemini-3.5-flash")
     if judge_model:
         click.echo(f"Using judge model: {effective_judge}")
     if multi_judge:
         click.echo("Multi-judge ensemble enabled")
+    if version:
+        click.echo(f"Version tag: {version}")
 
     for p in pairs:
         click.echo(f"\n[{p.id}] Optimizing with model {p.model}...")
