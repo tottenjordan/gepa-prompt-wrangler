@@ -409,6 +409,262 @@ eval_cases:
         args: {origin: DEN, destination: NRT}
 
   # ============================================================
+  # EXPANDED BOOKING COVERAGE
+  # ============================================================
+
+  - prompt: "Book flight FL002 for Emily Garcia and FL001 for her colleague James Park"
+    expected_response: "Flight FL002 booked for Emily Garcia. Flight FL001 booked for James Park. Both bookings confirmed."
+    tier: medium
+    category: booking
+    expected_tools:
+      - name: wrangler_booking_mcp_book_flight
+        args: {flight_id: FL002, passenger_name: Emily Garcia}
+      - name: wrangler_booking_mcp_book_flight
+        args: {flight_id: FL001, passenger_name: James Park}
+
+  - prompt: "Book hotel HT001 for Sarah Lee from June 20 to June 25"
+    expected_response: "Hotel HT001 (Grand Hyatt New York) booked for Sarah Lee, June 20-25. 5-night stay confirmed."
+    tier: low
+    category: booking
+    expected_tools:
+      - name: wrangler_booking_mcp_book_hotel
+        args: {hotel_id: HT001, guest_name: Sarah Lee, checkin: "2026-06-20", checkout: "2026-06-25"}
+
+  - prompt: "Search for flights from LAX to JFK, then book the cheapest one for me — my name is Tom Reyes"
+    expected_response: "Found LAX to JFK flights. Cheapest option booked for Tom Reyes."
+    tier: medium
+    category: booking
+    expected_tools:
+      - name: wrangler_search_mcp_search_flights
+        args: {origin: LAX, destination: JFK}
+      - name: wrangler_booking_mcp_book_flight
+        args: {passenger_name: Tom Reyes}
+
+  - prompt: "List all bookings for user EMP001"
+    expected_response: "Here are the bookings for user EMP001."
+    tier: low
+    category: booking
+    expected_tools:
+      - name: wrangler_booking_mcp_list_bookings
+        args: {user_id: EMP001}
+
+  - prompt: "Book hotel HT002 for Mark Chen June 10-12 and submit a $250 lodging expense for EMP003"
+    expected_response: "Hotel HT002 booked for Mark Chen (June 10-12). Lodging expense of $250 submitted for EMP003, within $400 policy."
+    tier: high
+    category: booking
+    expected_tools:
+      - name: wrangler_booking_mcp_book_hotel
+        args: {hotel_id: HT002, guest_name: Mark Chen, checkin: "2026-06-10", checkout: "2026-06-12"}
+      - name: wrangler_expense_mcp_check_expense_policy
+        args: {category: lodging, amount: 250}
+      - name: wrangler_expense_mcp_submit_expense
+        args: {user_id: EMP003, category: lodging, amount: 250, description: hotel stay}
+
+  - prompt: "Get the details for my booking — the ID is BK-001"
+    expected_response: "Booking BK-001 details retrieved."
+    tier: low
+    category: booking
+    expected_tools:
+      - name: wrangler_booking_mcp_get_booking
+        args: {booking_id: BK-001}
+
+  # ============================================================
+  # EXPANDED CANCELLATION COVERAGE
+  # ============================================================
+
+  - prompt: "Cancel booking BK-002"
+    expected_response: "Booking BK-002 has been cancelled successfully."
+    tier: low
+    category: cancellation
+    expected_tools:
+      - name: wrangler_booking_mcp_cancel_booking
+        args: {booking_id: BK-002}
+
+  - prompt: "Cancel booking BK-003 and then rebook flight FL001 for the same passenger"
+    expected_response: "Booking BK-003 cancelled. Flight FL001 rebooked for the original passenger."
+    tier: medium
+    category: cancellation
+    expected_tools:
+      - name: wrangler_booking_mcp_cancel_booking
+        args: {booking_id: BK-003}
+      - name: wrangler_booking_mcp_book_flight
+        args: {flight_id: FL001}
+
+  - prompt: "I need to cancel my hotel booking BK-005 and find a cheaper hotel in New York instead"
+    expected_response: "Hotel booking BK-005 cancelled. Here are cheaper hotel options in New York."
+    tier: medium
+    category: cancellation
+    expected_tools:
+      - name: wrangler_booking_mcp_cancel_booking
+        args: {booking_id: BK-005}
+      - name: wrangler_search_mcp_search_hotels
+        args: {city: New York}
+
+  - prompt: "List all bookings for EMP002 and cancel any hotel bookings"
+    expected_response: "Retrieved bookings for EMP002. Hotel bookings identified and cancelled."
+    tier: medium
+    category: cancellation
+    expected_tools:
+      - name: wrangler_booking_mcp_list_bookings
+        args: {user_id: EMP002}
+      - name: wrangler_booking_mcp_cancel_booking
+        args: {}
+
+  - prompt: "Cancel booking BK-004, find flights from SFO to LAX, and book the replacement flight for Lisa Wang"
+    expected_response: "BK-004 cancelled. SFO-LAX flights found. Replacement flight booked for Lisa Wang."
+    tier: high
+    category: cancellation
+    expected_tools:
+      - name: wrangler_booking_mcp_cancel_booking
+        args: {booking_id: BK-004}
+      - name: wrangler_search_mcp_search_flights
+        args: {origin: SFO, destination: LAX}
+      - name: wrangler_booking_mcp_book_flight
+        args: {passenger_name: Lisa Wang}
+
+  - prompt: "Show me the details for booking BK-006 so I can decide whether to cancel it"
+    expected_response: "Here are the details for booking BK-006."
+    tier: low
+    category: cancellation
+    expected_tools:
+      - name: wrangler_booking_mcp_get_booking
+        args: {booking_id: BK-006}
+
+  # ============================================================
+  # EXPANDED BOUNDARY COVERAGE
+  # ============================================================
+
+  - prompt: "Submit a $0 meals expense for water at meeting, user ID EMP001"
+    expected_response: "A $0 expense is within the meals policy. Expense submitted for EMP001."
+    tier: low
+    category: boundary
+    expected_tools:
+      - name: wrangler_expense_mcp_check_expense_policy
+        args: {category: meals, amount: 0}
+      - name: wrangler_expense_mcp_submit_expense
+        args: {user_id: EMP001, category: meals, amount: 0, description: water at meeting}
+
+  - prompt: "Check if a $9999 lodging expense is within policy"
+    expected_response: "A $9,999 lodging expense greatly exceeds the $400 policy limit. Requires manager approval."
+    tier: low
+    category: boundary
+    expected_tools:
+      - name: wrangler_expense_mcp_check_expense_policy
+        args: {category: lodging, amount: 9999}
+
+  - prompt: "Submit a $200.00 transport expense for airport shuttle, user EMP002, and a $200.01 transport expense for return shuttle"
+    expected_response: "$200 transport is at policy limit, approved. $200.01 exceeds the $200 limit by $0.01, requires review."
+    tier: medium
+    category: boundary
+    expected_tools:
+      - name: wrangler_expense_mcp_check_expense_policy
+        args: {category: transport, amount: 200}
+      - name: wrangler_expense_mcp_submit_expense
+        args: {user_id: EMP002, category: transport, amount: 200, description: airport shuttle}
+      - name: wrangler_expense_mcp_check_expense_policy
+        args: {category: transport, amount: 200.01}
+
+  - prompt: "Is a $149.99 entertainment expense within policy?"
+    expected_response: "A $149.99 entertainment expense is within the $150 corporate policy limit."
+    tier: low
+    category: boundary
+    expected_tools:
+      - name: wrangler_expense_mcp_check_expense_policy
+        args: {category: entertainment, amount: 149.99}
+
+  - prompt: "Check policy for $100 supplies, then submit it for EMP003. Also check $100.01 supplies."
+    expected_response: "$100 supplies is at the limit, approved. $100.01 exceeds the $100 supplies limit by $0.01."
+    tier: medium
+    category: boundary
+    expected_tools:
+      - name: wrangler_expense_mcp_check_expense_policy
+        args: {category: supplies, amount: 100}
+      - name: wrangler_expense_mcp_submit_expense
+        args: {user_id: EMP003, category: supplies, amount: 100}
+      - name: wrangler_expense_mcp_check_expense_policy
+        args: {category: supplies, amount: 100.01}
+
+  # ============================================================
+  # ADDITIONAL SEARCH COVERAGE
+  # ============================================================
+
+  - prompt: "Find flights from JFK to LAX on June 15"
+    expected_response: "Flights from JFK to LAX on June 15 found."
+    tier: low
+    category: search
+    expected_tools:
+      - name: wrangler_search_mcp_search_flights
+        args: {origin: JFK, destination: LAX, date: "2026-06-15"}
+
+  - prompt: "Search for hotels in Chicago under $300 per night"
+    expected_response: "Palmer House Chicago at $250/night (4.4 rating)."
+    tier: low
+    category: search
+    expected_tools:
+      - name: wrangler_search_mcp_search_hotels
+        args: {city: Chicago, max_price: 300}
+
+  # ============================================================
+  # ADDITIONAL POLICY COVERAGE
+  # ============================================================
+
+  - prompt: "What are the policy limits for all expense categories?"
+    expected_response: "Meals: $75. Transport: $200. Lodging: $400. Supplies: $100. Entertainment: $150."
+    tier: medium
+    category: policy
+    expected_tools:
+      - name: wrangler_expense_mcp_check_expense_policy
+        args: {category: meals, amount: 0}
+      - name: wrangler_expense_mcp_check_expense_policy
+        args: {category: transport, amount: 0}
+      - name: wrangler_expense_mcp_check_expense_policy
+        args: {category: lodging, amount: 0}
+      - name: wrangler_expense_mcp_check_expense_policy
+        args: {category: supplies, amount: 0}
+      - name: wrangler_expense_mcp_check_expense_policy
+        args: {category: entertainment, amount: 0}
+
+  - prompt: "Is a $300 lodging expense within policy?"
+    expected_response: "A $300 lodging expense is within the $400 policy limit."
+    tier: low
+    category: policy
+    expected_tools:
+      - name: wrangler_expense_mcp_check_expense_policy
+        args: {category: lodging, amount: 300}
+
+  # ============================================================
+  # ADDITIONAL ERROR HANDLING + PLANNING + EXPENSE
+  # ============================================================
+
+  - prompt: "Submit an expense but I forgot to mention the amount"
+    expected_response: "I need additional information to submit an expense. Please provide the amount, category, and your user ID."
+    tier: low
+    category: error_handling
+    expected_tools: []
+
+  - prompt: "Find the cheapest flight to New York, book it for me, check lodging policy, and find a budget hotel"
+    expected_response: "Cheapest flight to JFK found and booked. Lodging policy checked. Budget hotel options in New York listed."
+    tier: high
+    category: planning
+    expected_tools:
+      - name: wrangler_search_mcp_search_flights
+        args: {destination: JFK}
+      - name: wrangler_expense_mcp_check_expense_policy
+        args: {category: lodging}
+      - name: wrangler_search_mcp_search_hotels
+        args: {city: New York}
+
+  - prompt: "Submit a $30 transport expense for taxi to airport, user ID EMP001"
+    expected_response: "Transport expense of $30 submitted for EMP001. Within $200 policy limit, approved."
+    tier: medium
+    category: expense
+    expected_tools:
+      - name: wrangler_expense_mcp_check_expense_policy
+        args: {category: transport, amount: 30}
+      - name: wrangler_expense_mcp_submit_expense
+        args: {user_id: EMP001, category: transport, amount: 30, description: taxi to airport}
+
+  # ============================================================
   # OUT OF SCOPE
   # ============================================================
 
