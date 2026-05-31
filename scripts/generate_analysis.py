@@ -151,9 +151,12 @@ def generate_improvement_chart(results: dict):
     width = 0.12
     colors = plt.cm.Set2(np.linspace(0, 1, len(metrics)))
 
+    has_std = any(results[a].get("after_std") for a in agents)
     for i, metric in enumerate(metrics):
         deltas = [results[a].get("after", {}).get(metric, 0) - results[a].get("before", {}).get(metric, 0) for a in agents]
-        ax.bar(x + i * width, deltas, width, label=METRIC_LABELS[metric], color=colors[i])
+        yerr = [results[a].get("after_std", {}).get(metric, 0) for a in agents] if has_std else None
+        ax.bar(x + i * width, deltas, width, label=METRIC_LABELS[metric], color=colors[i],
+               yerr=yerr, capsize=2 if yerr else 0)
 
     ax.set_xlabel("Agent")
     ax.set_ylabel("Score Change")
@@ -360,6 +363,8 @@ def main(input_path: str = None):
             before_per_case=data.get("before_per_case"),
             after_per_case=data.get("after_per_case"),
             case_metadata=case_metadata,
+            before_std=data.get("before_std"),
+            after_std=data.get("after_std"),
         )
         print(f"  {agent_name}: {path}")
 

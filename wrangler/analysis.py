@@ -281,6 +281,8 @@ def generate_agent_report(
     before_per_case: list[dict] | None = None,
     after_per_case: list[dict] | None = None,
     case_metadata: list[dict] | None = None,
+    before_std: dict[str, float] | None = None,
+    after_std: dict[str, float] | None = None,
 ) -> str:
     """Generate a per-agent analysis markdown file. Returns the file path."""
     output_dir = Path(output_dir or REPORTS_DIR) / "agents"
@@ -330,14 +332,22 @@ def generate_agent_report(
 
     if after_scores:
         lines.append("### After Optimization\n")
-        lines.append("| Metric | Before | After | Delta | Change |")
-        lines.append("|--------|--------|-------|-------|--------|")
+        if after_std:
+            lines.append("| Metric | Before | After | Std Dev | Delta | Change |")
+            lines.append("|--------|--------|-------|---------|-------|--------|")
+        else:
+            lines.append("| Metric | Before | After | Delta | Change |")
+            lines.append("|--------|--------|-------|-------|--------|")
         for key in METRIC_LABELS:
             b = before_scores.get(key, 0)
             a = after_scores.get(key, 0)
             delta = a - b
             pct = f"{delta/b*100:+.0f}%" if b > 0 else "N/A"
-            lines.append(f"| {METRIC_LABELS[key]} | {b:.2f} | {a:.2f} | {delta:+.2f} | {pct} |")
+            if after_std:
+                sd = after_std.get(key, 0)
+                lines.append(f"| {METRIC_LABELS[key]} | {b:.2f} | {a:.2f} | {sd:.3f} | {delta:+.2f} | {pct} |")
+            else:
+                lines.append(f"| {METRIC_LABELS[key]} | {b:.2f} | {a:.2f} | {delta:+.2f} | {pct} |")
         lines.append("")
 
         lines.extend(_cost_benefit_section(model, before_scores, after_scores))
@@ -723,6 +733,7 @@ def generate_comparison_report(
     lines.append("")
 
     has_after = any(all_results[n].get("after") for n in ordered)
+    has_std = any(all_results[n].get("after_std") for n in ordered)
     if has_after:
         lines.append("### After Optimization (GEPA wrangler_v2)\n")
         lines.append(header)
@@ -731,7 +742,11 @@ def generate_comparison_report(
             row = f"| {label} |"
             for name in ordered:
                 s = all_results[name].get("after", {}).get(key, 0)
-                row += f" {s:.2f} |"
+                std = all_results[name].get("after_std", {}).get(key)
+                if std and has_std:
+                    row += f" {s:.2f} +/-{std:.2f} |"
+                else:
+                    row += f" {s:.2f} |"
             lines.append(row)
         lines.append("")
 

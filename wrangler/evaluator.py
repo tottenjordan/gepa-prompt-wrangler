@@ -1,5 +1,6 @@
 """Batch evaluation — runs inference + evaluation against deployed agents on GEAP."""
 
+import statistics
 import time
 import warnings
 from dataclasses import dataclass, field
@@ -33,6 +34,8 @@ class EvalResult:
 
     scores: dict[str, float] = field(default_factory=dict)
     per_case: list[dict[str, float]] = field(default_factory=list)
+    scores_std: dict[str, float] = field(default_factory=dict)
+    num_runs: int = 1
 
 
 def _build_eval_dataset(cases: list[dict]) -> pd.DataFrame:
@@ -186,6 +189,61 @@ def run_batch_eval(
 
     print(f"  {tag}Eval complete — total: {_fmt_elapsed(t0)}, {len(scores)} metrics, {len(per_case)} cases", flush=True)
     return EvalResult(scores=scores, per_case=per_case)
+
+
+def run_batch_eval_averaged(
+    engine_id: str,
+    eval_cases: list[dict],
+    num_runs: int = 1,
+    metrics: list | None = None,
+    agent_name: str = "",
+) -> EvalResult:
+    """Run batch eval N times and return averaged scores with std dev."""
+    if num_runs <= 1:
+        return run_batch_eval(engine_id, eval_cases, metrics=metrics, agent_name=agent_name)
+
+    tag = f"[{agent_name}] " if agent_name else ""
+    all_results: list[EvalResult] = []
+
+    for i in range(num_runs):
+        print(f"  {tag}Run {i + 1}/{num_runs}...", flush=True)
+        result = run_batch_eval(engine_id, eval_cases, metrics=metrics, agent_name=agent_name)
+        all_results.append(result)
+        avg = sum(result.scores.values()) / max(len(result.scores), 1)
+        print(f"  {tag}Run {i + 1}/{num_runs} avg: {avg:.3f}", flush=True)
+
+    all_metrics = set()
+    for r in all_results:
+        all_metrics.update(r.scores.keys())
+
+    avg_scores: dict[str, float] = {}
+    std_scores: dict[str, float] = {}
+    for metric in sorted(all_metrics):
+        values = [r.scores[metric] for r in all_results if metric in r.scores]
+        avg_scores[metric] = statistics.mean(values)
+        std_scores[metric] = statistics.stdev(values) if len(values) > 1 else 0.0
+
+    avg_per_case: list[dict[str, float]] = []
+    runs_with_cases = [r for r in all_results if r.per_case]
+    if runs_with_cases:
+        n_cases = max(len(r.per_case) for r in runs_with_cases)
+        for case_idx in range(n_cases):
+            case_metrics: dict[str, list[float]] = {}
+            for r in runs_with_cases:
+                if case_idx < len(r.per_case):
+                    for k, v in r.per_case[case_idx].items():
+                        case_metrics.setdefault(k, []).append(v)
+            avg_per_case.append({k: statistics.mean(vs) for k, vs in case_metrics.items()})
+
+    overall = sum(avg_scores.values()) / max(len(avg_scores), 1)
+    print(f"  {tag}Averaged {num_runs} runs — overall: {overall:.3f}", flush=True)
+
+    return EvalResult(
+        scores=avg_scores,
+        per_case=avg_per_case,
+        scores_std=std_scores,
+        num_runs=num_runs,
+    )
 
 
 def save_eval_results(

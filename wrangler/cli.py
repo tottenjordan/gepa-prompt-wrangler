@@ -117,11 +117,12 @@ def inspect(agent_path: str, output: str):
 @click.option("--from-phase", "from_phase", default=0, type=int, help="Start from this phase (requires --resume-from).")
 @click.option("--version", "-v", default=None, help="Version tag for saved prompts (e.g. wrangler_v5).")
 @click.option("--max-concurrent", "-c", default=1, type=int, help="Max parallel evals (default: 1 = sequential).")
-def run(manifest: str, dry_run: bool, resume_from: str, from_phase: int, version: str, max_concurrent: int):
+@click.option("--num-runs", "-n", default=1, type=int, help="Number of eval runs to average (default: 1).")
+def run(manifest: str, dry_run: bool, resume_from: str, from_phase: int, version: str, max_concurrent: int, num_runs: int):
     """Run the full pipeline: deploy -> eval -> optimize -> redeploy -> eval -> report."""
     from .runner import WranglerPipeline
 
-    pipeline = WranglerPipeline(manifest, max_concurrent=max_concurrent, version=version)
+    pipeline = WranglerPipeline(manifest, max_concurrent=max_concurrent, version=version, num_runs=num_runs)
     if dry_run:
         click.echo(f"Manifest: {pipeline.manifest.name}")
         click.echo(f"Pairs: {len(pipeline.manifest.pairs)}")
@@ -146,7 +147,8 @@ def run(manifest: str, dry_run: bool, resume_from: str, from_phase: int, version
 @click.option("--engine-id", help="Engine ID of the deployed agent.")
 @click.option("--eval-data", help="Path to eval data file (required with --engine-id without manifest).")
 @click.option("--agent-name", default=None, help="Label for this agent in results (defaults to engine ID).")
-def eval_cmd(manifest: str, pair: str, engine_id: str, eval_data: str, agent_name: str):
+@click.option("--num-runs", "-n", default=1, type=int, help="Number of eval runs to average (default: 1).")
+def eval_cmd(manifest: str, pair: str, engine_id: str, eval_data: str, agent_name: str, num_runs: int):
     """Run batch evaluation against a deployed agent.
 
     Can be used two ways:
@@ -154,7 +156,7 @@ def eval_cmd(manifest: str, pair: str, engine_id: str, eval_data: str, agent_nam
       2. Standalone: wrangler eval --engine-id <id> --eval-data <path>
     """
     from .converter import load_eval_file
-    from .evaluator import run_batch_eval
+    from .evaluator import run_batch_eval_averaged
 
     if engine_id and eval_data and (not manifest or not os.path.exists(manifest)):
         eval_cases = load_eval_file(eval_data)
@@ -171,10 +173,12 @@ def eval_cmd(manifest: str, pair: str, engine_id: str, eval_data: str, agent_nam
         raise SystemExit(1)
 
     label = agent_name or engine_id
-    result = run_batch_eval(engine_id, eval_cases, agent_name=label)
+    result = run_batch_eval_averaged(engine_id, eval_cases, num_runs=num_runs, agent_name=label)
     click.echo(f"\nResults for {label}:")
     for metric, score in sorted(result.scores.items()):
-        click.echo(f"  {metric:40s} {score:.2f}")
+        std = result.scores_std.get(metric)
+        std_str = f" +/- {std:.3f}" if std else ""
+        click.echo(f"  {metric:40s} {score:.2f}{std_str}")
 
 
 @main.command("generate-evalset")

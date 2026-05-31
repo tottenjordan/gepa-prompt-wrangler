@@ -16,7 +16,7 @@ warnings.filterwarnings("ignore", message=".*GEMINI_VIA_LITELLM.*")
 
 from .factory import PairFactory, AgentPromptPair, Manifest
 from .converter import load_eval_file
-from .evaluator import run_batch_eval, EvalResult
+from .evaluator import run_batch_eval_averaged, EvalResult
 from .optimizer import optimize
 from .reporter import generate_report
 from . import deploy as deployer
@@ -31,7 +31,7 @@ def _fmt_duration(seconds: float) -> str:
 
 
 class WranglerPipeline:
-    def __init__(self, manifest_path: str, max_concurrent: int = 1, version: str | None = None):
+    def __init__(self, manifest_path: str, max_concurrent: int = 1, version: str | None = None, num_runs: int = 1):
         self.manifest = PairFactory.load(manifest_path)
         self.manifest_dir = Path(manifest_path).parent
         self.results: dict[str, dict] = {}
@@ -39,6 +39,7 @@ class WranglerPipeline:
         self._pipeline_start: float = 0.0
         self.max_concurrent = max_concurrent
         self.version = version
+        self.num_runs = num_runs
 
     @contextmanager
     def _phase(self, name: str):
@@ -247,21 +248,27 @@ class WranglerPipeline:
         """Run batch eval for all agents, sequentially or in batches."""
         score_key = "before" if phase == "before" else "after"
         per_case_key = f"{score_key}_per_case"
+        std_key = f"{score_key}_std"
 
         def _eval_one(pair: AgentPromptPair) -> tuple[str, EvalResult, float]:
             engine_id = self.results[pair.id]["engine_id"]
             t0 = time.time()
-            result = run_batch_eval(engine_id, eval_cases, agent_name=pair.id)
+            result = run_batch_eval_averaged(engine_id, eval_cases, num_runs=self.num_runs, agent_name=pair.id)
             elapsed = time.time() - t0
             return pair.id, result, elapsed
 
         def _record(pair_id, result, elapsed):
             self.results[pair_id][score_key] = result.scores
             self.results[pair_id][per_case_key] = result.per_case
+            if result.scores_std:
+                self.results[pair_id][std_key] = result.scores_std
             avg = sum(result.scores.values()) / max(len(result.scores), 1)
-            print(f"  [{pair_id}] Done ({_fmt_duration(elapsed)}) — avg score: {avg:.2f}")
+            suffix = f" (avg of {result.num_runs} runs)" if result.num_runs > 1 else ""
+            print(f"  [{pair_id}] Done ({_fmt_duration(elapsed)}) — avg score: {avg:.2f}{suffix}")
             for m, s in sorted(result.scores.items()):
-                print(f"    {m:40s} {s:.2f}")
+                std = result.scores_std.get(m)
+                std_str = f" +/- {std:.3f}" if std else ""
+                print(f"    {m:40s} {s:.2f}{std_str}")
 
         pairs = list(self.manifest.pairs)
         mc = self.max_concurrent
