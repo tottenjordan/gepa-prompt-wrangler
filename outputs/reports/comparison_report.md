@@ -45,7 +45,7 @@ GEPA expanded this into specialized, model-tailored instructions:
 | Instruction Following | 0.76 | 0.80 | 0.73 | 0.81 | 0.79 |
 | Response Match | 0.81 | 0.78 | 0.80 | 0.83 | 0.91 |
 
-### After Optimization (GEPA wrangler_v2)
+### After Optimization (GEPA)
 
 | Metric |Lite | Flash | Pro | Sonnet | Opus |
 |--------|------ | ------ | ------ | ------ | ------ |
