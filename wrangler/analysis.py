@@ -33,6 +33,24 @@ MODEL_MAP = {
     "opus": "claude-opus-4-6",
 }
 
+
+def normalize_agent_keys(results: dict) -> dict:
+    """Normalize agent keys to short names (lite, flash, pro, sonnet, opus).
+
+    Handles both short keys ('lite') and full pair IDs ('lite-gemini-3.1-flash-lite').
+    """
+    normalized = {}
+    for key, value in results.items():
+        if key.startswith("_"):
+            normalized[key] = value
+            continue
+        short = key.split("-")[0] if "-" in key else key
+        if short in AGENT_ORDER:
+            normalized[short] = value
+        else:
+            normalized[key] = value
+    return normalized
+
 TIER_ORDER = ["low", "medium", "high"]
 
 
@@ -367,6 +385,10 @@ def _comparison_tier_section(
     phase = "after" if any(all_results[n].get("after") for n in ordered) else "before"
     per_case_key = f"{phase}_per_case"
 
+    has_per_case = any(all_results[n].get(per_case_key) for n in ordered)
+    if not has_per_case:
+        return []
+
     for tier in TIER_ORDER:
         tier_case_count = sum(1 for m in case_metadata if m.get("tier") == tier)
         if tier_case_count == 0:
@@ -409,6 +431,10 @@ def _category_heatmap_section(
 
     phase = "after" if any(all_results[n].get("after") for n in ordered) else "before"
     per_case_key = f"{phase}_per_case"
+
+    has_per_case = any(all_results[n].get(per_case_key) for n in ordered)
+    if not has_per_case:
+        return []
 
     all_cats = sorted(set(m.get("category", "") for m in case_metadata if m.get("category")))
     if not all_cats:
@@ -459,7 +485,7 @@ def _previous_run_comparison_section(
 
     try:
         with open(prev_path) as f:
-            prev = json.load(f)
+            prev = normalize_agent_keys(json.load(f))
     except (json.JSONDecodeError, OSError):
         return []
 
@@ -636,9 +662,12 @@ def generate_comparison_report(
         lines.append("### Optimization Impact\n")
         lines.append("![Improvement Delta](charts/improvement_delta.png)\n")
 
+    charts_dir = Path(output_dir) / "charts"
+    if (charts_dir / "tier_breakdown.png").exists():
         lines.append("### Tier Breakdown\n")
         lines.append("![Tier Breakdown](charts/tier_breakdown.png)\n")
 
+    if (charts_dir / "category_heatmap.png").exists():
         lines.append("### Category Heatmap\n")
         lines.append("![Category Heatmap](charts/category_heatmap.png)\n")
 

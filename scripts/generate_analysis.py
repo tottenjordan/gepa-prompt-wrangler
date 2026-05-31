@@ -20,7 +20,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from wrangler.config import MODEL_COSTS, REPORTS_DIR, OUTPUTS_DIR
 from wrangler.analysis import (
-    generate_agent_report, generate_comparison_report,
+    generate_agent_report, generate_comparison_report, normalize_agent_keys,
     compute_tier_scores, METRIC_LABELS, AGENT_ORDER, TIER_ORDER, PROVIDERS,
 )
 
@@ -180,6 +180,11 @@ def generate_tier_breakdown_chart(results: dict, case_metadata: list[dict] | Non
     phase = "after" if any(results[a].get("after") for a in agents) else "before"
     per_case_key = f"{phase}_per_case"
 
+    has_per_case = any(results[a].get(per_case_key) for a in agents)
+    if not has_per_case:
+        print("  Skipping tier breakdown chart (no per-case scores)")
+        return
+
     tiers_present = [t for t in TIER_ORDER if any(m.get("tier") == t for m in case_metadata)]
     if not tiers_present:
         return
@@ -236,6 +241,11 @@ def generate_category_heatmap(results: dict, case_metadata: list[dict] | None):
     phase = "after" if any(results[a].get("after") for a in agents) else "before"
     per_case_key = f"{phase}_per_case"
 
+    has_per_case = any(results[a].get(per_case_key) for a in agents)
+    if not has_per_case:
+        print("  Skipping category heatmap (no per-case scores)")
+        return
+
     categories = sorted(set(m.get("category", "") for m in case_metadata if m.get("category")))
     if not categories:
         return
@@ -280,7 +290,7 @@ def generate_run_comparison_chart(results: dict, previous_path: str = "outputs/r
 
     CHARTS_DIR.mkdir(parents=True, exist_ok=True)
     with open(prev_file) as f:
-        prev = json.load(f)
+        prev = normalize_agent_keys(json.load(f))
 
     agents = [a for a in _get_agents(results) if a in prev]
     if not agents:
@@ -300,12 +310,12 @@ def generate_run_comparison_chart(results: dict, previous_path: str = "outputs/r
     x = np.arange(len(agents))
     width = 0.35
 
-    ax.bar(x - width/2, prev_avgs, width, label="Previous Run (30 cases)", color="#93C5FD", edgecolor="black", linewidth=0.5)
-    ax.bar(x + width/2, curr_avgs, width, label="Current Run (40 cases)", color="#2563EB", edgecolor="black", linewidth=0.5)
+    ax.bar(x - width/2, prev_avgs, width, label="Previous Run", color="#93C5FD", edgecolor="black", linewidth=0.5)
+    ax.bar(x + width/2, curr_avgs, width, label="Current Run", color="#2563EB", edgecolor="black", linewidth=0.5)
 
     ax.set_xlabel("Agent")
     ax.set_ylabel("Average Score")
-    ax.set_title(f"Run Comparison — {phase.title()} Optimization (30 vs 40 eval cases)")
+    ax.set_title(f"Run Comparison — {phase.title()} Optimization")
     ax.set_xticks(x)
     ax.set_xticklabels([a.title() for a in agents])
     ax.legend(fontsize=9)
@@ -319,7 +329,7 @@ def generate_run_comparison_chart(results: dict, previous_path: str = "outputs/r
 
 def main(input_path: str = None):
     print("Loading results...")
-    results = load_results(input_path)
+    results = normalize_agent_keys(load_results(input_path))
     case_metadata = _get_case_metadata(results)
     agents = _get_agents(results)
     print(f"  Loaded {len(agents)} agents")
