@@ -677,14 +677,31 @@ def _interpretation_section(
     return lines
 
 
+def _detect_version(all_results: dict[str, dict]) -> str:
+    """Detect the optimization version from results metadata or prompt files."""
+    version = all_results.get("_eval_metadata", {}).get("version")
+    if version:
+        return version
+    import re
+    for data in all_results.values():
+        if isinstance(data, dict) and data.get("optimized_prompt"):
+            for key in data:
+                m = re.match(r"(wrangler_v\d+)", str(key))
+                if m:
+                    return m.group(1)
+    return "GEPA"
+
+
 def generate_comparison_report(
     all_results: dict[str, dict],
     output_dir: str | None = None,
     case_metadata: list[dict] | None = None,
+    version: str | None = None,
 ) -> str:
     """Generate a cross-model comparison report with cost-benefit and recommendations."""
     output_dir = Path(output_dir or REPORTS_DIR)
     output_dir.mkdir(parents=True, exist_ok=True)
+    version_label = version or _detect_version(all_results)
 
     lines = []
     lines.append("# GEPA Prompt Wrangler — Cross-Model Comparison Report\n")
@@ -735,7 +752,7 @@ def generate_comparison_report(
     has_after = any(all_results[n].get("after") for n in ordered)
     has_std = any(all_results[n].get("after_std") for n in ordered)
     if has_after:
-        lines.append("### After Optimization (GEPA wrangler_v2)\n")
+        lines.append(f"### After Optimization ({version_label})\n")
         lines.append(header)
         lines.append(sep)
         for key, label in METRIC_LABELS.items():

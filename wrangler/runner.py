@@ -337,6 +337,8 @@ class WranglerPipeline:
             })
 
         self.results["_eval_metadata"] = {
+            "version": self._next_version(),
+            "num_runs": self.num_runs,
             "case_count": len(eval_cases),
             "cases": [
                 {"tier": c.get("tier", ""), "category": c.get("category", ""), "prompt": c.get("prompt", "")}
