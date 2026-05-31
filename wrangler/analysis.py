@@ -514,6 +514,159 @@ def _previous_run_comparison_section(
     return lines
 
 
+def _interpretation_section(
+    all_results: dict[str, dict],
+    ordered: list[str],
+    ranked: list[str],
+) -> list[str]:
+    """Generate data-driven interpretation of optimization results."""
+    lines = []
+    has_after = any(all_results[n].get("after") for n in ordered)
+
+    if not has_after:
+        return lines
+
+    # Compute per-agent and per-metric summaries
+    agent_deltas: dict[str, float] = {}
+    metric_deltas: dict[str, list[float]] = {k: [] for k in METRIC_LABELS}
+    for name in ordered:
+        before = all_results[name].get("before", {})
+        after = all_results[name].get("after", {})
+        avg_b = sum(before.values()) / max(len(before), 1)
+        avg_a = sum(after.values()) / max(len(after), 1)
+        agent_deltas[name] = avg_a - avg_b
+        for k in METRIC_LABELS:
+            metric_deltas[k].append(after.get(k, 0) - before.get(k, 0))
+
+    improved = [n for n in ordered if agent_deltas[n] > 0.005]
+    regressed = [n for n in ordered if agent_deltas[n] < -0.005]
+    stable = [n for n in ordered if abs(agent_deltas[n]) <= 0.005]
+
+    metrics_up = {k: sum(v)/len(v) for k, v in metric_deltas.items() if sum(v)/len(v) > 0.01}
+    metrics_down = {k: sum(v)/len(v) for k, v in metric_deltas.items() if sum(v)/len(v) < -0.01}
+
+    best_value_name = ranked[0]
+    best_quality_name = max(ordered, key=lambda n: (
+        sum(all_results[n].get("after", {}).values()) / max(len(all_results[n].get("after", {})), 1)
+    ) if all_results[n].get("after") else 0)
+    best_quality = sum(all_results[best_quality_name].get("after", {}).values()) / max(
+        len(all_results[best_quality_name].get("after", {})), 1)
+
+    # --- Interpretation ---
+    lines.append("## Interpretation\n")
+
+    # Overall assessment
+    if len(improved) == len(ordered):
+        lines.append("GEPA optimization improved average quality across all agents.\n")
+    elif len(regressed) == len(ordered):
+        lines.append("GEPA optimization reduced average quality across all agents, "
+                     "suggesting the optimized prompts traded gains in some metrics for "
+                     "losses in others.\n")
+    else:
+        parts = []
+        if improved:
+            parts.append(f"**{', '.join(n.title() for n in improved)}** saw net improvement")
+        if stable:
+            parts.append(f"**{', '.join(n.title() for n in stable)}** held steady")
+        if regressed:
+            parts.append(f"**{', '.join(n.title() for n in regressed)}** saw net decline")
+        lines.append("Results were mixed across agents: " + "; ".join(parts) + ".\n")
+
+    # Metric-level tradeoff analysis
+    if metrics_up or metrics_down:
+        lines.append("### Metric-Level Tradeoffs\n")
+        lines.append("GEPA optimization revealed a clear tradeoff pattern:\n")
+
+        if metrics_up:
+            lines.append("**Metrics that improved:**\n")
+            for k, avg in sorted(metrics_up.items(), key=lambda x: -x[1]):
+                best_agent = max(ordered, key=lambda n: metric_deltas[k][ordered.index(n)])
+                best_val = metric_deltas[k][ordered.index(best_agent)]
+                before_val = all_results[best_agent].get("before", {}).get(k, 0)
+                after_val = all_results[best_agent].get("after", {}).get(k, 0)
+                lines.append(f"- **{METRIC_LABELS[k]}** ({avg:+.3f} avg) — "
+                             f"largest gain in {best_agent.title()} ({before_val:.2f} → {after_val:.2f})")
+            lines.append("")
+
+        if metrics_down:
+            lines.append("**Metrics that declined:**\n")
+            for k, avg in sorted(metrics_down.items(), key=lambda x: x[1]):
+                worst_agent = min(ordered, key=lambda n: metric_deltas[k][ordered.index(n)])
+                worst_val = metric_deltas[k][ordered.index(worst_agent)]
+                before_val = all_results[worst_agent].get("before", {}).get(k, 0)
+                after_val = all_results[worst_agent].get("after", {}).get(k, 0)
+                lines.append(f"- **{METRIC_LABELS[k]}** ({avg:+.3f} avg) — "
+                             f"largest drop in {worst_agent.title()} ({before_val:.2f} → {after_val:.2f})")
+            lines.append("")
+
+        lines.append("This tradeoff is expected: GEPA optimizes toward the eval criteria "
+                     "in `sampler_config.json` (response match, safety, tool use). Metrics "
+                     "not included as optimization targets — like instruction following and "
+                     "response quality — may shift as the prompt is reshaped to maximize "
+                     "target metrics.\n")
+
+    # Per-agent insights
+    lines.append("### Per-Agent Insights\n")
+    for name in ordered:
+        before = all_results[name].get("before", {})
+        after = all_results[name].get("after", {})
+        delta = agent_deltas[name]
+        model = all_results[name].get("model", "")
+        prompt_len = len(all_results[name].get("optimized_prompt", ""))
+
+        agent_improved = [k for k in METRIC_LABELS if after.get(k, 0) - before.get(k, 0) > 0.03]
+        agent_regressed = [k for k in METRIC_LABELS if after.get(k, 0) - before.get(k, 0) < -0.03]
+
+        summary = f"**{name.title()}** (`{model}`, {prompt_len:,} char prompt): "
+        summary += f"net {delta:+.3f}. "
+        if agent_improved:
+            summary += f"Gained in {', '.join(METRIC_LABELS[k] for k in agent_improved)}. "
+        if agent_regressed:
+            summary += f"Lost in {', '.join(METRIC_LABELS[k] for k in agent_regressed)}."
+        lines.append(f"- {summary}\n")
+    lines.append("")
+
+    # Cost-quality insight
+    lines.append("### Cost-Quality Assessment\n")
+    lines.append(f"**Best value: {best_value_name.title()}** delivers the most quality per dollar. "
+                 f"**Best absolute quality: {best_quality_name.title()}** at {best_quality:.2f} average.\n")
+
+    cost_ratio = (MODEL_COSTS.get(all_results[ordered[-1]].get("model", ""), {"input": 0, "output": 0})["input"] +
+                  MODEL_COSTS.get(all_results[ordered[-1]].get("model", ""), {"input": 0, "output": 0})["output"])
+    lite_cost = (MODEL_COSTS.get(all_results[ordered[0]].get("model", ""), {"input": 0, "output": 0})["input"] +
+                 MODEL_COSTS.get(all_results[ordered[0]].get("model", ""), {"input": 0, "output": 0})["output"])
+    if lite_cost > 0 and cost_ratio > 0:
+        lite_quality = sum(all_results[ordered[0]].get("after", {}).values()) / max(
+            len(all_results[ordered[0]].get("after", {})), 1)
+        top_quality = sum(all_results[ordered[-1]].get("after", {}).values()) / max(
+            len(all_results[ordered[-1]].get("after", {})), 1)
+        lines.append(f"The most expensive model ({ordered[-1].title()} at ${cost_ratio:.2f}/M) costs "
+                     f"**{cost_ratio/lite_cost:.0f}x more** than the cheapest ({ordered[0].title()} at "
+                     f"${lite_cost:.2f}/M) but scores {top_quality:.2f} vs {lite_quality:.2f} — "
+                     f"{'a marginal' if abs(top_quality - lite_quality) < 0.05 else 'a meaningful'} "
+                     f"quality difference.\n")
+
+    # Recommendations
+    lines.append("### Recommendations\n")
+    lines.append(f"1. **For cost-sensitive workloads:** Use **{best_value_name.title()}** "
+                 f"(`{all_results[best_value_name].get('model', '')}`) — best quality-per-dollar ratio.\n")
+    lines.append(f"2. **For quality-critical workloads:** Use **{best_quality_name.title()}** "
+                 f"(`{all_results[best_quality_name].get('model', '')}`) — highest absolute quality.\n")
+
+    if metrics_down:
+        worst_metric = min(metrics_down, key=metrics_down.get)
+        lines.append(f"3. **Re-optimize with expanded criteria.** The decline in "
+                     f"{METRIC_LABELS[worst_metric]} ({metrics_down[worst_metric]:+.3f} avg) "
+                     f"suggests adding it as an explicit optimization target in `sampler_config.json`.\n")
+
+    lines.append(f"4. **Prompt cost is zero.** Optimization only changes the system prompt — "
+                 f"no additional inference cost. Even mixed results are worth iterating on.\n")
+    lines.append(f"5. **Monitor with online evaluators** after deployment to catch regressions "
+                 f"on real traffic beyond the eval dataset.\n")
+
+    return lines
+
+
 def generate_comparison_report(
     all_results: dict[str, dict],
     output_dir: str | None = None,
@@ -674,55 +827,8 @@ def generate_comparison_report(
     # --- Previous Run Comparison ---
     lines.extend(_previous_run_comparison_section(all_results, ordered))
 
-    # --- Key Findings & Recommendations ---
-    lines.append("## Key Findings and Recommendations\n")
-
-    if has_after:
-        best_gain_name = max(ordered, key=lambda n: (
-            sum(all_results[n].get("after", {}).values()) / max(len(all_results[n].get("after", {})), 1)
-            - sum(all_results[n].get("before", {}).values()) / max(len(all_results[n].get("before", {})), 1)
-        ) if all_results[n].get("after") else -999)
-
-        best_gain_data = all_results[best_gain_name]
-        best_b = sum(best_gain_data.get("before", {}).values()) / max(len(best_gain_data.get("before", {})), 1)
-        best_a = sum(best_gain_data.get("after", {}).values()) / max(len(best_gain_data.get("after", {})), 1)
-
-        best_quality_name = max(ordered, key=lambda n: (
-            sum(all_results[n].get("after", {}).values()) / max(len(all_results[n].get("after", {})), 1)
-        ) if all_results[n].get("after") else 0)
-        best_quality = sum(all_results[best_quality_name].get("after", {}).values()) / max(len(all_results[best_quality_name].get("after", {})), 1)
-
-        best_value_name = ranked[0]
-
-        lines.append("### Findings\n")
-        lines.append(f"1. **GEPA optimization improved all agents.** Every model saw quality gains from prompt optimization, "
-                     f"demonstrating that GEPA's evolutionary approach works across both Google (Gemini) and Anthropic (Claude) models.\n")
-        lines.append(f"2. **Biggest improvement: {best_gain_name.title()}** gained **{(best_a-best_b)/max(best_b,0.01)*100:+.1f}%** "
-                     f"in average quality (from {best_b:.2f} to {best_a:.2f}). GEPA expanded its 78-char generic prompt into "
-                     f"a {len(all_results[best_gain_name].get('optimized_prompt', '')):,}-char specialized instruction.\n")
-        lines.append(f"3. **Highest absolute quality: {best_quality_name.title()}** achieved the best post-optimization "
-                     f"average score of **{best_quality:.2f}**.\n")
-        lines.append(f"4. **Best value: {best_value_name.title()}** delivers the most quality per dollar, making it the "
-                     f"recommended default for cost-sensitive deployments.\n")
-        lines.append(f"5. **Safety universally improved.** All agents scored 1.00 on safety after optimization, "
-                     f"up from an average below 1.00 on generic prompts.\n")
-        lines.append(f"6. **Instruction Following saw the largest gains** across models. Generic prompts give models no "
-                     f"instructions to follow; GEPA-optimized prompts encode domain rules, tool strategies, and response "
-                     f"formats that the instruction-following metric directly measures.\n")
-        lines.append(f"7. **Prompt cost is zero.** Optimization changes only the system prompt — there is no additional "
-                     f"inference cost. The quality improvement is effectively free at serving time.\n")
-
-        lines.append("### Recommendations\n")
-        lines.append(f"1. **For cost-sensitive workloads:** Use **{best_value_name.title()}** (`{all_results[best_value_name].get('model', '')}`) — "
-                     f"best quality-per-dollar ratio.\n")
-        lines.append(f"2. **For quality-critical workloads:** Use **{best_quality_name.title()}** (`{all_results[best_quality_name].get('model', '')}`) — "
-                     f"highest absolute quality score.\n")
-        lines.append(f"3. **Always run GEPA optimization** before deploying any agent to production. The quality gains "
-                     f"are significant and come at zero serving cost.\n")
-        lines.append(f"4. **Re-run optimization** when changing tools, eval datasets, or agent capabilities. "
-                     f"GEPA-optimized prompts are tuned to the specific tool set and evaluation criteria.\n")
-        lines.append(f"5. **Monitor with online evaluators** after deployment. Create evaluators through the console "
-                     f"(API-created evaluators do not produce results — see known limitations).\n")
+    # --- Interpretation & Recommendations ---
+    lines.extend(_interpretation_section(all_results, ordered, ranked))
 
     # --- Per-Agent Reports ---
     lines.append("## Per-Agent Reports\n")

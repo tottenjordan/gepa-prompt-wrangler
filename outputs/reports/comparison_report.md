@@ -118,35 +118,58 @@ Comparing against previous results from `outputs/results_all_agents.json`.
 | Sonnet | 0.81 | 0.73 | -0.08 |
 | Opus | 0.71 | 0.78 | +0.07 |
 
-## Key Findings and Recommendations
+## Interpretation
 
-### Findings
+Results were mixed across agents: **Opus** saw net improvement; **Lite** held steady; **Flash, Pro, Sonnet** saw net decline.
 
-1. **GEPA optimization improved all agents.** Every model saw quality gains from prompt optimization, demonstrating that GEPA's evolutionary approach works across both Google (Gemini) and Anthropic (Claude) models.
+### Metric-Level Tradeoffs
 
-2. **Biggest improvement: Opus** gained **+0.8%** in average quality (from 0.77 to 0.78). GEPA expanded its 78-char generic prompt into a 3,193-char specialized instruction.
+GEPA optimization revealed a clear tradeoff pattern:
 
-3. **Highest absolute quality: Flash** achieved the best post-optimization average score of **0.80**.
+**Metrics that improved:**
 
-4. **Best value: Lite** delivers the most quality per dollar, making it the recommended default for cost-sensitive deployments.
+- **Safety** (+0.089 avg) — largest gain in Opus (0.70 → 1.00)
+- **Tool Use** (+0.041 avg) — largest gain in Flash (0.41 → 0.47)
 
-5. **Safety universally improved.** All agents scored 1.00 on safety after optimization, up from an average below 1.00 on generic prompts.
+**Metrics that declined:**
 
-6. **Instruction Following saw the largest gains** across models. Generic prompts give models no instructions to follow; GEPA-optimized prompts encode domain rules, tool strategies, and response formats that the instruction-following metric directly measures.
+- **Instruction Following** (-0.081 avg) — largest drop in Sonnet (0.81 → 0.66)
+- **Response Match** (-0.074 avg) — largest drop in Sonnet (0.83 → 0.62)
+- **Response Quality** (-0.073 avg) — largest drop in Opus (0.89 → 0.80)
+- **Hallucination** (-0.022 avg) — largest drop in Pro (1.00 → 0.94)
 
-7. **Prompt cost is zero.** Optimization changes only the system prompt — there is no additional inference cost. The quality improvement is effectively free at serving time.
+This tradeoff is expected: GEPA optimizes toward the eval criteria in `sampler_config.json` (response match, safety, tool use). Metrics not included as optimization targets — like instruction following and response quality — may shift as the prompt is reshaped to maximize target metrics.
+
+### Per-Agent Insights
+
+- **Lite** (`gemini-3.1-flash-lite`, 3,954 char prompt): net -0.003. Gained in Tool Use, Response Match. Lost in Response Quality, Hallucination.
+
+- **Flash** (`gemini-3.5-flash`, 5,004 char prompt): net -0.011. Gained in Tool Use, Response Match. Lost in Response Quality, Hallucination.
+
+- **Pro** (`gemini-3.1-pro-preview`, 3,332 char prompt): net -0.038. Gained in Safety, Tool Use. Lost in Response Quality, Hallucination, Instruction Following, Response Match.
+
+- **Sonnet** (`claude-sonnet-4-6`, 2,909 char prompt): net -0.055. Gained in Safety. Lost in Response Quality, Instruction Following, Response Match.
+
+- **Opus** (`claude-opus-4-6`, 3,193 char prompt): net +0.006. Gained in Safety, Tool Use. Lost in Response Quality, Instruction Following, Response Match.
+
+
+### Cost-Quality Assessment
+
+**Best value: Lite** delivers the most quality per dollar. **Best absolute quality: Flash** at 0.80 average.
+
+The most expensive model (Opus at $30.00/M) costs **17x more** than the cheapest (Lite at $1.75/M) but scores 0.78 vs 0.80 — a marginal quality difference.
 
 ### Recommendations
 
 1. **For cost-sensitive workloads:** Use **Lite** (`gemini-3.1-flash-lite`) — best quality-per-dollar ratio.
 
-2. **For quality-critical workloads:** Use **Flash** (`gemini-3.5-flash`) — highest absolute quality score.
+2. **For quality-critical workloads:** Use **Flash** (`gemini-3.5-flash`) — highest absolute quality.
 
-3. **Always run GEPA optimization** before deploying any agent to production. The quality gains are significant and come at zero serving cost.
+3. **Re-optimize with expanded criteria.** The decline in Instruction Following (-0.081 avg) suggests adding it as an explicit optimization target in `sampler_config.json`.
 
-4. **Re-run optimization** when changing tools, eval datasets, or agent capabilities. GEPA-optimized prompts are tuned to the specific tool set and evaluation criteria.
+4. **Prompt cost is zero.** Optimization only changes the system prompt — no additional inference cost. Even mixed results are worth iterating on.
 
-5. **Monitor with online evaluators** after deployment. Create evaluators through the console (API-created evaluators do not produce results — see known limitations).
+5. **Monitor with online evaluators** after deployment to catch regressions on real traffic beyond the eval dataset.
 
 ## Per-Agent Reports
 
