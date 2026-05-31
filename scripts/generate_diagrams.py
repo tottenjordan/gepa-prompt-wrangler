@@ -42,6 +42,7 @@ def generate_diagram(source_path: str, caption: str, output_dir: str = None):
         "-o", str(dest),
         "--vlm-provider", "gemini",
         "--image-provider", "google_imagen",
+        "--image-model", "gemini-3-pro-image",
         "-n", "2",
     ]
 
