@@ -312,12 +312,6 @@ def optimize(
             "train_eval_set": evalset_stem,
         }
 
-    # ADK's BaseCriterion requires a threshold field on dict criteria.
-    # Default to 0.0 (continuous scoring, no binary gate) if not specified.
-    for _k, _v in sampler_config.get("eval_config", {}).get("criteria", {}).items():
-        if isinstance(_v, dict) and "threshold" not in _v:
-            _v["threshold"] = 0.0
-
     try:
         sampler_cfg = LocalEvalSamplerConfig.model_validate(sampler_config)
     except Exception as e:
