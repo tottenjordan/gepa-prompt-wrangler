@@ -3,8 +3,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 
 from flash_agent import flash_agent
-from prompts.flash_prompts import OPTIMIZED
 
-flash_agent.instruction = OPTIMIZED["wrangler_v4"]["prompt"]
+flash_agent.instruction = "You are a helpful assistant. Use the available tools to answer user questions."
 root_agent = flash_agent
 agent = types.SimpleNamespace(root_agent=flash_agent)

@@ -1,0 +1,65 @@
+{
+  "experiment": "multi-model-v6",
+  "created_at": "2026-06-05T22:45:00",
+  "version": "wrangler_v6",
+  "stages": {
+    "deploy": {
+      "status": "complete",
+      "pairs": {
+        "lite-gemini-3.1-flash-lite": {
+          "status": "complete",
+          "completed_at": "2026-06-05T22:55:00"
+        },
+        "flash-gemini-3.5-flash": {
+          "status": "complete",
+          "completed_at": "2026-06-05T22:55:00"
+        },
+        "pro-gemini-3.1-pro": {
+          "status": "complete",
+          "completed_at": "2026-06-05T22:55:00"
+        },
+        "sonnet-claude-4": {
+          "status": "complete",
+          "completed_at": "2026-06-05T22:55:00"
+        },
+        "opus-claude-4": {
+          "status": "complete",
+          "completed_at": "2026-06-05T22:55:00"
+        }
+      },
+      "completed_at": "2026-06-05T22:55:00",
+      "note": "Reused v5 engine IDs \u2014 agents already deployed"
+    },
+    "eval_before": {
+      "status": "complete",
+      "pairs": {
+        "lite-gemini-3.1-flash-lite": {
+          "status": "complete",
+          "completed_at": "2026-06-05T22:55:00"
+        },
+        "flash-gemini-3.5-flash": {
+          "status": "complete",
+          "completed_at": "2026-06-05T22:55:00"
+        },
+        "pro-gemini-3.1-pro": {
+          "status": "complete",
+          "completed_at": "2026-06-05T22:55:00"
+        },
+        "sonnet-claude-4": {
+          "status": "complete",
+          "completed_at": "2026-06-05T22:55:00"
+        },
+        "opus-claude-4": {
+          "status": "complete",
+          "completed_at": "2026-06-05T22:55:00"
+        }
+      },
+      "completed_at": "2026-06-05T22:55:00",
+      "note": "Reused v5 baseline scores \u2014 same generic prompt, same engines"
+    },
+    "optimize": {
+      "status": "pending",
+      "pairs": {}
+    }
+  }
+}

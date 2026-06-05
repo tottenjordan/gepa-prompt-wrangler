@@ -3,8 +3,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 
 from opus_agent import opus_agent
-from prompts.opus_prompts import OPTIMIZED
 
-opus_agent.instruction = OPTIMIZED["wrangler_v4"]["prompt"]
+opus_agent.instruction = "You are a helpful assistant. Use the available tools to answer user questions."
 root_agent = opus_agent
 agent = types.SimpleNamespace(root_agent=opus_agent)
