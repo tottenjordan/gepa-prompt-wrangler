@@ -16,7 +16,7 @@ from vertexai import Client, types
 from .config import GCP_PROJECT_ID, GCP_REGION, GCP_STAGING_BUCKET
 
 GCS_EVAL_DEST = f"gs://{GCP_STAGING_BUCKET}/eval-results/"
-MAX_POLL_SECONDS = 1200
+MAX_POLL_SECONDS = 2400
 
 DEFAULT_METRICS = [
     types.RubricMetric.FINAL_RESPONSE_QUALITY,
@@ -157,7 +157,11 @@ def run_batch_eval(
 
     if "FAILED" in state:
         err = getattr(evaluation_run, "error", None)
-        print(f"  {tag}ERROR: {err}")
+        print(f"  {tag}ERROR: Eval run failed: {err}")
+        return EvalResult()
+
+    if "SUCCEEDED" not in state:
+        print(f"  {tag}ERROR: Eval run timed out after {MAX_POLL_SECONDS}s (state={state}). Re-run this pair.")
         return EvalResult()
 
     print(f"  {tag}Fetching per-case results...", flush=True)
@@ -208,9 +212,16 @@ def run_batch_eval_averaged(
     for i in range(num_runs):
         print(f"  {tag}Run {i + 1}/{num_runs}...", flush=True)
         result = run_batch_eval(engine_id, eval_cases, metrics=metrics, agent_name=agent_name)
-        all_results.append(result)
-        avg = sum(result.scores.values()) / max(len(result.scores), 1)
-        print(f"  {tag}Run {i + 1}/{num_runs} avg: {avg:.3f}", flush=True)
+        if result.scores:
+            all_results.append(result)
+            avg = sum(result.scores.values()) / max(len(result.scores), 1)
+            print(f"  {tag}Run {i + 1}/{num_runs} avg: {avg:.3f}", flush=True)
+        else:
+            print(f"  {tag}Run {i + 1}/{num_runs} returned no scores (skipping from average)", flush=True)
+
+    if not all_results:
+        print(f"  {tag}WARNING: All {num_runs} runs returned no scores", flush=True)
+        return EvalResult(num_runs=num_runs)
 
     all_metrics = set()
     for r in all_results:
@@ -236,7 +247,10 @@ def run_batch_eval_averaged(
             avg_per_case.append({k: statistics.mean(vs) for k, vs in case_metrics.items()})
 
     overall = sum(avg_scores.values()) / max(len(avg_scores), 1)
-    print(f"  {tag}Averaged {num_runs} runs — overall: {overall:.3f}", flush=True)
+    successful = len(all_results)
+    skipped = num_runs - successful
+    skip_note = f" ({skipped} skipped — timeout/failure)" if skipped else ""
+    print(f"  {tag}Averaged {successful}/{num_runs} runs — overall: {overall:.3f}{skip_note}", flush=True)
 
     return EvalResult(
         scores=avg_scores,

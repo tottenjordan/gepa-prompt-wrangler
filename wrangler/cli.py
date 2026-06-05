@@ -7,22 +7,305 @@ import click
 import yaml
 
 
+def _is_experiment_dir(path: str) -> bool:
+    """True if path is an experiment directory (has config.yaml)."""
+    return Path(path).is_dir() and (Path(path) / "config.yaml").exists()
+
+
 @click.group()
 @click.version_option(version="0.1.0", prog_name="gepa-prompt-wrangler")
 def main():
     """GEPA Prompt Wrangler — prompt optimization harness for ADK agents."""
 
 
+# ── Experiment management ──────────────────────────────────────
+
+
+@main.group()
+def experiment():
+    """Manage DOE experiment campaigns."""
+
+
+@experiment.command("create")
+@click.argument("manifest")
+@click.option("--name", "-n", default=None, help="Experiment name (defaults to manifest name).")
+@click.option("--version", "-v", default=None, help="Version tag (e.g. wrangler_v5).")
+@click.option("--dir", "base_dir", default="experiments/active", help="Base directory for experiments.")
+def experiment_create(manifest: str, name: str, version: str, base_dir: str):
+    """Create a new experiment from a manifest YAML."""
+    from .experiment import Experiment
+
+    exp = Experiment.create(manifest, name=name, version=version, base_dir=base_dir)
+    click.echo(f"Created experiment: {exp.dir}")
+    click.echo(f"  Name:    {exp.name}")
+    click.echo(f"  Version: {exp.version}")
+    click.echo(f"  Pairs:   {len(exp.pair_ids)}")
+    click.echo(f"\nNext: wrangler deploy {exp.dir}")
+
+
+@main.command("status")
+@click.argument("experiment_dir")
+def status(experiment_dir: str):
+    """Show experiment stage completion status."""
+    from .experiment import Experiment
+
+    exp = Experiment.load(experiment_dir)
+    exp.print_status()
+
+
+# ── Pipeline stages (experiment-aware) ─────────────────────────
+
+
+@main.command()
+@click.argument("target", default="manifest.yaml")
+@click.option("--pair", "-p", default=None, help="Deploy only a specific pair by ID.")
+def deploy(target: str, pair: str):
+    """Deploy agent pairs to GEAP.
+
+    TARGET can be an experiment directory or a manifest.yaml file.
+    """
+    if _is_experiment_dir(target):
+        from .experiment import Experiment
+        from .stages import stage_deploy
+
+        exp = Experiment.load(target)
+        click.echo(f"Deploying — experiment: {exp.name}")
+        stage_deploy(exp, pair_id=pair)
+    else:
+        from .runner import WranglerPipeline
+        from . import deploy as deployer
+
+        pipeline = WranglerPipeline(target)
+        pairs = [pipeline.manifest.get_pair(pair)] if pair else pipeline.manifest.pairs
+        for p in pairs:
+            click.echo(f"\n[{p.id}] Deploying {p.model}...")
+            agent = pipeline._load_agent(p)
+            engine_id = deployer.deploy_agent(agent, display_name=p.id)
+            click.echo(f"  Engine ID: {engine_id}")
+
+
+@main.command("eval")
+@click.argument("target", default="manifest.yaml", required=False)
+@click.argument("phase", default="before", required=False)
+@click.option("--pair", "-p", default=None, help="Evaluate only a specific pair by ID.")
+@click.option("--engine-id", default=None, help="Engine ID (standalone mode only).")
+@click.option("--eval-data", default=None, help="Path to eval data file (standalone mode).")
+@click.option("--agent-name", default=None, help="Label for this agent in results.")
+@click.option("--num-runs", "-n", default=1, type=int, help="Number of eval runs to average.")
+def eval_cmd(target: str, phase: str, pair: str, engine_id: str, eval_data: str, agent_name: str, num_runs: int):
+    """Run batch evaluation against deployed agents.
+
+    Experiment mode:  wrangler eval <experiment_dir> before|after [--pair ID]
+    Standalone mode:  wrangler eval --engine-id <id> --eval-data <path>
+    """
+    if _is_experiment_dir(target):
+        from .experiment import Experiment
+        from .stages import stage_eval
+
+        if phase not in ("before", "after"):
+            click.echo(f"Error: phase must be 'before' or 'after', got '{phase}'")
+            raise SystemExit(1)
+
+        exp = Experiment.load(target)
+        click.echo(f"Evaluating ({phase}) — experiment: {exp.name}")
+        stage_eval(exp, phase=phase, pair_id=pair, num_runs=num_runs if num_runs > 1 else None)
+    elif engine_id:
+        from .converter import load_eval_file
+        from .evaluator import run_batch_eval_averaged
+
+        if eval_data:
+            eval_cases = load_eval_file(eval_data)
+        elif target and os.path.exists(target):
+            from .factory import PairFactory
+            m = PairFactory.load(target)
+            eval_cases = load_eval_file(m.eval_data)
+        else:
+            click.echo("Error: provide --eval-data or a manifest.yaml.")
+            raise SystemExit(1)
+
+        label = agent_name or engine_id
+        result = run_batch_eval_averaged(engine_id, eval_cases, num_runs=num_runs, agent_name=label)
+        click.echo(f"\nResults for {label}:")
+        for metric, score in sorted(result.scores.items()):
+            std = result.scores_std.get(metric)
+            std_str = f" +/- {std:.3f}" if std else ""
+            click.echo(f"  {metric:40s} {score:.2f}{std_str}")
+    else:
+        click.echo("Error: provide an experiment directory or --engine-id.")
+        raise SystemExit(1)
+
+
+@main.command()
+@click.argument("target", default="manifest.yaml")
+@click.option("--pair", "-p", default=None, help="Optimize only a specific pair by ID.")
+@click.option("--judge-model", "-j", default=None, help="Judge model for GEPA eval.")
+@click.option("--version", "-v", default=None, help="Version tag for saved prompts.")
+def optimize(target: str, pair: str, judge_model: str, version: str):
+    """Run GEPA optimization for pairs.
+
+    TARGET can be an experiment directory or a manifest.yaml file.
+    """
+    if _is_experiment_dir(target):
+        from .experiment import Experiment
+        from .stages import stage_optimize
+
+        exp = Experiment.load(target)
+        click.echo(f"Optimizing — experiment: {exp.name}")
+        stage_optimize(exp, pair_id=pair)
+    else:
+        from .factory import PairFactory
+        from .optimizer import optimize as run_optimize
+
+        m = PairFactory.load(target)
+        pairs = [m.get_pair(pair)] if pair else m.pairs
+
+        for p in pairs:
+            click.echo(f"\n[{p.id}] Optimizing with model {p.model}...")
+            result = run_optimize(m.agent_module, m.eval_data)
+            click.echo(f"  Optimized instruction ({len(result)} chars)")
+
+            output_path = Path("outputs/prompts") / f"{p.id}_optimized.txt"
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+            output_path.write_text(result)
+            click.echo(f"  Saved to: {output_path}")
+
+
+@main.command()
+@click.argument("experiment_dir")
+@click.option("--pair", "-p", default=None, help="Redeploy only a specific pair by ID.")
+def redeploy(experiment_dir: str, pair: str):
+    """Redeploy agents with optimized prompts."""
+    from .experiment import Experiment
+    from .stages import stage_redeploy
+
+    exp = Experiment.load(experiment_dir)
+    click.echo(f"Redeploying — experiment: {exp.name}")
+    stage_redeploy(exp, pair_id=pair)
+
+
+@main.command()
+@click.argument("experiment_dir")
+def analyze(experiment_dir: str):
+    """Analyze experiment results — per-pair diffs, prompt analysis, recommendations."""
+    from .experiment import Experiment
+    from .analyzer import run_analysis
+
+    exp = Experiment.load(experiment_dir)
+    click.echo(f"Analyzing — experiment: {exp.name}")
+    report_path = run_analysis(exp)
+    click.echo(f"\nFull report: {report_path}")
+
+
+@main.command()
+@click.argument("target", default="outputs")
+def report(target: str):
+    """Generate analysis report.
+
+    TARGET can be an experiment directory or an outputs directory with results JSON.
+    """
+    if _is_experiment_dir(target):
+        from .experiment import Experiment
+        from .stages import stage_report
+
+        exp = Experiment.load(target)
+        click.echo(f"Generating report — experiment: {exp.name}")
+        stage_report(exp)
+    else:
+        import json
+
+        results_files = sorted(Path(target).glob("results_*.json"))
+        if not results_files:
+            click.echo("No results files found. Run 'wrangler run' first.")
+            return
+
+        with open(results_files[-1]) as f:
+            results = json.load(f)
+
+        from .reporter import generate_report
+        generate_report(results, "experiment")
+        click.echo("Report generated at outputs/reports/experiment_report.md")
+
+
+# ── End-to-end ─────────────────────────────────────────────────
+
+
+@main.command()
+@click.argument("manifest", default="manifest.yaml")
+@click.option("--name", "-n", default=None, help="Experiment name.")
+@click.option("--version", "-v", default=None, help="Version tag (e.g. wrangler_v5).")
+@click.option("--num-runs", default=3, type=int, help="Number of eval runs to average.")
+@click.option("--pair", "-p", default=None, help="Run only a specific pair.")
+@click.option("--dry-run", is_flag=True, help="Parse and validate without executing.")
+@click.option("--resume-from", "resume_from", default=None, help="Path to previous results JSON (legacy mode).")
+@click.option("--from-phase", "from_phase", default=0, type=int, help="Start from this phase (legacy mode).")
+@click.option("--max-concurrent", "-c", default=1, type=int, help="Max parallel evals (legacy mode).")
+def run(manifest: str, name: str, version: str, num_runs: int, pair: str, dry_run: bool, resume_from: str, from_phase: int, max_concurrent: int):
+    """Run the full pipeline: deploy -> eval -> optimize -> redeploy -> eval -> report.
+
+    Creates an experiment directory and runs all stages in sequence.
+    """
+    if resume_from or from_phase > 0:
+        from .runner import WranglerPipeline
+        pipeline = WranglerPipeline(manifest, max_concurrent=max_concurrent, version=version, num_runs=num_runs)
+        if resume_from:
+            pipeline.load_results(resume_from)
+        pipeline.run(from_phase=from_phase)
+        return
+
+    if dry_run:
+        from .factory import PairFactory
+        m = PairFactory.load(manifest)
+        click.echo(f"Manifest: {m.name}")
+        click.echo(f"Pairs: {len(m.pairs)}")
+        for p in m.pairs:
+            click.echo(f"  {p.summary()}")
+        return
+
+    from .experiment import Experiment
+    from .stages import stage_deploy, stage_eval, stage_optimize, stage_redeploy, stage_report
+
+    exp = Experiment.create(manifest, name=name, version=version)
+
+    click.echo(f"\n{'=' * 60}")
+    click.echo(f"GEPA PROMPT WRANGLER — {exp.name}")
+    click.echo(f"{'=' * 60}")
+    click.echo(f"  Experiment: {exp.dir}")
+    click.echo(f"  Version:    {exp.version}")
+    click.echo(f"  Pairs:      {len(exp.pair_ids)}")
+    click.echo()
+
+    click.echo("\n--- Deploy ---")
+    stage_deploy(exp, pair_id=pair)
+
+    click.echo("\n--- Baseline Evaluation ---")
+    stage_eval(exp, phase="before", pair_id=pair, num_runs=num_runs)
+
+    click.echo("\n--- GEPA Optimization ---")
+    stage_optimize(exp, pair_id=pair)
+
+    click.echo("\n--- Redeploy ---")
+    stage_redeploy(exp, pair_id=pair)
+
+    click.echo("\n--- Post-Optimization Evaluation ---")
+    stage_eval(exp, phase="after", pair_id=pair, num_runs=num_runs)
+
+    click.echo("\n--- Report ---")
+    stage_report(exp)
+
+    click.echo(f"\n{'=' * 60}")
+    click.echo(f"COMPLETE — results in {exp.dir}")
+    click.echo(f"{'=' * 60}")
+    exp.print_status()
+
+
+# ── Utility commands ───────────────────────────────────────────
+
+
 @main.command()
 @click.option("--output", "-o", default="manifest.yaml", help="Output path for the manifest.")
 @click.option("--agent-dir", "-a", default=None, help="Path to an ADK agent module to auto-detect.")
 def init(output: str, agent_dir: str):
-    """Create a starter manifest.yaml for a new optimization run.
-
-    With --agent-dir, inspects the agent module and pre-populates the
-    manifest with real agent name, model, and tool names. Also generates
-    a skeleton eval_cases.yaml with correct tool names.
-    """
+    """Create a starter manifest.yaml for a new optimization run."""
     if os.path.exists(output):
         click.echo(f"Error: {output} already exists. Use --output to specify a different path.")
         raise SystemExit(1)
@@ -49,7 +332,6 @@ def init(output: str, agent_dir: str):
             with open(eval_path, "w") as f:
                 yaml.dump(eval_data, f, default_flow_style=False, sort_keys=False, width=100)
             click.echo(f"  Generated eval skeleton: {eval_path} ({len(eval_cases)} cases)")
-            click.echo(f"  Edit the TODO placeholders with real queries and expected responses.")
 
         if spec.tools:
             click.echo(f"\n  Tool names for eval cases:")
@@ -110,88 +392,14 @@ def inspect(agent_path: str, output: str):
             click.echo(f"  {t.eval_name:40s} [{t.tool_type}]{prefix}")
 
 
-@main.command()
-@click.argument("manifest", default="manifest.yaml")
-@click.option("--dry-run", is_flag=True, help="Parse and validate without executing.")
-@click.option("--resume-from", "resume_from", default=None, help="Path to previous results JSON to resume from.")
-@click.option("--from-phase", "from_phase", default=0, type=int, help="Start from this phase (requires --resume-from).")
-@click.option("--version", "-v", default=None, help="Version tag for saved prompts (e.g. wrangler_v5).")
-@click.option("--max-concurrent", "-c", default=1, type=int, help="Max parallel evals (default: 1 = sequential).")
-@click.option("--num-runs", "-n", default=1, type=int, help="Number of eval runs to average (default: 1).")
-def run(manifest: str, dry_run: bool, resume_from: str, from_phase: int, version: str, max_concurrent: int, num_runs: int):
-    """Run the full pipeline: deploy -> eval -> optimize -> redeploy -> eval -> report."""
-    from .runner import WranglerPipeline
-
-    pipeline = WranglerPipeline(manifest, max_concurrent=max_concurrent, version=version, num_runs=num_runs)
-    if dry_run:
-        click.echo(f"Manifest: {pipeline.manifest.name}")
-        click.echo(f"Pairs: {len(pipeline.manifest.pairs)}")
-        for p in pipeline.manifest.pairs:
-            click.echo(f"  {p.summary()}")
-        return
-
-    if resume_from:
-        click.echo(f"Loading previous results from: {resume_from}")
-        pipeline.load_results(resume_from)
-
-    if from_phase > 0 and not resume_from:
-        click.echo("Error: --from-phase requires --resume-from to load previous results.")
-        raise SystemExit(1)
-
-    pipeline.run(from_phase=from_phase)
-
-
-@main.command("eval")
-@click.argument("manifest", default="manifest.yaml", required=False)
-@click.option("--pair", "-p", help="Evaluate only a specific pair by ID.")
-@click.option("--engine-id", help="Engine ID of the deployed agent.")
-@click.option("--eval-data", help="Path to eval data file (required with --engine-id without manifest).")
-@click.option("--agent-name", default=None, help="Label for this agent in results (defaults to engine ID).")
-@click.option("--num-runs", "-n", default=1, type=int, help="Number of eval runs to average (default: 1).")
-def eval_cmd(manifest: str, pair: str, engine_id: str, eval_data: str, agent_name: str, num_runs: int):
-    """Run batch evaluation against a deployed agent.
-
-    Can be used two ways:
-      1. With a manifest: wrangler eval manifest.yaml --engine-id <id>
-      2. Standalone: wrangler eval --engine-id <id> --eval-data <path>
-    """
-    from .converter import load_eval_file
-    from .evaluator import run_batch_eval_averaged
-
-    if engine_id and eval_data and (not manifest or not os.path.exists(manifest)):
-        eval_cases = load_eval_file(eval_data)
-    elif manifest and os.path.exists(manifest):
-        from .factory import PairFactory
-        m = PairFactory.load(manifest)
-        eval_cases = load_eval_file(m.eval_data)
-    else:
-        click.echo("Error: provide a manifest.yaml OR both --engine-id and --eval-data.")
-        raise SystemExit(1)
-
-    if not engine_id:
-        click.echo("Error: --engine-id is required. Deploy the agent first with 'wrangler deploy'.")
-        raise SystemExit(1)
-
-    label = agent_name or engine_id
-    result = run_batch_eval_averaged(engine_id, eval_cases, num_runs=num_runs, agent_name=label)
-    click.echo(f"\nResults for {label}:")
-    for metric, score in sorted(result.scores.items()):
-        std = result.scores_std.get(metric)
-        std_str = f" +/- {std:.3f}" if std else ""
-        click.echo(f"  {metric:40s} {score:.2f}{std_str}")
-
-
 @main.command("generate-evalset")
 @click.option("--from", "from_path", required=True, help="Path to simplified eval YAML.")
 @click.option("--output", "-o", required=True, help="Output directory for GEPA evalset files.")
-@click.option("--count", "-n", default=15, help="Number of eval cases to include (default: 15).")
+@click.option("--count", "-n", default=15, help="Number of eval cases to include.")
 @click.option("--balanced/--no-balanced", default=True, help="Balance across complexity levels.")
 @click.option("--app-name", default=None, help="App name (defaults to output directory name).")
 def generate_evalset(from_path: str, output: str, count: int, balanced: bool, app_name: str):
-    """Generate a GEPA-compatible evalset from simplified eval cases.
-
-    Creates the evalset JSON and sampler_config.json needed for GEPA optimization.
-    """
+    """Generate a GEPA-compatible evalset from simplified eval cases."""
     from .converter import load_eval_file, generate_gepa_evalset, generate_sampler_config
 
     cases = load_eval_file(from_path)
@@ -209,78 +417,6 @@ def generate_evalset(from_path: str, output: str, count: int, balanced: bool, ap
 
     generate_sampler_config(app_name, eval_set_id, output_dir=output)
     click.echo(f"  Sampler config: {Path(output) / 'sampler_config.json'}")
-    click.echo(f"\nReady for optimization:")
-    click.echo(f"  wrangler optimize --agent-dir <agent_path> --evalset-dir {output}")
-
-
-@main.command()
-@click.argument("manifest", default="manifest.yaml")
-@click.option("--pair", "-p", help="Optimize only a specific pair by ID.")
-@click.option("--judge-model", "-j", default=None, help="Judge model for GEPA eval (default: gemini-3.5-flash).")
-@click.option("--multi-judge", is_flag=True, help="Enable multi-judge ensemble scoring.")
-@click.option("--version", "-v", default=None, help="Version tag for saved prompts (e.g. wrangler_v5).")
-def optimize(manifest: str, pair: str, judge_model: str, multi_judge: bool, version: str):
-    """Run GEPA optimization for pairs in the manifest."""
-    from .factory import PairFactory
-    from .optimizer import optimize as run_optimize
-
-    m = PairFactory.load(manifest)
-    pairs = [m.get_pair(pair)] if pair else m.pairs
-
-    effective_judge = judge_model or m.eval_config.get("judge_model", "gemini-3.5-flash")
-    if judge_model:
-        click.echo(f"Using judge model: {effective_judge}")
-    if multi_judge:
-        click.echo("Multi-judge ensemble enabled")
-    if version:
-        click.echo(f"Version tag: {version}")
-
-    for p in pairs:
-        click.echo(f"\n[{p.id}] Optimizing with model {p.model}...")
-        result = run_optimize(m.agent_module, m.eval_data)
-        click.echo(f"  Optimized instruction ({len(result)} chars)")
-
-        output_path = Path("outputs/prompts") / f"{p.id}_optimized.txt"
-        output_path.parent.mkdir(parents=True, exist_ok=True)
-        output_path.write_text(result)
-        click.echo(f"  Saved to: {output_path}")
-
-
-@main.command()
-@click.argument("results_dir", default="outputs")
-def report(results_dir: str):
-    """Generate analysis report from existing results."""
-    import json
-
-    results_files = sorted(Path(results_dir).glob("results_*.json"))
-    if not results_files:
-        click.echo("No results files found. Run 'wrangler run' first.")
-        return
-
-    with open(results_files[-1]) as f:
-        results = json.load(f)
-
-    from .reporter import generate_report
-    generate_report(results, "experiment")
-    click.echo("Report generated at outputs/reports/experiment_report.md")
-
-
-@main.command()
-@click.argument("manifest", default="manifest.yaml")
-@click.option("--pair", "-p", help="Deploy only a specific pair by ID.")
-def deploy(manifest: str, pair: str):
-    """Deploy agent pairs to GEAP."""
-    from .runner import WranglerPipeline
-    from . import deploy as deployer
-
-    pipeline = WranglerPipeline(manifest)
-    pairs = [pipeline.manifest.get_pair(pair)] if pair else pipeline.manifest.pairs
-
-    for p in pairs:
-        click.echo(f"\n[{p.id}] Deploying {p.model}...")
-        agent = pipeline._load_agent(p)
-        engine_id = deployer.deploy_agent(agent, display_name=p.id)
-        click.echo(f"  Engine ID: {engine_id}")
 
 
 if __name__ == "__main__":

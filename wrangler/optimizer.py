@@ -180,12 +180,156 @@ agent = types.SimpleNamespace(root_agent=root_agent)
     return wrapper_dir
 
 
+async def _prewarm_mcp_toolsets(agent, tag: str = "  ") -> int:
+    """Pre-warm MCP tool sessions so GEPA doesn't timeout on first connection.
+
+    Returns the number of toolsets successfully warmed.
+    """
+    from google.adk.tools.base_toolset import BaseToolset
+    mcp_toolsets = [t for t in agent.tools if isinstance(t, BaseToolset)]
+    warmed = 0
+    for ts in mcp_toolsets:
+        try:
+            tools = await ts.get_tools()
+            log.info("Pre-warmed %s: %d tools", type(ts).__name__, len(tools))
+            warmed += 1
+        except Exception as exc:
+            log.warning("MCP pre-warm failed for %s: %s", type(ts).__name__, exc)
+    if mcp_toolsets:
+        print(f"{tag}  Pre-warmed {warmed}/{len(mcp_toolsets)} MCP toolset(s)", flush=True)
+    return warmed
+
+
+def _merge_thresholds(sampler_config: dict, thresholds: dict[str, float], judge_model: str = "gemini-3.5-flash") -> None:
+    """Merge experiment thresholds into a loaded sampler_config.json in-place.
+
+    Ensures the experiment's calibrated thresholds override whatever is in the
+    sampler config file, while preserving the file's structure (rubrics, case IDs, app_name).
+    """
+    criteria = sampler_config.get("eval_config", {}).get("criteria", {})
+    if not criteria:
+        return
+
+    merged = []
+
+    # Fix metric name: hallucinations_v1 → hallucination_v1
+    if "hallucinations_v1" in criteria and "hallucination_v1" not in criteria:
+        criteria["hallucination_v1"] = criteria.pop("hallucinations_v1")
+        merged.append("renamed hallucinations_v1 → hallucination_v1")
+
+    for metric, threshold in thresholds.items():
+        if metric in criteria:
+            val = criteria[metric]
+            if isinstance(val, dict):
+                old = val.get("threshold", "unset")
+                val["threshold"] = threshold
+                if old != threshold:
+                    merged.append(f"{metric}: {old} → {threshold}")
+                if "judge_model_options" in val:
+                    val["judge_model_options"]["judge_model"] = judge_model
+            else:
+                if val != threshold:
+                    merged.append(f"{metric}: {val} → {threshold}")
+                criteria[metric] = threshold
+        else:
+            criteria[metric] = {
+                "judge_model_options": {"judge_model": judge_model},
+                "threshold": threshold,
+            }
+            merged.append(f"added {metric} (threshold={threshold})")
+
+    # Update judge model on all remaining dict criteria
+    for key, val in criteria.items():
+        if isinstance(val, dict) and "judge_model_options" in val:
+            val["judge_model_options"]["judge_model"] = judge_model
+
+    if merged:
+        log.info("Merged experiment thresholds into sampler config: %s", "; ".join(merged))
+
+
+def _build_criteria(thresholds: dict[str, float] | None = None, judge_model: str = "gemini-3.5-flash") -> dict:
+    """Build GEPA eval criteria dict with aligned metric names and calibrated thresholds.
+
+    Metric names match cloud eval (evaluator.py DEFAULT_METRICS):
+      - hallucination_v1 (not hallucinations_v1)
+      - final_response_quality_v1 (with custom rubrics)
+      - tool_use_quality_v1 (with custom rubrics)
+      - instruction_following_v1 (previously missing)
+    """
+    t = {
+        "final_response_match_v2": 0.5,
+        "instruction_following_v1": 0.5,
+        "tool_use_quality_v1": 0.3,
+        "final_response_quality_v1": 0.7,
+        "hallucination_v1": 0.8,
+        "safety_v1": 0.8,
+    }
+    if thresholds:
+        t.update(thresholds)
+
+    return {
+        "response_match_score": 0.1,
+        "final_response_match_v2": {
+            "judge_model_options": {"judge_model": judge_model},
+            "threshold": t["final_response_match_v2"],
+        },
+        "safety_v1": t["safety_v1"],
+        "hallucination_v1": t["hallucination_v1"],
+        "instruction_following_v1": {
+            "judge_model_options": {"judge_model": judge_model},
+            "threshold": t["instruction_following_v1"],
+        },
+        "rubric_based_final_response_quality_v1": {
+            "judge_model_options": {"judge_model": judge_model},
+            "threshold": t["final_response_quality_v1"],
+            "rubrics": [
+                {
+                    "rubric_id": "instruction_adherence",
+                    "rubric_content": {
+                        "text_property": "Response follows system prompt instructions."
+                    },
+                    "type": "INSTRUCTION_ADHERENCE",
+                },
+                {
+                    "rubric_id": "completeness",
+                    "rubric_content": {
+                        "text_property": "Response fully addresses the user request."
+                    },
+                    "type": "FINAL_RESPONSE_QUALITY",
+                },
+            ],
+        },
+        "rubric_based_tool_use_quality_v1": {
+            "judge_model_options": {"judge_model": judge_model},
+            "threshold": t["tool_use_quality_v1"],
+            "rubrics": [
+                {
+                    "rubric_id": "correct_tool_selection",
+                    "rubric_content": {
+                        "text_property": "Correct tools selected."
+                    },
+                    "type": "TOOL_USE_QUALITY",
+                },
+                {
+                    "rubric_id": "correct_parameters",
+                    "rubric_content": {
+                        "text_property": "Accurate tool parameters provided."
+                    },
+                    "type": "TOOL_USE_QUALITY",
+                },
+            ],
+        },
+    }
+
+
 def optimize(
     agent_module_path: str,
     evalset_path: str = None,
     sampler_config_path: str = None,
     eval_data_path: str = None,
     agent_name: str = "",
+    eval_thresholds: dict[str, float] | None = None,
+    judge_model: str = "gemini-3.5-flash",
 ) -> str:
     """Run GEPA optimization. Returns the optimized instruction string.
 
@@ -195,10 +339,20 @@ def optimize(
         sampler_config_path: Path to sampler config JSON file
         eval_data_path: Path to simplified eval YAML (for auto-generating GEPA evalset)
         agent_name: Display name for logging (e.g. "lite-gemini-3.1-flash-lite")
+        eval_thresholds: Per-metric thresholds for GEPA criteria (overrides defaults)
+        judge_model: Judge model for eval metrics
     """
     tag = f"  [{agent_name}] " if agent_name else "  "
     print(f"{tag}[1/3] Applying ADK patches...", flush=True)
     _patch_adk()
+
+    import vertexai
+    from .config import GCP_PROJECT_ID, GCP_REGION, GCP_STAGING_BUCKET
+    vertexai.init(
+        project=GCP_PROJECT_ID,
+        location=GCP_REGION,
+        staging_bucket=f"gs://{GCP_STAGING_BUCKET}",
+    )
 
     from google.adk.evaluation.local_eval_sets_manager import LocalEvalSetsManager
     from google.adk.optimization.gepa_root_agent_prompt_optimizer import (
@@ -255,58 +409,15 @@ def optimize(
         import json as _json
         with open(sampler_config_path) as f:
             sampler_config = _json.load(f)
+        if eval_thresholds:
+            _merge_thresholds(sampler_config, eval_thresholds, judge_model)
     else:
         evalset_stem = Path(evalset_path).stem if evalset_path else "eval_set"
         if evalset_stem.endswith(".evalset"):
             evalset_stem = evalset_stem[:-len(".evalset")]
         sampler_config = {
             "eval_config": {
-                "criteria": {
-                    "response_match_score": 0.1,
-                    "final_response_match_v2": {
-                        "judge_model_options": {"judge_model": "gemini-3.5-flash"},
-                    },
-                    "safety_v1": 0.8,
-                    "hallucinations_v1": 0.5,
-                    "rubric_based_final_response_quality_v1": {
-                        "judge_model_options": {"judge_model": "gemini-3.5-flash"},
-                        "rubrics": [
-                            {
-                                "rubric_id": "instruction_adherence",
-                                "rubric_content": {
-                                    "text_property": "Response follows system prompt instructions."
-                                },
-                                "type": "INSTRUCTION_ADHERENCE",
-                            },
-                            {
-                                "rubric_id": "completeness",
-                                "rubric_content": {
-                                    "text_property": "Response fully addresses the user request."
-                                },
-                                "type": "FINAL_RESPONSE_QUALITY",
-                            },
-                        ],
-                    },
-                    "rubric_based_tool_use_quality_v1": {
-                        "judge_model_options": {"judge_model": "gemini-3.5-flash"},
-                        "rubrics": [
-                            {
-                                "rubric_id": "correct_tool_selection",
-                                "rubric_content": {
-                                    "text_property": "Correct tools selected."
-                                },
-                                "type": "TOOL_USE_QUALITY",
-                            },
-                            {
-                                "rubric_id": "correct_parameters",
-                                "rubric_content": {
-                                    "text_property": "Accurate tool parameters provided."
-                                },
-                                "type": "TOOL_USE_QUALITY",
-                            },
-                        ],
-                    },
-                }
+                "criteria": _build_criteria(eval_thresholds, judge_model),
             },
             "app_name": app_name,
             "train_eval_set": evalset_stem,
@@ -363,7 +474,13 @@ def optimize(
 
     t0 = time.time()
     try:
-        optimization_result = asyncio.run(optimizer.optimize(root_agent, sampler))
+        # Pre-warm MCP sessions in the same event loop GEPA will use,
+        # before the heavy optimizer work starts.
+        async def _run_with_warmup():
+            await _prewarm_mcp_toolsets(root_agent, tag)
+            return await optimizer.optimize(root_agent, sampler)
+
+        optimization_result = asyncio.run(_run_with_warmup())
     except Exception as e:
         error_msg = str(e)
         if "ValidationError" in type(e).__name__ or "validation" in error_msg.lower():

@@ -1,0 +1,18 @@
+experiment:
+  name: test
+  description: ''
+  created: '2026-06-03T14:19:36'
+  version: wrangler_v1
+agent_module: agents/test
+eval_data: eval.yaml
+defaults:
+  num_runs: 3
+  judge_model: gemini-3.5-flash
+pairs:
+- id: p1
+  model: gemini-2.0-flash
+  description: ''
+  agent_module: ''
+  engine_id: ''
+  system_prompt: test
+eval_config: {}

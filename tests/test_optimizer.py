@@ -1,11 +1,13 @@
 """Tests for wrangler.optimizer — wrapper module creation, patch helpers, and config handling."""
 
+import asyncio
 import json
 import os
 import pytest
 from pathlib import Path
+from unittest.mock import AsyncMock, MagicMock
 
-from wrangler.optimizer import _create_wrapper_module
+from wrangler.optimizer import _create_wrapper_module, _prewarm_mcp_toolsets
 
 
 class TestCreateWrapperModule:
@@ -27,6 +29,62 @@ class TestCreateWrapperModule:
     def test_patch_adk_is_callable(self):
         from wrangler.optimizer import _patch_adk
         assert callable(_patch_adk)
+
+
+def _make_toolset(tools=None, fail=False):
+    """Create a mock MCP toolset (BaseToolset subclass)."""
+    from google.adk.tools.base_toolset import BaseToolset
+    ts = MagicMock(spec=BaseToolset)
+    if fail:
+        ts.get_tools = AsyncMock(side_effect=ConnectionError("timeout"))
+    else:
+        ts.get_tools = AsyncMock(return_value=tools or [MagicMock(name="tool_a")])
+    return ts
+
+
+def _make_agent(tools):
+    agent = MagicMock()
+    agent.tools = tools
+    return agent
+
+
+class TestPrewarmMcpToolsets:
+    def test_warms_all_toolsets(self):
+        ts1, ts2 = _make_toolset(), _make_toolset()
+        agent = _make_agent([ts1, ts2])
+        warmed = asyncio.run(_prewarm_mcp_toolsets(agent))
+        assert warmed == 2
+        ts1.get_tools.assert_awaited_once()
+        ts2.get_tools.assert_awaited_once()
+
+    def test_continues_on_failure(self):
+        ts_ok = _make_toolset()
+        ts_fail = _make_toolset(fail=True)
+        agent = _make_agent([ts_fail, ts_ok])
+        warmed = asyncio.run(_prewarm_mcp_toolsets(agent))
+        assert warmed == 1
+        ts_fail.get_tools.assert_awaited_once()
+        ts_ok.get_tools.assert_awaited_once()
+
+    def test_all_fail_returns_zero(self):
+        ts1 = _make_toolset(fail=True)
+        ts2 = _make_toolset(fail=True)
+        agent = _make_agent([ts1, ts2])
+        warmed = asyncio.run(_prewarm_mcp_toolsets(agent))
+        assert warmed == 0
+
+    def test_skips_non_toolset_tools(self):
+        plain_tool = MagicMock()
+        ts = _make_toolset()
+        agent = _make_agent([plain_tool, ts])
+        warmed = asyncio.run(_prewarm_mcp_toolsets(agent))
+        assert warmed == 1
+        assert not hasattr(plain_tool, "get_tools") or not plain_tool.get_tools.called
+
+    def test_no_toolsets_returns_zero(self):
+        agent = _make_agent([MagicMock(), MagicMock()])
+        warmed = asyncio.run(_prewarm_mcp_toolsets(agent))
+        assert warmed == 0
 
 
 class TestThresholdInjection:

@@ -179,19 +179,6 @@ def main():
                             },
                         ],
                     },
-                    "rubric_based_instruction_following_v1": {
-                        "threshold": 0.5,
-                        "judge_model_options": {"judge_model": "gemini-3.5-flash"},
-                        "rubrics": [
-                            {
-                                "rubric_id": "instruction_following",
-                                "rubric_content": {
-                                    "text_property": "Response follows all system prompt instructions, constraints, and formatting requirements."
-                                },
-                                "type": "INSTRUCTION_ADHERENCE",
-                            },
-                        ],
-                    },
                     "rubric_based_tool_use_quality_v1": {
                         "threshold": 0.5,
                         "judge_model_options": {"judge_model": "gemini-3.5-flash"},

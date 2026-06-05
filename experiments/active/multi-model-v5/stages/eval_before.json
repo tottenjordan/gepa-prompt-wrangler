@@ -1,0 +1,112 @@
+{
+  "lite-gemini-3.1-flash-lite": {
+    "scores": {
+      "final_response_match_v2": 0.6533883150705617,
+      "final_response_quality_v1": 0.8233181734462993,
+      "hallucination_v1": 0.9637590081243952,
+      "instruction_following_v1": 0.6204083754376194,
+      "safety_v1": 0.993127147766323,
+      "tool_use_quality_v1": 0.4383556745346916
+    },
+    "per_case": [],
+    "scores_std": {
+      "final_response_match_v2": 0.02693947022991247,
+      "final_response_quality_v1": 0.017361075528880193,
+      "hallucination_v1": 0.021664591852693878,
+      "instruction_following_v1": 0.0323754516408311,
+      "safety_v1": 0.011904129261641663,
+      "tool_use_quality_v1": 0.034268315143606926
+    },
+    "num_runs": 3,
+    "eval_run_ids": [
+      "6203127944563392512",
+      "1266619803011907584",
+      "937857030213861376"
+    ],
+    "note": "Recomputed from all 3 successful API runs (Run 2 finished after poll timeout)"
+  },
+  "flash-gemini-3.5-flash": {
+    "scores": {
+      "final_response_match_v2": 0.6289603269148292,
+      "final_response_quality_v1": 0.8182394760392544,
+      "hallucination_v1": 0.9687273421078391,
+      "instruction_following_v1": 0.664548605826395,
+      "safety_v1": 0.9852274699612633,
+      "tool_use_quality_v1": 0.45341685680812205
+    },
+    "per_case": [],
+    "scores_std": {
+      "final_response_match_v2": 0.018774053052005368,
+      "final_response_quality_v1": 0.030188888918880212,
+      "hallucination_v1": 0.005583875942794292,
+      "instruction_following_v1": 0.036888258937868915,
+      "safety_v1": 0.01322167282564092,
+      "tool_use_quality_v1": 0.018181510107833795
+    },
+    "num_runs": 3,
+    "elapsed": 2366.0304753780365
+  },
+  "pro-gemini-3.1-pro": {
+    "scores": {
+      "final_response_match_v2": 0.6144591949994159,
+      "final_response_quality_v1": 0.8175722836702116,
+      "hallucination_v1": 0.9706297379103495,
+      "instruction_following_v1": 0.5974155178620496,
+      "safety_v1": 0.9830438807566145,
+      "tool_use_quality_v1": 0.4457780404561771
+    },
+    "per_case": [],
+    "scores_std": {
+      "final_response_match_v2": 0.04523955431495932,
+      "final_response_quality_v1": 0.03213946383130703,
+      "hallucination_v1": 0.008752122157261543,
+      "instruction_following_v1": 0.042885183876844375,
+      "safety_v1": 0.0037192290277503507,
+      "tool_use_quality_v1": 0.009276533141446145
+    },
+    "num_runs": 3,
+    "elapsed": 2307.659700870514
+  },
+  "sonnet-claude-4": {
+    "scores": {
+      "final_response_match_v2": 0.6627289628823072,
+      "final_response_quality_v1": 0.8355518054594228,
+      "hallucination_v1": 0.9317952774712305,
+      "instruction_following_v1": 0.6726671850890509,
+      "safety_v1": 0.9741858997648049,
+      "tool_use_quality_v1": 0.42177621071209376
+    },
+    "per_case": [],
+    "scores_std": {
+      "final_response_match_v2": 0.06948437835762997,
+      "final_response_quality_v1": 0.03982054972986275,
+      "hallucination_v1": 0.011399883656866101,
+      "instruction_following_v1": 0.020413358999673333,
+      "safety_v1": 0.024946969762164702,
+      "tool_use_quality_v1": 0.02420736338259313
+    },
+    "num_runs": 3,
+    "elapsed": 2510.405834197998
+  },
+  "opus-claude-4": {
+    "scores": {
+      "final_response_match_v2": 0.6522316577084617,
+      "final_response_quality_v1": 0.8401802653112398,
+      "hallucination_v1": 0.8850425748342281,
+      "instruction_following_v1": 0.7314890206385108,
+      "safety_v1": 0.9338555950186574,
+      "tool_use_quality_v1": 0.42230540011947276
+    },
+    "per_case": [],
+    "scores_std": {
+      "final_response_match_v2": 0.045325804812113,
+      "final_response_quality_v1": 0.03291916106492377,
+      "hallucination_v1": 0.02375144632500013,
+      "instruction_following_v1": 0.027536520253641547,
+      "safety_v1": 0.030868723586639495,
+      "tool_use_quality_v1": 0.009174403381987571
+    },
+    "num_runs": 3,
+    "elapsed": 1953.38734126091
+  }
+}
