@@ -3,12 +3,15 @@
 import json
 import pytest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import patch, MagicMock
+
+import pandas as pd
 
 from wrangler.evaluator import (
     _build_eval_dataset, _resolve_resource_name, save_eval_results,
-    EvalResult, run_batch_eval_averaged,
+    EvalResult, run_batch_eval_averaged, _retry_failed_cases,
 )
+from wrangler.config import get_batch_config
 
 
 class TestBuildEvalDataset:
@@ -112,3 +115,97 @@ class TestSaveEvalResults:
         assert data["phase"] == "baseline"
         assert data["scores"] == scores
         assert "timestamp" in data
+
+
+class TestGetBatchConfig:
+    def test_gemini_3x_flash_lite(self):
+        batch_size, delay, workers = get_batch_config("gemini-3.1-flash-lite")
+        assert batch_size == 4
+        assert delay == 15.0
+        assert workers == 4
+
+    def test_gemini_3x_flash(self):
+        batch_size, delay, workers = get_batch_config("gemini-3.5-flash")
+        assert batch_size == 4
+        assert delay == 15.0
+        assert workers == 4
+
+    def test_gemini_3x_pro(self):
+        batch_size, delay, workers = get_batch_config("gemini-3.1-pro-preview")
+        assert batch_size == 4
+        assert delay == 15.0
+        assert workers == 4
+
+    def test_gemini_2x_flash(self):
+        batch_size, delay, workers = get_batch_config("gemini-2.5-flash")
+        assert batch_size == 16
+        assert delay == 5.0
+        assert workers == 10
+
+    def test_claude_sonnet(self):
+        batch_size, delay, workers = get_batch_config("claude-sonnet-4-6")
+        assert batch_size == 64
+        assert delay == 0.0
+        assert workers == 20
+
+    def test_claude_opus(self):
+        batch_size, delay, workers = get_batch_config("claude-opus-4-6")
+        assert batch_size == 64
+        assert delay == 0.0
+        assert workers == 20
+
+    def test_unknown_model_uses_default(self):
+        batch_size, delay, workers = get_batch_config("some-unknown-model")
+        assert batch_size == 16
+        assert delay == 5.0
+        assert workers == 10
+
+
+class TestRetryFailedCases:
+    def _make_inference_result(self, responses):
+        df = pd.DataFrame({"prompt": [f"q{i}" for i in range(len(responses))],
+                           "response": responses})
+        result = MagicMock()
+        result.eval_dataset_df = df
+        return result
+
+    @patch("wrangler.evaluator._run_batched_inference")
+    @patch("wrangler.evaluator.time.sleep")
+    def test_detects_null_responses(self, mock_sleep, mock_batched):
+        eval_df = pd.DataFrame({"prompt": ["q0", "q1", "q2"]})
+        inference_result = self._make_inference_result(["good", None, "good"])
+
+        retry_df = pd.DataFrame({"prompt": ["q1"], "response": ["recovered"]})
+        mock_batched.return_value = MagicMock(eval_dataset_df=retry_df)
+
+        result = _retry_failed_cases(
+            MagicMock(), "agent", eval_df, inference_result, "gemini-3.1-flash-lite",
+        )
+        mock_sleep.assert_called_once_with(30)
+        mock_batched.assert_called_once()
+        assert result.eval_dataset_df.iloc[1]["response"] == "recovered"
+
+    def test_skips_when_all_succeed(self):
+        eval_df = pd.DataFrame({"prompt": ["q0", "q1"]})
+        inference_result = self._make_inference_result(["good", "also good"])
+
+        result = _retry_failed_cases(
+            MagicMock(), "agent", eval_df, inference_result, "gemini-3.5-flash",
+        )
+        assert result is inference_result
+
+    @patch("wrangler.evaluator._run_batched_inference")
+    @patch("wrangler.evaluator.time.sleep")
+    def test_detects_error_dict_responses(self, mock_sleep, mock_batched):
+        eval_df = pd.DataFrame({"prompt": ["q0", "q1"]})
+        inference_result = self._make_inference_result(
+            ["good", {"error": "Resource exhausted"}]
+        )
+
+        retry_df = pd.DataFrame({"prompt": ["q1"], "response": ["recovered"]})
+        mock_batched.return_value = MagicMock(eval_dataset_df=retry_df)
+
+        result = _retry_failed_cases(
+            MagicMock(), "agent", eval_df, inference_result, "gemini-3.1-pro",
+        )
+        assert mock_batched.called

@@ -34,6 +34,33 @@ PAPERBANANA_PROJECT = os.environ.get("GOOGLE_CLOUD_PROJECT", GCP_PROJECT_ID)
 PAPERBANANA_LOCATION = os.environ.get("GOOGLE_CLOUD_LOCATION", "global")
 
 
+# --- Rate limits (RPM) per model for inference throttling ---
+RATE_LIMITS = {
+    "gemini-3.1-flash-lite": 5,
+    "gemini-3.5-flash": 5,
+    "gemini-3.1-pro": 5,
+    "gemini-2.5-flash": 100,
+    "gemini-2.5-pro": 80,
+    "claude-sonnet": 2000,
+    "claude-opus": 800,
+}
+
+
+def get_batch_config(model: str) -> tuple[int, float, int]:
+    """Return (batch_size, delay_seconds, max_workers) based on model RPM."""
+    rpm = 90
+    for prefix, limit in RATE_LIMITS.items():
+        if prefix in model.lower():
+            rpm = limit
+            break
+    if rpm <= 10:
+        return 4, 15.0, 4
+    elif rpm <= 100:
+        return 16, 5.0, 10
+    else:
+        return 64, 0.0, 20
+
+
 def resolve_model(model_str: str):
     """Resolve model string to an ADK-compatible model.
 

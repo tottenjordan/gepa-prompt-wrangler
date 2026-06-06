@@ -1,5 +1,7 @@
 """Batch evaluation — runs inference + evaluation against deployed agents on GEAP."""
 
+import functools
+import math
 import statistics
 import time
 import warnings
@@ -12,8 +14,9 @@ warnings.filterwarnings("ignore", message=".*experimental.*")
 import pandas as pd
 import vertexai
 from vertexai import Client, types
+from vertexai._genai import _evals_common
 
-from .config import GCP_PROJECT_ID, GCP_REGION, GCP_STAGING_BUCKET
+from .config import GCP_PROJECT_ID, GCP_REGION, GCP_STAGING_BUCKET, get_batch_config
 
 GCS_EVAL_DEST = f"gs://{GCP_STAGING_BUCKET}/eval-results/"
 MAX_POLL_SECONDS = 2400
@@ -63,30 +66,31 @@ def _resolve_resource_name(engine_id: str) -> str:
 
 
 def _extract_per_case_scores(evaluation_run) -> list[dict[str, float]]:
-    """Extract per-case metric scores from evaluation run items."""
+    """Extract per-case metric scores from evaluation run results.
+
+    SDK path: evaluation_item_results.eval_case_results[i].response_candidate_results[0].metric_results
+    """
     per_case: list[dict[str, float]] = []
     try:
-        run_results = getattr(evaluation_run, "evaluation_run_results", None)
-        if not run_results:
+        item_results = getattr(evaluation_run, "evaluation_item_results", None)
+        if not item_results:
             return per_case
-        eval_items = getattr(run_results, "evaluation_items", None)
-        if not eval_items:
+        case_results = getattr(item_results, "eval_case_results", None)
+        if not case_results:
             return per_case
 
-        sorted_items = sorted(
-            eval_items,
-            key=lambda item: getattr(item, "eval_case_index", 0) or 0,
-        )
-        for item in sorted_items:
+        for case_result in case_results:
             case_scores: dict[str, float] = {}
-            metric_results = getattr(item, "metric_results", None)
-            if metric_results:
-                items_dict = metric_results if isinstance(metric_results, dict) else dict(metric_results)
-                for metric_key, metric_val in items_dict.items():
-                    short = metric_key.split("/")[-1] if "/" in metric_key else metric_key
-                    score = getattr(metric_val, "score", None) if not isinstance(metric_val, (int, float)) else metric_val
-                    if score is not None:
-                        case_scores[short] = float(score)
+            candidates = getattr(case_result, "response_candidate_results", [])
+            if candidates:
+                metric_results = getattr(candidates[0], "metric_results", None)
+                if metric_results:
+                    items_dict = metric_results if isinstance(metric_results, dict) else dict(metric_results)
+                    for metric_key, metric_val in items_dict.items():
+                        short = metric_key.split("/")[-1] if "/" in metric_key else metric_key
+                        score = getattr(metric_val, "score", None) if not isinstance(metric_val, (int, float)) else metric_val
+                        if score is not None:
+                            case_scores[short] = float(score)
             per_case.append(case_scores)
     except Exception as e:
         print(f"  Warning extracting per-case scores: {e}")
@@ -101,11 +105,108 @@ def _fmt_elapsed(t0: float) -> str:
     return f"{m}m {s:02d}s"
 
 
+def _run_batched_inference(
+    client: Client,
+    agent_resource: str,
+    eval_df: pd.DataFrame,
+    batch_size: int,
+    delay: float,
+    max_workers: int,
+    tag: str = "",
+) -> types.EvaluationDataset:
+    """Run inference in batches with rate-limit-aware throttling."""
+    n_cases = len(eval_df)
+    n_batches = math.ceil(n_cases / batch_size)
+
+    original_max_workers = _evals_common.AGENT_MAX_WORKERS
+    original_retry_fn = _evals_common._execute_agent_run_with_retry
+
+    try:
+        _evals_common.AGENT_MAX_WORKERS = min(max_workers, batch_size)
+
+        @functools.wraps(original_retry_fn)
+        def _patched_retry(*args, max_retries=6, **kwargs):
+            return original_retry_fn(*args, max_retries=max_retries, **kwargs)
+
+        _evals_common._execute_agent_run_with_retry = _patched_retry
+
+        all_dfs = []
+        for i in range(n_batches):
+            start = i * batch_size
+            end = min(start + batch_size, n_cases)
+            chunk = eval_df.iloc[start:end].reset_index(drop=True)
+
+            if n_batches > 1:
+                print(f"  {tag}Batch {i + 1}/{n_batches} (cases {start + 1}-{end})...", flush=True)
+
+            result = client.evals.run_inference(agent=agent_resource, src=chunk)
+            all_dfs.append(result.eval_dataset_df)
+
+            if delay > 0 and i < n_batches - 1:
+                time.sleep(delay)
+
+        combined_df = pd.concat(all_dfs, ignore_index=True)
+        return types.EvaluationDataset(eval_dataset_df=combined_df)
+    finally:
+        _evals_common.AGENT_MAX_WORKERS = original_max_workers
+        _evals_common._execute_agent_run_with_retry = original_retry_fn
+
+
+def _retry_failed_cases(
+    client: Client,
+    agent_resource: str,
+    eval_df: pd.DataFrame,
+    inference_result: types.EvaluationDataset,
+    model: str,
+    tag: str = "",
+) -> types.EvaluationDataset:
+    """Detect failed inference cases and re-run them in micro-batches."""
+    result_df = inference_result.eval_dataset_df
+    failed_indices = []
+
+    for idx, row in result_df.iterrows():
+        response = row.get("response")
+        if response is None or (not isinstance(response, dict) and pd.isna(response)) or response == "":
+            failed_indices.append(idx)
+        elif isinstance(response, dict) and "error" in response:
+            failed_indices.append(idx)
+        elif isinstance(response, str) and response.strip() == "":
+            failed_indices.append(idx)
+
+    if not failed_indices:
+        return inference_result
+
+    n_failed = len(failed_indices)
+    print(f"  {tag}Detected {n_failed}/{len(result_df)} failed cases — waiting 30s for rate limit cooldown...", flush=True)
+    time.sleep(30)
+
+    failed_eval_df = eval_df.iloc[failed_indices].reset_index(drop=True)
+    retry_result = _run_batched_inference(
+        client, agent_resource, failed_eval_df,
+        batch_size=2, delay=20.0, max_workers=2, tag=f"{tag}retry ",
+    )
+
+    recovered = 0
+    retry_df = retry_result.eval_dataset_df
+    for retry_idx, original_idx in enumerate(failed_indices):
+        if retry_idx < len(retry_df):
+            retry_response = retry_df.iloc[retry_idx].get("response")
+            if retry_response is not None and retry_response != "":
+                if not (isinstance(retry_response, dict) and "error" in retry_response):
+                    result_df.iloc[original_idx] = retry_df.iloc[retry_idx]
+                    recovered += 1
+
+    print(f"  {tag}Recovered {recovered}/{n_failed} failed cases", flush=True)
+    return types.EvaluationDataset(eval_dataset_df=result_df)
+
+
 def run_batch_eval(
     engine_id: str,
     eval_cases: list[dict],
     metrics: list | None = None,
     agent_name: str = "",
+    model: str = "",
+    retry_failed: bool = True,
 ) -> EvalResult:
     """Run batch eval against a deployed agent. Returns EvalResult with aggregate and per-case scores."""
     tag = f"[{agent_name}] " if agent_name else ""
@@ -121,13 +222,24 @@ def run_batch_eval(
         metrics = DEFAULT_METRICS
 
     eval_df = _build_eval_dataset(eval_cases)
+    batch_size, delay, max_workers = get_batch_config(model)
 
-    print(f"  {tag}Inference: sending {len(eval_cases)} cases to engine {engine_id}...", flush=True)
+    if batch_size < len(eval_cases):
+        print(f"  {tag}Inference: sending {len(eval_cases)} cases in batches of {batch_size} "
+              f"({max_workers} workers, {delay}s delay) to engine {engine_id}...", flush=True)
+    else:
+        print(f"  {tag}Inference: sending {len(eval_cases)} cases to engine {engine_id}...", flush=True)
+
     t0 = time.time()
-    inference_result = client.evals.run_inference(
-        agent=agent_resource,
-        src=eval_df,
+    inference_result = _run_batched_inference(
+        client, agent_resource, eval_df, batch_size, delay, max_workers, tag,
     )
+
+    if retry_failed:
+        inference_result = _retry_failed_cases(
+            client, agent_resource, eval_df, inference_result, model, tag,
+        )
+
     print(f"  {tag}Inference complete ({_fmt_elapsed(t0)})", flush=True)
 
     print(f"  {tag}Scoring: creating evaluation run ({len(metrics)} metrics)...", flush=True)
@@ -201,17 +313,21 @@ def run_batch_eval_averaged(
     num_runs: int = 1,
     metrics: list | None = None,
     agent_name: str = "",
+    model: str = "",
+    retry_failed: bool = True,
 ) -> EvalResult:
     """Run batch eval N times and return averaged scores with std dev."""
     if num_runs <= 1:
-        return run_batch_eval(engine_id, eval_cases, metrics=metrics, agent_name=agent_name)
+        return run_batch_eval(engine_id, eval_cases, metrics=metrics, agent_name=agent_name,
+                              model=model, retry_failed=retry_failed)
 
     tag = f"[{agent_name}] " if agent_name else ""
     all_results: list[EvalResult] = []
 
     for i in range(num_runs):
         print(f"  {tag}Run {i + 1}/{num_runs}...", flush=True)
-        result = run_batch_eval(engine_id, eval_cases, metrics=metrics, agent_name=agent_name)
+        result = run_batch_eval(engine_id, eval_cases, metrics=metrics, agent_name=agent_name,
+                                model=model, retry_failed=retry_failed)
         if result.scores:
             all_results.append(result)
             avg = sum(result.scores.values()) / max(len(result.scores), 1)
