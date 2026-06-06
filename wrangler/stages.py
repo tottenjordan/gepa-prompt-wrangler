@@ -23,6 +23,72 @@ def _fmt_duration(seconds: float) -> str:
     return f"{m}m {s:02d}s"
 
 
+def _validate_sampler_config(
+    sampler_cfg_path: Path,
+    eval_thresholds: dict[str, float] | None,
+    judge_model: str,
+    pair_id: str,
+) -> None:
+    """Warn about sampler config misalignment before optimization."""
+    import json
+    try:
+        with open(sampler_cfg_path) as f:
+            cfg = json.load(f)
+    except (json.JSONDecodeError, OSError):
+        return
+
+    criteria = cfg.get("eval_config", {}).get("criteria", {})
+    if not criteria:
+        return
+
+    warnings = []
+    for key, val in criteria.items():
+        if isinstance(val, dict) and "judge_model_options" in val:
+            cfg_judge = val["judge_model_options"].get("judge_model", "")
+            if cfg_judge and cfg_judge != judge_model:
+                warnings.append(f"judge model mismatch: {key} uses '{cfg_judge}', experiment uses '{judge_model}'")
+
+    if eval_thresholds:
+        from .optimizer import METRIC_NAME_MAP
+        for metric, threshold in eval_thresholds.items():
+            actual_key = metric
+            if metric not in criteria and metric in METRIC_NAME_MAP:
+                rb_key = METRIC_NAME_MAP[metric]
+                if rb_key in criteria:
+                    actual_key = rb_key
+            if actual_key in criteria:
+                val = criteria[actual_key]
+                if isinstance(val, dict):
+                    cfg_thresh = val.get("threshold")
+                    if cfg_thresh is not None and cfg_thresh != threshold:
+                        warnings.append(f"{actual_key} threshold {cfg_thresh} != experiment {threshold} (will be overridden)")
+
+    for w in warnings:
+        print(f"  [{pair_id}] Warning: sampler_config — {w}")
+
+
+def _post_eval_sanity_check(
+    stage_name: str,
+    stage_data: dict,
+    pairs: list,
+) -> None:
+    """Warn about common eval data issues after all pairs complete."""
+    all_per_case_empty = all(
+        not stage_data.get(p.id, {}).get("per_case")
+        for p in pairs
+        if p.id in stage_data
+    )
+    if all_per_case_empty and stage_data:
+        print(f"\n  WARNING: All per_case arrays are empty in {stage_name}.")
+        print(f"  Tier/category analysis will be unavailable. Check _extract_per_case_scores() field mapping.")
+
+    for p in pairs:
+        scores = stage_data.get(p.id, {}).get("scores", {})
+        zero_metrics = [m for m, v in scores.items() if v == 0.0]
+        if zero_metrics:
+            print(f"  WARNING: [{p.id}] has zero scores for: {', '.join(zero_metrics)}")
+
+
 def _load_agent(manifest: Manifest, pair: AgentPromptPair, manifest_dir: Path | None = None):
     """Import and instantiate the agent with the pair's model and prompt."""
     module_ref = pair.agent_module or manifest.agent_module
@@ -172,6 +238,7 @@ def stage_eval(
     phase: str,
     pair_id: str | None = None,
     num_runs: int | None = None,
+    retry_failed: bool = True,
 ) -> None:
     stage_name = f"eval_{phase}"
     ok, msg = exp.check_gate(stage_name, pair_id)
@@ -195,10 +262,12 @@ def stage_eval(
             print(f"  [{pair.id}] No engine_id found — skipping (run deploy first)")
             continue
 
+        model = deploy_data.get(pair.id, {}).get("model", "")
         print(f"\n  [{pair.id}] ({i}/{len(pairs)}) Evaluating ({phase})...", flush=True)
         t0 = time.time()
         result = run_batch_eval_averaged(
             engine_id, eval_cases, num_runs=num_runs, agent_name=pair.id,
+            model=model, retry_failed=retry_failed,
         )
         elapsed = time.time() - t0
 
@@ -218,6 +287,10 @@ def stage_eval(
             "elapsed": elapsed,
         })
 
+    # Post-eval sanity checks
+    stage_data = exp.read_stage(stage_name)
+    _post_eval_sanity_check(stage_name, stage_data, pairs)
+
 
 def stage_optimize(exp: Experiment, pair_id: str | None = None) -> None:
     ok, msg = exp.check_gate("optimize", pair_id)
@@ -231,12 +304,15 @@ def stage_optimize(exp: Experiment, pair_id: str | None = None) -> None:
 
     eval_path = _resolve_eval_path(manifest, mdir)
 
+    eval_thresholds = exp.eval_thresholds
+    judge = exp.config.get("eval_config", {}).get("judge_model", "gemini-3.5-flash")
+
     for i, pair in enumerate(pairs, 1):
         print(f"\n  [{pair.id}] ({i}/{len(pairs)}) Optimizing...", flush=True)
         agent_path = _resolve_optimize_module(manifest, pair, mdir)
         sampler_cfg = agent_path / "sampler_config.json"
-        eval_thresholds = exp.eval_thresholds
-        judge = exp.config.get("eval_config", {}).get("judge_model", "gemini-3.5-flash")
+        if sampler_cfg.exists():
+            _validate_sampler_config(sampler_cfg, eval_thresholds, judge, pair.id)
         t0 = time.time()
         optimized = optimize(
             str(agent_path),
@@ -359,7 +435,7 @@ def stage_redeploy(exp: Experiment, pair_id: str | None = None) -> None:
         })
 
 
-def stage_report(exp: Experiment) -> None:
+def stage_report(exp: Experiment, use_paperbanana: bool = True) -> None:
     ok, msg = exp.check_gate("report")
     if not ok:
         print(f"  Warning: {msg}")
@@ -400,7 +476,7 @@ def stage_report(exp: Experiment) -> None:
         reporter.REPORTS_DIR.mkdir(parents=True, exist_ok=True)
         reporter.CHARTS_DIR.mkdir(parents=True, exist_ok=True)
 
-        _generate_report(results, exp.name)
+        _generate_report(results, exp.name, use_paperbanana=use_paperbanana)
     finally:
         reporter.REPORTS_DIR = original_reports
         reporter.CHARTS_DIR = original_charts

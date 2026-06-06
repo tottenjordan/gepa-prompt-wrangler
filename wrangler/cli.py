@@ -92,7 +92,8 @@ def deploy(target: str, pair: str):
 @click.option("--eval-data", default=None, help="Path to eval data file (standalone mode).")
 @click.option("--agent-name", default=None, help="Label for this agent in results.")
 @click.option("--num-runs", "-n", default=1, type=int, help="Number of eval runs to average.")
-def eval_cmd(target: str, phase: str, pair: str, engine_id: str, eval_data: str, agent_name: str, num_runs: int):
+@click.option("--retry-failed/--no-retry-failed", default=True, help="Retry failed inference cases (default: on).")
+def eval_cmd(target: str, phase: str, pair: str, engine_id: str, eval_data: str, agent_name: str, num_runs: int, retry_failed: bool):
     """Run batch evaluation against deployed agents.
 
     Experiment mode:  wrangler eval <experiment_dir> before|after [--pair ID]
@@ -108,7 +109,8 @@ def eval_cmd(target: str, phase: str, pair: str, engine_id: str, eval_data: str,
 
         exp = Experiment.load(target)
         click.echo(f"Evaluating ({phase}) — experiment: {exp.name}")
-        stage_eval(exp, phase=phase, pair_id=pair, num_runs=num_runs if num_runs > 1 else None)
+        stage_eval(exp, phase=phase, pair_id=pair, num_runs=num_runs if num_runs > 1 else None,
+                   retry_failed=retry_failed)
     elif engine_id:
         from .converter import load_eval_file
         from .evaluator import run_batch_eval_averaged
@@ -124,7 +126,8 @@ def eval_cmd(target: str, phase: str, pair: str, engine_id: str, eval_data: str,
             raise SystemExit(1)
 
         label = agent_name or engine_id
-        result = run_batch_eval_averaged(engine_id, eval_cases, num_runs=num_runs, agent_name=label)
+        result = run_batch_eval_averaged(engine_id, eval_cases, num_runs=num_runs, agent_name=label,
+                                         retry_failed=retry_failed)
         click.echo(f"\nResults for {label}:")
         for metric, score in sorted(result.scores.items()):
             std = result.scores_std.get(metric)
@@ -198,7 +201,8 @@ def analyze(experiment_dir: str):
 
 @main.command()
 @click.argument("target", default="outputs")
-def report(target: str):
+@click.option("--no-paperbanana", is_flag=True, default=False, help="Skip PaperBanana, use matplotlib only for charts.")
+def report(target: str, no_paperbanana: bool):
     """Generate analysis report.
 
     TARGET can be an experiment directory or an outputs directory with results JSON.
@@ -209,7 +213,7 @@ def report(target: str):
 
         exp = Experiment.load(target)
         click.echo(f"Generating report — experiment: {exp.name}")
-        stage_report(exp)
+        stage_report(exp, use_paperbanana=not no_paperbanana)
     else:
         import json
 
@@ -222,7 +226,7 @@ def report(target: str):
             results = json.load(f)
 
         from .reporter import generate_report
-        generate_report(results, "experiment")
+        generate_report(results, "experiment", use_paperbanana=not no_paperbanana)
         click.echo("Report generated at outputs/reports/experiment_report.md")
 
 
@@ -278,7 +282,7 @@ def run(manifest: str, name: str, version: str, num_runs: int, pair: str, dry_ru
     stage_deploy(exp, pair_id=pair)
 
     click.echo("\n--- Baseline Evaluation ---")
-    stage_eval(exp, phase="before", pair_id=pair, num_runs=num_runs)
+    stage_eval(exp, phase="before", pair_id=pair, num_runs=num_runs, retry_failed=True)
 
     click.echo("\n--- GEPA Optimization ---")
     stage_optimize(exp, pair_id=pair)
@@ -287,7 +291,7 @@ def run(manifest: str, name: str, version: str, num_runs: int, pair: str, dry_ru
     stage_redeploy(exp, pair_id=pair)
 
     click.echo("\n--- Post-Optimization Evaluation ---")
-    stage_eval(exp, phase="after", pair_id=pair, num_runs=num_runs)
+    stage_eval(exp, phase="after", pair_id=pair, num_runs=num_runs, retry_failed=True)
 
     click.echo("\n--- Report ---")
     stage_report(exp)
