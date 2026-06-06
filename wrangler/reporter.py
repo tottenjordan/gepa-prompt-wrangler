@@ -1,4 +1,4 @@
-"""Analysis report generation — charts + markdown for prompt optimization experiments."""
+"""Experiment report generation — charts + markdown for prompt optimization experiments."""
 
 import csv
 import re
@@ -13,87 +13,23 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 from .factory import AgentPromptPair
+from .analysis import (
+    normalize_agent_keys,
+    generate_all_charts,
+    METRIC_LABELS,
+    AGENT_ORDER,
+    MODEL_MAP,
+    PROVIDERS,
+)
+from .config import MODEL_COSTS
 
 REPORTS_DIR = Path("outputs/reports")
 CHARTS_DIR = REPORTS_DIR / "charts"
-
-METRIC_LABELS = {
-    "final_response_quality_v1": "Quality",
-    "hallucination_v1": "Hallucination",
-    "safety_v1": "Safety",
-    "tool_use_quality_v1": "Tool Use",
-    "instruction_following_v1": "Instruction",
-    "final_response_match_v2": "Response Match",
-}
 
 
 def _ensure_dirs():
     REPORTS_DIR.mkdir(parents=True, exist_ok=True)
     CHARTS_DIR.mkdir(parents=True, exist_ok=True)
-
-
-def generate_comparison_chart(results: dict[str, dict]):
-    """Grouped bar chart comparing all pairs across metrics."""
-    _ensure_dirs()
-    pairs = list(results.keys())
-    metrics = list(METRIC_LABELS.keys())
-    n = len(pairs)
-
-    fig, ax = plt.subplots(figsize=(14, 7))
-    x = np.arange(n)
-    width = 0.12
-    colors = plt.cm.Set2(np.linspace(0, 1, len(metrics)))
-
-    for i, metric in enumerate(metrics):
-        values = [results[p].get("after", {}).get(metric, 0) for p in pairs]
-        ax.bar(x + i * width, values, width, label=METRIC_LABELS[metric], color=colors[i])
-
-    ax.set_xlabel("Agent-Prompt Pair")
-    ax.set_ylabel("Score")
-    ax.set_title("Post-Optimization Scores — All Pairs")
-    ax.set_xticks(x + width * (len(metrics) - 1) / 2)
-    ax.set_xticklabels(pairs, rotation=15, ha="right")
-    ax.legend(fontsize=8)
-    ax.set_ylim(0, 1.15)
-    ax.grid(axis="y", alpha=0.3)
-
-    plt.tight_layout()
-    plt.savefig(CHARTS_DIR / "comparison.png", dpi=150)
-    plt.close()
-
-
-def generate_improvement_chart(results: dict[str, dict]):
-    """Bar chart showing improvement delta per pair."""
-    _ensure_dirs()
-    pairs = list(results.keys())
-    metrics = list(METRIC_LABELS.keys())
-    n = len(pairs)
-
-    fig, ax = plt.subplots(figsize=(14, 7))
-    x = np.arange(n)
-    width = 0.12
-    colors = plt.cm.Set2(np.linspace(0, 1, len(metrics)))
-
-    for i, metric in enumerate(metrics):
-        deltas = []
-        for p in pairs:
-            before = results[p].get("before", {}).get(metric, 0)
-            after = results[p].get("after", {}).get(metric, 0)
-            deltas.append(after - before)
-        ax.bar(x + i * width, deltas, width, label=METRIC_LABELS[metric], color=colors[i])
-
-    ax.set_xlabel("Agent-Prompt Pair")
-    ax.set_ylabel("Score Change")
-    ax.set_title("GEPA Optimization Impact (After - Before)")
-    ax.set_xticks(x + width * (len(metrics) - 1) / 2)
-    ax.set_xticklabels(pairs, rotation=15, ha="right")
-    ax.legend(fontsize=8)
-    ax.axhline(y=0, color="black", linewidth=0.5)
-    ax.grid(axis="y", alpha=0.3)
-
-    plt.tight_layout()
-    plt.savefig(CHARTS_DIR / "improvement_delta.png", dpi=150)
-    plt.close()
 
 
 def _extract_cost(description: str) -> float | None:
@@ -104,192 +40,338 @@ def _extract_cost(description: str) -> float | None:
     return None
 
 
-def generate_cost_benefit_chart(results: dict[str, dict]):
-    """Scatter plot: model cost vs score improvement, generated via PaperBanana."""
-    _ensure_dirs()
-
-    rows = []
-    for pair_id, data in results.items():
-        before = data.get("before", {})
-        after = data.get("after", {})
-        if not before or not after:
-            continue
-
-        # Get cost from pair config description
-        desc = ""
-        for key in ("description", "model_description"):
-            if key in data:
-                desc = data[key]
-                break
-        cost = _extract_cost(desc)
-        if cost is None:
-            continue
-
-        common = set(before) & set(after)
-        if not common:
-            continue
-        avg_delta = sum(after[m] - before[m] for m in common) / len(common)
-        verdict = "improved" if avg_delta > 0 else "regressed"
-
-        rows.append({
-            "pair_id": pair_id,
-            "cost_per_m": cost,
-            "avg_delta": round(avg_delta, 4),
-            "verdict": verdict,
-        })
-
-    if not rows:
-        print("  No cost data found in pair descriptions — skipping cost-benefit chart")
-        return
-
-    output_path = CHARTS_DIR / "cost_benefit.png"
-
-    # Try PaperBanana first, fall back to matplotlib
-    if _try_paperbanana_cost_chart(rows, output_path):
-        return
-
-    _matplotlib_cost_chart(rows, output_path)
+def _get_case_metadata(results: dict) -> list[dict] | None:
+    """Extract case metadata if embedded in results."""
+    meta = results.get("_eval_metadata")
+    if meta and "cases" in meta:
+        return meta["cases"]
+    return None
 
 
-def _try_paperbanana_cost_chart(rows: list[dict], output_path: Path) -> bool:
-    """Attempt cost-benefit chart via PaperBanana CLI. Returns True on success."""
-    with tempfile.TemporaryDirectory() as tmpdir:
-        csv_path = Path(tmpdir) / "cost_benefit.csv"
-        with open(csv_path, "w", newline="") as f:
-            writer = csv.DictWriter(f, fieldnames=["pair_id", "cost_per_m", "avg_delta", "verdict"])
-            writer.writeheader()
-            writer.writerows(rows)
+def _executive_summary(results: dict, ordered: list[str]) -> list[str]:
+    """Auto-generate executive summary from result data."""
+    lines = []
+    lines.append("## Executive Summary\n")
 
-        intent = (
-            "Scatter plot comparing model cost versus optimization improvement. "
-            "X-axis: cost_per_m (dollars per million output tokens, log scale). "
-            "Y-axis: avg_delta (average score change, positive = improved). "
-            "Label each point with its pair_id. "
-            "Color points green if verdict is 'improved', red if 'regressed'. "
-            "Add a horizontal dashed line at y=0. "
-            "Title: 'Cost vs Optimization Impact'."
-        )
+    has_after = any(results[n].get("after") for n in ordered)
+    if not has_after:
+        lines.append("Baseline evaluation complete. No optimization results yet.\n")
+        return lines
 
-        try:
-            import os
-            env = os.environ.copy()
-            gemini_key = env.get("GEMINI_API_KEY") or env.get("GOOGLE_API_KEY")
-            if not gemini_key:
-                for env_file in [Path(".env"), Path("examples/multi_model_agents/.env")]:
-                    if env_file.exists():
-                        for line in env_file.read_text().splitlines():
-                            if line.startswith("GOOGLE_API_KEY="):
-                                gemini_key = line.split("=", 1)[1].strip()
-                                break
-                    if gemini_key:
-                        break
-            if gemini_key:
-                env["GOOGLE_API_KEY"] = gemini_key
-            env["GOOGLE_GENAI_USE_VERTEXAI"] = "0"
+    agent_deltas = {}
+    for name in ordered:
+        before = results[name].get("before", {})
+        after = results[name].get("after", {})
+        avg_b = sum(before.values()) / max(len(before), 1) if before else 0
+        avg_a = sum(after.values()) / max(len(after), 1) if after else 0
+        agent_deltas[name] = avg_a - avg_b
 
-            result = subprocess.run(
-                [
-                    "uv", "run", "paperbanana", "plot",
-                    "-d", str(csv_path),
-                    "--intent", intent,
-                    "-o", str(output_path),
-                    "-n", "2",
-                ],
-                capture_output=True,
-                text=True,
-                timeout=300,
-                env=env,
-            )
-            if result.returncode == 0:
-                if output_path.exists():
-                    print(f"  Cost-benefit chart saved to {output_path} (PaperBanana)")
-                    return True
-                # PaperBanana plot command ignores -o; find its output
-                pb_outputs = sorted(Path("outputs").glob("run_*/final_output.png"), key=lambda p: p.stat().st_mtime, reverse=True)
-                if pb_outputs:
-                    shutil.copy2(pb_outputs[0], output_path)
-                    print(f"  Cost-benefit chart saved to {output_path} (PaperBanana)")
-                    return True
-            print(f"  PaperBanana failed (rc={result.returncode}), falling back to matplotlib")
-        except (subprocess.TimeoutExpired, FileNotFoundError):
-            print("  PaperBanana not available, falling back to matplotlib")
-    return False
+    improved = [n for n in ordered if agent_deltas[n] > 0.005]
+    regressed = [n for n in ordered if agent_deltas[n] < -0.005]
+    stable = [n for n in ordered if abs(agent_deltas[n]) <= 0.005]
+
+    best = max(ordered, key=lambda n: agent_deltas[n])
+    worst = min(ordered, key=lambda n: agent_deltas[n])
+
+    lines.append(f"**{len(improved)}/{len(ordered)} models improved** after GEPA optimization. ")
+    if improved:
+        lines.append(f"Best performer: **{best}** ({agent_deltas[best]:+.3f} avg). ")
+    if regressed:
+        lines.append(f"Largest regression: **{worst}** ({agent_deltas[worst]:+.3f} avg). ")
+    lines.append("")
+
+    if improved:
+        lines.append(f"- **Improved:** {', '.join(f'{n} ({agent_deltas[n]:+.3f})' for n in improved)}")
+    if stable:
+        lines.append(f"- **Stable:** {', '.join(f'{n} ({agent_deltas[n]:+.3f})' for n in stable)}")
+    if regressed:
+        lines.append(f"- **Regressed:** {', '.join(f'{n} ({agent_deltas[n]:+.3f})' for n in regressed)}")
+    lines.append("")
+
+    metric_avg_deltas = {}
+    for metric in METRIC_LABELS:
+        vals = []
+        for name in ordered:
+            b = results[name].get("before", {}).get(metric, 0)
+            a = results[name].get("after", {}).get(metric, 0)
+            vals.append(a - b)
+        metric_avg_deltas[metric] = sum(vals) / len(vals) if vals else 0
+
+    best_metric = max(metric_avg_deltas, key=metric_avg_deltas.get)
+    worst_metric = min(metric_avg_deltas, key=metric_avg_deltas.get)
+    if metric_avg_deltas[best_metric] > 0.005:
+        lines.append(f"**Strongest metric gain:** {METRIC_LABELS[best_metric]} ({metric_avg_deltas[best_metric]:+.3f} avg across models)")
+    if metric_avg_deltas[worst_metric] < -0.005:
+        lines.append(f"**Largest metric decline:** {METRIC_LABELS[worst_metric]} ({metric_avg_deltas[worst_metric]:+.3f} avg across models)")
+    lines.append("")
+
+    return lines
 
 
-def _matplotlib_cost_chart(rows: list[dict], output_path: Path):
-    """Matplotlib fallback for cost-benefit scatter plot."""
-    fig, ax = plt.subplots(figsize=(10, 7))
+def _methodology_section(results: dict, ordered: list[str], experiment_name: str) -> list[str]:
+    """Experiment configuration and methodology."""
+    lines = []
+    lines.append("## Methodology\n")
+    lines.append(f"**Experiment:** `{experiment_name}`\n")
+    lines.append("| Agent | Model | Provider | Cost ($/M in+out) |")
+    lines.append("|-------|-------|----------|-------------------|")
+    for name in ordered:
+        model = results[name].get("model", "unknown")
+        provider = PROVIDERS.get(model, "Unknown")
+        cost = MODEL_COSTS.get(model, {"input": 0, "output": 0})
+        combined = cost["input"] + cost["output"]
+        lines.append(f"| {name} | `{model}` | {provider} | ${combined:.2f} |")
+    lines.append("")
 
-    for row in rows:
-        color = "#2ecc71" if row["verdict"] == "improved" else "#e74c3c"
-        ax.scatter(row["cost_per_m"], row["avg_delta"], color=color, s=120, zorder=3, edgecolors="white", linewidth=1.5)
-        ax.annotate(
-            row["pair_id"], (row["cost_per_m"], row["avg_delta"]),
-            textcoords="offset points", xytext=(8, 8), fontsize=8,
-        )
+    lines.append("**Metrics evaluated:**\n")
+    for key, label in METRIC_LABELS.items():
+        lines.append(f"- {label} (`{key}`)")
+    lines.append("")
 
-    ax.axhline(y=0, color="black", linestyle="--", linewidth=0.8, alpha=0.6)
-    ax.set_xscale("log")
-    ax.set_xlabel("Cost ($/M output tokens)")
-    ax.set_ylabel("Avg Score Delta (After − Before)")
-    ax.set_title("Cost vs Optimization Impact")
-    ax.grid(True, alpha=0.3)
+    return lines
 
-    from matplotlib.lines import Line2D
-    legend_elements = [
-        Line2D([0], [0], marker="o", color="w", markerfacecolor="#2ecc71", markersize=10, label="Improved"),
-        Line2D([0], [0], marker="o", color="w", markerfacecolor="#e74c3c", markersize=10, label="Regressed"),
+
+def _scores_section(results: dict, ordered: list[str]) -> list[str]:
+    """Before/after score tables with deltas."""
+    lines = []
+    has_after = any(results[n].get("after") for n in ordered)
+    has_std = any(results[n].get("after_std") for n in ordered)
+
+    lines.append("## Evaluation Results\n")
+
+    lines.append("### Baseline Scores (Generic Prompt)\n")
+    header = "| Metric |" + " | ".join(n.title() for n in ordered) + " |"
+    sep = "|--------|" + " | ".join("------" for _ in ordered) + " |"
+    lines.append(header)
+    lines.append(sep)
+    for key, label in METRIC_LABELS.items():
+        row = f"| {label} |"
+        for name in ordered:
+            s = results[name].get("before", {}).get(key, 0)
+            row += f" {s:.2f} |"
+        lines.append(row)
+    lines.append("")
+
+    if has_after:
+        lines.append("### Post-Optimization Scores\n")
+        lines.append(header)
+        lines.append(sep)
+        for key, label in METRIC_LABELS.items():
+            row = f"| {label} |"
+            for name in ordered:
+                s = results[name].get("after", {}).get(key, 0)
+                std = results[name].get("after_std", {}).get(key)
+                if std and has_std:
+                    row += f" {s:.2f} ±{std:.2f} |"
+                else:
+                    row += f" {s:.2f} |"
+            lines.append(row)
+        lines.append("")
+
+        lines.append("### Improvement Delta (After - Before)\n")
+        lines.append(header)
+        lines.append(sep)
+        for key, label in METRIC_LABELS.items():
+            row = f"| {label} |"
+            for name in ordered:
+                b = results[name].get("before", {}).get(key, 0)
+                a = results[name].get("after", {}).get(key, 0)
+                d = a - b
+                row += f" {d:+.02f} |"
+            lines.append(row)
+
+        avg_row = "| **Average** |"
+        for name in ordered:
+            before = results[name].get("before", {})
+            after = results[name].get("after", {})
+            avg_b = sum(before.values()) / max(len(before), 1) if before else 0
+            avg_a = sum(after.values()) / max(len(after), 1) if after else 0
+            avg_row += f" **{avg_a - avg_b:+.02f}** |"
+        lines.append(avg_row)
+        lines.append("")
+
+    return lines
+
+
+def _per_model_section(results: dict, ordered: list[str]) -> list[str]:
+    """Per-model analysis with key observations."""
+    lines = []
+    has_after = any(results[n].get("after") for n in ordered)
+    if not has_after:
+        return lines
+
+    lines.append("## Per-Model Analysis\n")
+
+    for name in ordered:
+        before = results[name].get("before", {})
+        after = results[name].get("after", {})
+        model = results[name].get("model", "unknown")
+        cost = MODEL_COSTS.get(model, {"input": 0, "output": 0})
+        combined = cost["input"] + cost["output"]
+
+        avg_b = sum(before.values()) / max(len(before), 1) if before else 0
+        avg_a = sum(after.values()) / max(len(after), 1) if after else 0
+        delta = avg_a - avg_b
+
+        improved = [k for k in METRIC_LABELS if after.get(k, 0) - before.get(k, 0) > 0.01]
+        regressed_m = [k for k in METRIC_LABELS if after.get(k, 0) - before.get(k, 0) < -0.01]
+
+        verdict = "improved" if delta > 0.005 else ("regressed" if delta < -0.005 else "stable")
+
+        lines.append(f"### {name.title()} (`{model}`, ${combined:.2f}/M)\n")
+        lines.append(f"**Overall:** {avg_b:.2f} → {avg_a:.2f} ({delta:+.3f}, {verdict})\n")
+
+        if improved:
+            lines.append(f"- **Gained:** {', '.join(METRIC_LABELS[k] for k in improved)}")
+        if regressed_m:
+            lines.append(f"- **Lost:** {', '.join(METRIC_LABELS[k] for k in regressed_m)}")
+
+        opt_prompt = results[name].get("optimized_prompt", "")
+        orig_prompt = results[name].get("original_prompt", "")
+        if opt_prompt:
+            lines.append(f"- **Prompt expansion:** {len(orig_prompt)} → {len(opt_prompt)} chars "
+                         f"({len(opt_prompt)/max(len(orig_prompt),1):.0f}x)")
+        lines.append("")
+
+    return lines
+
+
+def _cost_benefit_section(results: dict, ordered: list[str]) -> list[str]:
+    """Cost-benefit analysis with quality/$ ranking."""
+    lines = []
+    lines.append("## Cost-Benefit Analysis\n")
+    lines.append("| Agent | Model | Cost ($/M) | Before | After | Delta | Quality/$ |")
+    lines.append("|-------|-------|-----------|--------|-------|-------|----------|")
+
+    for name in ordered:
+        model = results[name].get("model", "unknown")
+        cost = MODEL_COSTS.get(model, {"input": 0, "output": 0})
+        combined = cost["input"] + cost["output"]
+        before = results[name].get("before", {})
+        after = results[name].get("after", before)
+        avg_b = sum(before.values()) / max(len(before), 1) if before else 0
+        avg_a = sum(after.values()) / max(len(after), 1) if after else 0
+        delta = avg_a - avg_b
+        qpd = avg_a / max(combined, 0.01)
+        lines.append(f"| {name.title()} | `{model}` | ${combined:.2f} | {avg_b:.2f} | {avg_a:.2f} | {delta:+.02f} | {qpd:.3f} |")
+    lines.append("")
+    return lines
+
+
+def _charts_section() -> list[str]:
+    """Embed chart images with captions."""
+    lines = []
+    lines.append("## Visualizations\n")
+
+    chart_info = [
+        ("radar.png", "Metric Profiles", "Radar overlay showing each model's strength/weakness pattern across all 6 metrics."),
+        ("comparison.png", "Baseline Comparison", "Grouped bar chart of pre-optimization scores across all agents."),
+        ("improvement_delta.png", "Optimization Impact", "Per-metric score change from GEPA optimization. Bars above zero = improved."),
+        ("cost_quality.png", "Cost-Quality Tradeoff", "Model cost vs average quality. Arrows show before→after movement."),
+        ("tier_breakdown.png", "Tier Performance", "Average scores by complexity tier (low/medium/high)."),
+        ("category_heatmap.png", "Category Capability", "Heatmap of per-category scores across models."),
+        ("tier_improvement_heatmap.png", "Tier Improvement", "Optimization impact by complexity tier. Green=improved, red=regressed."),
+        ("run_comparison.png", "Run Comparison", "Side-by-side comparison with previous experiment run."),
     ]
-    ax.legend(handles=legend_elements, loc="best")
 
-    plt.tight_layout()
-    plt.savefig(output_path, dpi=150)
-    plt.close()
-    print(f"  Cost-benefit chart saved to {output_path}")
+    for filename, title, caption in chart_info:
+        if (CHARTS_DIR / filename).exists():
+            lines.append(f"### {title}\n")
+            lines.append(f"![{title}](../images/{filename})\n")
+            lines.append(f"*{caption}*\n")
+
+    return lines
 
 
-def generate_report(results: dict[str, dict], experiment_name: str = "experiment"):
-    """Generate full markdown report with charts."""
+def _conclusions_section(results: dict, ordered: list[str]) -> list[str]:
+    """Auto-generated conclusions and next steps."""
+    lines = []
+    has_after = any(results[n].get("after") for n in ordered)
+    if not has_after:
+        return lines
+
+    lines.append("## Conclusions & Next Steps\n")
+
+    agent_deltas = {}
+    for name in ordered:
+        before = results[name].get("before", {})
+        after = results[name].get("after", {})
+        avg_b = sum(before.values()) / max(len(before), 1) if before else 0
+        avg_a = sum(after.values()) / max(len(after), 1) if after else 0
+        agent_deltas[name] = avg_a - avg_b
+
+    improved = [n for n in ordered if agent_deltas[n] > 0.005]
+    regressed = [n for n in ordered if agent_deltas[n] < -0.005]
+
+    if len(improved) >= len(ordered) * 0.6:
+        lines.append("GEPA optimization was broadly successful. ")
+    elif len(regressed) >= len(ordered) * 0.6:
+        lines.append("GEPA optimization showed widespread regression — review sampler config thresholds and eval criteria alignment. ")
+    else:
+        lines.append("Results were mixed across models. ")
+
+    lines.append("")
+    lines.append("**Recommended next steps:**\n")
+
+    if regressed:
+        metric_deltas = {}
+        for metric in METRIC_LABELS:
+            vals = []
+            for name in regressed:
+                b = results[name].get("before", {}).get(metric, 0)
+                a = results[name].get("after", {}).get(metric, 0)
+                vals.append(a - b)
+            metric_deltas[metric] = sum(vals) / len(vals) if vals else 0
+        worst = min(metric_deltas, key=metric_deltas.get)
+        lines.append(f"1. **Investigate {METRIC_LABELS[worst]} regression** ({metric_deltas[worst]:+.3f} avg in regressed models) — "
+                     f"consider adding as explicit optimization target in sampler config")
+
+    lines.append(f"2. **Re-run with tighter thresholds** — higher thresholds force GEPA to discover domain-specific content")
+    lines.append(f"3. **Verify per-case scores** are being extracted correctly for tier/category analysis")
+    lines.append(f"4. **Monitor deployed agents** with online evaluators to catch drift on real traffic")
+    lines.append("")
+
+    return lines
+
+
+def generate_report(
+    results: dict[str, dict],
+    experiment_name: str = "experiment",
+    use_paperbanana: bool = True,
+):
+    """Generate full markdown report with rich charts and analytical sections."""
     _ensure_dirs()
-    generate_comparison_chart(results)
-    generate_improvement_chart(results)
-    generate_cost_benefit_chart(results)
+
+    normalized = normalize_agent_keys(results)
+    case_metadata = _get_case_metadata(results)
+    ordered = [a for a in AGENT_ORDER if a in normalized]
+
+    if not ordered:
+        ordered = sorted(normalized.keys())
+
+    print("Generating charts...")
+    generate_all_charts(normalized, case_metadata, CHARTS_DIR, use_paperbanana=use_paperbanana)
 
     lines = []
     lines.append(f"# GEPA Prompt Wrangler — {experiment_name}\n")
-    lines.append("## Results Overview\n")
-    lines.append("![Comparison](../images/comparison.png)\n")
-    lines.append("![Improvement Delta](../images/improvement_delta.png)\n")
 
-    cost_benefit_path = CHARTS_DIR / "cost_benefit.png"
-    if cost_benefit_path.exists():
-        lines.append("![Cost-Benefit](../images/cost_benefit.png)\n")
-
-    lines.append("## Before vs After Scores\n")
-    lines.append("| Pair | Metric | Before | After | Delta | Change |")
-    lines.append("|------|--------|--------|-------|-------|--------|")
-
-    for pair_id, data in results.items():
-        before = data.get("before", {})
-        after = data.get("after", {})
-        for metric in METRIC_LABELS:
-            b = before.get(metric, 0)
-            a = after.get(metric, 0)
-            delta = a - b
-            pct = f"{delta/b*100:+.0f}%" if b > 0 else "N/A"
-            lines.append(
-                f"| {pair_id} | {METRIC_LABELS[metric]} "
-                f"| {b:.2f} | {a:.2f} | {delta:+.2f} | {pct} |"
-            )
-    lines.append("")
+    lines.extend(_executive_summary(normalized, ordered))
+    lines.extend(_methodology_section(normalized, ordered, experiment_name))
+    lines.extend(_charts_section())
+    lines.extend(_scores_section(normalized, ordered))
+    lines.extend(_per_model_section(normalized, ordered))
+    lines.extend(_cost_benefit_section(normalized, ordered))
+    lines.extend(_conclusions_section(normalized, ordered))
 
     lines.append("## Optimized Prompts\n")
-    for pair_id, data in results.items():
-        lines.append(f"### {pair_id}\n")
+    for name in ordered:
+        data = normalized[name]
+        lines.append(f"### {name.title()}\n")
         lines.append(f"**Model:** `{data.get('model', 'unknown')}`\n")
         if data.get("optimized_prompt"):
-            lines.append("**Optimized instruction:**")
-            lines.append(f"```\n{data['optimized_prompt']}\n```\n")
+            lines.append("<details><summary>Click to expand optimized prompt</summary>\n")
+            lines.append(f"```\n{data['optimized_prompt'].strip()}\n```\n")
+            lines.append("</details>\n")
 
     report_path = REPORTS_DIR / "experiment_report.md"
     with open(report_path, "w") as f:
