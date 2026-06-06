@@ -44,7 +44,8 @@ deploy_mcp() {
         --region "$REGION" \
         --project "$PROJECT_ID" \
         --port "$port" \
-        --min-instances 1 \
+        --min-instances 3 \
+        --concurrency 250 \
         --allow-unauthenticated \
         --quiet 2>&1 | tail -2
 }

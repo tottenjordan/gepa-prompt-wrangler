@@ -1,0 +1,107 @@
+{
+  "lite-gemini-3.1-flash-lite": {
+    "scores": {
+      "final_response_match_v2": 0.6036109991694779,
+      "final_response_quality_v1": 0.8171150041838442,
+      "hallucination_v1": 0.9597944771951737,
+      "instruction_following_v1": 0.6200829149902825,
+      "safety_v1": 0.9938271604938274,
+      "tool_use_quality_v1": 0.41640341106857637
+    },
+    "per_case": [],
+    "scores_std": {
+      "final_response_match_v2": 0.07431942242561816,
+      "final_response_quality_v1": 0.03302737199552187,
+      "hallucination_v1": 0.006911074950853003,
+      "instruction_following_v1": 0.09956474962221457,
+      "safety_v1": 0.0106916716516594,
+      "tool_use_quality_v1": 0.0519587713854615
+    },
+    "num_runs": 3,
+    "elapsed": 997.1665165424347
+  },
+  "flash-gemini-3.5-flash": {
+    "scores": {
+      "final_response_match_v2": 0.6131459510715659,
+      "final_response_quality_v1": 0.85191086169479,
+      "hallucination_v1": 0.9501763308527941,
+      "instruction_following_v1": 0.6251133237833887,
+      "safety_v1": 0.980048984768037,
+      "tool_use_quality_v1": 0.45008027647115484
+    },
+    "per_case": [],
+    "scores_std": {
+      "final_response_match_v2": 0.0715031837790499,
+      "final_response_quality_v1": 0.0548991979770789,
+      "hallucination_v1": 0.014781960841850078,
+      "instruction_following_v1": 0.04816815187284998,
+      "safety_v1": 0.002284869181713699,
+      "tool_use_quality_v1": 0.012938555975196393
+    },
+    "num_runs": 3,
+    "elapsed": 1288.0814628601074
+  },
+  "pro-gemini-3.1-pro": {
+    "scores": {
+      "final_response_match_v2": 0.5373331824312217,
+      "final_response_quality_v1": 0.8556143703037957,
+      "hallucination_v1": 0.9752734456553752,
+      "instruction_following_v1": 0.5657142608803392,
+      "safety_v1": 0.9872218550341488,
+      "tool_use_quality_v1": 0.43062135064699586
+    },
+    "per_case": [],
+    "scores_std": {
+      "final_response_match_v2": 0.08952477164038358,
+      "final_response_quality_v1": 0.03614791162113448,
+      "hallucination_v1": 0.023519343904294568,
+      "instruction_following_v1": 0.0617354436328075,
+      "safety_v1": 0.011074966933294938,
+      "tool_use_quality_v1": 0.025144793475271304
+    },
+    "num_runs": 3,
+    "elapsed": 1093.5021979808807
+  },
+  "sonnet-claude-4": {
+    "scores": {
+      "final_response_match_v2": 0.6450638924300368,
+      "final_response_quality_v1": 0.8636859007092491,
+      "hallucination_v1": 0.918591811079267,
+      "instruction_following_v1": 0.6685265863292918,
+      "safety_v1": 0.9705520584617607,
+      "tool_use_quality_v1": 0.43176039546948003
+    },
+    "per_case": [],
+    "scores_std": {
+      "final_response_match_v2": 0.0500752797833442,
+      "final_response_quality_v1": 0.02503100832861668,
+      "hallucination_v1": 0.020932847103464637,
+      "instruction_following_v1": 0.057592082928709445,
+      "safety_v1": 0.029411831452730124,
+      "tool_use_quality_v1": 0.04307939045365703
+    },
+    "num_runs": 3,
+    "elapsed": 915.1864383220673
+  },
+  "opus-claude-4": {
+    "scores": {
+      "final_response_match_v2": 0.7226832286935483,
+      "final_response_quality_v1": 0.8472936694936626,
+      "hallucination_v1": 0.8931260428999259,
+      "instruction_following_v1": 0.7371124348189726,
+      "safety_v1": 0.8853541828940025,
+      "tool_use_quality_v1": 0.44559386851643734
+    },
+    "per_case": [],
+    "scores_std": {
+      "final_response_match_v2": 0.007385776180389915,
+      "final_response_quality_v1": 0.03617768225169733,
+      "hallucination_v1": 0.01659408682907853,
+      "instruction_following_v1": 0.01518971224631626,
+      "safety_v1": 0.019695181436859083,
+      "tool_use_quality_v1": 0.028288412336184916
+    },
+    "num_runs": 3,
+    "elapsed": 1057.2910022735596
+  }
+}

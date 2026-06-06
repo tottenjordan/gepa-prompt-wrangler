@@ -200,11 +200,19 @@ async def _prewarm_mcp_toolsets(agent, tag: str = "  ") -> int:
     return warmed
 
 
+METRIC_NAME_MAP = {
+    "final_response_quality_v1": "rubric_based_final_response_quality_v1",
+    "tool_use_quality_v1": "rubric_based_tool_use_quality_v1",
+}
+
+
 def _merge_thresholds(sampler_config: dict, thresholds: dict[str, float], judge_model: str = "gemini-3.5-flash") -> None:
     """Merge experiment thresholds into a loaded sampler_config.json in-place.
 
     Ensures the experiment's calibrated thresholds override whatever is in the
     sampler config file, while preserving the file's structure (rubrics, case IDs, app_name).
+    Handles rubric_based_ prefix: config.yaml uses plain names but sampler_config.json
+    uses rubric_based_ prefixed names for metrics with custom rubrics.
     """
     criteria = sampler_config.get("eval_config", {}).get("criteria", {})
     if not criteria:
@@ -212,25 +220,30 @@ def _merge_thresholds(sampler_config: dict, thresholds: dict[str, float], judge_
 
     merged = []
 
-    # Fix metric name: hallucinations_v1 → hallucination_v1
     if "hallucinations_v1" in criteria and "hallucination_v1" not in criteria:
         criteria["hallucination_v1"] = criteria.pop("hallucinations_v1")
         merged.append("renamed hallucinations_v1 → hallucination_v1")
 
     for metric, threshold in thresholds.items():
-        if metric in criteria:
-            val = criteria[metric]
+        actual_key = metric
+        if metric not in criteria and metric in METRIC_NAME_MAP:
+            rb_key = METRIC_NAME_MAP[metric]
+            if rb_key in criteria:
+                actual_key = rb_key
+
+        if actual_key in criteria:
+            val = criteria[actual_key]
             if isinstance(val, dict):
                 old = val.get("threshold", "unset")
                 val["threshold"] = threshold
                 if old != threshold:
-                    merged.append(f"{metric}: {old} → {threshold}")
+                    merged.append(f"{actual_key}: {old} → {threshold}")
                 if "judge_model_options" in val:
                     val["judge_model_options"]["judge_model"] = judge_model
             else:
                 if val != threshold:
-                    merged.append(f"{metric}: {val} → {threshold}")
-                criteria[metric] = threshold
+                    merged.append(f"{actual_key}: {val} → {threshold}")
+                criteria[actual_key] = threshold
         else:
             criteria[metric] = {
                 "judge_model_options": {"judge_model": judge_model},
@@ -238,7 +251,6 @@ def _merge_thresholds(sampler_config: dict, thresholds: dict[str, float], judge_
             }
             merged.append(f"added {metric} (threshold={threshold})")
 
-    # Update judge model on all remaining dict criteria
     for key, val in criteria.items():
         if isinstance(val, dict) and "judge_model_options" in val:
             val["judge_model_options"]["judge_model"] = judge_model

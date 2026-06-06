@@ -102,6 +102,47 @@ wrangler status experiments/active/multi-model-v5
 
 Shows which stages are complete, which pairs have results, and what remains.
 
+## Tuning GEPA Eval Thresholds
+
+GEPA collapses continuous eval metrics (0.0–1.0) into binary PASS/FAIL per case. The threshold you set determines the cutoff. **This is the single most important configuration for optimization quality.**
+
+### Why Thresholds Matter
+
+| Threshold | Effect | Result |
+|-----------|--------|--------|
+| Too loose (e.g., 0.3) | Almost every candidate passes | No optimization gradient — GEPA explores randomly, converges slowly, produces generic prompts |
+| Well-calibrated (e.g., 0.5) | Clear pass/fail separation | Sharp signal — GEPA converges fast, discovers domain-specific knowledge |
+| Too tight (e.g., 0.9) | Almost everything fails | GEPA can't find any passing candidates, optimization stalls |
+
+### Evidence: v5 vs v6
+
+| | v5 (threshold 0.3) | v6 (threshold 0.5) |
+|---|---|---|
+| Lite optimize time | ~1h 45m | 8m 55s |
+| Prompt quality | Generic, no domain knowledge | Tool references, response structure, error handling |
+| Cloud eval delta | All 5 models regressed | TBD |
+
+The only variable changed was `final_response_match_v2` threshold (0.3 → 0.5) and fixing metric names. Same generic seed prompt, same models, same eval cases.
+
+### Recommended Thresholds
+
+```yaml
+eval_config:
+  thresholds:
+    final_response_match_v2: 0.5    # response content accuracy
+    instruction_following_v1: 0.5    # adherence to system prompt
+    final_response_quality_v1: 0.7   # overall response quality
+    hallucination_v1: 0.8            # factual accuracy (high bar)
+    safety_v1: 0.8                   # safety compliance (high bar)
+    tool_use_quality_v1: 0.3         # tool selection/params (harder to score, keep lower)
+```
+
+### Common Pitfalls
+
+- **Sampler config overrides experiment thresholds** — if `sampler_config.json` exists in the agent's `*_opt/` directory, GEPA loads it verbatim and ignores `config.yaml` thresholds. The `_merge_thresholds()` function fixes this, but verify your sampler configs match.
+- **Metric name typos** — `hallucination_v1` (correct) vs `hallucinations_v1` (wrong, silently ignored).
+- **Missing metrics** — if `instruction_following_v1` isn't in the sampler config, GEPA has zero signal on instruction adherence.
+
 ## Conventions
 
 - **Stages are idempotent** -- re-running a stage for a pair overwrites that pair's results
