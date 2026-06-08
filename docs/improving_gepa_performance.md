@@ -110,3 +110,37 @@ Before these fixes, we were:
 6. **Using single-run evals** — high variance masked true performance
 
 All of these manifested as "the model performs poorly" or "optimization doesn't help much" when the real problem was pipeline bugs masking actual capabilities. With these fixes in place, the v8 experiment pipeline produces reliable, reproducible results with clear before/after signal.
+
+## Interpreting Results: Why "Optimized" Doesn't Always Mean Higher Scores
+
+Even with a fully working pipeline, an optimized prompt may produce aggregate scores similar to (or occasionally lower than) the baseline. This does not necessarily mean optimization failed — it means the continuous average is an incomplete lens. Here's why:
+
+### GEPA Optimizes Binary Pass/Fail, Not Continuous Scores
+
+GEPA uses thresholds to convert each metric's continuous score into a binary pass/fail signal per eval case. It then tries to maximize the number of cases that pass *all* thresholds simultaneously. This means a prompt that flips 5 failing cases to passing — but regresses 5 other cases from 0.95 to 0.75 (still above threshold) — is a net win for GEPA, even though the continuous average may stay flat or dip slightly.
+
+**Takeaway:** The aggregate average can mask real improvements. Look at the per-case pass/fail counts and per-metric breakdowns in the report, not just the headline number.
+
+### Per-Metric Tradeoffs Can Net Out
+
+The "average score" reported across all 6 metrics can hide per-metric movement. An optimized prompt might significantly improve `instruction_following` and `tool_use_quality` while slightly regressing `response_match` — netting to the same overall number. The per-metric delta table in the report stage reveals these tradeoffs.
+
+### Model Capability Ceiling
+
+Lower-tier models (e.g., flash-lite at $0.30/M output tokens) have inherent reasoning limitations. If the model can't reason through multi-step tool chains, no prompt can compensate. Prompt optimization has the most room to help on models that are capable but under-directed — expect larger lifts on mid-to-upper-tier models (pro, sonnet, opus) than on the cheapest tier.
+
+### The Generic Prompt Is Surprisingly Competitive
+
+The baseline seed prompt — `"You are a helpful assistant. Use the available tools to answer user questions."` — already conveys the core task. For simple tool-use scenarios, the model's pretraining may already handle the task well, leaving less headroom for prompt-driven improvement. The optimized prompt's value shows up more on complex, multi-intent, or ambiguous cases where explicit instructions reduce guesswork.
+
+### Variance Between Runs
+
+Eval scores vary between runs due to model sampling (temperature, tool-call ordering, API latency). A 3-run average with standard deviation (`scores_std`) helps distinguish real improvements from noise. If the baseline's standard deviation is ±0.03 and the post-optimization delta is +0.01, the improvement is within noise. The report stage flags this.
+
+### What to Look At Instead of the Aggregate Average
+
+1. **Per-metric deltas** — Which metrics improved, which regressed?
+2. **Per-case pass/fail counts** — How many cases crossed a threshold boundary?
+3. **Standard deviation** — Is the delta statistically meaningful vs. run-to-run variance?
+4. **Qualitative prompt inspection** — Does the optimized prompt contain domain-specific instructions (tool names, response structure, edge-case handling) that the generic prompt lacks?
+5. **Cost-quality tradeoff** — A cheaper model with an optimized prompt matching a more expensive model's baseline is still a win.
