@@ -223,7 +223,9 @@ def stage_deploy(exp: Experiment, pair_id: str | None = None) -> None:
             print(f"  {tag} Deploying...", end="", flush=True)
             t0 = time.time()
             agent = _load_agent(manifest, pair, mdir)
-            engine_id = deployer.deploy_agent(agent, display_name=pair.id)
+            version_tag = exp.version.replace("_", "-") if exp.version else ""
+            display = f"{pair.id}_{version_tag}" if version_tag else pair.id
+            engine_id = deployer.deploy_agent(agent, display_name=display)
             print(f" {_fmt_duration(time.time() - t0)}")
             exp.merge_pair("deploy", pair.id, {
                 "engine_id": engine_id,
@@ -424,7 +426,9 @@ def stage_redeploy(exp: Experiment, pair_id: str | None = None) -> None:
         print(f"  [{pair.id}] ({i}/{len(pairs)}) Redeploying...", end="", flush=True)
         t0 = time.time()
         agent = _load_agent(manifest, pair, mdir)
-        deployer.update_agent(agent, engine_id, display_name=pair.id)
+        version_tag = exp.version.replace("_", "-") if exp.version else ""
+        display = f"{pair.id}_{version_tag}" if version_tag else pair.id
+        deployer.update_agent(agent, engine_id, display_name=display)
         elapsed = time.time() - t0
         print(f" {_fmt_duration(elapsed)}")
 
