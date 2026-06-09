@@ -1,23 +1,23 @@
-name: "pipeline-test-flash-sonnet"
+name: "pipeline-test-sonnet-opus"
 description: >
-  Pipeline test with pre-deployed Flash and Sonnet agents.
+  Pipeline test with pre-deployed Sonnet and Opus agents.
 
-agent_module: "examples/multi_model_agents/agents/flash_agent"
+agent_module: "examples/multi_model_agents/agents/sonnet_agent"
 eval_data: "examples/multi_model_agents/eval_data/eval_cases.yaml"
 
 pairs:
-  - id: "flash"
-    model: "gemini-3.5-flash"
-    description: "Gemini Flash with generic prompt"
-    agent_module: "examples/multi_model_agents/agents/flash_agent"
-    engine_id: "4124741455543533568"
-    system_prompt: "You are a helpful assistant. Use the available tools to answer user questions."
-
   - id: "sonnet"
     model: "claude-sonnet-4-6"
     description: "Claude Sonnet with generic prompt"
     agent_module: "examples/multi_model_agents/agents/sonnet_agent"
     engine_id: "6943994822277464064"
+    system_prompt: "You are a helpful assistant. Use the available tools to answer user questions."
+
+  - id: "opus"
+    model: "claude-opus-4-6"
+    description: "Claude Opus with generic prompt"
+    agent_module: "examples/multi_model_agents/agents/opus_agent"
+    engine_id: "3543777103612739584"
     system_prompt: "You are a helpful assistant. Use the available tools to answer user questions."
 
 eval_config:
