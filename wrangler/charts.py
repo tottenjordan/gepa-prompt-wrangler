@@ -18,7 +18,7 @@ from .analysis import (
     MODEL_MAP,
     PROVIDERS,
 )
-from .config import MODEL_COSTS, PAPERBANANA_PROJECT, PAPERBANANA_LOCATION
+from .config import MODEL_COSTS
 
 
 def _try_paperbanana(
@@ -28,59 +28,67 @@ def _try_paperbanana(
     fallback_fn,
     fallback_kwargs: dict,
     timeout: int = 180,
+    max_attempts: int = 2,
 ) -> bool:
     """Try PaperBanana CLI for chart generation, fall back to matplotlib on failure.
 
     Returns True if PaperBanana succeeded, False if fallback was used.
     """
-    data_path = None
-    try:
-        with tempfile.NamedTemporaryFile(
-            mode="w", suffix=".json", delete=False
-        ) as tmp:
-            json.dump(data, tmp)
-            data_path = tmp.name
-
-        env = os.environ.copy()
-        env["GOOGLE_GENAI_USE_VERTEXAI"] = "1"
-        env["GOOGLE_CLOUD_PROJECT"] = PAPERBANANA_PROJECT
-        env["GOOGLE_CLOUD_LOCATION"] = PAPERBANANA_LOCATION
-
-        result = subprocess.run(
-            [
-                "uv", "run", "paperbanana", "plot",
-                "--data", data_path,
-                "--intent", intent,
-                "-n", "2",
-            ],
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-            env=env,
-        )
-
-        if result.returncode != 0:
-            raise RuntimeError(result.stderr[-300:] if result.stderr else "unknown error")
-
-        run_dirs = sorted(glob.glob("outputs/run_*"), reverse=True)
-        for run_dir in run_dirs:
-            final = Path(run_dir) / "final_output.png"
-            if final.exists():
-                output_path.parent.mkdir(parents=True, exist_ok=True)
-                shutil.copy2(str(final), str(output_path))
-                print(f"  Generated (PaperBanana): {output_path.name}")
-                return True
-
-        raise FileNotFoundError("PaperBanana output not found in run directories")
-
-    except Exception as e:
-        print(f"  PaperBanana unavailable ({type(e).__name__}: {e}), using matplotlib")
+    env = os.environ.copy()
+    if not env.get("GOOGLE_API_KEY"):
+        print(f"  PaperBanana skipped (no GOOGLE_API_KEY), using matplotlib")
         fallback_fn(**fallback_kwargs)
         return False
 
-    finally:
-        if data_path and os.path.exists(data_path):
-            os.unlink(data_path)
+    last_error = None
+    for attempt in range(max_attempts):
+        data_path = None
+        try:
+            with tempfile.NamedTemporaryFile(
+                mode="w", suffix=".json", delete=False
+            ) as tmp:
+                json.dump(data, tmp)
+                data_path = tmp.name
+
+            result = subprocess.run(
+                [
+                    "uv", "run", "paperbanana", "plot",
+                    "--data", data_path,
+                    "--intent", intent,
+                    "-n", "3",
+                ],
+                capture_output=True,
+                text=True,
+                timeout=timeout,
+                env=env,
+            )
+
+            if result.returncode != 0:
+                raise RuntimeError(result.stderr[-300:] if result.stderr else "unknown error")
+
+            run_dirs = sorted(glob.glob("outputs/run_*"), reverse=True)
+            for run_dir in run_dirs:
+                final = Path(run_dir) / "final_output.png"
+                if final.exists():
+                    output_path.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.copy2(str(final), str(output_path))
+                    print(f"  Generated (PaperBanana): {output_path.name}")
+                    return True
+
+            raise FileNotFoundError("PaperBanana output not found in run directories")
+
+        except Exception as e:
+            last_error = e
+            if attempt < max_attempts - 1:
+                print(f"  PaperBanana attempt {attempt + 1} failed, retrying...")
+
+        finally:
+            if data_path and os.path.exists(data_path):
+                os.unlink(data_path)
+
+    print(f"  PaperBanana failed after {max_attempts} attempts ({type(last_error).__name__}), using matplotlib")
+    fallback_fn(**fallback_kwargs)
+    return False
 
 
 def _get_agents(results: dict) -> list[str]:

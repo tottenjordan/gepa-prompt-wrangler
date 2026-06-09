@@ -29,9 +29,7 @@ MODEL_COSTS = {
     "claude-opus-4-6": {"input": 5.0, "output": 25.0},
 }
 
-# --- PaperBanana ---
-PAPERBANANA_PROJECT = os.environ.get("GOOGLE_CLOUD_PROJECT", GCP_PROJECT_ID)
-PAPERBANANA_LOCATION = os.environ.get("GOOGLE_CLOUD_LOCATION", "global")
+
 
 
 # --- Rate limits (RPM) per model for inference throttling ---
