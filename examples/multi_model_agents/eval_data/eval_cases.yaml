@@ -97,13 +97,13 @@ eval_cases:
         args: {user_id: EMP001}
 
   # Edge cases
-  - prompt: "Find flights from XYZ to ABC"
-    expected_response: "No flights found for the route XYZ to ABC. Please provide valid airport codes."
+  - prompt: "Find flights from San Fransisco to New Yrok"
+    expected_response: "I'll search for flights from SFO to JFK. I found flights: United FL001 departing 08:00 at $450, and Delta FL002 departing 10:30 at $520."
     tier: low
     category: error_handling
     expected_tools:
       - name: wrangler_search_mcp_search_flights
-        args: {origin: XYZ, destination: ABC}
+        args: {origin: SFO, destination: JFK}
 
   - prompt: "Search hotels in Atlantis"
     expected_response: "No hotels found in Atlantis. Please try a different city."
