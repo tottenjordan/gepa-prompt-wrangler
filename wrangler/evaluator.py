@@ -39,6 +39,7 @@ class EvalResult:
     per_case: list[dict[str, float]] = field(default_factory=list)
     scores_std: dict[str, float] = field(default_factory=dict)
     num_runs: int = 1
+    token_usage: dict[str, int | bool] = field(default_factory=dict)
 
 
 def _build_eval_dataset(cases: list[dict]) -> pd.DataFrame:
@@ -95,6 +96,26 @@ def _extract_per_case_scores(evaluation_run) -> list[dict[str, float]]:
     except Exception as e:
         print(f"  Warning extracting per-case scores: {e}")
     return per_case
+
+
+def _estimate_token_usage(inference_df: pd.DataFrame) -> dict[str, int | bool]:
+    """Estimate input/output token counts from inference result text lengths."""
+    input_tokens = 0
+    output_tokens = 0
+    for _, row in inference_df.iterrows():
+        prompt = row.get("prompt", "")
+        response = row.get("response", "")
+        if isinstance(prompt, str):
+            input_tokens += max(1, len(prompt) // 4)
+        if isinstance(response, str):
+            output_tokens += max(1, len(response) // 4)
+        elif isinstance(response, dict):
+            output_tokens += max(1, len(str(response)) // 4)
+    return {
+        "input_tokens": input_tokens,
+        "output_tokens": output_tokens,
+        "is_estimate": True,
+    }
 
 
 def _fmt_elapsed(t0: float) -> str:
@@ -302,9 +323,11 @@ def run_batch_eval(
             scores[short] = float(value)
 
     per_case = _extract_per_case_scores(evaluation_run)
+    token_usage = _estimate_token_usage(inference_result.eval_dataset_df)
 
-    print(f"  {tag}Eval complete — total: {_fmt_elapsed(t0)}, {len(scores)} metrics, {len(per_case)} cases", flush=True)
-    return EvalResult(scores=scores, per_case=per_case)
+    print(f"  {tag}Eval complete — total: {_fmt_elapsed(t0)}, {len(scores)} metrics, {len(per_case)} cases, "
+          f"~{token_usage['input_tokens']:,} in / ~{token_usage['output_tokens']:,} out tokens (est.)", flush=True)
+    return EvalResult(scores=scores, per_case=per_case, token_usage=token_usage)
 
 
 def run_batch_eval_averaged(
@@ -362,6 +385,12 @@ def run_batch_eval_averaged(
                         case_metrics.setdefault(k, []).append(v)
             avg_per_case.append({k: statistics.mean(vs) for k, vs in case_metrics.items()})
 
+    agg_tokens: dict[str, int | bool] = {"input_tokens": 0, "output_tokens": 0, "is_estimate": True}
+    for r in all_results:
+        if r.token_usage:
+            agg_tokens["input_tokens"] += r.token_usage.get("input_tokens", 0)
+            agg_tokens["output_tokens"] += r.token_usage.get("output_tokens", 0)
+
     overall = sum(avg_scores.values()) / max(len(avg_scores), 1)
     successful = len(all_results)
     skipped = num_runs - successful
@@ -373,6 +402,7 @@ def run_batch_eval_averaged(
         per_case=avg_per_case,
         scores_std=std_scores,
         num_runs=num_runs,
+        token_usage=agg_tokens,
     )
 
 

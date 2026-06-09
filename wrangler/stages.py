@@ -287,6 +287,7 @@ def stage_eval(
             "scores_std": result.scores_std,
             "num_runs": result.num_runs,
             "elapsed": elapsed,
+            "token_usage": result.token_usage,
         })
 
     # Post-eval sanity checks

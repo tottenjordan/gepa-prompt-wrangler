@@ -29,6 +29,16 @@ MODEL_COSTS = {
     "claude-opus-4-6": {"input": 5.0, "output": 25.0},
 }
 
+BLENDED_INPUT_WEIGHT = 4
+BLENDED_OUTPUT_WEIGHT = 1
+
+
+def blended_cost(model: str) -> float:
+    """Estimated cost per 1M tokens assuming 4:1 input:output token ratio."""
+    cost = MODEL_COSTS.get(model, {"input": 0, "output": 0})
+    w = BLENDED_INPUT_WEIGHT + BLENDED_OUTPUT_WEIGHT
+    return (BLENDED_INPUT_WEIGHT * cost["input"] + BLENDED_OUTPUT_WEIGHT * cost["output"]) / w
+
 
 
 

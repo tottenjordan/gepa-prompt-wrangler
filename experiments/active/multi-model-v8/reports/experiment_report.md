@@ -16,12 +16,12 @@ Largest regression: **flash** (-0.012 avg).
 
 **Experiment:** `multi-model-v8`
 
-| Agent | Model | Provider | Cost ($/M in+out) |
-|-------|-------|----------|-------------------|
-| flash | `gemini-3.5-flash` | Google | $10.50 |
-| pro | `gemini-3.1-pro-preview` | Google | $22.00 |
-| sonnet | `claude-sonnet-4-6` | Anthropic | $18.00 |
-| opus | `claude-opus-4-6` | Anthropic | $30.00 |
+| Agent | Model | Provider | Input $/M | Output $/M | Blended $/M |
+|-------|-------|----------|-----------|------------|-------------|
+| flash | `gemini-3.5-flash` | Google | $1.50 | $9.00 | $3.00 |
+| pro | `gemini-3.1-pro-preview` | Google | $4.00 | $18.00 | $6.80 |
+| sonnet | `claude-sonnet-4-6` | Anthropic | $3.00 | $15.00 | $5.40 |
+| opus | `claude-opus-4-6` | Anthropic | $5.00 | $25.00 | $9.00 |
 
 **Metrics evaluated:**
 
@@ -96,7 +96,7 @@ Largest regression: **flash** (-0.012 avg).
 
 ## Per-Model Analysis
 
-### Flash (`gemini-3.5-flash`, $10.50/M)
+### Flash (`gemini-3.5-flash`, $1.50/$9.00 in/out per M)
 
 **Overall:** 0.71 → 0.70 (-0.012, regressed)
 
@@ -104,7 +104,7 @@ Largest regression: **flash** (-0.012 avg).
 - **Lost:** Hallucination, Tool Use, Instruction Following
 - **Prompt expansion:** 78 → 4249 chars (54x)
 
-### Pro (`gemini-3.1-pro-preview`, $22.00/M)
+### Pro (`gemini-3.1-pro-preview`, $4.00/$18.00 in/out per M)
 
 **Overall:** 0.65 → 0.64 (-0.011, regressed)
 
@@ -112,7 +112,7 @@ Largest regression: **flash** (-0.012 avg).
 - **Lost:** Tool Use, Instruction Following, Response Match
 - **Prompt expansion:** 78 → 4139 chars (53x)
 
-### Sonnet (`claude-sonnet-4-6`, $18.00/M)
+### Sonnet (`claude-sonnet-4-6`, $3.00/$15.00 in/out per M)
 
 **Overall:** 0.63 → 0.65 (+0.014, improved)
 
@@ -120,7 +120,7 @@ Largest regression: **flash** (-0.012 avg).
 - **Lost:** Response Quality, Hallucination
 - **Prompt expansion:** 78 → 1996 chars (26x)
 
-### Opus (`claude-opus-4-6`, $30.00/M)
+### Opus (`claude-opus-4-6`, $5.00/$25.00 in/out per M)
 
 **Overall:** 0.65 → 0.66 (+0.009, improved)
 
@@ -130,12 +130,14 @@ Largest regression: **flash** (-0.012 avg).
 
 ## Cost-Benefit Analysis
 
-| Agent | Model | Cost ($/M) | Before | After | Delta | Quality/$ |
-|-------|-------|-----------|--------|-------|-------|----------|
-| Flash | `gemini-3.5-flash` | $10.50 | 0.71 | 0.70 | -0.01 | 0.067 |
-| Pro | `gemini-3.1-pro-preview` | $22.00 | 0.65 | 0.64 | -0.01 | 0.029 |
-| Sonnet | `claude-sonnet-4-6` | $18.00 | 0.63 | 0.65 | +0.01 | 0.036 |
-| Opus | `claude-opus-4-6` | $30.00 | 0.65 | 0.66 | +0.01 | 0.022 |
+| Agent | Model | Input $/M | Output $/M | Blended $/M | Before | After | Delta | Quality/$ |
+|-------|-------|-----------|------------|-------------|--------|-------|-------|----------|
+| Flash | `gemini-3.5-flash` | $1.50 | $9.00 | $3.00 | 0.71 | 0.70 | -0.01 | 0.233 |
+| Pro | `gemini-3.1-pro-preview` | $4.00 | $18.00 | $6.80 | 0.65 | 0.64 | -0.01 | 0.094 |
+| Sonnet | `claude-sonnet-4-6` | $3.00 | $15.00 | $5.40 | 0.63 | 0.65 | +0.01 | 0.120 |
+| Opus | `claude-opus-4-6` | $5.00 | $25.00 | $9.00 | 0.65 | 0.66 | +0.01 | 0.074 |
+
+*Blended $/M = weighted average assuming 4:1 input:output token ratio. Quality/$ = avg quality / blended cost.*
 
 ## Conclusions & Next Steps
 

@@ -18,7 +18,7 @@ from .analysis import (
     MODEL_MAP,
     PROVIDERS,
 )
-from .config import MODEL_COSTS
+from .config import MODEL_COSTS, blended_cost
 
 
 def _try_paperbanana(
@@ -180,8 +180,8 @@ def generate_cost_quality_chart_pb(
     data = {"agents": []}
     for a in agents:
         model = results[a].get("model", MODEL_MAP.get(a, ""))
+        blend = blended_cost(model)
         cost_info = MODEL_COSTS.get(model, {"input": 0, "output": 0})
-        combined_cost = cost_info["input"] + cost_info["output"]
         before = results[a].get("before", {})
         after = results[a].get("after", before)
         avg_before = sum(before.values()) / max(len(before), 1) if before else 0
@@ -190,18 +190,22 @@ def generate_cost_quality_chart_pb(
 
         data["agents"].append({
             "name": a.title(),
-            "cost_per_million": round(combined_cost, 2),
+            "blended_cost_per_million": round(blend, 2),
+            "input_cost_per_million": round(cost_info["input"], 2),
+            "output_cost_per_million": round(cost_info["output"], 2),
             "before_quality": round(avg_before, 4),
             "after_quality": round(avg_after, 4),
             "provider": provider,
         })
 
     intent = (
-        "Scatter plot of model cost vs average quality score. X-axis: combined cost "
-        "per million tokens (log scale). Y-axis: average quality score (0 to 1). "
-        "Show before (circle) and after (diamond) points for each model with arrows "
+        "Scatter plot of model cost vs average quality score with Pareto frontier. "
+        "X-axis: blended cost per million tokens (4:1 input:output ratio, log scale). "
+        "Y-axis: average quality score (0 to 1). "
+        "Show before (circle) and after (diamond) points for each model with dashed arrows "
         "connecting them. Color by provider: blue shades for Google, orange shades for "
-        "Anthropic. Label each point with the model name."
+        "Anthropic. Draw a green Pareto frontier line connecting non-dominated after points "
+        "(sorted by cost ascending, quality must be non-decreasing). Label each point."
     )
 
     _try_paperbanana(

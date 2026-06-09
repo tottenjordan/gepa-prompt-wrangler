@@ -21,7 +21,7 @@ from .analysis import (
     MODEL_MAP,
     PROVIDERS,
 )
-from .config import MODEL_COSTS
+from .config import MODEL_COSTS, blended_cost
 
 REPORTS_DIR = Path("outputs/reports")
 CHARTS_DIR = REPORTS_DIR / "charts"
@@ -113,14 +113,14 @@ def _methodology_section(results: dict, ordered: list[str], experiment_name: str
     lines = []
     lines.append("## Methodology\n")
     lines.append(f"**Experiment:** `{experiment_name}`\n")
-    lines.append("| Agent | Model | Provider | Cost ($/M in+out) |")
-    lines.append("|-------|-------|----------|-------------------|")
+    lines.append("| Agent | Model | Provider | Input $/M | Output $/M | Blended $/M |")
+    lines.append("|-------|-------|----------|-----------|------------|-------------|")
     for name in ordered:
         model = results[name].get("model", "unknown")
         provider = PROVIDERS.get(model, "Unknown")
         cost = MODEL_COSTS.get(model, {"input": 0, "output": 0})
-        combined = cost["input"] + cost["output"]
-        lines.append(f"| {name} | `{model}` | {provider} | ${combined:.2f} |")
+        blend = blended_cost(model)
+        lines.append(f"| {name} | `{model}` | {provider} | ${cost['input']:.2f} | ${cost['output']:.2f} | ${blend:.2f} |")
     lines.append("")
 
     lines.append("**Metrics evaluated:**\n")
@@ -207,7 +207,7 @@ def _per_model_section(results: dict, ordered: list[str]) -> list[str]:
         after = results[name].get("after", {})
         model = results[name].get("model", "unknown")
         cost = MODEL_COSTS.get(model, {"input": 0, "output": 0})
-        combined = cost["input"] + cost["output"]
+        blend = blended_cost(model)
 
         avg_b = sum(before.values()) / max(len(before), 1) if before else 0
         avg_a = sum(after.values()) / max(len(after), 1) if after else 0
@@ -218,7 +218,7 @@ def _per_model_section(results: dict, ordered: list[str]) -> list[str]:
 
         verdict = "improved" if delta > 0.005 else ("regressed" if delta < -0.005 else "stable")
 
-        lines.append(f"### {name.title()} (`{model}`, ${combined:.2f}/M)\n")
+        lines.append(f"### {name.title()} (`{model}`, ${cost['input']:.2f}/${cost['output']:.2f} in/out per M)\n")
         lines.append(f"**Overall:** {avg_b:.2f} → {avg_a:.2f} ({delta:+.3f}, {verdict})\n")
 
         if improved:
@@ -240,21 +240,23 @@ def _cost_benefit_section(results: dict, ordered: list[str]) -> list[str]:
     """Cost-benefit analysis with quality/$ ranking."""
     lines = []
     lines.append("## Cost-Benefit Analysis\n")
-    lines.append("| Agent | Model | Cost ($/M) | Before | After | Delta | Quality/$ |")
-    lines.append("|-------|-------|-----------|--------|-------|-------|----------|")
+    lines.append("| Agent | Model | Input $/M | Output $/M | Blended $/M | Before | After | Delta | Quality/$ |")
+    lines.append("|-------|-------|-----------|------------|-------------|--------|-------|-------|----------|")
 
     for name in ordered:
         model = results[name].get("model", "unknown")
         cost = MODEL_COSTS.get(model, {"input": 0, "output": 0})
-        combined = cost["input"] + cost["output"]
+        blend = blended_cost(model)
         before = results[name].get("before", {})
         after = results[name].get("after", before)
         avg_b = sum(before.values()) / max(len(before), 1) if before else 0
         avg_a = sum(after.values()) / max(len(after), 1) if after else 0
         delta = avg_a - avg_b
-        qpd = avg_a / max(combined, 0.01)
-        lines.append(f"| {name.title()} | `{model}` | ${combined:.2f} | {avg_b:.2f} | {avg_a:.2f} | {delta:+.02f} | {qpd:.3f} |")
+        qpd = avg_a / max(blend, 0.01)
+        lines.append(f"| {name.title()} | `{model}` | ${cost['input']:.2f} | ${cost['output']:.2f} | ${blend:.2f} | {avg_b:.2f} | {avg_a:.2f} | {delta:+.02f} | {qpd:.3f} |")
+
     lines.append("")
+    lines.append("*Blended $/M = weighted average assuming 4:1 input:output token ratio. Quality/$ = avg quality / blended cost.*\n")
     return lines
 
 

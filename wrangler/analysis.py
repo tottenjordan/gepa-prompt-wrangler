@@ -9,7 +9,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 
-from .config import MODEL_COSTS, REPORTS_DIR
+from .config import MODEL_COSTS, REPORTS_DIR, blended_cost
 
 METRIC_LABELS = {
     "final_response_quality_v1": "Response Quality",
@@ -102,18 +102,19 @@ def generate_comparison_chart(results: dict, charts_dir: Path | None = None):
 
 
 def generate_cost_quality_chart(results: dict, charts_dir: Path | None = None):
-    """Cost vs quality scatter with before/after arrows per model."""
+    """Cost vs quality scatter with before/after arrows and Pareto frontier."""
     charts_dir = Path(charts_dir or CHARTS_DIR)
     charts_dir.mkdir(parents=True, exist_ok=True)
     has_after = any(results[a].get("after") for a in results if not a.startswith("_"))
     fig, ax = plt.subplots(figsize=(12, 7))
 
+    pareto_points = []
+
     for agent_name, data in results.items():
         if agent_name.startswith("_"):
             continue
         model = data.get("model", "unknown")
-        cost_info = MODEL_COSTS.get(model, {"input": 0, "output": 0})
-        cost = cost_info["input"] + cost_info["output"]
+        cost = blended_cost(model)
         is_gemini = "gemini" in model
 
         before_scores = data.get("before", {})
@@ -135,6 +136,23 @@ def generate_cost_quality_chart(results: dict, charts_dir: Path | None = None):
                         textcoords="offset points", xytext=(10, 5), fontsize=9, fontweight="bold")
             ax.annotate("", xy=(cost, avg_after), xytext=(cost, avg_before),
                         arrowprops=dict(arrowstyle="->", color="gray", lw=1.2, ls="--"))
+            pareto_points.append((cost, avg_after, agent_name))
+        else:
+            pareto_points.append((cost, avg_before, agent_name))
+
+    if pareto_points:
+        pareto_points.sort(key=lambda p: p[0])
+        frontier = []
+        max_quality = -1
+        for cost_val, quality, name in pareto_points:
+            if quality >= max_quality:
+                frontier.append((cost_val, quality))
+                max_quality = quality
+        if frontier:
+            fx, fy = zip(*frontier)
+            if len(frontier) >= 2:
+                ax.plot(fx, fy, color="#10B981", ls="-", lw=2.5, alpha=0.7, zorder=3)
+            ax.scatter(fx, fy, s=80, c="#10B981", zorder=6, marker="s", edgecolors="black", linewidth=0.5)
 
     from matplotlib.lines import Line2D
     legend_items = [
@@ -147,9 +165,11 @@ def generate_cost_quality_chart(results: dict, charts_dir: Path | None = None):
         Line2D([0], [0], marker="D", color="w", markerfacecolor="#EA580C",
                markeredgecolor="black", markersize=10, label="Claude (After)"),
         Line2D([0], [0], color="gray", ls="--", lw=1.2, label="GEPA improvement"),
+        Line2D([0], [0], color="#10B981", ls="-", lw=2.5, marker="s", markersize=6,
+               markerfacecolor="#10B981", markeredgecolor="black", label="Pareto frontier"),
     ]
     ax.legend(handles=legend_items, loc="lower left", fontsize=8)
-    ax.set_xlabel("Combined Cost — Input + Output ($/M tokens)")
+    ax.set_xlabel("Blended Cost ($/M tokens, 4:1 in:out)")
     ax.set_ylabel("Average Quality Score")
     ax.set_title("Cost-Quality Tradeoff — Before & After GEPA Optimization")
     ax.set_xscale("log")
@@ -667,7 +687,7 @@ def _cost_benefit_section(model: str, before_scores: dict, after_scores: dict) -
     """Generate cost-benefit analysis section."""
     lines = []
     cost = MODEL_COSTS.get(model, {"input": 0, "output": 0})
-    provider = PROVIDERS.get(model, "Unknown")
+    blend = blended_cost(model)
 
     lines.append("## Cost-Benefit Analysis\n")
 
@@ -677,20 +697,20 @@ def _cost_benefit_section(model: str, before_scores: dict, after_scores: dict) -
 
     lines.append(f"| Metric | Value |")
     lines.append(f"|--------|-------|")
-    lines.append(f"| Input cost | ${cost['input']}/M tokens |")
-    lines.append(f"| Output cost | ${cost['output']}/M tokens |")
-    lines.append(f"| Combined cost (in+out) | ${cost['input'] + cost['output']:.2f}/M tokens |")
+    lines.append(f"| Input cost | ${cost['input']:.2f}/M tokens |")
+    lines.append(f"| Output cost | ${cost['output']:.2f}/M tokens |")
+    lines.append(f"| Blended cost (4:1 in:out) | ${blend:.2f}/M tokens |")
     lines.append(f"| Avg quality (before) | {avg_before:.2f} |")
     lines.append(f"| Avg quality (after) | {avg_after:.2f} |")
     lines.append(f"| Quality gain | {improvement:+.2f} ({improvement/max(avg_before,0.01)*100:+.1f}%) |")
 
-    quality_per_dollar = avg_after / max(cost['input'] + cost['output'], 0.01)
+    quality_per_dollar = avg_after / max(blend, 0.01)
     lines.append(f"| Quality per $/M tokens | {quality_per_dollar:.3f} |")
     lines.append("")
 
     if improvement > 0:
         lines.append(f"GEPA optimization improved average quality by **{improvement/max(avg_before,0.01)*100:+.1f}%** "
-                     f"at a cost of **${cost['input'] + cost['output']:.2f}/M tokens** (combined input+output). "
+                     f"at **${cost['input']:.2f}** input / **${cost['output']:.2f}** output per M tokens. "
                      f"The quality gain comes at zero additional inference cost — only the system prompt changed.\n")
     else:
         lines.append(f"GEPA optimization resulted in a **{improvement:+.2f}** change in average quality. "
@@ -1071,18 +1091,16 @@ def _interpretation_section(
     lines.append(f"**Best value: {best_value_name.title()}** delivers the most quality per dollar. "
                  f"**Best absolute quality: {best_quality_name.title()}** at {best_quality:.2f} average.\n")
 
-    cost_ratio = (MODEL_COSTS.get(all_results[ordered[-1]].get("model", ""), {"input": 0, "output": 0})["input"] +
-                  MODEL_COSTS.get(all_results[ordered[-1]].get("model", ""), {"input": 0, "output": 0})["output"])
-    lite_cost = (MODEL_COSTS.get(all_results[ordered[0]].get("model", ""), {"input": 0, "output": 0})["input"] +
-                 MODEL_COSTS.get(all_results[ordered[0]].get("model", ""), {"input": 0, "output": 0})["output"])
-    if lite_cost > 0 and cost_ratio > 0:
+    top_blend = blended_cost(all_results[ordered[-1]].get("model", ""))
+    lite_blend = blended_cost(all_results[ordered[0]].get("model", ""))
+    if lite_blend > 0 and top_blend > 0:
         lite_quality = sum(all_results[ordered[0]].get("after", {}).values()) / max(
             len(all_results[ordered[0]].get("after", {})), 1)
         top_quality = sum(all_results[ordered[-1]].get("after", {}).values()) / max(
             len(all_results[ordered[-1]].get("after", {})), 1)
-        lines.append(f"The most expensive model ({ordered[-1].title()} at ${cost_ratio:.2f}/M) costs "
-                     f"**{cost_ratio/lite_cost:.0f}x more** than the cheapest ({ordered[0].title()} at "
-                     f"${lite_cost:.2f}/M) but scores {top_quality:.2f} vs {lite_quality:.2f} — "
+        lines.append(f"The most expensive model ({ordered[-1].title()} at ${top_blend:.2f}/M blended) costs "
+                     f"**{top_blend/lite_blend:.0f}x more** than the cheapest ({ordered[0].title()} at "
+                     f"${lite_blend:.2f}/M blended) but scores {top_quality:.2f} vs {lite_quality:.2f} — "
                      f"{'a marginal' if abs(top_quality - lite_quality) < 0.05 else 'a meaningful'} "
                      f"quality difference.\n")
 
@@ -1228,45 +1246,43 @@ def generate_comparison_report(
     # --- Cost-Benefit Analysis ---
     lines.append("## Cost-Benefit Analysis\n")
     lines.append("### Per-Model Cost and Quality\n")
-    lines.append("| Agent | Model | Input $/M | Output $/M | Combined $/M | Avg Quality (Before) | Avg Quality (After) | Quality Gain | Quality/$ |")
+    lines.append("| Agent | Model | Input $/M | Output $/M | Blended $/M | Avg Quality (Before) | Avg Quality (After) | Quality Gain | Quality/$ |")
     lines.append("|-------|-------|-----------|------------|-------------|---------------------|--------------------|--------------|-----------:|")
     for name in ordered:
         data = all_results[name]
         model = data.get("model", "unknown")
         cost = MODEL_COSTS.get(model, {"input": 0, "output": 0})
-        combined = cost["input"] + cost["output"]
+        blend = blended_cost(model)
         before = data.get("before", {})
         after = data.get("after", {})
         avg_b = sum(before.values()) / max(len(before), 1) if before else 0
         avg_a = sum(after.values()) / max(len(after), 1) if after else 0
         gain = avg_a - avg_b
-        qpd = avg_a / max(combined, 0.01)
-        lines.append(f"| {name.title()} | `{model}` | ${cost['input']:.2f} | ${cost['output']:.2f} | ${combined:.2f} | {avg_b:.2f} | {avg_a:.2f} | {gain:+.02f} | {qpd:.3f} |")
+        qpd = avg_a / max(blend, 0.01)
+        lines.append(f"| {name.title()} | `{model}` | ${cost['input']:.2f} | ${cost['output']:.2f} | ${blend:.2f} | {avg_b:.2f} | {avg_a:.2f} | {gain:+.02f} | {qpd:.3f} |")
     lines.append("")
 
     lines.append("### Cost-Quality Tradeoff\n")
     lines.append("![Cost-Quality Tradeoff](charts/cost_quality.png)\n")
 
-    lines.append("*Quality/$ = average post-optimization quality score divided by combined token cost ($/M tokens). "
-                 "Higher is better — indicates more quality per dollar spent.*\n")
+    lines.append("*Blended $/M = weighted average assuming 4:1 input:output token ratio. "
+                 "Quality/$ = avg quality / blended cost. Higher is better.*\n")
 
     # Rank by quality per dollar
     ranked = sorted(ordered, key=lambda n: (
         sum((all_results[n].get("after") or all_results[n].get("before", {})).values()) /
         max(len((all_results[n].get("after") or all_results[n].get("before", {}))), 1)
-    ) / max(MODEL_COSTS.get(all_results[n].get("model", ""), {"input": 0, "output": 0})["input"] +
-            MODEL_COSTS.get(all_results[n].get("model", ""), {"input": 0, "output": 0})["output"], 0.01),
+    ) / max(blended_cost(all_results[n].get("model", "")), 0.01),
         reverse=True)
 
     lines.append("**Ranked by Quality/$:**\n")
     for i, name in enumerate(ranked, 1):
         model = all_results[name].get("model", "")
-        cost = MODEL_COSTS.get(model, {"input": 0, "output": 0})
-        combined = cost["input"] + cost["output"]
+        blend = blended_cost(model)
         after = all_results[name].get("after") or all_results[name].get("before", {})
         avg = sum(after.values()) / max(len(after), 1)
-        qpd = avg / max(combined, 0.01)
-        lines.append(f"{i}. **{name.title()}** — {qpd:.3f} quality/$ (avg {avg:.2f} at ${combined:.2f}/M)")
+        qpd = avg / max(blend, 0.01)
+        lines.append(f"{i}. **{name.title()}** — {qpd:.3f} quality/$ (avg {avg:.2f} at ${blend:.2f}/M blended)")
     lines.append("")
 
     # --- Charts ---
