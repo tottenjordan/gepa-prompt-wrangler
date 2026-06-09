@@ -334,6 +334,10 @@ def optimize_single_agent(
         secret_name = f"projects/{project_id}/secrets/{secret_id}/versions/latest"
         payload = sm.access_secret_version(name=secret_name).payload.data.decode("UTF-8")
         load_dotenv(stream=io.StringIO(payload), override=True)
+        # Force Vertex AI ADC — API keys don't work with Evaluation Service
+        os.environ["GOOGLE_GENAI_USE_VERTEXAI"] = "1"
+        os.environ.pop("GOOGLE_API_KEY", None)
+        os.environ.pop("GEMINI_API_KEY", None)
 
     from wrangler.optimize.optimizer import optimize
     from wrangler.core.config import MODEL_COSTS
@@ -461,6 +465,10 @@ def redeploy_single_agent(
         secret_name = f"projects/{project_id}/secrets/{secret_id}/versions/latest"
         payload = sm.access_secret_version(name=secret_name).payload.data.decode("UTF-8")
         load_dotenv(stream=io.StringIO(payload), override=True)
+        # Force Vertex AI ADC — API keys don't work with Evaluation Service
+        os.environ["GOOGLE_GENAI_USE_VERTEXAI"] = "1"
+        os.environ.pop("GOOGLE_API_KEY", None)
+        os.environ.pop("GEMINI_API_KEY", None)
 
     from wrangler.core.config import resolve_model
     from wrangler.core import deploy as deployer
