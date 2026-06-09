@@ -22,8 +22,22 @@ def _get_client():
     return vertexai.Client(project=GCP_PROJECT_ID, location=GCP_REGION)
 
 
-def deploy_agent(agent, display_name: str | None = None, env_vars: dict | None = None) -> str:
-    """Deploy a new agent to GEAP. Returns the resource name."""
+def deploy_agent(
+    agent,
+    display_name: str | None = None,
+    env_vars: dict | None = None,
+    extra_packages: list[str] | None = None,
+) -> str:
+    """Deploy a new agent to GEAP. Returns the resource name.
+
+    Args:
+        agent: The ADK agent object to deploy.
+        display_name: Display name for the agent in GEAP.
+        env_vars: Additional environment variables.
+        extra_packages: Local directories to upload alongside the agent.
+            Required when the agent's tool functions are defined in local
+            modules that aren't pip-installable (e.g., ``["agents/example_agent"]``).
+    """
     vertexai.init(
         project=GCP_PROJECT_ID,
         location=GCP_REGION,
@@ -34,6 +48,7 @@ def deploy_agent(agent, display_name: str | None = None, env_vars: dict | None =
         "staging_bucket": f"gs://{GCP_STAGING_BUCKET}",
         "requirements": REQUIREMENTS,
         "display_name": display_name or agent.name,
+        "labels": {"solution": "promp-wrangler"},
         "env_vars": {
             "GCP_PROJECT_ID": GCP_PROJECT_ID,
             "GCP_REGION": GCP_REGION,
@@ -44,6 +59,8 @@ def deploy_agent(agent, display_name: str | None = None, env_vars: dict | None =
             **(env_vars or {}),
         },
     }
+    if extra_packages:
+        config["extra_packages"] = extra_packages
 
     print(f"  Deploying {agent.name}...")
     remote = _get_client().agent_engines.create(agent=agent, config=config)
@@ -53,7 +70,13 @@ def deploy_agent(agent, display_name: str | None = None, env_vars: dict | None =
     return engine_id
 
 
-def update_agent(agent, engine_id: str, display_name: str | None = None, env_vars: dict | None = None) -> str:
+def update_agent(
+    agent,
+    engine_id: str,
+    display_name: str | None = None,
+    env_vars: dict | None = None,
+    extra_packages: list[str] | None = None,
+) -> str:
     """Update an existing agent on GEAP. Returns the resource name."""
     vertexai.init(
         project=GCP_PROJECT_ID,
@@ -68,6 +91,7 @@ def update_agent(agent, engine_id: str, display_name: str | None = None, env_var
         "staging_bucket": f"gs://{GCP_STAGING_BUCKET}",
         "requirements": REQUIREMENTS,
         "display_name": display_name or agent.name,
+        "labels": {"solution": "promp-wrangler"},
         "env_vars": {
             "GCP_PROJECT_ID": GCP_PROJECT_ID,
             "GCP_REGION": GCP_REGION,
@@ -78,6 +102,8 @@ def update_agent(agent, engine_id: str, display_name: str | None = None, env_var
             **(env_vars or {}),
         },
     }
+    if extra_packages:
+        config["extra_packages"] = extra_packages
 
     print(f"  Updating {agent.name} ({engine_id.split('/')[-1]})...")
     remote = _get_client().agent_engines.update(

@@ -14,12 +14,12 @@ os.environ.setdefault("ADK_SUPPRESS_GEMINI_LITELLM_WARNINGS", "true")
 warnings.filterwarnings("ignore", message=".*EXPERIMENTAL.*")
 warnings.filterwarnings("ignore", message=".*GEMINI_VIA_LITELLM.*")
 
-from .factory import PairFactory, AgentPromptPair, Manifest
-from .converter import load_eval_file
-from .evaluator import run_batch_eval_averaged, EvalResult
-from .optimizer import optimize
-from .reporter import generate_report
-from . import deploy as deployer
+from ..core.factory import PairFactory, AgentPromptPair, Manifest
+from ..core.converter import load_eval_file
+from ..eval.evaluator import run_batch_eval_averaged, EvalResult
+from ..optimize.optimizer import optimize
+from ..reporting.reporter import generate_report
+from ..core import deploy as deployer
 
 
 def _fmt_duration(seconds: float) -> str:
@@ -114,7 +114,7 @@ class WranglerPipeline:
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
 
-        from .config import resolve_model
+        from ..core.config import resolve_model
 
         if hasattr(module, "create_agent"):
             return module.create_agent(pair.model, pair.system_prompt)

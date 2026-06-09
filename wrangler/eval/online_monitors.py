@@ -20,7 +20,7 @@ from pathlib import Path
 import vertexai
 from vertexai import Client, types
 
-from .config import GCP_PROJECT_ID, GCP_REGION, GCP_STAGING_BUCKET, OUTPUTS_DIR
+from ..core.config import GCP_PROJECT_ID, GCP_REGION, GCP_STAGING_BUCKET, OUTPUTS_DIR
 
 QUICK_EVAL_CASES = [
     "Find flights from SFO to JFK",
@@ -84,6 +84,7 @@ def run_quick_eval(agent_id: str, num_cases: int = None) -> dict:
         agent=agent_resource,
         metrics=EVAL_METRICS,
         dest=GCS_DEST,
+        labels={"solution": "promp-wrangler"},
     )
 
     poll_start = time.time()

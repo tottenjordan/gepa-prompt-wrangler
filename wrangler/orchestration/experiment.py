@@ -11,7 +11,7 @@ from typing import Any
 
 import yaml
 
-from .factory import PairFactory, Manifest, AgentPromptPair
+from ..core.factory import PairFactory, Manifest, AgentPromptPair
 
 STAGES = ("deploy", "eval_before", "optimize", "redeploy", "eval_after", "report", "analyze")
 

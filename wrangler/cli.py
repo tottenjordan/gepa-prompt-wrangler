@@ -33,7 +33,7 @@ def experiment():
 @click.option("--dir", "base_dir", default="experiments/active", help="Base directory for experiments.")
 def experiment_create(manifest: str, name: str, version: str, base_dir: str):
     """Create a new experiment from a manifest YAML."""
-    from .experiment import Experiment
+    from .orchestration.experiment import Experiment
 
     exp = Experiment.create(manifest, name=name, version=version, base_dir=base_dir)
     click.echo(f"Created experiment: {exp.dir}")
@@ -47,7 +47,7 @@ def experiment_create(manifest: str, name: str, version: str, base_dir: str):
 @click.argument("experiment_dir")
 def status(experiment_dir: str):
     """Show experiment stage completion status."""
-    from .experiment import Experiment
+    from .orchestration.experiment import Experiment
 
     exp = Experiment.load(experiment_dir)
     exp.print_status()
@@ -65,15 +65,15 @@ def deploy(target: str, pair: str):
     TARGET can be an experiment directory or a manifest.yaml file.
     """
     if _is_experiment_dir(target):
-        from .experiment import Experiment
-        from .stages import stage_deploy
+        from .orchestration.experiment import Experiment
+        from .orchestration.stages import stage_deploy
 
         exp = Experiment.load(target)
         click.echo(f"Deploying — experiment: {exp.name}")
         stage_deploy(exp, pair_id=pair)
     else:
-        from .runner import WranglerPipeline
-        from . import deploy as deployer
+        from .orchestration.runner import WranglerPipeline
+        from .core import deploy as deployer
 
         pipeline = WranglerPipeline(target)
         pairs = [pipeline.manifest.get_pair(pair)] if pair else pipeline.manifest.pairs
@@ -100,8 +100,8 @@ def eval_cmd(target: str, phase: str, pair: str, engine_id: str, eval_data: str,
     Standalone mode:  wrangler eval --engine-id <id> --eval-data <path>
     """
     if _is_experiment_dir(target):
-        from .experiment import Experiment
-        from .stages import stage_eval
+        from .orchestration.experiment import Experiment
+        from .orchestration.stages import stage_eval
 
         if phase not in ("before", "after"):
             click.echo(f"Error: phase must be 'before' or 'after', got '{phase}'")
@@ -112,13 +112,13 @@ def eval_cmd(target: str, phase: str, pair: str, engine_id: str, eval_data: str,
         stage_eval(exp, phase=phase, pair_id=pair, num_runs=num_runs if num_runs > 1 else None,
                    retry_failed=retry_failed)
     elif engine_id:
-        from .converter import load_eval_file
-        from .evaluator import run_batch_eval_averaged
+        from .core.converter import load_eval_file
+        from .eval.evaluator import run_batch_eval_averaged
 
         if eval_data:
             eval_cases = load_eval_file(eval_data)
         elif target and os.path.exists(target):
-            from .factory import PairFactory
+            from .core.factory import PairFactory
             m = PairFactory.load(target)
             eval_cases = load_eval_file(m.eval_data)
         else:
@@ -149,15 +149,15 @@ def optimize(target: str, pair: str, judge_model: str, version: str):
     TARGET can be an experiment directory or a manifest.yaml file.
     """
     if _is_experiment_dir(target):
-        from .experiment import Experiment
-        from .stages import stage_optimize
+        from .orchestration.experiment import Experiment
+        from .orchestration.stages import stage_optimize
 
         exp = Experiment.load(target)
         click.echo(f"Optimizing — experiment: {exp.name}")
         stage_optimize(exp, pair_id=pair)
     else:
-        from .factory import PairFactory
-        from .optimizer import optimize as run_optimize
+        from .core.factory import PairFactory
+        from .optimize.optimizer import optimize as run_optimize
 
         m = PairFactory.load(target)
         pairs = [m.get_pair(pair)] if pair else m.pairs
@@ -178,8 +178,8 @@ def optimize(target: str, pair: str, judge_model: str, version: str):
 @click.option("--pair", "-p", default=None, help="Redeploy only a specific pair by ID.")
 def redeploy(experiment_dir: str, pair: str):
     """Redeploy agents with optimized prompts."""
-    from .experiment import Experiment
-    from .stages import stage_redeploy
+    from .orchestration.experiment import Experiment
+    from .orchestration.stages import stage_redeploy
 
     exp = Experiment.load(experiment_dir)
     click.echo(f"Redeploying — experiment: {exp.name}")
@@ -190,8 +190,8 @@ def redeploy(experiment_dir: str, pair: str):
 @click.argument("experiment_dir")
 def analyze(experiment_dir: str):
     """Analyze experiment results — per-pair diffs, prompt analysis, recommendations."""
-    from .experiment import Experiment
-    from .analyzer import run_analysis
+    from .orchestration.experiment import Experiment
+    from .reporting.analyzer import run_analysis
 
     exp = Experiment.load(experiment_dir)
     click.echo(f"Analyzing — experiment: {exp.name}")
@@ -208,8 +208,8 @@ def report(target: str, no_paperbanana: bool):
     TARGET can be an experiment directory or an outputs directory with results JSON.
     """
     if _is_experiment_dir(target):
-        from .experiment import Experiment
-        from .stages import stage_report
+        from .orchestration.experiment import Experiment
+        from .orchestration.stages import stage_report
 
         exp = Experiment.load(target)
         click.echo(f"Generating report — experiment: {exp.name}")
@@ -225,7 +225,7 @@ def report(target: str, no_paperbanana: bool):
         with open(results_files[-1]) as f:
             results = json.load(f)
 
-        from .reporter import generate_report
+        from .reporting.reporter import generate_report
         generate_report(results, "experiment", use_paperbanana=not no_paperbanana)
         click.echo("Report generated at outputs/reports/experiment_report.md")
 
@@ -249,7 +249,7 @@ def run(manifest: str, name: str, version: str, num_runs: int, pair: str, dry_ru
     Creates an experiment directory and runs all stages in sequence.
     """
     if resume_from or from_phase > 0:
-        from .runner import WranglerPipeline
+        from .orchestration.runner import WranglerPipeline
         pipeline = WranglerPipeline(manifest, max_concurrent=max_concurrent, version=version, num_runs=num_runs)
         if resume_from:
             pipeline.load_results(resume_from)
@@ -257,7 +257,7 @@ def run(manifest: str, name: str, version: str, num_runs: int, pair: str, dry_ru
         return
 
     if dry_run:
-        from .factory import PairFactory
+        from .core.factory import PairFactory
         m = PairFactory.load(manifest)
         click.echo(f"Manifest: {m.name}")
         click.echo(f"Pairs: {len(m.pairs)}")
@@ -265,8 +265,8 @@ def run(manifest: str, name: str, version: str, num_runs: int, pair: str, dry_ru
             click.echo(f"  {p.summary()}")
         return
 
-    from .experiment import Experiment
-    from .stages import stage_deploy, stage_eval, stage_optimize, stage_redeploy, stage_report
+    from .orchestration.experiment import Experiment
+    from .orchestration.stages import stage_deploy, stage_eval, stage_optimize, stage_redeploy, stage_report
 
     exp = Experiment.create(manifest, name=name, version=version)
 
@@ -315,7 +315,7 @@ def init(output: str, agent_dir: str):
         raise SystemExit(1)
 
     if agent_dir:
-        from .inspector import AgentInspector
+        from .tools.inspector import AgentInspector
 
         click.echo(f"Inspecting agent at {agent_dir}...")
         try:
@@ -377,7 +377,7 @@ def init(output: str, agent_dir: str):
 @click.option("--output", "-o", default=None, help="Output YAML file path")
 def inspect(agent_path: str, output: str):
     """Inspect an agent module and discover its tools."""
-    from .inspector import AgentInspector
+    from .tools.inspector import AgentInspector
 
     spec = AgentInspector.inspect(agent_path)
     yaml_str = AgentInspector.to_yaml(spec)
@@ -404,7 +404,7 @@ def inspect(agent_path: str, output: str):
 @click.option("--app-name", default=None, help="App name (defaults to output directory name).")
 def generate_evalset(from_path: str, output: str, count: int, balanced: bool, app_name: str):
     """Generate a GEPA-compatible evalset from simplified eval cases."""
-    from .converter import load_eval_file, generate_gepa_evalset, generate_sampler_config
+    from .core.converter import load_eval_file, generate_gepa_evalset, generate_sampler_config
 
     cases = load_eval_file(from_path)
     click.echo(f"Loaded {len(cases)} eval cases from {from_path}")
@@ -421,6 +421,61 @@ def generate_evalset(from_path: str, output: str, count: int, balanced: bool, ap
 
     generate_sampler_config(app_name, eval_set_id, output_dir=output)
     click.echo(f"  Sampler config: {Path(output) / 'sampler_config.json'}")
+
+
+# ── Pipeline commands ─────────────────────────────────────────
+
+
+@main.group()
+def pipeline():
+    """Run GEPA optimization as a Vertex AI Pipeline."""
+
+
+@pipeline.command("run")
+@click.argument("manifest")
+@click.option("--run-id", default=None, help="Custom run ID (default: auto-generated timestamp).")
+@click.option("--num-runs", default=1, type=int, help="Number of eval averaging runs per pair.")
+@click.option("--quick-test", is_flag=True, help="Quick validation run with minimal resources.")
+def pipeline_run(manifest: str, run_id: str | None, num_runs: int, quick_test: bool):
+    """Compile and submit the GEPA pipeline to Vertex AI."""
+    import logging
+
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
+
+    from .pipeline.deploy_pipeline import deploy_pipeline
+
+    result = deploy_pipeline(
+        manifest_path=manifest,
+        run_id=run_id,
+        num_runs=num_runs,
+        quick_test=quick_test,
+    )
+    click.echo(f"\nPipeline submitted:")
+    click.echo(f"  Run ID:    {result['run_id']}")
+    click.echo(f"  Job ID:    {result['job_id']}")
+    click.echo(f"  Dashboard: {result['dashboard_uri']}")
+
+
+@pipeline.command("status")
+@click.argument("job_id")
+def pipeline_status(job_id: str):
+    """Check the status of a pipeline job."""
+    from google.cloud import aiplatform
+
+    project_id = os.environ.get("GCP_PROJECT_ID", "")
+    location = os.environ.get("GCP_REGION", "us-central1")
+
+    aiplatform.init(project=project_id, location=location)
+    job = aiplatform.PipelineJob.get(resource_name=job_id)
+    click.echo(f"Job:    {job.display_name}")
+    click.echo(f"State:  {job.state}")
+    click.echo(f"Create: {job.create_time}")
+    end = getattr(job, "end_time", None) or getattr(job, "update_time", None)
+    if end:
+        click.echo(f"End:    {end}")
+    error = getattr(job, "error", None)
+    if error:
+        click.echo(f"Error:  {error}")
 
 
 if __name__ == "__main__":

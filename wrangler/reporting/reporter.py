@@ -13,7 +13,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 
-from .factory import AgentPromptPair
+from ..core.factory import AgentPromptPair
 from .analysis import (
     normalize_agent_keys,
     generate_all_charts,
@@ -22,7 +22,7 @@ from .analysis import (
     MODEL_MAP,
     PROVIDERS,
 )
-from .config import MODEL_COSTS, blended_cost
+from ..core.config import MODEL_COSTS, blended_cost
 
 REPORTS_DIR = Path("outputs/reports")
 CHARTS_DIR = REPORTS_DIR / "charts"

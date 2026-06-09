@@ -30,8 +30,8 @@ from pathlib import Path
 import vertexai
 from vertexai import agent_engines
 
-from .config import GCP_PROJECT_ID, GCP_REGION, disable_pyopenssl
-from .converter import load_eval_file
+from ..core.config import GCP_PROJECT_ID, GCP_REGION, disable_pyopenssl
+from ..core.converter import load_eval_file
 
 DEFAULT_QUERIES = [
     ("Find flights from SFO to JFK", "low"),

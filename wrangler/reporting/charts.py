@@ -18,7 +18,7 @@ from .analysis import (
     MODEL_MAP,
     PROVIDERS,
 )
-from .config import MODEL_COSTS, blended_cost
+from ..core.config import MODEL_COSTS, blended_cost
 
 
 def _try_paperbanana(

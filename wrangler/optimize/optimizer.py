@@ -359,7 +359,7 @@ def optimize(
     _patch_adk()
 
     import vertexai
-    from .config import GCP_PROJECT_ID, GCP_REGION, GCP_STAGING_BUCKET
+    from ..core.config import GCP_PROJECT_ID, GCP_REGION, GCP_STAGING_BUCKET
     vertexai.init(
         project=GCP_PROJECT_ID,
         location=GCP_REGION,
@@ -451,7 +451,7 @@ def optimize(
     evalset_files = [f for f in os.listdir(evalset_dir) if f.endswith(".evalset.json")] if os.path.isdir(evalset_dir) else []
     if not evalset_files and eval_data_path:
         print(f"{tag}  No evalset files in {evalset_dir} — auto-generating from {eval_data_path}", flush=True)
-        from .converter import load_eval_file, generate_gepa_evalset, generate_sampler_config
+        from ..core.converter import load_eval_file, generate_gepa_evalset, generate_sampler_config
         cases = load_eval_file(eval_data_path)
         eval_set_id = f"{app_name}_eval_set"
         generate_gepa_evalset(cases, evalset_dir, eval_set_id=eval_set_id, app_name=app_name)

@@ -8,12 +8,12 @@ from datetime import datetime
 from pathlib import Path
 
 from .experiment import Experiment
-from .factory import AgentPromptPair, Manifest
-from .converter import load_eval_file
-from .evaluator import run_batch_eval_averaged, EvalResult
-from .optimizer import optimize
-from .reporter import generate_report as _generate_report
-from . import deploy as deployer
+from ..core.factory import AgentPromptPair, Manifest
+from ..core.converter import load_eval_file
+from ..eval.evaluator import run_batch_eval_averaged, EvalResult
+from ..optimize.optimizer import optimize
+from ..reporting.reporter import generate_report as _generate_report
+from ..core import deploy as deployer
 
 
 def _fmt_duration(seconds: float) -> str:
@@ -49,7 +49,7 @@ def _validate_sampler_config(
                 warnings.append(f"judge model mismatch: {key} uses '{cfg_judge}', experiment uses '{judge_model}'")
 
     if eval_thresholds:
-        from .optimizer import METRIC_NAME_MAP
+        from ..optimize.optimizer import METRIC_NAME_MAP
         for metric, threshold in eval_thresholds.items():
             actual_key = metric
             if metric not in criteria and metric in METRIC_NAME_MAP:
@@ -118,7 +118,7 @@ def _load_agent(manifest: Manifest, pair: AgentPromptPair, manifest_dir: Path | 
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
 
-    from .config import resolve_model
+    from ..core.config import resolve_model
 
     if hasattr(module, "create_agent"):
         return module.create_agent(pair.model, pair.system_prompt)
@@ -481,12 +481,12 @@ def stage_report(exp: Experiment, use_paperbanana: bool = True) -> None:
     import matplotlib
     matplotlib.use("Agg")
 
-    from .reporter import REPORTS_DIR, CHARTS_DIR
+    from ..reporting.reporter import REPORTS_DIR, CHARTS_DIR
     original_reports = REPORTS_DIR
     original_charts = CHARTS_DIR
 
     try:
-        from . import reporter
+        from ..reporting import reporter
         reporter.REPORTS_DIR = exp.dir / "reports"
         reporter.CHARTS_DIR = exp.dir / "images"
         reporter.REPORTS_DIR.mkdir(parents=True, exist_ok=True)
