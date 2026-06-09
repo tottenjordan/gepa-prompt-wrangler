@@ -2,7 +2,6 @@
 
 import os
 from dotenv import load_dotenv
-from google.adk.models.lite_llm import LiteLlm
 
 load_dotenv()
 
@@ -33,9 +32,9 @@ BLENDED_INPUT_WEIGHT = 4
 BLENDED_OUTPUT_WEIGHT = 1
 
 
-def blended_cost(model: str) -> float:
+def blended_cost(model: str, custom_costs: dict[str, float] | None = None) -> float:
     """Estimated cost per 1M tokens assuming 4:1 input:output token ratio."""
-    cost = MODEL_COSTS.get(model, {"input": 0, "output": 0})
+    cost = custom_costs or MODEL_COSTS.get(model, {"input": 0, "output": 0})
     w = BLENDED_INPUT_WEIGHT + BLENDED_OUTPUT_WEIGHT
     return (BLENDED_INPUT_WEIGHT * cost["input"] + BLENDED_OUTPUT_WEIGHT * cost["output"]) / w
 
@@ -73,14 +72,19 @@ def resolve_model(model_str: str):
     """Resolve model string to an ADK-compatible model.
 
     Gemini 2.x models work in regional endpoints — pass as plain strings.
-    Gemini 3.x and Claude models require location=global, so they are
-    wrapped with LiteLLM which supports per-model location.
+    Gemini 3.x models use the native Gemini class (global endpoint via env).
+    Claude models use the native Claude class (Vertex AI via env).
+
+    Both Gemini and Claude read GOOGLE_CLOUD_LOCATION from the environment,
+    which should be set to "global" for 3.x models.
     """
     if model_str.startswith(("gemini-2", "models/")):
         return model_str
-    if not model_str.startswith("vertex_ai/"):
-        model_str = f"vertex_ai/{model_str}"
-    return LiteLlm(model=model_str, vertex_location="global")
+    if model_str.startswith("claude"):
+        from google.adk.models.anthropic_llm import Claude
+        return Claude(model=model_str)
+    from google.adk.models.google_llm import Gemini
+    return Gemini(model=model_str)
 
 
 def disable_pyopenssl():

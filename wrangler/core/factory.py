@@ -21,6 +21,7 @@ class AgentPromptPair:
     tags: list[str] = field(default_factory=list)
     engine_id: str = ""
     agent_module: str = ""
+    costs: dict[str, float] | None = None
 
     def summary(self) -> str:
         """One-line summary for display."""
@@ -80,6 +81,11 @@ class PairFactory:
             if "system_prompt" not in entry:
                 raise ValueError(f"Pair {pair_id!r} is missing required field: 'system_prompt'")
 
+            raw_costs = entry.get("costs")
+            costs = None
+            if isinstance(raw_costs, dict) and "input" in raw_costs and "output" in raw_costs:
+                costs = {"input": float(raw_costs["input"]), "output": float(raw_costs["output"])}
+
             pairs.append(
                 AgentPromptPair(
                     id=pair_id,
@@ -90,6 +96,7 @@ class PairFactory:
                     tags=entry.get("tags", []),
                     engine_id=entry.get("engine_id", ""),
                     agent_module=entry.get("agent_module", ""),
+                    costs=costs,
                 )
             )
 

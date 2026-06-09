@@ -16,7 +16,7 @@ import vertexai
 from vertexai import Client, types
 from vertexai._genai import _evals_common
 
-from .config import GCP_PROJECT_ID, GCP_REGION, GCP_STAGING_BUCKET, get_batch_config
+from ..core.config import GCP_PROJECT_ID, GCP_REGION, GCP_STAGING_BUCKET, get_batch_config
 
 GCS_EVAL_DEST = f"gs://{GCP_STAGING_BUCKET}/eval-results/"
 MAX_POLL_SECONDS = 2400
@@ -69,15 +69,27 @@ def _resolve_resource_name(engine_id: str) -> str:
 def _extract_per_case_scores(evaluation_run) -> list[dict[str, float]]:
     """Extract per-case metric scores from evaluation run results.
 
-    SDK path: evaluation_item_results.eval_case_results[i].response_candidate_results[0].metric_results
+    Primary path: evaluation_item_results.eval_case_results[i]
+                  .response_candidate_results[0].metric_results
+
+    The SDK populates evaluation_item_results via
+    _convert_evaluation_run_results(), which returns None when
+    evaluation_run_results.evaluation_set is missing. When that
+    happens, fall back to fetching evaluation items directly via
+    the API client.
     """
     per_case: list[dict[str, float]] = []
     try:
         item_results = getattr(evaluation_run, "evaluation_item_results", None)
-        if not item_results:
+        if item_results is None:
+            per_case = _extract_per_case_via_api(evaluation_run)
+            if not per_case:
+                print("  Warning: evaluation_item_results is None and API fallback returned no results")
             return per_case
+
         case_results = getattr(item_results, "eval_case_results", None)
         if not case_results:
+            print("  Warning: eval_case_results is empty")
             return per_case
 
         for case_result in case_results:
@@ -95,6 +107,40 @@ def _extract_per_case_scores(evaluation_run) -> list[dict[str, float]]:
             per_case.append(case_scores)
     except Exception as e:
         print(f"  Warning extracting per-case scores: {e}")
+    return per_case
+
+
+def _extract_per_case_via_api(evaluation_run) -> list[dict[str, float]]:
+    """Fallback: fetch per-case scores directly from the Evaluation Management API."""
+    per_case: list[dict[str, float]] = []
+    try:
+        run_results = getattr(evaluation_run, "evaluation_run_results", None)
+        if not run_results or not getattr(run_results, "evaluation_set", None):
+            return per_case
+
+        client = Client(project=GCP_PROJECT_ID, location=GCP_REGION)
+        eval_set_name = run_results.evaluation_set
+        eval_set = client.evals.get_evaluation_set(name=eval_set_name)
+        if not eval_set or not getattr(eval_set, "evaluation_items", None):
+            return per_case
+
+        for item_name in eval_set.evaluation_items:
+            case_scores: dict[str, float] = {}
+            try:
+                item = client.evals.get_evaluation_item(name=item_name)
+                response = getattr(item, "evaluation_response", None)
+                if response:
+                    for candidate in getattr(response, "candidate_results", []):
+                        metric = getattr(candidate, "metric", "")
+                        score = getattr(candidate, "score", None)
+                        if metric and score is not None:
+                            short = metric.split("/")[-1] if "/" in metric else metric
+                            case_scores[short] = float(score)
+            except Exception:
+                pass
+            per_case.append(case_scores)
+    except Exception as e:
+        print(f"  Warning in API fallback for per-case scores: {e}")
     return per_case
 
 
@@ -270,6 +316,7 @@ def run_batch_eval(
         agent=agent_resource,
         metrics=metrics,
         dest=GCS_EVAL_DEST,
+        labels={"solution": "promp-wrangler"},
     )
     run_id = evaluation_run.name.split("/")[-1] if evaluation_run.name else "unknown"
     print(f"  {tag}Scoring: eval run {run_id} created, polling for results...", flush=True)
