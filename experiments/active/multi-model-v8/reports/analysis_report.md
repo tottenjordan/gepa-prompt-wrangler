@@ -1,6 +1,6 @@
 # Analysis Report — multi-model-v8
 
-Generated: 2026-06-09T02:49:23
+Generated: 2026-06-09T04:49:04
 
 ## Summary
 
@@ -16,6 +16,8 @@ Generated: 2026-06-09T02:49:23
 
 ### Response Match (`final_response_match_v2`)
 
+GEPA threshold: **0.5**
+
 | Pair | Before | After | Delta | Significant? |
 |------|--------|-------|-------|-------------|
 | flash-lite-gemini-3.1 | 0.453 | 0.433 | -0.020 | no |
@@ -25,6 +27,8 @@ Generated: 2026-06-09T02:49:23
 | opus-claude-4 | 0.300 | 0.335 | +0.035 | no |
 
 ### Quality (`final_response_quality_v1`)
+
+GEPA threshold: **0.7**
 
 | Pair | Before | After | Delta | Significant? |
 |------|--------|-------|-------|-------------|
@@ -36,6 +40,8 @@ Generated: 2026-06-09T02:49:23
 
 ### Hallucination (`hallucination_v1`)
 
+GEPA threshold: **0.8**
+
 | Pair | Before | After | Delta | Significant? |
 |------|--------|-------|-------|-------------|
 | flash-lite-gemini-3.1 | 0.981 | 0.947 | -0.035 | YES |
@@ -45,6 +51,8 @@ Generated: 2026-06-09T02:49:23
 | opus-claude-4 | 0.860 | 0.915 | +0.055 | YES |
 
 ### Instruction (`instruction_following_v1`)
+
+GEPA threshold: **0.5**
 
 | Pair | Before | After | Delta | Significant? |
 |------|--------|-------|-------|-------------|
@@ -56,6 +64,8 @@ Generated: 2026-06-09T02:49:23
 
 ### Safety (`safety_v1`)
 
+GEPA threshold: **0.8**
+
 | Pair | Before | After | Delta | Significant? |
 |------|--------|-------|-------|-------------|
 | flash-lite-gemini-3.1 | 0.984 | 0.996 | +0.012 | no |
@@ -65,6 +75,8 @@ Generated: 2026-06-09T02:49:23
 | opus-claude-4 | 0.911 | 0.946 | +0.035 | no |
 
 ### Tool Use (`tool_use_quality_v1`)
+
+GEPA threshold: **0.3**
 
 | Pair | Before | After | Delta | Significant? |
 |------|--------|-------|-------|-------------|
@@ -135,18 +147,18 @@ Generated: 2026-06-09T02:49:23
 
 ### flash-lite-gemini-3.1
 
-Degraded metrics: Hallucination, Instruction, Response Match
+Degraded metrics: Instruction, Hallucination, Response Match
 
-- **Hallucination**: -0.035 (-4%)
 - **Instruction**: -0.028 (-5%)
+- **Hallucination**: -0.035 (-4%)
 - **Response Match**: -0.020 (-4%)
 
 ### flash-gemini-3.5
 
-Degraded metrics: Hallucination, Instruction, Tool Use
+Degraded metrics: Instruction, Hallucination, Tool Use
 
-- **Hallucination**: -0.074 (-8%)
 - **Instruction**: -0.088 (-14%)
+- **Hallucination**: -0.074 (-8%)
 - **Tool Use**: -0.027 (-6%)
 
 ### pro-gemini-3.1
@@ -171,6 +183,19 @@ Degraded metrics: Quality, Instruction
 
 - **Quality**: -0.034 (-4%)
 - **Instruction**: -0.033 (-6%)
+
+## Threshold Alignment Check
+
+Checks whether GEPA thresholds are calibrated against baseline scores.
+
+| Metric | Threshold | Min Baseline | Gap | Status |
+|--------|-----------|-------------|-----|--------|
+| final_response_match_v2 | 0.5 | 0.208 | -0.292 | FAILING |
+| final_response_quality_v1 | 0.7 | 0.793 | +0.093 | OK |
+| hallucination_v1 | 0.8 | 0.860 | +0.060 | OK |
+| instruction_following_v1 | 0.5 | 0.502 | +0.002 | TIGHT |
+| safety_v1 | 0.8 | 0.903 | +0.103 | OK |
+| tool_use_quality_v1 | 0.3 | 0.382 | +0.082 | OK |
 
 ## Per-Case Analysis
 
@@ -307,18 +332,14 @@ Checks whether optimized prompts retained tool-related terminology.
 
 ## Cost Efficiency
 
-| Pair | Cost ($/M) | Avg Delta | Cost per +0.01 |
-|------|-----------|----------|----------------|
-| flash-lite-gemini-3.1 | $0.30 | -0.003 | regressed |
-| flash-gemini-3.5 | $0.60 | -0.012 | regressed |
-| pro-gemini-3.1 | $10.00 | -0.011 | regressed |
-| sonnet-claude-4 | $15.00 | +0.014 | $10.67 |
-| opus-claude-4 | $75.00 | +0.009 | $82.39 |
+| Pair | Model | Blended $/M | Avg Delta | Cost per +0.01 |
+|------|-------|------------|----------|----------------|
+| flash-lite-gemini-3.1 | gemini-3.1-flash-lite | $0.50 | -0.003 | regressed |
+| flash-gemini-3.5 | gemini-3.5-flash | $3.00 | -0.012 | regressed |
+| pro-gemini-3.1 | gemini-3.1-pro-preview | $6.80 | -0.011 | regressed |
+| sonnet-claude-4 | claude-sonnet-4-6 | $5.40 | +0.014 | $3.84 |
+| opus-claude-4 | claude-opus-4-6 | $9.00 | +0.009 | $9.89 |
 
 ## Recommendations
 
-1. **Add thresholds for**: final_response_match_v2, final_response_quality_v1, hallucination_v1, instruction_following_v1, safety_v1, tool_use_quality_v1
-   Metrics without thresholds default to 0.0 in GEPA — no optimization pressure.
-
-2. **Investigate metric name alignment** between GEPA local eval and cloud eval.
-   Mismatched names mean GEPA optimizes for different metrics than cloud reports.
+No actionable recommendations — all metrics improved or held steady.

@@ -464,8 +464,19 @@ def stage_report(exp: Experiment, use_paperbanana: bool = True) -> None:
             "after": eval_after.get(pair_id, {}).get("scores", {}),
             "after_per_case": eval_after.get(pair_id, {}).get("per_case", []),
             "after_std": eval_after.get(pair_id, {}).get("scores_std", {}),
+            "num_runs": eval_before.get(pair_id, {}).get("num_runs", 1),
             "optimized_prompt": optimize_data.get(pair_id, {}).get("optimized_prompt", ""),
         }
+
+    eval_path = _resolve_eval_path(exp.manifest, _manifest_dir(exp))
+    eval_cases = load_eval_file(str(eval_path))
+    results["_eval_metadata"] = {
+        "cases": [
+            {"tier": c.get("tier", ""), "category": c.get("category", ""),
+             "prompt": c.get("prompt", ""), "index": i}
+            for i, c in enumerate(eval_cases)
+        ]
+    }
 
     import matplotlib
     matplotlib.use("Agg")

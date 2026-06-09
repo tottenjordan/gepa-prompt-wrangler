@@ -1,6 +1,7 @@
 """Experiment report generation — charts + markdown for prompt optimization experiments."""
 
 import csv
+import math
 import re
 import subprocess
 import shutil
@@ -193,6 +194,133 @@ def _scores_section(results: dict, ordered: list[str]) -> list[str]:
     return lines
 
 
+def _significance_section(results: dict, ordered: list[str]) -> list[str]:
+    """Flag which metric deltas are statistically significant."""
+    lines = []
+    has_after = any(results[n].get("after") for n in ordered)
+    has_std = any(results[n].get("before_std") or results[n].get("after_std") for n in ordered)
+    if not has_after or not has_std:
+        return lines
+
+    lines.append("## Statistical Significance\n")
+    lines.append("Pooled standard error: `se = sqrt(std_before² + std_after²) / sqrt(n)`. "
+                 "Significant if `|delta| > 2 × se` (approx. p < 0.05).\n")
+
+    header = "| Metric |" + " | ".join(n.title() for n in ordered) + " |"
+    sep = "|--------|" + " | ".join("------" for _ in ordered) + " |"
+    lines.append(header)
+    lines.append(sep)
+
+    sig_count = 0
+    total_count = 0
+    for key, label in METRIC_LABELS.items():
+        row = f"| {label} |"
+        for name in ordered:
+            b = results[name].get("before", {}).get(key, 0)
+            a = results[name].get("after", {}).get(key, 0)
+            d = a - b
+            b_std = results[name].get("before_std", {}).get(key, 0)
+            a_std = results[name].get("after_std", {}).get(key, 0)
+            num_runs = results[name].get("num_runs", 3)
+            if num_runs < 2:
+                num_runs = 3
+            se = math.sqrt(b_std**2 + a_std**2) / math.sqrt(num_runs)
+            total_count += 1
+            if se > 0 and abs(d) > 2 * se:
+                sig_count += 1
+                row += f" {d:+.02f} ★ |"
+            else:
+                row += f" {d:+.02f} |"
+        lines.append(row)
+    lines.append("")
+    lines.append(f"*★ = statistically significant. {sig_count}/{total_count} metric-model combinations showed significant change.*\n")
+    return lines
+
+
+def _per_case_winners_losers(results: dict, ordered: list[str], case_metadata: list[dict] | None) -> list[str]:
+    """Show top improved and regressed test cases per model."""
+    lines = []
+    has_per_case = any(
+        results[n].get("before_per_case") and results[n].get("after_per_case")
+        for n in ordered
+    )
+    if not has_per_case:
+        return lines
+
+    lines.append("## Per-Case Winners & Losers\n")
+
+    for name in ordered:
+        before_cases = results[name].get("before_per_case", [])
+        after_cases = results[name].get("after_per_case", [])
+        if not before_cases or not after_cases:
+            continue
+
+        n_cases = min(len(before_cases), len(after_cases))
+        case_deltas = []
+        for i in range(n_cases):
+            bc = before_cases[i]
+            ac = after_cases[i]
+            common = set(bc) & set(ac)
+            if not common:
+                continue
+            avg_delta = sum(ac.get(m, 0) - bc.get(m, 0) for m in common) / len(common)
+            best_m = max(common, key=lambda m: ac.get(m, 0) - bc.get(m, 0))
+            worst_m = min(common, key=lambda m: ac.get(m, 0) - bc.get(m, 0))
+            case_deltas.append((i, avg_delta, best_m, worst_m))
+
+        if not case_deltas:
+            continue
+
+        case_deltas.sort(key=lambda x: x[1])
+        top_improved = list(reversed(case_deltas[-3:]))
+        top_regressed = [c for c in case_deltas[:3] if c[1] < -0.005]
+
+        if not top_improved and not top_regressed:
+            continue
+
+        lines.append(f"### {name.title()}\n")
+
+        if top_improved:
+            lines.append("**Top Improved:**\n")
+            lines.append("| Case | Category | Avg Delta | Best Metric | Worst Metric |")
+            lines.append("|------|----------|----------|-------------|-------------|")
+            for idx, delta, best_m, worst_m in top_improved:
+                label = _case_label(idx, case_metadata)
+                best_l = METRIC_LABELS.get(best_m, best_m)
+                worst_l = METRIC_LABELS.get(worst_m, worst_m)
+                lines.append(f"| {label} | {_case_category(idx, case_metadata)} | {delta:+.3f} | {best_l} | {worst_l} |")
+            lines.append("")
+
+        if top_regressed:
+            lines.append("**Top Regressed:**\n")
+            lines.append("| Case | Category | Avg Delta | Best Metric | Worst Metric |")
+            lines.append("|------|----------|----------|-------------|-------------|")
+            for idx, delta, best_m, worst_m in top_regressed:
+                label = _case_label(idx, case_metadata)
+                best_l = METRIC_LABELS.get(best_m, best_m)
+                worst_l = METRIC_LABELS.get(worst_m, worst_m)
+                lines.append(f"| {label} | {_case_category(idx, case_metadata)} | {delta:+.3f} | {best_l} | {worst_l} |")
+            lines.append("")
+
+    return lines
+
+
+def _case_label(idx: int, case_metadata: list[dict] | None) -> str:
+    if case_metadata and idx < len(case_metadata):
+        prompt = case_metadata[idx].get("prompt", "")
+        if prompt:
+            return f"#{idx}: {prompt[:50]}..."
+    return f"Case {idx}"
+
+
+def _case_category(idx: int, case_metadata: list[dict] | None) -> str:
+    if case_metadata and idx < len(case_metadata):
+        cat = case_metadata[idx].get("category", "")
+        if cat:
+            return cat
+    return "—"
+
+
 def _per_model_section(results: dict, ordered: list[str]) -> list[str]:
     """Per-model analysis with key observations."""
     lines = []
@@ -361,6 +489,8 @@ def generate_report(
     lines.extend(_methodology_section(normalized, ordered, experiment_name))
     lines.extend(_charts_section())
     lines.extend(_scores_section(normalized, ordered))
+    lines.extend(_significance_section(normalized, ordered))
+    lines.extend(_per_case_winners_losers(normalized, ordered, case_metadata))
     lines.extend(_per_model_section(normalized, ordered))
     lines.extend(_cost_benefit_section(normalized, ordered))
     lines.extend(_conclusions_section(normalized, ordered))

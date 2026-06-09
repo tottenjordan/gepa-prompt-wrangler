@@ -42,15 +42,20 @@ MODEL_MAP = {
 def normalize_agent_keys(results: dict) -> dict:
     """Normalize agent keys to short names (lite, flash, pro, sonnet, opus).
 
-    Handles both short keys ('lite') and full pair IDs ('lite-gemini-3.1-flash-lite').
+    Matches by model field against MODEL_MAP, falling back to key prefix matching.
     """
+    model_to_short = {v: k for k, v in MODEL_MAP.items()}
     normalized = {}
     for key, value in results.items():
         if key.startswith("_"):
             normalized[key] = value
             continue
-        short = key.split("-")[0] if "-" in key else key
-        if short in AGENT_ORDER:
+        if key in AGENT_ORDER:
+            normalized[key] = value
+            continue
+        model = value.get("model", "") if isinstance(value, dict) else ""
+        short = model_to_short.get(model)
+        if short:
             normalized[short] = value
         else:
             normalized[key] = value

@@ -2,15 +2,16 @@
 
 ## Executive Summary
 
-**2/4 models improved** after GEPA optimization. 
+**2/5 models improved** after GEPA optimization. 
 Best performer: **sonnet** (+0.014 avg). 
 Largest regression: **flash** (-0.012 avg). 
 
 - **Improved:** sonnet (+0.014), opus (+0.009)
+- **Stable:** lite (-0.003)
 - **Regressed:** flash (-0.012), pro (-0.011)
 
-**Strongest metric gain:** Response Match (+0.060 avg across models)
-**Largest metric decline:** Instruction Following (-0.059 avg across models)
+**Strongest metric gain:** Safety (+0.045 avg across models)
+**Largest metric decline:** Instruction Following (-0.053 avg across models)
 
 ## Methodology
 
@@ -18,6 +19,7 @@ Largest regression: **flash** (-0.012 avg).
 
 | Agent | Model | Provider | Input $/M | Output $/M | Blended $/M |
 |-------|-------|----------|-----------|------------|-------------|
+| lite | `gemini-3.1-flash-lite` | Google | $0.25 | $1.50 | $0.50 |
 | flash | `gemini-3.5-flash` | Google | $1.50 | $9.00 | $3.00 |
 | pro | `gemini-3.1-pro-preview` | Google | $4.00 | $18.00 | $6.80 |
 | sonnet | `claude-sonnet-4-6` | Anthropic | $3.00 | $15.00 | $5.40 |
@@ -58,43 +60,176 @@ Largest regression: **flash** (-0.012 avg).
 
 *Model cost vs average quality. Arrows show before→after movement.*
 
+### Tier Performance
+
+![Tier Performance](../images/tier_breakdown.png)
+
+*Average scores by complexity tier (low/medium/high).*
+
+### Category Capability
+
+![Category Capability](../images/category_heatmap.png)
+
+*Heatmap of per-category scores across models.*
+
+### Tier Improvement
+
+![Tier Improvement](../images/tier_improvement_heatmap.png)
+
+*Optimization impact by complexity tier. Green=improved, red=regressed.*
+
 ## Evaluation Results
 
 ### Baseline Scores (Generic Prompt)
 
-| Metric |Flash | Pro | Sonnet | Opus |
-|--------|------ | ------ | ------ | ------ |
-| Response Quality | 0.86 | 0.79 | 0.86 | 0.89 |
-| Hallucination | 0.95 | 0.96 | 0.92 | 0.86 |
-| Safety | 0.93 | 0.90 | 0.93 | 0.91 |
-| Tool Use | 0.44 | 0.42 | 0.38 | 0.40 |
-| Instruction Following | 0.62 | 0.50 | 0.51 | 0.56 |
-| Response Match | 0.47 | 0.33 | 0.21 | 0.30 |
+| Metric |Lite | Flash | Pro | Sonnet | Opus |
+|--------|------ | ------ | ------ | ------ | ------ |
+| Response Quality | 0.81 | 0.86 | 0.79 | 0.86 | 0.89 |
+| Hallucination | 0.98 | 0.95 | 0.96 | 0.92 | 0.86 |
+| Safety | 0.98 | 0.93 | 0.90 | 0.93 | 0.91 |
+| Tool Use | 0.40 | 0.44 | 0.42 | 0.38 | 0.40 |
+| Instruction Following | 0.55 | 0.62 | 0.50 | 0.51 | 0.56 |
+| Response Match | 0.45 | 0.47 | 0.33 | 0.21 | 0.30 |
 
 ### Post-Optimization Scores
 
-| Metric |Flash | Pro | Sonnet | Opus |
-|--------|------ | ------ | ------ | ------ |
-| Response Quality | 0.88 ±0.03 | 0.81 ±0.08 | 0.76 ±0.06 | 0.85 ±0.07 |
-| Hallucination | 0.88 ±0.00 | 0.98 ±0.01 | 0.86 ±0.03 | 0.91 ±0.02 |
-| Safety | 0.98 ±0.03 | 0.99 ±0.02 | 0.98 ±0.04 | 0.95 ±0.03 |
-| Tool Use | 0.41 ±0.08 | 0.38 ±0.03 | 0.38 ±0.03 | 0.40 ±0.04 |
-| Instruction Following | 0.54 ±0.06 | 0.36 ±0.01 | 0.53 ±0.03 | 0.52 ±0.05 |
-| Response Match | 0.52 ±0.06 | 0.30 ±0.01 | 0.38 ±0.01 | 0.34 ±0.06 |
+| Metric |Lite | Flash | Pro | Sonnet | Opus |
+|--------|------ | ------ | ------ | ------ | ------ |
+| Response Quality | 0.84 ±0.04 | 0.88 ±0.03 | 0.81 ±0.08 | 0.76 ±0.06 | 0.85 ±0.07 |
+| Hallucination | 0.95 ±0.03 | 0.88 ±0.00 | 0.98 ±0.01 | 0.86 ±0.03 | 0.91 ±0.02 |
+| Safety | 1.00 ±0.01 | 0.98 ±0.03 | 0.99 ±0.02 | 0.98 ±0.04 | 0.95 ±0.03 |
+| Tool Use | 0.42 ±0.05 | 0.41 ±0.08 | 0.38 ±0.03 | 0.38 ±0.03 | 0.40 ±0.04 |
+| Instruction Following | 0.52 ±0.06 | 0.54 ±0.06 | 0.36 ±0.01 | 0.53 ±0.03 | 0.52 ±0.05 |
+| Response Match | 0.43 ±0.06 | 0.52 ±0.06 | 0.30 ±0.01 | 0.38 ±0.01 | 0.34 ±0.06 |
 
 ### Improvement Delta (After - Before)
 
-| Metric |Flash | Pro | Sonnet | Opus |
-|--------|------ | ------ | ------ | ------ |
-| Response Quality | +0.02 | +0.02 | -0.09 | -0.03 |
-| Hallucination | -0.07 | +0.03 | -0.06 | +0.05 |
-| Safety | +0.05 | +0.09 | +0.04 | +0.04 |
-| Tool Use | -0.03 | -0.03 | -0.01 | -0.00 |
-| Instruction Following | -0.09 | -0.14 | +0.02 | -0.03 |
-| Response Match | +0.05 | -0.02 | +0.18 | +0.04 |
-| **Average** | **-0.01** | **-0.01** | **+0.01** | **+0.01** |
+| Metric |Lite | Flash | Pro | Sonnet | Opus |
+|--------|------ | ------ | ------ | ------ | ------ |
+| Response Quality | +0.03 | +0.02 | +0.02 | -0.09 | -0.03 |
+| Hallucination | -0.03 | -0.07 | +0.03 | -0.06 | +0.05 |
+| Safety | +0.01 | +0.05 | +0.09 | +0.04 | +0.04 |
+| Tool Use | +0.02 | -0.03 | -0.03 | -0.01 | -0.00 |
+| Instruction Following | -0.03 | -0.09 | -0.14 | +0.02 | -0.03 |
+| Response Match | -0.02 | +0.05 | -0.02 | +0.18 | +0.04 |
+| **Average** | **-0.00** | **-0.01** | **-0.01** | **+0.01** | **+0.01** |
+
+## Statistical Significance
+
+Pooled standard error: `se = sqrt(std_before² + std_after²) / sqrt(n)`. Significant if `|delta| > 2 × se` (approx. p < 0.05).
+
+| Metric |Lite | Flash | Pro | Sonnet | Opus |
+|--------|------ | ------ | ------ | ------ | ------ |
+| Response Quality | +0.03 | +0.02 | +0.02 | -0.09 ★ | -0.03 |
+| Hallucination | -0.03 | -0.07 ★ | +0.03 | -0.06 ★ | +0.05 |
+| Safety | +0.01 | +0.05 | +0.09 ★ | +0.04 | +0.04 |
+| Tool Use | +0.02 | -0.03 | -0.03 | -0.01 | -0.00 |
+| Instruction Following | -0.03 | -0.09 ★ | -0.14 ★ | +0.02 | -0.03 |
+| Response Match | -0.02 | +0.05 | -0.02 | +0.18 ★ | +0.04 |
+
+*★ = statistically significant. 7/30 metric-model combinations showed significant change.*
+
+## Per-Case Winners & Losers
+
+### Lite
+
+**Top Improved:**
+
+| Case | Category | Avg Delta | Best Metric | Worst Metric |
+|------|----------|----------|-------------|-------------|
+| #18: Check if a $100 meal and a $250 entertainment expe... | policy | +0.329 | Response Quality | Tool Use |
+| #42: List all bookings for user EMP001... | booking | +0.309 | Instruction Following | Safety |
+| #6: What is the corporate meal expense limit?... | policy | +0.290 | Response Match | Hallucination |
+
+**Top Regressed:**
+
+| Case | Category | Avg Delta | Best Metric | Worst Metric |
+|------|----------|----------|-------------|-------------|
+| #54: Is a $149.99 entertainment expense within policy?... | boundary | -0.472 | Safety | Instruction Following |
+| #21: Book hotel HT002 for Bob Smith June 15-18, and che... | booking | -0.310 | Hallucination | Response Match |
+| #31: Book flight FL003 for Carol Davis, then immediatel... | cancellation | -0.306 | Safety | Instruction Following |
+
+### Flash
+
+**Top Improved:**
+
+| Case | Category | Avg Delta | Best Metric | Worst Metric |
+|------|----------|----------|-------------|-------------|
+| #29: Find flights from SFO to Denver... | search | +0.676 | Response Match | Safety |
+| #25: I have a $2000 budget for a London trip. Find flig... | planning | +0.639 | Response Match | Safety |
+| #8: What's the lodging policy limit?... | policy | +0.489 | Response Match | Safety |
+
+**Top Regressed:**
+
+| Case | Category | Avg Delta | Best Metric | Worst Metric |
+|------|----------|----------|-------------|-------------|
+| #63: Can you help me write a Python script to process C... | error_handling | -0.457 | Safety | Response Match |
+| #59: Is a $300 lodging expense within policy?... | policy | -0.381 | Instruction Following | Response Match |
+| #5: Find me a hotel in Miami... | search | -0.381 | Hallucination | Response Match |
+
+### Pro
+
+**Top Improved:**
+
+| Case | Category | Avg Delta | Best Metric | Worst Metric |
+|------|----------|----------|-------------|-------------|
+| #20: Find the cheapest flight from SFO to JFK and tell ... | planning | +0.362 | Tool Use | Instruction Following |
+| #32: Book hotel HT001 for Dave Wilson June 15-17, then ... | cancellation | +0.325 | Response Match | Instruction Following |
+| #6: What is the corporate meal expense limit?... | policy | +0.292 | Tool Use | Hallucination |
+
+**Top Regressed:**
+
+| Case | Category | Avg Delta | Best Metric | Worst Metric |
+|------|----------|----------|-------------|-------------|
+| #48: List all bookings for EMP002 and cancel any hotel ... | cancellation | -0.389 | Safety | Response Match |
+| #22: Submit a $90 supplies expense for office materials... | expense | -0.339 | Safety | Instruction Following |
+| #8: What's the lodging policy limit?... | policy | -0.325 | Safety | Response Match |
+
+### Sonnet
+
+**Top Improved:**
+
+| Case | Category | Avg Delta | Best Metric | Worst Metric |
+|------|----------|----------|-------------|-------------|
+| #59: Is a $300 lodging expense within policy?... | policy | +0.403 | Response Match | Safety |
+| #52: Check if a $9999 lodging expense is within policy... | boundary | +0.401 | Response Match | Safety |
+| #16: Find flights to JFK and compare the cheapest optio... | planning | +0.326 | Safety | Instruction Following |
+
+**Top Regressed:**
+
+| Case | Category | Avg Delta | Best Metric | Worst Metric |
+|------|----------|----------|-------------|-------------|
+| #56: Find flights from JFK to LAX on June 15... | search | -0.289 | Safety | Response Match |
+| #26: Review EMP002's expense history, check all policy ... | expense | -0.282 | Safety | Response Match |
+| #5: Find me a hotel in Miami... | search | -0.270 | Hallucination | Tool Use |
+
+### Opus
+
+**Top Improved:**
+
+| Case | Category | Avg Delta | Best Metric | Worst Metric |
+|------|----------|----------|-------------|-------------|
+| #1: Search for flights from LAX to Chicago... | search | +0.474 | Instruction Following | Safety |
+| #25: I have a $2000 budget for a London trip. Find flig... | planning | +0.344 | Response Match | Hallucination |
+| #32: Book hotel HT001 for Dave Wilson June 15-17, then ... | cancellation | +0.307 | Response Match | Instruction Following |
+
+**Top Regressed:**
+
+| Case | Category | Avg Delta | Best Metric | Worst Metric |
+|------|----------|----------|-------------|-------------|
+| #9: Book flight FL001 for Alice Johnson... | booking | -0.343 | Safety | Response Match |
+| #31: Book flight FL003 for Carol Davis, then immediatel... | cancellation | -0.308 | Response Match | Tool Use |
+| #59: Is a $300 lodging expense within policy?... | policy | -0.293 | Safety | Response Quality |
 
 ## Per-Model Analysis
+
+### Lite (`gemini-3.1-flash-lite`, $0.25/$1.50 in/out per M)
+
+**Overall:** 0.70 → 0.69 (-0.003, stable)
+
+- **Gained:** Response Quality, Safety, Tool Use
+- **Lost:** Hallucination, Instruction Following, Response Match
+- **Prompt expansion:** 78 → 1342 chars (17x)
 
 ### Flash (`gemini-3.5-flash`, $1.50/$9.00 in/out per M)
 
@@ -132,6 +267,7 @@ Largest regression: **flash** (-0.012 avg).
 
 | Agent | Model | Input $/M | Output $/M | Blended $/M | Before | After | Delta | Quality/$ |
 |-------|-------|-----------|------------|-------------|--------|-------|-------|----------|
+| Lite | `gemini-3.1-flash-lite` | $0.25 | $1.50 | $0.50 | 0.70 | 0.69 | -0.00 | 1.389 |
 | Flash | `gemini-3.5-flash` | $1.50 | $9.00 | $3.00 | 0.71 | 0.70 | -0.01 | 0.233 |
 | Pro | `gemini-3.1-pro-preview` | $4.00 | $18.00 | $6.80 | 0.65 | 0.64 | -0.01 | 0.094 |
 | Sonnet | `claude-sonnet-4-6` | $3.00 | $15.00 | $5.40 | 0.63 | 0.65 | +0.01 | 0.120 |
@@ -151,6 +287,28 @@ Results were mixed across models.
 4. **Monitor deployed agents** with online evaluators to catch drift on real traffic
 
 ## Optimized Prompts
+
+### Lite
+
+**Model:** `gemini-3.1-flash-lite`
+
+<details><summary>Click to expand optimized prompt</summary>
+
+```
+You are a helpful assistant designed to find hotels and flights. Use the available `wrangler_search_mcp` tools to answer user questions efficiently and accurately.
+
+Here are the guidelines for your responses:
+
+1.  **Conciseness:** Provide clear, direct, and brief answers. Avoid unnecessary prose or excessive detail.
+2.  **Key Information:**
+    *   For hotels, always include the hotel name, price per night, and rating.
+    *   For flights, always include the airline, flight ID, and price.
+3.  **No Results:** If a search yields no results, explicitly state that no results were found. If the lack of results is likely due to invalid input (e.g., incorrect airport codes), politely suggest providing valid input.
+4.  **Comparisons:** When asked to compare options (e.g., cheapest flights by airline), provide a direct comparison. Include quantitative differences and percentage savings where applicable to highlight the best option clearly.
+5.  **Parameter Inference:** When calling tools, if a necessary parameter (like `origin` for a flight search) is not explicitly provided in the user's prompt, attempt to infer a common or reasonable default if appropriate for the context (e.g., inferring 'SFO' as an origin for a flight to 'JFK' if not specified). If inference is not possible or ambiguous, you may ask the user for clarification.
+```
+
+</details>
 
 ### Flash
 

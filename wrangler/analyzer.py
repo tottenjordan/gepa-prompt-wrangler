@@ -3,13 +3,13 @@
 from __future__ import annotations
 
 import difflib
-import re
 import textwrap
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from .config import blended_cost
 from .experiment import Experiment
 
 METRIC_LABELS = {
@@ -90,11 +90,9 @@ def analyze_experiment(exp: Experiment) -> ExperimentAnalysis:
     optimize_data = exp.read_stage("optimize")
     deploy_data = exp.read_stage("deploy")
 
-    thresholds = exp.config.get("eval_config", {}).get("thresholds", {})
-
     analysis = ExperimentAnalysis(
         experiment_name=exp.name,
-        thresholds=thresholds,
+        thresholds=exp.eval_thresholds,
     )
 
     pair_descriptions = {
@@ -150,24 +148,16 @@ def _find_removed_content(original: str, optimized: str, keywords: list[str] | N
     if keywords is None:
         keywords = ["$", "policy", "limit", "maximum", "threshold", "must", "require", "tool", "always", "never"]
 
-    orig_lower = optimized.lower()
+    opt_lower = optimized.lower()
     removed = []
     for line in original.splitlines():
         line_stripped = line.strip()
         if not line_stripped or len(line_stripped) < 10:
             continue
-        if line_stripped.lower() not in orig_lower:
+        if line_stripped.lower() not in opt_lower:
             if any(kw in line_stripped.lower() for kw in keywords):
                 removed.append(line_stripped)
     return removed
-
-
-def _extract_cost_from_description(description: str) -> float | None:
-    """Parse cost from pair description. Looks for '$X.XX/M' pattern."""
-    match = re.search(r"\$(\d+(?:\.\d+)?)/M", description)
-    if match:
-        return float(match.group(1))
-    return None
 
 
 # ── MCP Tool Usage Audit ──────────────────────────────────────
@@ -440,22 +430,22 @@ def format_analysis_report(
     # --- Cost efficiency ---
     cost_rows = []
     for p in analysis.pairs:
-        cost = _extract_cost_from_description(p.description)
-        if cost is not None:
+        cost = blended_cost(p.model)
+        if cost > 0:
             delta = p.avg_after - p.avg_before
-            cost_rows.append((p.pair_id, cost, delta))
+            cost_rows.append((p.pair_id, p.model, cost, delta))
     if cost_rows:
         lines.append("## Cost Efficiency\n")
-        lines.append("| Pair | Cost ($/M) | Avg Delta | Cost per +0.01 |")
-        lines.append("|------|-----------|----------|----------------|")
-        for pid, cost, delta in cost_rows:
+        lines.append("| Pair | Model | Blended $/M | Avg Delta | Cost per +0.01 |")
+        lines.append("|------|-------|------------|----------|----------------|")
+        for pid, model, cost, delta in cost_rows:
             if delta > 0.001:
                 cost_per_unit = f"${cost / (delta * 100):.2f}"
             elif delta < -0.001:
                 cost_per_unit = "regressed"
             else:
                 cost_per_unit = "no change"
-            lines.append(f"| {pid} | ${cost:.2f} | {delta:+.3f} | {cost_per_unit} |")
+            lines.append(f"| {pid} | {model} | ${cost:.2f} | {delta:+.3f} | {cost_per_unit} |")
         lines.append("")
 
     # --- Recommendations ---
@@ -478,8 +468,12 @@ def format_analysis_report(
         lines.append("   GEPA compressed prompts >30%, likely removing load-bearing content.\n")
         rec_num += 1
 
-    if any(p.degraded_metrics for p in analysis.pairs):
-        lines.append(f"{rec_num}. **Investigate metric name alignment** between GEPA local eval and cloud eval.")
+    mismatched = set()
+    for p in analysis.pairs:
+        if p.before and p.after and set(p.before) != set(p.after):
+            mismatched |= set(p.before).symmetric_difference(set(p.after))
+    if mismatched:
+        lines.append(f"{rec_num}. **Investigate metric name alignment** — before/after use different metric keys: {', '.join(sorted(mismatched))}")
         lines.append("   Mismatched names mean GEPA optimizes for different metrics than cloud reports.\n")
         rec_num += 1
 
