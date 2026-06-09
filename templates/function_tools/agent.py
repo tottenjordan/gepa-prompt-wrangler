@@ -60,7 +60,7 @@ def create_agent(model: str = DEFAULT_MODEL, instruction: str = DEFAULT_INSTRUCT
     Wrangler calls this with different model/instruction combinations
     during optimization. Keep this function signature unchanged.
     """
-    from wrangler.config import resolve_model
+    from wrangler.core.config import resolve_model
     return Agent(
         model=resolve_model(model),
         name="my_agent",

@@ -1,6 +1,6 @@
-# CLI Walkthrough — Live Testing the BYOA Features
+# CLI Walkthrough
 
-This walkthrough tests each new CLI command added in the `feat/byoa-factory` branch, explaining what each does, why it matters, and what to expect.
+Step-by-step walkthrough of each CLI command, explaining what it does, why it matters, and what to expect.
 
 ---
 
@@ -217,5 +217,45 @@ Results:
 ```
 
 **Key takeaway:** No manifest, no agent module, no deployment step. Just an engine ID and eval data. This is the fastest way to health-check a deployed agent or compare before/after prompt changes. Scores will vary slightly between runs since each eval creates new sessions with the live agent.
+
+---
+
+## Test 5: `wrangler pipeline run` — Submit to Vertex AI Pipeline
+
+**What it does:** Compiles the GEPA optimization workflow as a KFP v2 pipeline and submits it to Vertex AI Pipelines. Each model/agent pair in the manifest gets its own deploy, eval, optimize, and redeploy step in the pipeline DAG.
+
+**Why it matters:** Running experiments locally ties up your machine for hours. The pipeline runs on managed infrastructure with per-step metrics, fault isolation, and GCS artifact persistence. If one pair fails, others continue.
+
+```bash
+wrangler pipeline run manifests/example_manifest.yaml
+```
+
+**What happens:**
+1. Agent code + eval data are packaged as a tarball and uploaded to GCS
+2. The manifest is serialized as a pipeline parameter
+3. The KFP pipeline YAML is compiled and submitted to Vertex AI
+4. You get a dashboard URL to monitor progress
+
+**Example output:**
+
+```
+2026-06-09 14:30:22 - INFO - Packaging code and uploading to GCS...
+2026-06-09 14:30:25 - INFO - Compiling pipeline to /tmp/gepa_pipeline_run-20260609-143022.yaml...
+2026-06-09 14:30:26 - INFO - ============================================================
+2026-06-09 14:30:26 - INFO - DEPLOYMENT SUMMARY
+2026-06-09 14:30:26 - INFO -   Experiment:     travel-agent-prompt-comparison
+2026-06-09 14:30:26 - INFO -   Run ID:         run-20260609-143022
+2026-06-09 14:30:26 - INFO -   Pairs:          2
+2026-06-09 14:30:26 - INFO -   Judge Model:    gemini-2.5-pro
+2026-06-09 14:30:26 - INFO - ============================================================
+2026-06-09 14:30:30 - INFO - Pipeline submitted! Dashboard: https://console.cloud.google.com/...
+
+Pipeline submitted:
+  Run ID:    run-20260609-143022
+  Job ID:    gepa-run-20260609-143022
+  Dashboard: https://console.cloud.google.com/vertex-ai/locations/us-central1/pipelines/runs/...
+```
+
+**Key takeaway:** One command turns a local experiment into a managed cloud pipeline. Check status with `wrangler pipeline status <job-id>`. Results and reports are saved to `gs://{bucket}/pipeline-runs/{run_id}/`.
 
 ---

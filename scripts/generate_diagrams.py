@@ -13,7 +13,7 @@ from pathlib import Path
 import sys
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from wrangler.config import PAPERBANANA_PROJECT, PAPERBANANA_LOCATION, DIAGRAMS_DIR
+from wrangler.core.config import PAPERBANANA_PROJECT, PAPERBANANA_LOCATION, DIAGRAMS_DIR
 
 DIAGRAM_SOURCES_DIR = Path("docs/diagram_sources")
 

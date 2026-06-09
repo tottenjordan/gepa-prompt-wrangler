@@ -39,7 +39,7 @@ def my_tool(param: str) -> dict:
 TOOLS = [my_tool]
 
 def create_agent(model: str = "gemini-3.5-flash", instruction: str = "You are helpful.") -> Agent:
-    from wrangler.config import resolve_model
+    from wrangler.core.config import resolve_model
     return Agent(
         model=resolve_model(model),
         name="my_agent",
@@ -83,7 +83,7 @@ wrangler generate-evalset --from eval_cases.yaml --output my_agent_opt/ -n 15
 
 ```bash
 uv run python -c "
-from wrangler.optimizer import optimize
+from wrangler.optimize.optimizer import optimize
 result = optimize('my_agent_opt/', sampler_config_path='my_agent_opt/sampler_config.json')
 print(result)
 "
@@ -128,7 +128,7 @@ mcp_tools = McpToolset(
 )
 
 def create_agent(model="gemini-3.5-flash", instruction="You are helpful."):
-    from wrangler.config import resolve_model
+    from wrangler.core.config import resolve_model
     return Agent(
         model=resolve_model(model),
         name="my_mcp_agent",

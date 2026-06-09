@@ -12,7 +12,7 @@ from pathlib import Path
 import sys
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from wrangler.config import REPORTS_DIR, OUTPUTS_DIR
+from wrangler.core.config import REPORTS_DIR, OUTPUTS_DIR
 from wrangler.analysis import (
     generate_agent_report, generate_comparison_report, normalize_agent_keys,
     generate_all_charts,

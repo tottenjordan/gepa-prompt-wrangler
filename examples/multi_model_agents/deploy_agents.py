@@ -61,13 +61,13 @@ def deploy_single(name: str, generic: bool = False, update: bool = False, versio
         engine_id = os.environ.get(f"{name.upper()}_ENGINE_ID", "")
         if not engine_id:
             print(f"  No ENGINE_ID for {name}, deploying new instead")
-            from wrangler.deploy import deploy_agent
+            from wrangler.core.deploy import deploy_agent
             engine_id = deploy_agent(agent, display_name=display_name)
         else:
-            from wrangler.deploy import update_agent
+            from wrangler.core.deploy import update_agent
             update_agent(agent, engine_id, display_name=display_name)
     else:
-        from wrangler.deploy import deploy_agent
+        from wrangler.core.deploy import deploy_agent
         engine_id = deploy_agent(agent, display_name=display_name)
 
     env_key = f"{name.upper()}_ENGINE_ID"

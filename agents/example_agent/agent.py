@@ -168,7 +168,7 @@ def create_agent(model: str = DEFAULT_MODEL, instruction: str = DEFAULT_INSTRUCT
             Wrangler resolves this to the appropriate backend.
         instruction: System instruction to use for this agent.
     """
-    from wrangler.config import resolve_model
+    from wrangler.core.config import resolve_model
     return Agent(
         model=resolve_model(model),
         name="travel_agent",

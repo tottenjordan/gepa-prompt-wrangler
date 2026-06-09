@@ -99,7 +99,7 @@ def test_sampler_config():
     _header("Test 2: Sampler Config Validation")
 
     import json
-    from wrangler.optimizer import _patch_adk
+    from wrangler.optimize.optimizer import _patch_adk
     _patch_adk()
 
     from google.adk.optimization.local_eval_sampler import LocalEvalSamplerConfig
@@ -131,7 +131,7 @@ def test_single_eval():
     """Test 3: Run a real eval with 2 cases against the lite agent engine."""
     _header("Test 3: Single-Agent Eval (2 cases)")
 
-    from wrangler.evaluator import run_batch_eval
+    from wrangler.eval.evaluator import run_batch_eval
 
     t0 = time.time()
     try:
@@ -208,14 +208,14 @@ def test_gepa_optimize():
 
     import json
     import vertexai
-    from wrangler.config import GCP_PROJECT_ID, GCP_REGION, GCP_STAGING_BUCKET
+    from wrangler.core.config import GCP_PROJECT_ID, GCP_REGION, GCP_STAGING_BUCKET
     vertexai.init(
         project=GCP_PROJECT_ID,
         location=GCP_REGION,
         staging_bucket=f"gs://{GCP_STAGING_BUCKET}",
     )
 
-    from wrangler.optimizer import _patch_adk
+    from wrangler.optimize.optimizer import _patch_adk
     _patch_adk()
 
     from google.adk.evaluation.local_eval_sets_manager import LocalEvalSetsManager

@@ -13,7 +13,7 @@ import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
-from wrangler.config import REPORTS_DIR
+from wrangler.core.config import REPORTS_DIR
 
 
 def _fmt_duration(seconds: float) -> str:

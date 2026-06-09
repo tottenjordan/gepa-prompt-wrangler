@@ -70,10 +70,10 @@ def run_demo(agent_names: list[str], skip_deploy: bool = False):
 
     # Add wrangler lib to path
     sys.path.insert(0, os.path.join(SCRIPT_DIR, "..", ".."))
-    from wrangler.evaluator import run_batch_eval
-    from wrangler.deploy import deploy_agent, update_agent
+    from wrangler.eval.evaluator import run_batch_eval
+    from wrangler.core.deploy import deploy_agent, update_agent
     from wrangler.converter import load_eval_file
-    from wrangler.config import disable_pyopenssl
+    from wrangler.core.config import disable_pyopenssl
     disable_pyopenssl()
 
     eval_cases = load_eval_file(EVAL_DATA)

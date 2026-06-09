@@ -11,7 +11,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
-from wrangler.config import REPORTS_DIR
+from wrangler.core.config import REPORTS_DIR
 
 
 def run_step(name: str, cmd: list[str]) -> bool:

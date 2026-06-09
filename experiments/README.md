@@ -87,12 +87,20 @@ wrangler eval experiments/active/multi-model-v5 after \
 wrangler report experiments/active/multi-model-v5
 ```
 
-### Run End-to-End
+### Run End-to-End (Local)
 
 ```bash
 wrangler run examples/multi_model_agents/manifest.yaml \
     --name multi-model-v5 --version wrangler_v5 --num-runs 3
 ```
+
+### Run as Vertex AI Pipeline
+
+```bash
+wrangler pipeline run examples/multi_model_agents/manifest.yaml --num-runs 3
+```
+
+Submits the experiment as a managed Vertex AI Pipeline with per-pair steps, GCS artifact persistence, and console metrics. Artifacts are saved to `gs://{bucket}/pipeline-runs/{run_id}/`. See the main [README](../README.md#vertex-ai-pipeline) for details.
 
 ### Check Status
 

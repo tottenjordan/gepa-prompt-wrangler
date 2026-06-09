@@ -21,7 +21,7 @@ import google.auth
 import google.auth.transport.requests
 import requests as http_requests
 
-from .config import GCP_PROJECT_ID, GCP_REGION
+from ..core.config import GCP_PROJECT_ID, GCP_REGION
 
 PROJECT_NUMBER = os.environ.get("PROJECT_NUMBER", "")
 API_BASE = f"https://{GCP_REGION}-aiplatform.googleapis.com/v1beta1/projects/{PROJECT_NUMBER}/locations/{GCP_REGION}"
