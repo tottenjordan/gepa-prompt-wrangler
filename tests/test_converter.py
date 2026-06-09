@@ -9,7 +9,7 @@ import yaml
 
 class TestConverter:
     def test_load_simplified_yaml(self, tmp_path):
-        from wrangler.converter import load_eval_file
+        from wrangler.core.converter import load_eval_file
 
         data = {
             "eval_cases": [
@@ -28,7 +28,7 @@ class TestConverter:
         assert cases[0]["prompt"] == "Find flights from SFO to JFK"
 
     def test_load_adk_json(self, tmp_path):
-        from wrangler.converter import load_eval_file
+        from wrangler.core.converter import load_eval_file
 
         data = [
             {
@@ -45,7 +45,7 @@ class TestConverter:
         assert cases[0].get("prompt") == "Hello" or cases[0].get("query") == "Hello"
 
     def test_auto_detect_yaml(self, tmp_path):
-        from wrangler.converter import load_eval_file
+        from wrangler.core.converter import load_eval_file
 
         data = {"eval_cases": [{"prompt": "test", "expected_response": "ok"}]}
         path = tmp_path / "test.yml"
@@ -55,12 +55,12 @@ class TestConverter:
         assert len(cases) == 1
 
     def test_missing_file_raises(self, tmp_path):
-        from wrangler.converter import load_eval_file
+        from wrangler.core.converter import load_eval_file
         with pytest.raises((FileNotFoundError, OSError)):
             load_eval_file(str(tmp_path / "nonexistent.yaml"))
 
     def test_cases_have_prompt(self, tmp_path):
-        from wrangler.converter import load_eval_file
+        from wrangler.core.converter import load_eval_file
 
         data = {"eval_cases": [{"prompt": "test q", "expected_response": "test a"}]}
         path = tmp_path / "test.yaml"
@@ -70,7 +70,7 @@ class TestConverter:
         assert "prompt" in cases[0]
 
     def test_category_and_tier_loaded_from_yaml(self, tmp_path):
-        from wrangler.converter import load_eval_file
+        from wrangler.core.converter import load_eval_file
 
         data = {
             "eval_cases": [
@@ -90,7 +90,7 @@ class TestConverter:
         assert cases[0]["category"] == "search"
 
     def test_to_adk_evalset_preserves_category_and_tier(self):
-        from wrangler.converter import to_adk_evalset
+        from wrangler.core.converter import to_adk_evalset
 
         cases = [
             {
@@ -106,7 +106,7 @@ class TestConverter:
         assert result[0]["tier"] == "low"
 
     def test_to_adk_evalset_omits_empty_category(self):
-        from wrangler.converter import to_adk_evalset
+        from wrangler.core.converter import to_adk_evalset
 
         cases = [{"query": "test", "expected_response": "ok", "expected_tools": []}]
         result = to_adk_evalset(cases)
@@ -116,7 +116,7 @@ class TestConverter:
 
 class TestGepaEvalsetGeneration:
     def test_category_in_session_input(self, tmp_path):
-        from wrangler.converter import generate_gepa_evalset
+        from wrangler.core.converter import generate_gepa_evalset
 
         cases = [
             {
@@ -138,7 +138,7 @@ class TestGepaEvalsetGeneration:
         assert case["session_input"]["tier"] == "low"
 
     def test_category_in_eval_id(self, tmp_path):
-        from wrangler.converter import generate_gepa_evalset
+        from wrangler.core.converter import generate_gepa_evalset
 
         cases = [
             {
@@ -158,7 +158,7 @@ class TestGepaEvalsetGeneration:
         assert data["eval_cases"][0]["eval_id"] == "case_1_low_search"
 
     def test_eval_id_without_category(self, tmp_path):
-        from wrangler.converter import generate_gepa_evalset
+        from wrangler.core.converter import generate_gepa_evalset
 
         cases = [
             {
@@ -179,7 +179,7 @@ class TestGepaEvalsetGeneration:
 
 class TestSamplerConfig:
     def test_default_criteria_include_rubrics(self):
-        from wrangler.converter import generate_sampler_config
+        from wrangler.core.converter import generate_sampler_config
 
         config = generate_sampler_config("test_opt")
         criteria = config["eval_config"]["criteria"]
@@ -207,14 +207,14 @@ class TestSamplerConfig:
         assert "threshold" not in criteria.get("rubric_based_tool_use_quality_v1", {})
 
     def test_default_judge_model(self):
-        from wrangler.converter import generate_sampler_config
+        from wrangler.core.converter import generate_sampler_config
 
         config = generate_sampler_config("test_opt")
         criteria = config["eval_config"]["criteria"]
         assert criteria["final_response_match_v2"]["judge_model_options"]["judge_model"] == "gemini-3.5-flash"
 
     def test_judge_model_propagated(self):
-        from wrangler.converter import generate_sampler_config
+        from wrangler.core.converter import generate_sampler_config
 
         config = generate_sampler_config("test_opt", judge_model="gemini-2.5-flash")
         criteria = config["eval_config"]["criteria"]
@@ -223,7 +223,7 @@ class TestSamplerConfig:
         assert criteria["rubric_based_final_response_quality_v1"]["judge_model_options"]["judge_model"] == "gemini-2.5-flash"
 
     def test_multi_judge_enabled(self):
-        from wrangler.converter import generate_sampler_config
+        from wrangler.core.converter import generate_sampler_config
 
         config = generate_sampler_config("test_opt", multi_judge=True)
         criteria = config["eval_config"]["criteria"]
@@ -233,13 +233,13 @@ class TestSamplerConfig:
         assert "multi_judge_quality" in config["eval_config"]["custom_metrics"]
 
     def test_multi_judge_disabled_by_default(self):
-        from wrangler.converter import generate_sampler_config
+        from wrangler.core.converter import generate_sampler_config
 
         config = generate_sampler_config("test_opt")
         assert "custom_metrics" not in config["eval_config"]
 
     def test_writes_to_disk(self, tmp_path):
-        from wrangler.converter import generate_sampler_config
+        from wrangler.core.converter import generate_sampler_config
 
         config = generate_sampler_config("test_opt", output_dir=str(tmp_path))
         config_path = tmp_path / "sampler_config.json"

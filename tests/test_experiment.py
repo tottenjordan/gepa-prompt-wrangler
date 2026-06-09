@@ -6,8 +6,8 @@ from pathlib import Path
 import pytest
 import yaml
 
-from wrangler.experiment import Experiment, STAGES, STAGE_GATES
-from wrangler.factory import Manifest, AgentPromptPair
+from wrangler.orchestration.experiment import Experiment, STAGES, STAGE_GATES
+from wrangler.core.factory import Manifest, AgentPromptPair
 
 
 @pytest.fixture

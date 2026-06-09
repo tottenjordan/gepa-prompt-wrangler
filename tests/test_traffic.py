@@ -3,12 +3,12 @@
 import pytest
 from unittest.mock import patch
 
-from wrangler.traffic import DEFAULT_QUERIES, _resolve_resource
+from wrangler.tools.traffic import DEFAULT_QUERIES, _resolve_resource
 
 
 class TestResolveResource:
-    @patch("wrangler.traffic.GCP_PROJECT_ID", "test-project")
-    @patch("wrangler.traffic.GCP_REGION", "us-central1")
+    @patch("wrangler.tools.traffic.GCP_PROJECT_ID", "test-project")
+    @patch("wrangler.tools.traffic.GCP_REGION", "us-central1")
     def test_short_id_expanded(self):
         result = _resolve_resource("12345")
         assert result == "projects/test-project/locations/us-central1/reasoningEngines/12345"
@@ -17,8 +17,8 @@ class TestResolveResource:
         full = "projects/my-proj/locations/us/reasoningEngines/123"
         assert _resolve_resource(full) == full
 
-    @patch("wrangler.traffic.GCP_PROJECT_ID", "test-project")
-    @patch("wrangler.traffic.GCP_REGION", "us-central1")
+    @patch("wrangler.tools.traffic.GCP_PROJECT_ID", "test-project")
+    @patch("wrangler.tools.traffic.GCP_REGION", "us-central1")
     def test_empty_id(self):
         result = _resolve_resource("")
         assert "reasoningEngines/" in result

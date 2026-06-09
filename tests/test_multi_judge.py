@@ -2,7 +2,7 @@
 
 from unittest.mock import patch, MagicMock
 
-from wrangler.multi_judge import evaluate, _get_judge_models, DEFAULT_JUDGE_MODELS
+from wrangler.optimize.multi_judge import evaluate, _get_judge_models, DEFAULT_JUDGE_MODELS
 
 
 class TestGetJudgeModels:
@@ -23,8 +23,8 @@ class TestGetJudgeModels:
 
 
 class TestEvaluate:
-    @patch("wrangler.multi_judge._call_judge")
-    @patch("wrangler.multi_judge._get_judge_models")
+    @patch("wrangler.optimize.multi_judge._call_judge")
+    @patch("wrangler.optimize.multi_judge._get_judge_models")
     def test_returns_mean_of_scores(self, mock_models, mock_call):
         mock_models.return_value = ["judge-a", "judge-b"]
         mock_call.side_effect = [0.8, 0.6]
@@ -32,8 +32,8 @@ class TestEvaluate:
         score = evaluate(query="test", response="answer", reference="ref")
         assert score == 0.7
 
-    @patch("wrangler.multi_judge._call_judge")
-    @patch("wrangler.multi_judge._get_judge_models")
+    @patch("wrangler.optimize.multi_judge._call_judge")
+    @patch("wrangler.optimize.multi_judge._get_judge_models")
     def test_handles_single_judge_failure(self, mock_models, mock_call):
         mock_models.return_value = ["judge-a", "judge-b"]
         mock_call.side_effect = [0.8, Exception("timeout")]
@@ -41,8 +41,8 @@ class TestEvaluate:
         score = evaluate(query="test", response="answer", reference="ref")
         assert score == 0.8
 
-    @patch("wrangler.multi_judge._call_judge")
-    @patch("wrangler.multi_judge._get_judge_models")
+    @patch("wrangler.optimize.multi_judge._call_judge")
+    @patch("wrangler.optimize.multi_judge._get_judge_models")
     def test_all_judges_fail_returns_default(self, mock_models, mock_call):
         mock_models.return_value = ["judge-a"]
         mock_call.side_effect = Exception("fail")

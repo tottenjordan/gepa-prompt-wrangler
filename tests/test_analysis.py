@@ -3,16 +3,18 @@
 import pytest
 from pathlib import Path
 
-from wrangler.analysis import (
-    _prompt_evolution_summary,
-    _cost_benefit_section,
+from wrangler.reporting.analysis import (
     compute_tier_scores,
-    generate_agent_report,
-    generate_comparison_report,
     METRIC_LABELS,
     PROVIDERS,
     AGENT_ORDER,
     MODEL_MAP,
+)
+from wrangler.reporting.report_sections import (
+    _prompt_evolution_summary,
+    _cost_benefit_section,
+    generate_agent_report,
+    generate_comparison_report,
 )
 
 
@@ -271,3 +273,126 @@ class TestGenerateComparisonReport:
         content = Path(path).read_text()
         assert "Baseline" in content
         assert "Improvement Delta" not in content
+
+
+# ── Chart function tests ──────────────────────────────────────────
+
+from unittest.mock import patch, MagicMock
+
+from wrangler.reporting.analysis import (
+    normalize_agent_keys,
+    generate_tier_breakdown_chart,
+    generate_category_heatmap,
+    generate_radar_chart,
+    generate_tier_improvement_heatmap,
+)
+
+
+class TestNormalizeAgentKeys:
+    def test_short_keys_unchanged(self):
+        results = {"lite": {"model": "gemini-3.1-flash-lite", "before": {}}}
+        normalized = normalize_agent_keys(results)
+        assert "lite" in normalized
+
+    def test_normalizes_by_model_field(self):
+        results = {"long-key-flash": {"model": "gemini-3.5-flash", "before": {}}}
+        normalized = normalize_agent_keys(results)
+        assert "flash" in normalized
+
+    def test_preserves_underscore_prefixed_keys(self):
+        results = {"_eval_metadata": {"version": "v1"}, "flash": {"model": "gemini-3.5-flash"}}
+        normalized = normalize_agent_keys(results)
+        assert "_eval_metadata" in normalized
+
+    def test_empty_results(self):
+        assert normalize_agent_keys({}) == {}
+
+
+def _mock_plt_setup(mock_plt):
+    """Configure mock plt so subplots() returns (fig, ax) tuple."""
+    mock_fig = MagicMock()
+    mock_ax = MagicMock()
+    mock_plt.subplots.return_value = (mock_fig, mock_ax)
+    return mock_fig, mock_ax
+
+
+class TestGenerateTierBreakdownChart:
+    @patch("wrangler.reporting.analysis.plt")
+    def test_creates_chart_file(self, mock_plt, tmp_path):
+        _mock_plt_setup(mock_plt)
+        results = {
+            "flash": {
+                "model": "gemini-3.5-flash",
+                "after": {"quality": 0.8},
+                "after_per_case": [{"quality": 0.9}, {"quality": 0.7}],
+            },
+        }
+        metadata = [{"tier": "low"}, {"tier": "high"}]
+        generate_tier_breakdown_chart(results, metadata, charts_dir=tmp_path)
+        mock_plt.savefig.assert_called_once()
+
+    @patch("wrangler.reporting.analysis.plt")
+    def test_skips_when_no_metadata(self, mock_plt, tmp_path):
+        results = {"flash": {"model": "gemini-3.5-flash", "after": {"q": 0.8}}}
+        generate_tier_breakdown_chart(results, None, charts_dir=tmp_path)
+        mock_plt.savefig.assert_not_called()
+
+
+class TestGenerateCategoryHeatmap:
+    @patch("wrangler.reporting.analysis.plt")
+    def test_creates_heatmap(self, mock_plt, tmp_path):
+        _mock_plt_setup(mock_plt)
+        results = {
+            "flash": {
+                "model": "gemini-3.5-flash",
+                "after": {"quality": 0.8},
+                "after_per_case": [{"quality": 0.9}, {"quality": 0.7}],
+            },
+        }
+        metadata = [{"category": "search"}, {"category": "policy"}]
+        generate_category_heatmap(results, metadata, charts_dir=tmp_path)
+        mock_plt.savefig.assert_called_once()
+
+    @patch("wrangler.reporting.analysis.plt")
+    def test_skips_when_no_metadata(self, mock_plt, tmp_path):
+        results = {"flash": {"model": "gemini-3.5-flash", "after": {"q": 0.8}}}
+        generate_category_heatmap(results, None, charts_dir=tmp_path)
+        mock_plt.savefig.assert_not_called()
+
+
+class TestGenerateRadarChart:
+    @patch("wrangler.reporting.analysis.plt")
+    def test_creates_radar_chart(self, mock_plt, tmp_path):
+        _mock_plt_setup(mock_plt)
+        mock_plt.subplot.return_value = MagicMock()
+        results = {
+            "flash": {"model": "gemini-3.5-flash", "after": {"final_response_quality_v1": 0.8, "safety_v1": 0.9}},
+            "sonnet": {"model": "claude-sonnet-4-6", "after": {"final_response_quality_v1": 0.85, "safety_v1": 0.95}},
+        }
+        generate_radar_chart(results, charts_dir=tmp_path)
+        mock_plt.savefig.assert_called_once()
+
+
+class TestGenerateTierImprovementHeatmap:
+    @patch("wrangler.reporting.analysis.plt")
+    def test_creates_heatmap(self, mock_plt, tmp_path):
+        _mock_plt_setup(mock_plt)
+        results = {
+            "flash": {
+                "model": "gemini-3.5-flash",
+                "before": {"quality": 0.7},
+                "after": {"quality": 0.8},
+                "before_per_case": [{"quality": 0.6}, {"quality": 0.8}],
+                "after_per_case": [{"quality": 0.7}, {"quality": 0.9}],
+            },
+        }
+        metadata = [{"tier": "low"}, {"tier": "high"}]
+        generate_tier_improvement_heatmap(results, metadata, charts_dir=tmp_path)
+        mock_plt.savefig.assert_called_once()
+
+    @patch("wrangler.reporting.analysis.plt")
+    def test_skips_when_no_after(self, mock_plt, tmp_path):
+        results = {"flash": {"model": "gemini-3.5-flash", "before": {"q": 0.7}}}
+        metadata = [{"tier": "low"}]
+        generate_tier_improvement_heatmap(results, metadata, charts_dir=tmp_path)
+        mock_plt.savefig.assert_not_called()

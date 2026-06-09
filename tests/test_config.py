@@ -3,7 +3,7 @@
 import pytest
 from unittest.mock import patch, MagicMock
 
-from wrangler.config import resolve_model, MODEL_COSTS
+from wrangler.core.config import resolve_model, MODEL_COSTS
 
 
 class TestResolveModel:
@@ -17,44 +17,39 @@ class TestResolveModel:
         assert result == "models/gemini-pro"
         assert isinstance(result, str)
 
-    @patch("wrangler.config.LiteLlm")
-    def test_gemini_3x_returns_litellm(self, mock_litellm):
+    @patch("google.adk.models.google_llm.Gemini")
+    def test_gemini_3x_returns_gemini(self, mock_gemini):
         mock_instance = MagicMock()
-        mock_litellm.return_value = mock_instance
+        mock_gemini.return_value = mock_instance
         result = resolve_model("gemini-3.5-flash")
-        mock_litellm.assert_called_once_with(
-            model="vertex_ai/gemini-3.5-flash", vertex_location="global"
-        )
+        mock_gemini.assert_called_once_with(model="gemini-3.5-flash")
         assert result == mock_instance
 
-    @patch("wrangler.config.LiteLlm")
-    def test_claude_returns_litellm(self, mock_litellm):
+    @patch("google.adk.models.anthropic_llm.Claude")
+    def test_claude_returns_claude(self, mock_claude):
         mock_instance = MagicMock()
-        mock_litellm.return_value = mock_instance
+        mock_claude.return_value = mock_instance
         result = resolve_model("claude-sonnet-4-6")
-        mock_litellm.assert_called_once_with(
-            model="vertex_ai/claude-sonnet-4-6", vertex_location="global"
-        )
+        mock_claude.assert_called_once_with(model="claude-sonnet-4-6")
         assert result == mock_instance
 
-    @patch("wrangler.config.LiteLlm")
-    def test_already_prefixed_no_double_prefix(self, mock_litellm):
+    @patch("google.adk.models.google_llm.Gemini")
+    def test_gemini_3x_pro_returns_gemini(self, mock_gemini):
         mock_instance = MagicMock()
-        mock_litellm.return_value = mock_instance
-        resolve_model("vertex_ai/gemini-3.5-flash")
-        args = mock_litellm.call_args
-        model_arg = args[1].get("model") or args[0][0]
-        assert not model_arg.startswith("vertex_ai/vertex_ai/")
+        mock_gemini.return_value = mock_instance
+        result = resolve_model("gemini-3.1-pro-preview")
+        mock_gemini.assert_called_once_with(model="gemini-3.1-pro-preview")
+        assert result == mock_instance
 
 
 class TestDisablePyopenssl:
     def test_no_openssl_is_noop(self):
         with patch.dict("sys.modules", {"OpenSSL": None, "OpenSSL.SSL": None}):
-            from wrangler.config import disable_pyopenssl
+            from wrangler.core.config import disable_pyopenssl
             disable_pyopenssl()
 
     def test_function_exists_and_callable(self):
-        from wrangler.config import disable_pyopenssl
+        from wrangler.core.config import disable_pyopenssl
         assert callable(disable_pyopenssl)
 
 

@@ -7,7 +7,7 @@ import pytest
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
-from wrangler.optimizer import _create_wrapper_module, _prewarm_mcp_toolsets
+from wrangler.optimize.optimizer import _create_wrapper_module, _prewarm_mcp_toolsets
 
 
 class TestCreateWrapperModule:
@@ -27,7 +27,7 @@ class TestCreateWrapperModule:
         assert "importlib" in content
 
     def test_patch_adk_is_callable(self):
-        from wrangler.optimizer import _patch_adk
+        from wrangler.optimize.optimizer import _patch_adk
         assert callable(_patch_adk)
 
 

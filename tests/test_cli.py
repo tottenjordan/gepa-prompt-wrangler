@@ -71,10 +71,10 @@ class TestRunCommand:
 
 
 class TestInspectCommand:
-    @patch("wrangler.inspector.AgentInspector.inspect")
-    @patch("wrangler.inspector.AgentInspector.to_yaml")
+    @patch("wrangler.tools.inspector.AgentInspector.inspect")
+    @patch("wrangler.tools.inspector.AgentInspector.to_yaml")
     def test_inspect_calls_inspector(self, mock_to_yaml, mock_inspect):
-        from wrangler.inspector import AgentSpec
+        from wrangler.tools.inspector import AgentSpec
         mock_inspect.return_value = AgentSpec(name="test", model="m", instruction="i", tools=[])
         mock_to_yaml.return_value = "agent:\n  name: test\n"
         runner = CliRunner()
@@ -105,3 +105,101 @@ class TestReportCommand:
             Path("empty_outputs").mkdir()
             result = runner.invoke(main, ["report", "empty_outputs"])
             assert "No results files found" in result.output
+
+
+class TestPipelineRunCommand:
+    @patch("wrangler.pipeline.deploy_pipeline.deploy_pipeline")
+    def test_pipeline_run_submits_job(self, mock_deploy):
+        mock_deploy.return_value = {
+            "run_id": "run-20260609-120000",
+            "job_id": "gepa-run-20260609-120000",
+            "dashboard_uri": "https://console.cloud.google.com/vertex-ai/...",
+        }
+        runner = CliRunner()
+        with runner.isolated_filesystem():
+            manifest = {
+                "name": "test", "agent_module": "agents/test",
+                "eval_data": "eval.yaml",
+                "pairs": [{"id": "p1", "model": "m", "system_prompt": "s"}],
+            }
+            Path("manifest.yaml").write_text(yaml.dump(manifest))
+            result = runner.invoke(main, ["pipeline", "run", "manifest.yaml"])
+            assert result.exit_code == 0
+            assert "run-20260609-120000" in result.output
+            assert "Dashboard" in result.output
+
+    @patch("wrangler.pipeline.deploy_pipeline.deploy_pipeline")
+    def test_pipeline_run_with_custom_run_id(self, mock_deploy):
+        mock_deploy.return_value = {
+            "run_id": "my-run", "job_id": "gepa-my-run",
+            "dashboard_uri": "https://...",
+        }
+        runner = CliRunner()
+        with runner.isolated_filesystem():
+            manifest = {
+                "name": "test", "agent_module": "agents/test",
+                "eval_data": "eval.yaml",
+                "pairs": [{"id": "p1", "model": "m", "system_prompt": "s"}],
+            }
+            Path("manifest.yaml").write_text(yaml.dump(manifest))
+            result = runner.invoke(main, ["pipeline", "run", "manifest.yaml", "--run-id", "my-run"])
+            assert result.exit_code == 0
+            mock_deploy.assert_called_once()
+            assert mock_deploy.call_args.kwargs.get("run_id") == "my-run"
+
+
+class TestPipelineStatusCommand:
+    @patch("google.cloud.aiplatform.PipelineJob")
+    @patch("google.cloud.aiplatform.init")
+    def test_pipeline_status_shows_state(self, mock_init, mock_pj_class):
+        mock_job = MagicMock()
+        mock_job.display_name = "gepa-test-pipeline"
+        mock_job.state = "PIPELINE_STATE_SUCCEEDED"
+        mock_job.create_time = "2026-06-09T12:00:00"
+        mock_job.end_time = "2026-06-09T13:00:00"
+        mock_pj_class.get.return_value = mock_job
+
+        runner = CliRunner()
+        result = runner.invoke(main, ["pipeline", "status", "some-job-id"])
+        assert result.exit_code == 0
+        assert "gepa-test-pipeline" in result.output
+
+
+class TestRunDryRunMultiPair:
+    def test_dry_run_shows_all_pairs(self, tmp_path):
+        manifest = {
+            "name": "multi-test",
+            "agent_module": "agents/test",
+            "eval_data": "eval.yaml",
+            "pairs": [
+                {"id": "flash", "model": "gemini-3.5-flash", "system_prompt": "Be helpful."},
+                {"id": "sonnet", "model": "claude-sonnet-4-6", "system_prompt": "Be thorough."},
+            ],
+        }
+        manifest_path = tmp_path / "manifest.yaml"
+        manifest_path.write_text(yaml.dump(manifest))
+        runner = CliRunner()
+        result = runner.invoke(main, ["run", str(manifest_path), "--dry-run"])
+        assert result.exit_code == 0
+        assert "Pairs: 2" in result.output
+        assert "flash" in result.output
+        assert "sonnet" in result.output
+
+
+class TestGenerateEvalsetCommand:
+    @patch("wrangler.core.converter.generate_sampler_config")
+    @patch("wrangler.core.converter.generate_gepa_evalset")
+    @patch("wrangler.core.converter.load_eval_file")
+    def test_generate_evalset(self, mock_load, mock_gen, mock_sampler, tmp_path):
+        mock_load.return_value = [{"prompt": "test", "expected_response": "ok"}] * 10
+        mock_gen.return_value = str(tmp_path / "eval_set.evalset.json")
+
+        runner = CliRunner()
+        result = runner.invoke(main, [
+            "generate-evalset",
+            "--from", str(tmp_path / "eval.yaml"),
+            "--output", str(tmp_path / "output"),
+            "-n", "5",
+        ])
+        assert result.exit_code == 0
+        assert "Loaded 10 eval cases" in result.output

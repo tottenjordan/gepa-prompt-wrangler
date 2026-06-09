@@ -3,12 +3,12 @@
 import pytest
 from unittest.mock import patch
 
-from wrangler.online_monitors import QUICK_EVAL_CASES, _resolve_agent_resource
+from wrangler.eval.online_monitors import QUICK_EVAL_CASES, _resolve_agent_resource
 
 
 class TestResolveAgentResource:
-    @patch("wrangler.online_monitors.GCP_PROJECT_ID", "test-project")
-    @patch("wrangler.online_monitors.GCP_REGION", "us-central1")
+    @patch("wrangler.eval.online_monitors.GCP_PROJECT_ID", "test-project")
+    @patch("wrangler.eval.online_monitors.GCP_REGION", "us-central1")
     def test_short_id_expanded(self):
         result = _resolve_agent_resource("12345")
         assert result == "projects/test-project/locations/us-central1/reasoningEngines/12345"
