@@ -488,10 +488,30 @@ def optimize(
 
     t0 = time.time()
     try:
-        # Pre-warm MCP sessions in the same event loop GEPA will use,
-        # before the heavy optimizer work starts.
         async def _run_with_warmup():
             await _prewarm_mcp_toolsets(root_agent, tag)
+
+            # Patch sampler to refresh MCP sessions before each generation.
+            # Sessions die between generations due to Cloud Run idle timeouts.
+            from google.adk.tools.base_toolset import BaseToolset
+            _orig_sample = sampler.sample_and_score
+            _gen_count = [0]
+
+            async def _refreshed_sample(candidate, *args, **kwargs):
+                _gen_count[0] += 1
+                if _gen_count[0] > 1:
+                    for tool in root_agent.tools:
+                        if isinstance(tool, BaseToolset):
+                            try:
+                                await tool.close()
+                            except Exception:
+                                pass
+                    warmed = await _prewarm_mcp_toolsets(root_agent, tag, max_retries=2)
+                    log.info("Generation %d: re-warmed %d MCP toolset(s)", _gen_count[0], warmed)
+                return await _orig_sample(candidate, *args, **kwargs)
+
+            sampler.sample_and_score = _refreshed_sample
+
             return await optimizer.optimize(root_agent, sampler)
 
         optimization_result = asyncio.run(_run_with_warmup())
