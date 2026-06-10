@@ -20,11 +20,16 @@ MCP_READ_TIMEOUT_SECONDS = 180.0
 _registry = None
 
 
-def _create_pooled_client():
-    """HTTPX client with connection pooling and keepalive."""
+def _create_pooled_client(**kwargs):
+    """HTTPX client with connection pooling and keepalive.
+
+    Accepts **kwargs because the MCP session manager passes headers
+    and other parameters to the factory at session creation time.
+    """
     return httpx.AsyncClient(
         limits=httpx.Limits(max_connections=10, max_keepalive_connections=5),
         timeout=httpx.Timeout(connect=30.0, read=180.0, write=30.0, pool=30.0),
+        **kwargs,
     )
 
 
