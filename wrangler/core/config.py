@@ -21,6 +21,8 @@ EVAL_OUTPUT_DIR = os.environ.get("EVAL_OUTPUT_DIR", "eval_outputs")
 # --- Model costs per 1M tokens ---
 # Source: https://cloud.google.com/gemini-enterprise-agent-platform/generative-ai/pricing
 MODEL_COSTS = {
+    "gemini-2.5-flash": {"input": 0.15, "output": 0.60},
+    "gemini-2.5-pro": {"input": 1.25, "output": 10.0},
     "gemini-3.1-flash-lite": {"input": 0.25, "output": 1.5},
     "gemini-3.5-flash": {"input": 1.50, "output": 9.0},
     "gemini-3.1-pro-preview": {"input": 4.0, "output": 18.0},
