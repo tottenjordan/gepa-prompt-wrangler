@@ -362,8 +362,10 @@ def optimize_single_agent(
                 mcp_procs.append(proc)
                 os.environ[env_key] = f"http://localhost:{port}/mcp"
                 logging.info(f"Started local MCP server: {name} on port {port}")
-        time.sleep(2)
-        logging.info(f"Started {len(mcp_procs)} local MCP server(s)")
+        time.sleep(5)
+        # Verify servers are alive
+        alive = sum(1 for p in mcp_procs if p.poll() is None)
+        logging.info(f"Started {alive}/{len(mcp_procs)} local MCP server(s)")
     else:
         logging.warning("MCP servers dir not found — using remote URLs from secrets")
 
