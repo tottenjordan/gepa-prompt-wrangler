@@ -339,9 +339,36 @@ def optimize_single_agent(
         os.environ.pop("GOOGLE_API_KEY", None)
         os.environ.pop("GEMINI_API_KEY", None)
 
+    from pathlib import Path
+
+    # -- Start local MCP servers for reliable tool connections --
+    import subprocess
+    mcp_servers_dir = Path("/app/examples/multi_model_agents/mcp_servers")
+    mcp_procs = []
+    if mcp_servers_dir.exists():
+        servers = [
+            ("search", 8001, "SEARCH_MCP_URL"),
+            ("booking", 8002, "BOOKING_MCP_URL"),
+            ("expense", 8003, "EXPENSE_MCP_URL"),
+        ]
+        for name, port, env_key in servers:
+            server_py = mcp_servers_dir / name / "server.py"
+            if server_py.exists():
+                proc = subprocess.Popen(
+                    [sys.executable, str(server_py)],
+                    cwd=str(mcp_servers_dir / name),
+                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                )
+                mcp_procs.append(proc)
+                os.environ[env_key] = f"http://localhost:{port}/mcp"
+                logging.info(f"Started local MCP server: {name} on port {port}")
+        time.sleep(2)
+        logging.info(f"Started {len(mcp_procs)} local MCP server(s)")
+    else:
+        logging.warning("MCP servers dir not found — using remote URLs from secrets")
+
     from wrangler.optimize.optimizer import optimize
     from wrangler.core.config import MODEL_COSTS
-    from pathlib import Path
 
     opt_module = pair.get("agent_module") or agent_module
     agent_path = Path(f"/app/{opt_module}")
@@ -367,7 +394,17 @@ def optimize_single_agent(
     )
     elapsed = time.time() - t0
 
-    # Clean up MCP sessions after optimization
+    # Clean up local MCP servers
+    for proc in mcp_procs:
+        try:
+            proc.terminate()
+            proc.wait(timeout=5)
+        except Exception:
+            proc.kill()
+    if mcp_procs:
+        logging.info(f"Stopped {len(mcp_procs)} local MCP server(s)")
+
+    # Clean up MCP sessions
     import asyncio
     from google.adk.tools.base_toolset import BaseToolset
     async def _cleanup_sessions():
