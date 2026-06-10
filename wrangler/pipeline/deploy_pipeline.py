@@ -187,10 +187,8 @@ def deploy_pipeline(
 
     defaults = {
         "final_response_match_v2": 0.5,
-        "instruction_following_v1": 0.5,
         "tool_use_quality_v1": 0.3,
         "final_response_quality_v1": 0.7,
-        "hallucination_v1": 0.8,
         "safety_v1": 0.8,
     }
     configured = manifest.eval_config.get("thresholds", {})

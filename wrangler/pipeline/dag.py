@@ -68,7 +68,7 @@ def build_pipeline(image_uri: str):
             run_id=run_id,
             manifest_json=manifest_json,
         )
-        archive_task.set_caching_options(enable_caching=False)
+        archive_task.set_caching_options(enable_caching=True)
         archive_task.set_display_name("Archive agent Code")
 
         with dsl.ParallelFor(pairs_json) as pair_config:
@@ -80,7 +80,7 @@ def build_pipeline(image_uri: str):
                 pair_json=pair_config,
                 agent_module=agent_module,
             )
-            deploy_task.set_caching_options(enable_caching=False)
+            deploy_task.set_caching_options(enable_caching=True)
             deploy_task.after(archive_task)
             deploy_task.set_display_name(f"Deploy Agents")
 
@@ -98,7 +98,7 @@ def build_pipeline(image_uri: str):
             )
             eval_before_task.set_cpu_limit("4")
             eval_before_task.set_memory_limit("16G")
-            eval_before_task.set_caching_options(enable_caching=False)
+            eval_before_task.set_caching_options(enable_caching=True)
             eval_before_task.after(deploy_task)
             eval_before_task.set_display_name(f"Evaluate Agent")
 
