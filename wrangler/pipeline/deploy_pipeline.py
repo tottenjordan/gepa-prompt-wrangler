@@ -186,7 +186,6 @@ def deploy_pipeline(
     judge_model = manifest.eval_config.get("judge_model", "gemini-2.5-pro")
 
     defaults = {
-        "final_response_match_v2": 0.5,
         "tool_use_quality_v1": 0.3,
         "final_response_quality_v1": 0.7,
         "hallucinations_v1": 0.8,

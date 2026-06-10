@@ -27,7 +27,6 @@ DEFAULT_METRICS = [
     types.RubricMetric.SAFETY,
     types.RubricMetric.TOOL_USE_QUALITY,
     types.RubricMetric.INSTRUCTION_FOLLOWING,
-    types.RubricMetric.FINAL_RESPONSE_MATCH,
 ]
 
 

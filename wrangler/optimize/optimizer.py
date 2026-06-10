@@ -277,9 +277,11 @@ def _build_criteria(thresholds: dict[str, float] | None = None, judge_model: str
       - tool_use_quality_v1 (with custom rubrics)
     Note: instruction_following_v1 is NOT in the ADK metric evaluator
     registry (any version). hallucinations_v1 (plural) was added in ADK 2.x.
+    final_response_match_v2 and response_match_score are excluded because
+    they compare against reference responses which don't match real MCP
+    tool outputs.
     """
     t = {
-        "final_response_match_v2": 0.5,
         "tool_use_quality_v1": 0.3,
         "final_response_quality_v1": 0.7,
         "hallucinations_v1": 0.8,
@@ -289,11 +291,6 @@ def _build_criteria(thresholds: dict[str, float] | None = None, judge_model: str
         t.update(thresholds)
 
     return {
-        "response_match_score": 0.1,
-        "final_response_match_v2": {
-            "judge_model_options": {"judge_model": judge_model},
-            "threshold": t["final_response_match_v2"],
-        },
         "hallucinations_v1": t["hallucinations_v1"],
         "safety_v1": t["safety_v1"],
         "rubric_based_final_response_quality_v1": {
