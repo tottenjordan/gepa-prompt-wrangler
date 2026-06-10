@@ -25,7 +25,10 @@ def _create_pooled_client(**kwargs):
 
     Accepts **kwargs because the MCP session manager passes headers
     and other parameters to the factory at session creation time.
+    We pop conflicting keys to avoid duplicate keyword arguments.
     """
+    kwargs.pop("timeout", None)
+    kwargs.pop("limits", None)
     return httpx.AsyncClient(
         limits=httpx.Limits(max_connections=10, max_keepalive_connections=5),
         timeout=httpx.Timeout(connect=30.0, read=180.0, write=30.0, pool=30.0),
