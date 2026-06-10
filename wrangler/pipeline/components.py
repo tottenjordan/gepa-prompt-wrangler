@@ -447,16 +447,17 @@ def redeploy_single_agent(
 ) -> str:
     """Redeploy a single agent with its optimized prompt.
 
-    Instead of re-importing the agent module and re-pickling (which fails
-    due to MCP module resolution in containers), this component:
-    1. Downloads the existing pickle from GCS
-    2. Modifies the instruction inside it
-    3. Re-uploads the modified pickle
-    4. Triggers a redeploy via agent_engines.update()
+    Downloads the existing pickle from GCS, modifies the instruction
+    inside it, re-uploads, and triggers a redeploy. Requires code
+    injection + secrets because cloudpickle needs the agent's module
+    dependencies (registry, config, etc.) to deserialize.
     """
+    import io
     import json
     import logging
     import os
+    import sys
+    import tarfile
     import time
     from datetime import datetime
 
@@ -466,13 +467,38 @@ def redeploy_single_agent(
     pair = json.loads(pair_json)
     pair_id = pair["id"]
 
+    # -- Code injection --
+    gcs = storage.Client(project=project_id)
+    gcs.bucket(bucket_name).blob(f"pipeline-runs/{run_id}/code.tar.gz").download_to_filename("/tmp/code.tar.gz")
+    with tarfile.open("/tmp/code.tar.gz", "r:gz") as tar:
+        tar.extractall(path="/app")
+    sys.path.insert(0, "/app")
+
     os.environ["GCP_PROJECT_ID"] = project_id
     os.environ["GCP_REGION"] = location
+    os.environ["GCP_STAGING_BUCKET"] = bucket_name
     os.environ["GOOGLE_CLOUD_PROJECT"] = project_id
     os.environ["GOOGLE_CLOUD_LOCATION"] = "global"
     os.environ["GOOGLE_GENAI_USE_VERTEXAI"] = "1"
 
-    gcs = storage.Client(project=project_id)
+    # -- Load agent env vars from Secret Manager --
+    if secret_id:
+        from google.cloud import secretmanager
+        from dotenv import load_dotenv
+        logging.info(f"Loading secrets from {secret_id}")
+        sm = secretmanager.SecretManagerServiceClient()
+        secret_name = f"projects/{project_id}/secrets/{secret_id}/versions/latest"
+        payload = sm.access_secret_version(name=secret_name).payload.data.decode("UTF-8")
+        load_dotenv(stream=io.StringIO(payload), override=True)
+        os.environ["GOOGLE_GENAI_USE_VERTEXAI"] = "1"
+        os.environ.pop("GOOGLE_API_KEY", None)
+        os.environ.pop("GEMINI_API_KEY", None)
+
+    # Add agent module paths for cloudpickle deserialization
+    from pathlib import Path
+    agent_path = Path(f"/app/{agent_module}")
+    sys.path.insert(0, str(agent_path.parent))
+    sys.path.insert(0, str(agent_path.parent.parent))
 
     # Read deploy + optimize results from GCS
     deploy_data = json.loads(
