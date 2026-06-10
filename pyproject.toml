@@ -9,7 +9,7 @@ authors = [{ name = "GEPA Team" }]
 
 dependencies = [
     "google-cloud-aiplatform[adk,agent-engines,evaluation]>=1.154.0",
-    "google-adk[a2a,agent-identity,eval]>=1.34.1",
+    "google-adk[a2a,agent-identity,eval]>=2.2.0",
     "google-genai>=1.66.0",
     "litellm>=1.83.14",
     "python-dotenv>=1.0.0",

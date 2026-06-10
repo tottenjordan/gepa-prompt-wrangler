@@ -233,10 +233,6 @@ def _merge_thresholds(sampler_config: dict, thresholds: dict[str, float], judge_
 
     merged = []
 
-    if "hallucinations_v1" in criteria and "hallucination_v1" not in criteria:
-        criteria["hallucination_v1"] = criteria.pop("hallucinations_v1")
-        merged.append("renamed hallucinations_v1 → hallucination_v1")
-
     for metric, threshold in thresholds.items():
         actual_key = metric
         if metric not in criteria and metric in METRIC_NAME_MAP:
@@ -279,15 +275,14 @@ def _build_criteria(thresholds: dict[str, float] | None = None, judge_model: str
       - hallucination_v1 (not hallucinations_v1)
       - final_response_quality_v1 (with custom rubrics)
       - tool_use_quality_v1 (with custom rubrics)
-    Note: instruction_following_v1 and hallucination_v1 (singular) are NOT
-    in the ADK metric evaluator registry. Using them causes NotFoundError
-    during GEPA optimization, polluting scores with 0.00. Only registered
-    metrics are included here.
+    Note: instruction_following_v1 is NOT in the ADK metric evaluator
+    registry (any version). hallucinations_v1 (plural) was added in ADK 2.x.
     """
     t = {
         "final_response_match_v2": 0.5,
         "tool_use_quality_v1": 0.3,
         "final_response_quality_v1": 0.7,
+        "hallucinations_v1": 0.8,
         "safety_v1": 0.8,
     }
     if thresholds:
@@ -299,6 +294,7 @@ def _build_criteria(thresholds: dict[str, float] | None = None, judge_model: str
             "judge_model_options": {"judge_model": judge_model},
             "threshold": t["final_response_match_v2"],
         },
+        "hallucinations_v1": t["hallucinations_v1"],
         "safety_v1": t["safety_v1"],
         "rubric_based_final_response_quality_v1": {
             "judge_model_options": {"judge_model": judge_model},
