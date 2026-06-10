@@ -117,7 +117,7 @@ def build_pipeline(image_uri: str):
             )
             optimize_task.set_cpu_limit("8")
             optimize_task.set_memory_limit("32G")
-            optimize_task.set_caching_options(enable_caching=False)
+            optimize_task.set_caching_options(enable_caching=True)
             optimize_task.after(eval_before_task)
             optimize_task.set_display_name(f"Optimize Agent")
 
@@ -131,7 +131,7 @@ def build_pipeline(image_uri: str):
                 agent_module=agent_module,
                 secret_id=secret_id,
             )
-            redeploy_task.set_caching_options(enable_caching=False)
+            redeploy_task.set_caching_options(enable_caching=True)
             redeploy_task.after(optimize_task)
             redeploy_task.set_display_name(f"Re-deploy Optimized Agent")
 
@@ -149,7 +149,7 @@ def build_pipeline(image_uri: str):
             )
             eval_after_task.set_cpu_limit("4")
             eval_after_task.set_memory_limit("16G")
-            eval_after_task.set_caching_options(enable_caching=False)
+            eval_after_task.set_caching_options(enable_caching=True)
             eval_after_task.after(redeploy_task)
             eval_after_task.set_display_name(f"Evaluate Agent")
 
@@ -160,7 +160,7 @@ def build_pipeline(image_uri: str):
             run_id=run_id,
             manifest_json=manifest_json,
         )
-        analysis_task.set_caching_options(enable_caching=False)
+        analysis_task.set_caching_options(enable_caching=True)
         analysis_task.after(eval_after_task)
         analysis_task.set_display_name(f"Generate Analysis")
 
