@@ -61,16 +61,23 @@ class TestPrewarmMcpToolsets:
         ts_ok = _make_toolset()
         ts_fail = _make_toolset(fail=True)
         agent = _make_agent([ts_fail, ts_ok])
-        warmed = asyncio.run(_prewarm_mcp_toolsets(agent))
+        warmed = asyncio.run(_prewarm_mcp_toolsets(agent, max_retries=1))
         assert warmed == 1
         ts_fail.get_tools.assert_awaited_once()
         ts_ok.get_tools.assert_awaited_once()
+
+    def test_retries_on_failure(self):
+        ts_fail = _make_toolset(fail=True)
+        agent = _make_agent([ts_fail])
+        warmed = asyncio.run(_prewarm_mcp_toolsets(agent, max_retries=3))
+        assert warmed == 0
+        assert ts_fail.get_tools.await_count == 3
 
     def test_all_fail_returns_zero(self):
         ts1 = _make_toolset(fail=True)
         ts2 = _make_toolset(fail=True)
         agent = _make_agent([ts1, ts2])
-        warmed = asyncio.run(_prewarm_mcp_toolsets(agent))
+        warmed = asyncio.run(_prewarm_mcp_toolsets(agent, max_retries=1))
         assert warmed == 0
 
     def test_skips_non_toolset_tools(self):

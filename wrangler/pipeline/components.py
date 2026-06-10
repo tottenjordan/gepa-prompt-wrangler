@@ -367,6 +367,26 @@ def optimize_single_agent(
     )
     elapsed = time.time() - t0
 
+    # Clean up MCP sessions after optimization
+    import asyncio
+    from google.adk.tools.base_toolset import BaseToolset
+    async def _cleanup_sessions():
+        for mod_name in list(sys.modules):
+            mod = sys.modules.get(mod_name)
+            if mod and hasattr(mod, 'root_agent'):
+                agent = getattr(mod, 'root_agent', None)
+                if agent and hasattr(agent, 'tools'):
+                    for t in agent.tools:
+                        if isinstance(t, BaseToolset):
+                            try:
+                                await t.close()
+                            except Exception:
+                                pass
+    try:
+        asyncio.run(_cleanup_sessions())
+    except RuntimeError:
+        pass
+
     judge_costs = MODEL_COSTS.get(judge_model, {"input": 0, "output": 0})
     est_input = len(original_prompt) * 50
     est_output = len(optimized_prompt) * 10

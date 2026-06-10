@@ -5,6 +5,7 @@ Falls back to direct Cloud Run URLs when the Agent Registry entry is not found.
 
 import logging
 
+import httpx
 from google.adk.integrations.agent_registry import AgentRegistry
 from google.adk.tools.mcp_tool import McpToolset
 from google.adk.tools.mcp_tool.mcp_session_manager import StreamableHTTPConnectionParams
@@ -13,11 +14,18 @@ from config import GCP_PROJECT_ID, AGENT_REGISTRY_LOCATION, MCP_SERVER_URLS
 
 log = logging.getLogger(__name__)
 
-# Default 5s connection / 300s read is too slow for Cloud Run MCP servers
-MCP_TIMEOUT_SECONDS = 60.0
-MCP_READ_TIMEOUT_SECONDS = 90.0
+MCP_TIMEOUT_SECONDS = 120.0
+MCP_READ_TIMEOUT_SECONDS = 180.0
 
 _registry = None
+
+
+def _create_pooled_client():
+    """HTTPX client with connection pooling and keepalive."""
+    return httpx.AsyncClient(
+        limits=httpx.Limits(max_connections=10, max_keepalive_connections=5),
+        timeout=httpx.Timeout(connect=30.0, read=180.0, write=30.0, pool=30.0),
+    )
 
 
 def get_registry() -> AgentRegistry:
@@ -29,21 +37,34 @@ def get_registry() -> AgentRegistry:
     return _registry
 
 
+def _harden_toolset(toolset):
+    """Apply connection hardening to an McpToolset from Agent Registry."""
+    if hasattr(toolset, '_connection_params'):
+        cp = toolset._connection_params
+        if hasattr(cp, 'timeout'):
+            cp.timeout = MCP_TIMEOUT_SECONDS
+        if hasattr(cp, 'sse_read_timeout'):
+            cp.sse_read_timeout = MCP_READ_TIMEOUT_SECONDS
+        if hasattr(cp, 'terminate_on_close'):
+            cp.terminate_on_close = False
+        if hasattr(cp, 'httpx_client_factory'):
+            cp.httpx_client_factory = _create_pooled_client
+    return toolset
+
+
 def get_mcp_tools(server_name: str):
     try:
         toolset = get_registry().get_mcp_toolset(server_name)
-        # Agent Registry uses default 5s/300s — override for Cloud Run
-        if hasattr(toolset, '_connection_params'):
-            if hasattr(toolset._connection_params, 'timeout'):
-                toolset._connection_params.timeout = MCP_TIMEOUT_SECONDS
-            if hasattr(toolset._connection_params, 'sse_read_timeout'):
-                toolset._connection_params.sse_read_timeout = MCP_READ_TIMEOUT_SECONDS
-        return toolset
+        return _harden_toolset(toolset)
     except RuntimeError:
         url = MCP_SERVER_URLS.get(server_name)
         if not url:
             raise
         log.info("Agent Registry unavailable for %s — using direct URL %s", server_name, url)
         return McpToolset(connection_params=StreamableHTTPConnectionParams(
-            url=url, timeout=MCP_TIMEOUT_SECONDS, sse_read_timeout=MCP_READ_TIMEOUT_SECONDS
+            url=url,
+            timeout=MCP_TIMEOUT_SECONDS,
+            sse_read_timeout=MCP_READ_TIMEOUT_SECONDS,
+            terminate_on_close=False,
+            httpx_client_factory=_create_pooled_client,
         ))

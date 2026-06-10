@@ -180,23 +180,36 @@ agent = types.SimpleNamespace(root_agent=root_agent)
     return wrapper_dir
 
 
-async def _prewarm_mcp_toolsets(agent, tag: str = "  ") -> int:
+async def _prewarm_mcp_toolsets(agent, tag: str = "  ", max_retries: int = 3) -> int:
     """Pre-warm MCP tool sessions so GEPA doesn't timeout on first connection.
 
+    Retries with exponential backoff to survive Cloud Run cold starts.
     Returns the number of toolsets successfully warmed.
     """
     from google.adk.tools.base_toolset import BaseToolset
     mcp_toolsets = [t for t in agent.tools if isinstance(t, BaseToolset)]
     warmed = 0
     for ts in mcp_toolsets:
-        try:
-            tools = await ts.get_tools()
-            log.info("Pre-warmed %s: %d tools", type(ts).__name__, len(tools))
-            warmed += 1
-        except Exception as exc:
-            log.warning("MCP pre-warm failed for %s: %s", type(ts).__name__, exc)
+        for attempt in range(max_retries):
+            try:
+                tools = await ts.get_tools()
+                log.info("Pre-warmed %s: %d tools", type(ts).__name__, len(tools))
+                warmed += 1
+                break
+            except Exception as exc:
+                if attempt < max_retries - 1:
+                    wait = 2 ** attempt
+                    log.warning("MCP pre-warm attempt %d/%d failed, retrying in %ds: %s",
+                                attempt + 1, max_retries, wait, exc)
+                    await asyncio.sleep(wait)
+                else:
+                    log.error("MCP pre-warm failed after %d attempts for %s: %s",
+                              max_retries, type(ts).__name__, exc)
     if mcp_toolsets:
         print(f"{tag}  Pre-warmed {warmed}/{len(mcp_toolsets)} MCP toolset(s)", flush=True)
+        if warmed < len(mcp_toolsets):
+            print(f"{tag}  WARNING: {len(mcp_toolsets) - warmed} toolset(s) failed — "
+                  f"optimization will proceed with reduced tool context", flush=True)
     return warmed
 
 
