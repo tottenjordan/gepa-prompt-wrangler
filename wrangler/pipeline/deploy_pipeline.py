@@ -289,7 +289,6 @@ def deploy_pipeline(
             "eval_thresholds_json": json.dumps(eval_thresholds),
             "secret_id": secret_id,
         },
-        enable_caching=False,
         labels={"solution": "promp-wrangler"},
     )
 
