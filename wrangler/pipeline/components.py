@@ -445,13 +445,18 @@ def redeploy_single_agent(
     metrics: Output[Metrics],
     summary: Output[Markdown],
 ) -> str:
-    """Redeploy a single agent with its optimized prompt."""
-    import io
+    """Redeploy a single agent with its optimized prompt.
+
+    Instead of re-importing the agent module and re-pickling (which fails
+    due to MCP module resolution in containers), this component:
+    1. Downloads the existing pickle from GCS
+    2. Modifies the instruction inside it
+    3. Re-uploads the modified pickle
+    4. Triggers a redeploy via agent_engines.update()
+    """
     import json
     import logging
     import os
-    import sys
-    import tarfile
     import time
     from datetime import datetime
 
@@ -460,38 +465,14 @@ def redeploy_single_agent(
     logging.basicConfig(level=logging.INFO)
     pair = json.loads(pair_json)
     pair_id = pair["id"]
-    model = pair["model"]
-
-    # -- Code injection --
-    gcs = storage.Client(project=project_id)
-    gcs.bucket(bucket_name).blob(f"pipeline-runs/{run_id}/code.tar.gz").download_to_filename("/tmp/code.tar.gz")
-    with tarfile.open("/tmp/code.tar.gz", "r:gz") as tar:
-        tar.extractall(path="/app")
-    sys.path.insert(0, "/app")
 
     os.environ["GCP_PROJECT_ID"] = project_id
     os.environ["GCP_REGION"] = location
-    os.environ["GCP_STAGING_BUCKET"] = bucket_name
     os.environ["GOOGLE_CLOUD_PROJECT"] = project_id
     os.environ["GOOGLE_CLOUD_LOCATION"] = "global"
     os.environ["GOOGLE_GENAI_USE_VERTEXAI"] = "1"
 
-    # -- Load agent env vars from Secret Manager --
-    if secret_id:
-        from google.cloud import secretmanager
-        from dotenv import load_dotenv
-        logging.info(f"Loading secrets from {secret_id}")
-        sm = secretmanager.SecretManagerServiceClient()
-        secret_name = f"projects/{project_id}/secrets/{secret_id}/versions/latest"
-        payload = sm.access_secret_version(name=secret_name).payload.data.decode("UTF-8")
-        load_dotenv(stream=io.StringIO(payload), override=True)
-        # Force Vertex AI ADC — API keys don't work with Evaluation Service
-        os.environ["GOOGLE_GENAI_USE_VERTEXAI"] = "1"
-        os.environ.pop("GOOGLE_API_KEY", None)
-        os.environ.pop("GEMINI_API_KEY", None)
-
-    from wrangler.core.config import resolve_model
-    from wrangler.core import deploy as deployer
+    gcs = storage.Client(project=project_id)
 
     # Read deploy + optimize results from GCS
     deploy_data = json.loads(
@@ -502,22 +483,39 @@ def redeploy_single_agent(
     engine_id = deploy_data["engine_id"]
     optimized_prompt = optimize_data["optimized_prompt"]
 
-    from pathlib import Path
-    agent_path = Path(f"/app/{agent_module}")
-    sys.path.insert(0, str(agent_path.parent))
-    sys.path.insert(0, str(agent_path.parent.parent))
-    module_name = agent_path.name
-    mod = __import__(module_name)
+    # Get the pickle URI from the deployed agent
+    import vertexai
+    vertexai.init(project=project_id, location=location, staging_bucket=f"gs://{bucket_name}")
+    client = vertexai.Client(project=project_id, location=location)
 
-    if hasattr(mod, "create_agent"):
-        agent = mod.create_agent(model, optimized_prompt)
+    if not engine_id.startswith("projects/"):
+        full_name = f"projects/{project_id}/locations/{location}/reasoningEngines/{engine_id}"
     else:
-        agent = getattr(mod, "root_agent", None) or mod.agent.root_agent
-        agent.model = resolve_model(model)
-        agent.instruction = optimized_prompt
+        full_name = engine_id
 
+    agent_engine = client.agent_engines.get(name=full_name)
+    pickle_uri = agent_engine.api_resource.spec.package_spec.pickle_object_gcs_uri
+    logging.info(f"[{pair_id}] Pickle URI: {pickle_uri}")
+
+    # Download, modify instruction, re-upload
+    import cloudpickle
+    pickle_bucket = pickle_uri.replace("gs://", "").split("/")[0]
+    pickle_blob_path = "/".join(pickle_uri.replace("gs://", "").split("/")[1:])
+    blob = gcs.bucket(pickle_bucket).blob(pickle_blob_path)
+    pickle_data = blob.download_as_bytes()
+
+    agent_obj = cloudpickle.loads(pickle_data)
+    old_instruction = agent_obj._tmpl_attrs["agent"].instruction
+    agent_obj._tmpl_attrs["agent"].instruction = optimized_prompt
+    blob.upload_from_string(cloudpickle.dumps(agent_obj))
+    logging.info(f"[{pair_id}] Updated instruction: {len(old_instruction)} → {len(optimized_prompt)} chars")
+
+    # Trigger redeploy
     t0 = time.time()
-    deployer.update_agent(agent, engine_id, display_name=f"gepa-{pair_id}")
+    client.agent_engines.update(
+        name=full_name,
+        config={"display_name": f"gepa-{pair_id}", "labels": {"solution": "promp-wrangler"}},
+    )
     elapsed = time.time() - t0
 
     result = {
