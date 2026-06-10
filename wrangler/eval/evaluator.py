@@ -18,7 +18,7 @@ from vertexai._genai import _evals_common
 
 from ..core.config import GCP_PROJECT_ID, GCP_REGION, GCP_STAGING_BUCKET, get_batch_config
 
-GCS_EVAL_DEST = f"gs://{GCP_STAGING_BUCKET}/eval-results/"
+GCS_EVAL_DEST = f"gs://{GCP_STAGING_BUCKET}/eval-results"
 MAX_POLL_SECONDS = 2400
 
 DEFAULT_METRICS = [
