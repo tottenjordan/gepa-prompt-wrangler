@@ -499,7 +499,12 @@ def optimize(
 
             async def _refreshed_sample(candidate, *args, **kwargs):
                 _gen_count[0] += 1
-                if _gen_count[0] > 1:
+                gen = _gen_count[0]
+                gen_t0 = time.time()
+                mcp_count = sum(1 for t in root_agent.tools if isinstance(t, BaseToolset))
+
+                if gen > 1 and mcp_count > 0:
+                    print(f"{tag}  Generation {gen}: closing {mcp_count} stale MCP session(s)...", flush=True)
                     for tool in root_agent.tools:
                         if isinstance(tool, BaseToolset):
                             try:
@@ -507,8 +512,15 @@ def optimize(
                             except Exception:
                                 pass
                     warmed = await _prewarm_mcp_toolsets(root_agent, tag, max_retries=2)
-                    log.info("Generation %d: re-warmed %d MCP toolset(s)", _gen_count[0], warmed)
-                return await _orig_sample(candidate, *args, **kwargs)
+                    refresh_elapsed = time.time() - gen_t0
+                    print(f"{tag}  Generation {gen}: re-warmed {warmed}/{mcp_count} in {refresh_elapsed:.1f}s", flush=True)
+                else:
+                    print(f"{tag}  Generation {gen}: evaluating candidate...", flush=True)
+
+                result = await _orig_sample(candidate, *args, **kwargs)
+                gen_elapsed = time.time() - gen_t0
+                print(f"{tag}  Generation {gen}: scored in {gen_elapsed:.1f}s", flush=True)
+                return result
 
             sampler.sample_and_score = _refreshed_sample
 
