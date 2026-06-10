@@ -13,13 +13,14 @@ GEPA local eval (optimization) and GEAP batch eval (measurement) use different m
 | `response_match_score` | — | GEPA only (string similarity) |
 | `final_response_match_v2` | `final_response_match_v1` | Equivalent (LLM-judged semantic match) |
 | `safety_v1` | `safety_v1` | Equivalent |
-| `rubric_based_final_response_quality_v1` | `final_response_quality_v1` / `instruction_following_v1` | Approximate (via custom rubrics) |
+| `rubric_based_final_response_quality_v1` | `final_response_quality_v1` | Approximate (via custom rubrics) |
 | `rubric_based_tool_use_quality_v1` | `tool_use_quality_v1` | Approximate |
-| — | `hallucination_v1` | Batch eval only |
+| `hallucinations_v1` | `hallucination_v1` | Aligned (added in ADK 2.x) |
+| — | `instruction_following_v1` | Batch eval only (not in ADK registry) |
 
 ### Key Gap
 
-GEAP batch eval has a dedicated `instruction_following_v1` metric. ADK's `PrebuiltMetrics` enum does not include an equivalent. The closest ADK-native mechanism is `rubric_based_final_response_quality_v1` with instruction-adherence rubrics. The wrangler's default sampler config includes two rubrics that approximate this:
+GEAP batch eval has a dedicated `instruction_following_v1` metric. ADK's metric evaluator registry does not include an equivalent in any version (1.x or 2.x). The closest ADK-native mechanism is `rubric_based_final_response_quality_v1` with instruction-adherence rubrics. The wrangler's default sampler config includes two rubrics that approximate this:
 
 - **`instruction_adherence`** — Evaluates whether the response follows system prompt instructions (formatting, tone, content requirements)
 - **`completeness`** — Evaluates whether the response fully addresses all parts of the user's request

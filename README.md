@@ -257,8 +257,7 @@ eval_config:
   response_match_threshold: 0.5
   safety_threshold: 0.8
   thresholds:                           # optional — per-metric GEPA thresholds
-    instruction_following_v1: 0.7
-    hallucination_v1: 0.8
+    hallucinations_v1: 0.8
 
 pipeline:                               # optional — Vertex AI Pipeline config
   bucket: my-project-wrangler-staging
@@ -602,7 +601,7 @@ See [docs/online_eval_guide.md](docs/online_eval_guide.md) for details on evalua
 
 *Source: [GEAP Model Pricing](https://cloud.google.com/gemini-enterprise-agent-platform/generative-ai/pricing)*
 
-Gemini 2.x uses regional Vertex AI endpoints (passed as strings). All other models route through `LiteLlm` with `vertex_location="global"`.
+Gemini 2.x uses regional Vertex AI endpoints (passed as strings). Gemini 3.x uses the native `Gemini()` class and Claude uses the native `Claude()` class, both via `GOOGLE_CLOUD_LOCATION=global`.
 
 ---
 

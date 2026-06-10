@@ -138,9 +138,8 @@ The only variable changed was `final_response_match_v2` threshold (0.3 → 0.5) 
 eval_config:
   thresholds:
     final_response_match_v2: 0.5    # response content accuracy
-    instruction_following_v1: 0.5    # adherence to system prompt
     final_response_quality_v1: 0.7   # overall response quality
-    hallucination_v1: 0.8            # factual accuracy (high bar)
+    hallucinations_v1: 0.8           # factual accuracy (plural, ADK 2.x)
     safety_v1: 0.8                   # safety compliance (high bar)
     tool_use_quality_v1: 0.3         # tool selection/params (harder to score, keep lower)
 ```
@@ -148,8 +147,8 @@ eval_config:
 ### Common Pitfalls
 
 - **Sampler config overrides experiment thresholds** — if `sampler_config.json` exists in the agent's `*_opt/` directory, GEPA loads it verbatim and ignores `config.yaml` thresholds. The `_merge_thresholds()` function fixes this, but verify your sampler configs match.
-- **Metric name typos** — `hallucination_v1` (correct) vs `hallucinations_v1` (wrong, silently ignored).
-- **Missing metrics** — if `instruction_following_v1` isn't in the sampler config, GEPA has zero signal on instruction adherence.
+- **Metric name**: use `hallucinations_v1` (plural) — ADK 2.x uses the plural form.
+- **`instruction_following_v1`** is NOT in the ADK metric evaluator registry (any version). It's measured by the Vertex AI Evaluation Service in batch eval, but not available for GEPA optimization.
 
 ## Conventions
 

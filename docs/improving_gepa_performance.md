@@ -30,11 +30,12 @@ The ADK's `LocalEvalSamplerConfig` schema *requires* a `threshold` field on rubr
 | Metric | Threshold | Rationale |
 |--------|-----------|-----------|
 | `safety_v1` | 0.8 | High bar — safety failures are unacceptable |
-| `hallucination_v1` | 0.8 | High bar — factual accuracy is critical |
+| `hallucinations_v1` | 0.8 | High bar — factual accuracy is critical (plural, ADK 2.x) |
 | `final_response_quality_v1` | 0.7 | Moderate-high — overall quality matters |
 | `final_response_match_v2` | 0.5 | Moderate — partial matches are valuable |
-| `instruction_following_v1` | 0.5 | Moderate — some flexibility acceptable |
 | `tool_use_quality_v1` | 0.3 | Lower — tool use is harder, reward incremental progress |
+
+> **Note:** `instruction_following_v1` was previously included but is NOT in the ADK metric evaluator registry (any version). Using it causes `NotFoundError` during GEPA optimization. It was removed in the ADK 2.x upgrade.
 
 **Impact:** Tighter thresholds give the optimizer more signal about what to improve, leading to faster convergence and better optimized prompts.
 
@@ -78,15 +79,15 @@ The optimizer was starting from a *previously optimized* prompt instead of the g
 
 **Impact:** Clean-slate optimization produces better results because GEPA can explore the full prompt space without being anchored to a prior local optimum.
 
-## 6. `instruction_following_v1` as Explicit Metric
+## 6. `instruction_following_v1` — Added Then Removed
 
-**Commit:** [`7c76a03`](https://github.com/tottenjordan/gepa-prompt-wrangler/commit/7c76a0314585e333b371d4f0819fe18bf9391179)
+**Commit (added):** [`7c76a03`](https://github.com/tottenjordan/gepa-prompt-wrangler/commit/7c76a0314585e333b371d4f0819fe18bf9391179)
 
-This metric was entirely missing from the GEPA optimization criteria. The optimizer wasn't being told to care about whether the agent follows its system prompt instructions — which is the core objective of prompt optimization.
+This metric was added to the GEPA optimization criteria with a 0.5 threshold. However, `instruction_following_v1` is NOT in the ADK metric evaluator registry (any version, including 2.x). GEPA threw `NotFoundError` for every eval case, scoring it as 0.00 and polluting the optimization signal.
 
-**Fix:** Added `instruction_following_v1` with a 0.5 threshold to the criteria passed to GEPA.
+**Fix (removed):** Removed `instruction_following_v1` from GEPA criteria. Instruction adherence is approximated by the `rubric_based_final_response_quality_v1` metric's custom rubrics (`instruction_adherence` and `completeness`). The batch eval's `instruction_following_v1` (server-side) still measures it in eval_before/eval_after.
 
-**Impact:** The optimizer now explicitly targets instruction adherence, producing prompts that are more directive and effective.
+**Impact:** Cleaner optimization signal — GEPA no longer wastes evaluation budget on a metric that always returns 0.00.
 
 ## 7. Multi-Run Eval Averaging
 
