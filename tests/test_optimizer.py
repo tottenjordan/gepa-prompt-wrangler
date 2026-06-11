@@ -3,11 +3,35 @@
 import asyncio
 import json
 import os
+import re
+import unicodedata
 import pytest
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
 from wrangler.optimize.optimizer import _create_wrapper_module, _prewarm_mcp_toolsets
+
+
+# --- Reproduce _fuzzy_normalize for direct unit testing ---
+# Mirrors the implementation inside _patch_adk() in optimizer.py.
+
+_SMART_CHARS = {
+    0x2018: "'", 0x2019: "'",
+    0x201C: '"', 0x201D: '"',
+    0x2013: "-", 0x2014: "-",
+    0x2026: "...",
+}
+
+
+def _fuzzy_normalize(text):
+    if not isinstance(text, str):
+        return ""
+    text = unicodedata.normalize('NFKC', text)
+    text = text.translate(_SMART_CHARS)
+    text = re.sub(r'^[\s*•\-"\']+', '', text)
+    text = re.sub(r'[\s*•\-"\']+$', '', text)
+    text = re.sub(r'\s+', ' ', text)
+    return text.lower().strip()
 
 
 class TestCreateWrapperModule:
@@ -131,3 +155,81 @@ class TestThresholdInjection:
                 v["threshold"] = 0.0
 
         assert criteria["custom"]["threshold"] == 0.7
+
+
+class TestFuzzyNormalize:
+    """Validate NFKC + smart-char normalization for rubric matching (issue #6072)."""
+
+    RUBRIC = "the response correctly uses tools"
+
+    @pytest.mark.parametrize("label,input_text", [
+        ("exact", "The response correctly uses tools"),
+        ("markdown_bullet", "- The response correctly uses tools"),
+        ("bullet_bold", "* **The response correctly uses tools**"),
+        ("smart_double_quotes", "“The response correctly uses tools”"),
+        ("double_spaces", "The  response  correctly  uses  tools"),
+        ("em_dash_prefix", "— The response correctly uses tools"),
+        ("en_dash_prefix", "– The response correctly uses tools"),
+        ("unicode_bullet", "• The response correctly uses tools"),
+        ("leading_whitespace", "   The response correctly uses tools"),
+    ])
+    def test_garbled_text_matches_rubric(self, label, input_text):
+        assert _fuzzy_normalize(input_text) == self.RUBRIC
+
+    def test_smart_single_quotes_stripped_at_boundaries(self):
+        assert _fuzzy_normalize("‘hello’") == "hello"
+
+    def test_smart_single_quotes_normalized_mid_word(self):
+        assert _fuzzy_normalize("the response’s tools") == "the response's tools"
+
+    def test_ellipsis_normalized(self):
+        assert _fuzzy_normalize("The response… uses tools") == "the response... uses tools"
+
+    def test_non_string_returns_empty(self):
+        assert _fuzzy_normalize(None) == ""
+        assert _fuzzy_normalize(42) == ""
+
+    def test_empty_string(self):
+        assert _fuzzy_normalize("") == ""
+
+    def test_accented_chars_preserved(self):
+        assert _fuzzy_normalize("réponse") == "réponse"
+
+
+class TestSubstringUniquenessGuard:
+    """Verify substring fallback only matches when exactly one rubric candidate exists."""
+
+    def test_unique_substring_match_accepted(self):
+        normalized_map = {
+            _fuzzy_normalize("uses tools correctly"): "rubric_1",
+        }
+        judge_text = _fuzzy_normalize("the agent uses tools correctly and efficiently")
+        result = normalized_map.get(judge_text)
+
+        if not result:
+            candidates = [
+                r for ct, r in normalized_map.items()
+                if ct in judge_text or judge_text in ct
+            ]
+            if len(candidates) == 1:
+                result = candidates[0]
+
+        assert result == "rubric_1"
+
+    def test_ambiguous_substring_match_rejected(self):
+        normalized_map = {
+            _fuzzy_normalize("uses tools correctly"): "rubric_1",
+            _fuzzy_normalize("uses tools efficiently"): "rubric_2",
+        }
+        judge_text = _fuzzy_normalize("uses tools")
+        result = normalized_map.get(judge_text)
+
+        if not result:
+            candidates = [
+                r for ct, r in normalized_map.items()
+                if ct in judge_text or judge_text in ct
+            ]
+            if len(candidates) == 1:
+                result = candidates[0]
+
+        assert result is None

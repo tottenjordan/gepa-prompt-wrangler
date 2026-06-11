@@ -105,13 +105,23 @@ def _patch_adk():
     import re as _re
     from google.adk.evaluation import rubric_based_evaluator as _rbe
 
+    import unicodedata as _ud
+
+    _SMART_CHARS = {
+        0x2018: "'", 0x2019: "'",
+        0x201C: '"', 0x201D: '"',
+        0x2013: "-", 0x2014: "-",
+        0x2026: "...",
+    }
+
     def _fuzzy_normalize(text: str) -> str:
         if not isinstance(text, str):
             return ""
-        text = _re.sub(r'^[\s*•\-]+', '', text)
-        text = _re.sub(r'[\s*•\-]+$', '', text)
+        text = _ud.normalize('NFKC', text)
+        text = text.translate(_SMART_CHARS)
+        text = _re.sub(r'^[\s*•\-"\']+', '', text)
+        text = _re.sub(r'[\s*•\-"\']+$', '', text)
         text = _re.sub(r'\s+', ' ', text)
-        text = text.encode('ascii', 'ignore').decode('ascii')
         return text.lower().strip()
 
     _rbe._normalize_text = _fuzzy_normalize
@@ -136,10 +146,12 @@ def _patch_adk():
             rubric = normalized_map.get(norm_text)
 
             if not rubric:
-                for config_text, r in normalized_map.items():
-                    if config_text in norm_text or norm_text in config_text:
-                        rubric = r
-                        break
+                candidates = [
+                    r for ct, r in normalized_map.items()
+                    if ct in norm_text or norm_text in ct
+                ]
+                if len(candidates) == 1:
+                    rubric = candidates[0]
 
             if rubric:
                 rubric_scores.append(RubricScore(
