@@ -716,8 +716,8 @@ def generate_analysis(
     original_reports = reporter.REPORTS_DIR
     original_charts = reporter.CHARTS_DIR
     try:
-        reporter.REPORTS_DIR = str(reports_dir)
-        reporter.CHARTS_DIR = str(charts_dir)
+        reporter.REPORTS_DIR = reports_dir
+        reporter.CHARTS_DIR = charts_dir
         experiment_name = manifest.get("name", run_id)
         generate_report(results, experiment_name, use_paperbanana=True)
     finally:
