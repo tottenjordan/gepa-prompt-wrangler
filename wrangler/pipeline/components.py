@@ -175,6 +175,7 @@ def eval_single_agent(
     phase: str,
     num_runs: int,
     judge_model: str,
+    redeploy_output: str,
     metrics: Output[Metrics],
     summary: Output[Markdown],
 ) -> str:
@@ -486,6 +487,7 @@ def redeploy_single_agent(
     pair_json: str,
     agent_module: str,
     secret_id: str,
+    optimize_output: str,
     metrics: Output[Metrics],
     summary: Output[Markdown],
 ) -> str:

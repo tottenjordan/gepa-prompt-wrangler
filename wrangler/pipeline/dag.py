@@ -96,13 +96,18 @@ def build_pipeline(image_uri: str):
                 phase="before",
                 num_runs=num_runs,
                 judge_model=judge_model,
+                redeploy_output="",
             )
             eval_before_task.set_cpu_limit("4")
             eval_before_task.set_memory_limit("16G")
             eval_before_task.set_caching_options(enable_caching=True)
             eval_before_task.after(deploy_task)
-            eval_before_task.set_display_name(f"Evaluate Agent")
+            eval_before_task.set_display_name("Evaluate Agent (Before)")
 
+        # Optimize → redeploy → eval_after in ONE ParallelFor block so
+        # optimize's output flows as a data dependency to redeploy and
+        # eval_after. This ensures KFP caching works correctly — if
+        # optimize produces a new prompt, redeploy and eval_after re-run.
         with dsl.ParallelFor(pairs_json, parallelism=1) as pair_config:
             optimize_task = comps["optimize"](
                 project_id=project_id,
@@ -121,9 +126,8 @@ def build_pipeline(image_uri: str):
             optimize_task.set_memory_limit("32G")
             optimize_task.set_caching_options(enable_caching=True)
             optimize_task.after(eval_before_task)
-            optimize_task.set_display_name(f"Optimize Agent")
+            optimize_task.set_display_name("Optimize Agent")
 
-        with dsl.ParallelFor(pairs_json) as pair_config:
             redeploy_task = comps["redeploy"](
                 project_id=project_id,
                 location=location,
@@ -132,12 +136,11 @@ def build_pipeline(image_uri: str):
                 pair_json=pair_config,
                 agent_module=agent_module,
                 secret_id=secret_id,
+                optimize_output=optimize_task.outputs["Output"],
             )
             redeploy_task.set_caching_options(enable_caching=True)
-            redeploy_task.after(optimize_task)
-            redeploy_task.set_display_name(f"Re-deploy Optimized Agent")
+            redeploy_task.set_display_name("Re-deploy Optimized Agent")
 
-        with dsl.ParallelFor(pairs_json, parallelism=1) as pair_config:
             eval_after_task = comps["eval"](
                 project_id=project_id,
                 location=location,
@@ -148,12 +151,12 @@ def build_pipeline(image_uri: str):
                 phase="after",
                 num_runs=num_runs,
                 judge_model=judge_model,
+                redeploy_output=redeploy_task.outputs["Output"],
             )
             eval_after_task.set_cpu_limit("4")
             eval_after_task.set_memory_limit("16G")
             eval_after_task.set_caching_options(enable_caching=True)
-            eval_after_task.after(redeploy_task)
-            eval_after_task.set_display_name(f"Evaluate Agent")
+            eval_after_task.set_display_name("Evaluate Agent (After)")
 
         analysis_task = comps["analysis"](
             project_id=project_id,
