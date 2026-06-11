@@ -1,6 +1,6 @@
-name: "pipeline-test-sonnet-opus"
+name: "pipeline-test-sonnet"
 description: >
-  Pipeline test with pre-deployed Sonnet and Opus agents.
+  Pipeline test — single Sonnet agent, fastest path to end-to-end.
 
 agent_module: "examples/multi_model_agents/agents/sonnet_agent"
 eval_data: "examples/multi_model_agents/eval_data/eval_cases.yaml"
@@ -13,13 +13,6 @@ pairs:
     engine_id: "6943994822277464064"
     system_prompt: "You are a helpful assistant. Use the available tools to answer user questions."
 
-  - id: "opus"
-    model: "claude-opus-4-6"
-    description: "Claude Opus with generic prompt"
-    agent_module: "examples/multi_model_agents/agents/opus_agent"
-    engine_id: "3543777103612739584"
-    system_prompt: "You are a helpful assistant. Use the available tools to answer user questions."
-
 eval_config:
   judge_model: gemini-2.5-pro
   response_match_threshold: 0.5
@@ -27,3 +20,4 @@ eval_config:
 
 pipeline:
   secret_id: wrangler-agent-env
+  cache_bust: "v1"

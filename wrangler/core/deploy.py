@@ -11,6 +11,7 @@ REQUIREMENTS = [
     "google-genai>=1.66.0",
     "google-auth>=2.52.0",
     "google-adk[a2a,agent-identity,eval,mcp]>=2.2.0",
+    "anthropic[vertex]>=0.49.0",
     "litellm>=1.83.14",
     "python-dotenv>=1.0.0",
     "pydantic>=2.12.5",

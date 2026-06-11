@@ -77,6 +77,7 @@ def deploy_single_agent(
     run_id: str,
     pair_json: str,
     agent_module: str,
+    secret_id: str,
     metrics: Output[Metrics],
     summary: Output[Markdown],
 ) -> str:
@@ -110,6 +111,20 @@ def deploy_single_agent(
     os.environ["GOOGLE_CLOUD_LOCATION"] = "global"
     os.environ["GOOGLE_GENAI_USE_VERTEXAI"] = "1"
 
+    # -- Load agent env vars from Secret Manager --
+    if secret_id:
+        from google.cloud import secretmanager
+        from dotenv import load_dotenv
+        import io
+        logging.info(f"Loading secrets from {secret_id}")
+        sm = secretmanager.SecretManagerServiceClient()
+        secret_name = f"projects/{project_id}/secrets/{secret_id}/versions/latest"
+        payload = sm.access_secret_version(name=secret_name).payload.data.decode("UTF-8")
+        load_dotenv(stream=io.StringIO(payload), override=True)
+        os.environ["GOOGLE_GENAI_USE_VERTEXAI"] = "1"
+        os.environ.pop("GOOGLE_API_KEY", None)
+        os.environ.pop("GEMINI_API_KEY", None)
+
     from wrangler.core.config import resolve_model
     from wrangler.core import deploy as deployer
 
@@ -134,8 +149,18 @@ def deploy_single_agent(
             agent.model = resolve_model(model)
             agent.instruction = pair["system_prompt"]
 
+        agent_parent = str(Path(f"/app/{agent_module}").parent)
+        extra_pkgs = [agent_parent]
+
+        mcp_env = {k: v for k, v in os.environ.items()
+                   if k.startswith(("SEARCH_MCP", "BOOKING_MCP", "EXPENSE_MCP"))}
+
         t0 = time.time()
-        engine_id = deployer.deploy_agent(agent, display_name=f"gepa-{pair_id}")
+        engine_id = deployer.deploy_agent(
+            agent, display_name=f"gepa-{pair_id}",
+            extra_packages=extra_pkgs,
+            env_vars=mcp_env,
+        )
         elapsed = time.time() - t0
 
         result = {
@@ -176,6 +201,7 @@ def eval_single_agent(
     num_runs: int,
     judge_model: str,
     redeploy_output: str,
+    cache_bust: str,
     metrics: Output[Metrics],
     summary: Output[Markdown],
 ) -> str:
@@ -294,6 +320,7 @@ def optimize_single_agent(
     eval_thresholds_json: str,
     secret_id: str,
     max_metric_calls: int,
+    cache_bust: str,
     metrics: Output[Metrics],
     summary: Output[Markdown],
 ) -> str:
@@ -488,6 +515,7 @@ def redeploy_single_agent(
     agent_module: str,
     secret_id: str,
     optimize_output: str,
+    cache_bust: str,
     metrics: Output[Metrics],
     summary: Output[Markdown],
 ) -> str:
@@ -620,6 +648,7 @@ def generate_analysis(
     bucket_name: str,
     run_id: str,
     manifest_json: str,
+    cache_bust: str,
     metrics: Output[Metrics],
     summary: Output[Markdown],
 ) -> str:

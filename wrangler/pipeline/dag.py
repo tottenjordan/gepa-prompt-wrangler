@@ -62,6 +62,7 @@ def build_pipeline(image_uri: str):
         eval_thresholds_json: str = "{}",
         secret_id: str = "",
         max_metric_calls: int = 50,
+        cache_bust: str = "",
     ):
         archive_task = archive_agent_code(
             project_id=project_id,
@@ -80,6 +81,7 @@ def build_pipeline(image_uri: str):
                 run_id=run_id,
                 pair_json=pair_config,
                 agent_module=agent_module,
+                secret_id=secret_id,
             )
             deploy_task.set_caching_options(enable_caching=True)
             deploy_task.after(archive_task)
@@ -97,6 +99,7 @@ def build_pipeline(image_uri: str):
                 num_runs=num_runs,
                 judge_model=judge_model,
                 redeploy_output="",
+                cache_bust="",
             )
             eval_before_task.set_cpu_limit("4")
             eval_before_task.set_memory_limit("16G")
@@ -121,6 +124,7 @@ def build_pipeline(image_uri: str):
                 eval_thresholds_json=eval_thresholds_json,
                 secret_id=secret_id,
                 max_metric_calls=max_metric_calls,
+                cache_bust=cache_bust,
             )
             optimize_task.set_cpu_limit("8")
             optimize_task.set_memory_limit("32G")
@@ -137,6 +141,7 @@ def build_pipeline(image_uri: str):
                 agent_module=agent_module,
                 secret_id=secret_id,
                 optimize_output=optimize_task.outputs["Output"],
+                cache_bust=cache_bust,
             )
             redeploy_task.set_caching_options(enable_caching=True)
             redeploy_task.set_display_name("Re-deploy Optimized Agent")
@@ -152,6 +157,7 @@ def build_pipeline(image_uri: str):
                 num_runs=num_runs,
                 judge_model=judge_model,
                 redeploy_output=redeploy_task.outputs["Output"],
+                cache_bust=cache_bust,
             )
             eval_after_task.set_cpu_limit("4")
             eval_after_task.set_memory_limit("16G")
@@ -164,6 +170,7 @@ def build_pipeline(image_uri: str):
             bucket_name=bucket_name,
             run_id=run_id,
             manifest_json=manifest_json,
+            cache_bust=cache_bust,
         )
         analysis_task.set_caching_options(enable_caching=True)
         analysis_task.after(eval_after_task)
