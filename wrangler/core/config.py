@@ -28,6 +28,8 @@ MODEL_COSTS = {
     "gemini-3.1-pro-preview": {"input": 4.0, "output": 18.0},
     "claude-sonnet-4-6": {"input": 3.0, "output": 15.0},
     "claude-opus-4-6": {"input": 5.0, "output": 25.0},
+    "claude-opus-4-7": {"input": 5.0, "output": 25.0},
+    "claude-fable-5": {"input": 10.0, "output": 50.0},
 }
 
 BLENDED_INPUT_WEIGHT = 4
@@ -50,8 +52,10 @@ RATE_LIMITS = {
     "gemini-3.1-pro": 5,
     "gemini-2.5-flash": 100,
     "gemini-2.5-pro": 80,
-    "claude-sonnet": 2000,
-    "claude-opus": 800,
+    "claude-sonnet-4-6": 2000,
+    "claude-opus-4-6": 800,
+    "claude-opus-4-7": 800,
+    "claude-fable-5": 800,
 }
 
 

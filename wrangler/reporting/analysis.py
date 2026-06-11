@@ -26,9 +26,11 @@ PROVIDERS = {
     "gemini-3.1-pro-preview": "Google",
     "claude-sonnet-4-6": "Anthropic",
     "claude-opus-4-6": "Anthropic",
+    "claude-opus-4-7": "Anthropic",
+    "claude-fable-5": "Anthropic",
 }
 
-AGENT_ORDER = ["lite", "flash", "pro", "sonnet", "opus"]
+AGENT_ORDER = ["lite", "flash", "pro", "sonnet", "opus", "opus47", "fable"]
 
 MODEL_MAP = {
     "lite": "gemini-3.1-flash-lite",
@@ -36,6 +38,8 @@ MODEL_MAP = {
     "pro": "gemini-3.1-pro-preview",
     "sonnet": "claude-sonnet-4-6",
     "opus": "claude-opus-4-6",
+    "opus47": "claude-opus-4-7",
+    "fable": "claude-fable-5",
 }
 
 
