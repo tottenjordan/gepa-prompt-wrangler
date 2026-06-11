@@ -178,9 +178,15 @@ def deploy_pipeline(
     service_account = pipeline_config.get("service_account", os.getenv("PIPELINE_SERVICE_ACCOUNT", ""))
     secret_id = pipeline_config.get("secret_id", "")
 
+    # run_id is deterministic from inputs so KFP caching works across submissions.
+    # job_id gets a unique timestamp suffix so Vertex AI doesn't reject duplicates.
     if not run_id:
-        timestamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
-        run_id = f"run-{timestamp}"
+        import hashlib
+        cache_key = hashlib.md5(
+            f"{manifest.name}:{manifest.agent_module}:{manifest.eval_data}:"
+            f"{','.join(p.id for p in manifest.pairs)}".encode()
+        ).hexdigest()[:10]
+        run_id = f"run-{cache_key}"
 
     num_runs = pipeline_config.get("num_runs", num_runs)
     judge_model = manifest.eval_config.get("judge_model", "gemini-2.5-pro")
@@ -254,7 +260,8 @@ def deploy_pipeline(
     aiplatform.init(project=project_id, location=location)
 
     pipeline_root = f"gs://{bucket_name}/pipeline-runs/{run_id}/pipeline_root"
-    job_id = f"gepa-{run_id}"
+    timestamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+    job_id = f"gepa-{run_id}-{timestamp}"
     display_name = f"gepa-{manifest.name}-{run_id}"
 
     logger.info("=" * 60)
