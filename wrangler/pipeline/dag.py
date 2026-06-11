@@ -61,6 +61,7 @@ def build_pipeline(image_uri: str):
         judge_model: str = "gemini-2.5-pro",
         eval_thresholds_json: str = "{}",
         secret_id: str = "",
+        max_metric_calls: int = 50,
     ):
         archive_task = archive_agent_code(
             project_id=project_id,
@@ -114,6 +115,7 @@ def build_pipeline(image_uri: str):
                 judge_model=judge_model,
                 eval_thresholds_json=eval_thresholds_json,
                 secret_id=secret_id,
+                max_metric_calls=max_metric_calls,
             )
             optimize_task.set_cpu_limit("8")
             optimize_task.set_memory_limit("32G")

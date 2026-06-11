@@ -344,6 +344,7 @@ def optimize(
     agent_name: str = "",
     eval_thresholds: dict[str, float] | None = None,
     judge_model: str = "gemini-3.5-flash",
+    max_metric_calls: int | None = None,
 ) -> str:
     """Run GEPA optimization. Returns the optimized instruction string.
 
@@ -473,7 +474,10 @@ def optimize(
 
     run_dir = os.path.join("outputs", "gepa_runs", app_name)
     os.makedirs(run_dir, exist_ok=True)
-    optimizer_config = GEPARootAgentPromptOptimizerConfig(run_dir=run_dir)
+    opt_kwargs = {"run_dir": run_dir}
+    if max_metric_calls is not None:
+        opt_kwargs["max_metric_calls"] = max_metric_calls
+    optimizer_config = GEPARootAgentPromptOptimizerConfig(**opt_kwargs)
     eval_sets_manager = LocalEvalSetsManager(agents_dir=agents_dir)
     sampler = LocalEvalSampler(sampler_cfg, eval_sets_manager)
     optimizer = GEPARootAgentPromptOptimizer(optimizer_config)

@@ -190,6 +190,7 @@ def deploy_pipeline(
 
     num_runs = pipeline_config.get("num_runs", num_runs)
     judge_model = manifest.eval_config.get("judge_model", "gemini-2.5-pro")
+    max_metric_calls = pipeline_config.get("max_metric_calls", 50)
 
     defaults = {
         "tool_use_quality_v1": 0.3,
@@ -295,6 +296,7 @@ def deploy_pipeline(
             "judge_model": judge_model,
             "eval_thresholds_json": json.dumps(eval_thresholds),
             "secret_id": secret_id,
+            "max_metric_calls": max_metric_calls,
         },
         labels={"solution": "promp-wrangler"},
     )

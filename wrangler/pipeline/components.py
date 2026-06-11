@@ -292,6 +292,7 @@ def optimize_single_agent(
     judge_model: str,
     eval_thresholds_json: str,
     secret_id: str,
+    max_metric_calls: int,
     metrics: Output[Metrics],
     summary: Output[Markdown],
 ) -> str:
@@ -393,6 +394,7 @@ def optimize_single_agent(
         agent_name=pair_id,
         eval_thresholds=eval_thresholds,
         judge_model=judge_model,
+        max_metric_calls=max_metric_calls if max_metric_calls > 0 else None,
     )
     elapsed = time.time() - t0
 
