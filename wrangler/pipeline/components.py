@@ -462,10 +462,13 @@ def optimize_single_agent(
     pct = ((len(optimized_prompt) - len(original_prompt)) / max(len(original_prompt), 1)) * 100
     with open(summary.path, "w") as f:
         f.write(f"## Optimization: {pair_id}\n\n")
+        f.write(f"- **Model**: `{model}`\n")
         f.write(f"- **Elapsed**: {m}m {s:02d}s\n")
         f.write(f"- **Prompt**: {len(original_prompt)} → {len(optimized_prompt)} chars ({pct:+.0f}%)\n")
         f.write(f"- **Input tokens**: ~{est_input:,} | **Output tokens**: ~{est_output:,}\n")
-        f.write(f"- **Input cost**: ${input_cost:.4f} | **Output cost**: ${output_cost:.4f} | **Total**: ${input_cost + output_cost:.4f}\n")
+        f.write(f"- **Input cost**: ${input_cost:.4f} | **Output cost**: ${output_cost:.4f} | **Total**: ${input_cost + output_cost:.4f}\n\n")
+        f.write(f"### Original Prompt\n\n```\n{original_prompt}\n```\n\n")
+        f.write(f"### Optimized Prompt\n\n```\n{optimized_prompt}\n```\n")
 
     logging.info(f"[{pair_id}] Optimized in {m}m {s:02d}s: {len(original_prompt)} → {len(optimized_prompt)} chars")
     return json.dumps(stage_data)
@@ -768,18 +771,44 @@ def generate_analysis(
     metrics.log_metric("total_cost_usd", round(total_input_cost + total_output_cost, 4))
 
     m, s = divmod(int(total_elapsed), 60)
+
+    METRIC_LABELS = {
+        "final_response_quality_v1": "Response Quality",
+        "hallucination_v1": "Hallucination",
+        "safety_v1": "Safety",
+        "tool_use_quality_v1": "Tool Use",
+        "instruction_following_v1": "Instruction Following",
+    }
+
     with open(summary.path, "w") as f:
         f.write("## Analysis Summary\n\n")
-        f.write("| Pair | Before Avg | After Avg | Delta | Cost (in/out) |\n")
-        f.write("|------|-----------|----------|-------|---------------|\n")
+
         for pair_id, ps in summary_data["pairs"].items():
             eval_b = _read_stage("eval_before", pair_id)
             eval_a = _read_stage("eval_after", pair_id)
             opt = _read_stage("optimize", pair_id)
+            before_scores = eval_b.get("scores", {})
+            after_scores = eval_a.get("scores", {})
             pair_in = sum(d.get("costs", {}).get("input_usd", 0) for d in [eval_b, opt, eval_a])
             pair_out = sum(d.get("costs", {}).get("output_usd", 0) for d in [eval_b, opt, eval_a])
-            f.write(f"| {pair_id} | {ps['before_avg']:.4f} | {ps['after_avg']:.4f} | {ps['delta']:+.4f} | ${pair_in:.3f} / ${pair_out:.3f} |\n")
-        f.write(f"\n**Total cost**: ${total_input_cost + total_output_cost:.4f} | ")
+
+            f.write(f"### {pair_id} (`{ps['model']}`)\n\n")
+            f.write("| Metric | Before | After | Delta | Change |\n")
+            f.write("|--------|--------|-------|-------|--------|\n")
+            for key, label in METRIC_LABELS.items():
+                b = before_scores.get(key, 0)
+                a = after_scores.get(key, 0)
+                d = a - b
+                pct = f"{d / b * 100:+.1f}%" if b > 0 else "N/A"
+                f.write(f"| {label} | {b:.2f} | {a:.2f} | {d:+.2f} | {pct} |\n")
+            avg_b = ps["before_avg"]
+            avg_a = ps["after_avg"]
+            avg_d = ps["delta"]
+            avg_pct = f"{avg_d / avg_b * 100:+.1f}%" if avg_b > 0 else "N/A"
+            f.write(f"| **Average** | **{avg_b:.2f}** | **{avg_a:.2f}** | **{avg_d:+.2f}** | **{avg_pct}** |\n\n")
+            f.write(f"Cost: ${pair_in + pair_out:.3f} (in: ${pair_in:.3f} / out: ${pair_out:.3f})\n\n")
+
+        f.write(f"**Total cost**: ${total_input_cost + total_output_cost:.4f} | ")
         f.write(f"**Total time**: {m}m {s:02d}s\n")
         f.write(f"\n**Reports**: `gs://{bucket_name}/pipeline-runs/{run_id}/reports/`\n")
 

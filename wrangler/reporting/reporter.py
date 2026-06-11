@@ -133,62 +133,42 @@ def _methodology_section(results: dict, ordered: list[str], experiment_name: str
 
 
 def _scores_section(results: dict, ordered: list[str]) -> list[str]:
-    """Before/after score tables with deltas."""
+    """Combined before/after/delta table per model."""
     lines = []
     has_after = any(results[n].get("after") for n in ordered)
-    has_std = any(results[n].get("after_std") for n in ordered)
 
     lines.append("## Evaluation Results\n")
 
-    lines.append("### Baseline Scores (Generic Prompt)\n")
-    header = "| Metric |" + " | ".join(n.title() for n in ordered) + " |"
-    sep = "|--------|" + " | ".join("------" for _ in ordered) + " |"
-    lines.append(header)
-    lines.append(sep)
-    for key, label in METRIC_LABELS.items():
-        row = f"| {label} |"
-        for name in ordered:
-            s = results[name].get("before", {}).get(key, 0)
-            row += f" {s:.2f} |"
-        lines.append(row)
-    lines.append("")
+    for name in ordered:
+        model = results[name].get("model", "")
+        before = results[name].get("before", {})
+        after = results[name].get("after", {})
 
-    if has_after:
-        lines.append("### Post-Optimization Scores\n")
-        lines.append(header)
-        lines.append(sep)
-        for key, label in METRIC_LABELS.items():
-            row = f"| {label} |"
-            for name in ordered:
-                s = results[name].get("after", {}).get(key, 0)
-                std = results[name].get("after_std", {}).get(key)
-                if std and has_std:
-                    row += f" {s:.2f} ±{std:.2f} |"
-                else:
-                    row += f" {s:.2f} |"
-            lines.append(row)
-        lines.append("")
+        lines.append(f"### {name.title()} (`{model}`)\n")
 
-        lines.append("### Improvement Delta (After - Before)\n")
-        lines.append(header)
-        lines.append(sep)
-        for key, label in METRIC_LABELS.items():
-            row = f"| {label} |"
-            for name in ordered:
-                b = results[name].get("before", {}).get(key, 0)
-                a = results[name].get("after", {}).get(key, 0)
+        if has_after and after:
+            lines.append("| Metric | Before | After | Delta | Change |")
+            lines.append("|--------|--------|-------|-------|--------|")
+            for key, label in METRIC_LABELS.items():
+                b = before.get(key, 0)
+                a = after.get(key, 0)
                 d = a - b
-                row += f" {d:+.02f} |"
-            lines.append(row)
-
-        avg_row = "| **Average** |"
-        for name in ordered:
-            before = results[name].get("before", {})
-            after = results[name].get("after", {})
+                pct = f"{d / b * 100:+.1f}%" if b > 0 else "N/A"
+                lines.append(f"| {label} | {b:.2f} | {a:.2f} | {d:+.2f} | {pct} |")
             avg_b = sum(before.values()) / max(len(before), 1) if before else 0
             avg_a = sum(after.values()) / max(len(after), 1) if after else 0
-            avg_row += f" **{avg_a - avg_b:+.02f}** |"
-        lines.append(avg_row)
+            avg_d = avg_a - avg_b
+            avg_pct = f"{avg_d / avg_b * 100:+.1f}%" if avg_b > 0 else "N/A"
+            lines.append(f"| **Average** | **{avg_b:.2f}** | **{avg_a:.2f}** | **{avg_d:+.2f}** | **{avg_pct}** |")
+        else:
+            lines.append("| Metric | Score |")
+            lines.append("|--------|-------|")
+            for key, label in METRIC_LABELS.items():
+                s = before.get(key, 0)
+                lines.append(f"| {label} | {s:.2f} |")
+            avg = sum(before.values()) / max(len(before), 1) if before else 0
+            lines.append(f"| **Average** | **{avg:.2f}** |")
+
         lines.append("")
 
     return lines
@@ -407,7 +387,7 @@ def _charts_section() -> list[str]:
     for filename, title, caption in chart_info:
         if (CHARTS_DIR / filename).exists():
             lines.append(f"### {title}\n")
-            lines.append(f"![{title}](../images/{filename})\n")
+            lines.append(f"![{title}](charts/{filename})\n")
             lines.append(f"*{caption}*\n")
 
     return lines

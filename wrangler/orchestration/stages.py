@@ -488,7 +488,7 @@ def stage_report(exp: Experiment, use_paperbanana: bool = True) -> None:
     try:
         from ..reporting import reporter
         reporter.REPORTS_DIR = exp.dir / "reports"
-        reporter.CHARTS_DIR = exp.dir / "images"
+        reporter.CHARTS_DIR = exp.dir / "reports" / "charts"
         reporter.REPORTS_DIR.mkdir(parents=True, exist_ok=True)
         reporter.CHARTS_DIR.mkdir(parents=True, exist_ok=True)
 
