@@ -113,7 +113,16 @@ os.environ.pop("GEMINI_API_KEY", None)
 Cloud Run MCP servers drop idle HTTP connections within ~2 minutes — too short for GEPA's inter-generation gaps. The optimize component starts **local FastMCP servers** on localhost (ports 8001-8003) from the code in `examples/multi_model_agents/mcp_servers/`. MCP URLs are overridden to `http://localhost:{port}/mcp`. Per-generation session refresh closes and re-warms sessions between GEPA generations (~0.1s overhead).
 
 ### Pipeline Caching
-`run_id` is deterministic (hash of manifest name + agent module + eval data + pair IDs). `job_id` gets a timestamp suffix for uniqueness. Same manifest → same `run_id` → cached steps reused. Changing the manifest busts the cache (correct behavior). If you need to force a fresh run, pass `--run-id` explicitly.
+KFP caches each component independently based on: **(1) component function body hash** and **(2) input parameter values**. Both must match for a cache hit.
+
+**What this means in practice:**
+- `run_id` is deterministic (hash of manifest name + agent module + eval data + pair IDs). Same manifest → same `run_id` → same input values.
+- `job_id` gets a timestamp suffix so Vertex AI accepts resubmissions.
+- **Changing component code** (even one line in `components.py`) invalidates the cache for THAT component — but OTHER unchanged components still cache. KFP hashes each function body independently.
+- **Changing input parameters** (new `run_id`, different manifest) invalidates cache for all components that receive the changed parameter.
+- If you only change the `generate_analysis` component, the earlier steps (archive, deploy, eval_before, optimize, redeploy, eval_after) will all cache and the pipeline skips straight to analysis.
+
+**Verified behavior:** After changing optimize + analysis component code but not deploy/eval code, archive/deploy/eval_before cached correctly and the pipeline started directly at optimize.
 
 ### Tarball Packaging
 `deploy_pipeline.py` packages the **full project tree** using an exclude-list (`.venv`, `.git`, `__pycache__`, `outputs`, `experiments`). Missing directories have caused multiple pipeline failures. If you add new directories the agents depend on, they'll be included automatically.
