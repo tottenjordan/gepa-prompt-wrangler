@@ -99,14 +99,23 @@ cp .env.example .env
 # Step 2: Deploy MCP tool servers (wrangler-prefixed Cloud Run services)
 bash scripts/deploy_mcp_servers.sh
 
-# Step 3: Deploy all 5 agents to Agent Engine
-cd ../..
-uv run python examples/multi_model_agents/deploy_agents.py
+# Step 3: Grant GEAP service account Cloud Run invoker permissions
+# (required for deployed agents to call MCP tool servers)
+SA="service-$(gcloud projects describe $GCP_PROJECT_ID --format='value(projectNumber)')@gcp-sa-aiplatform-re.iam.gserviceaccount.com"
+for SVC in wrangler-search-mcp wrangler-booking-mcp wrangler-expense-mcp; do
+  gcloud run services add-iam-policy-binding $SVC \
+    --region=us-central1 --project=$GCP_PROJECT_ID \
+    --member="serviceAccount:$SA" --role="roles/run.invoker" --quiet
+done
 
-# Step 4: Setup monitoring (logging sink + online evaluators)
+# Step 4: Deploy agents to Agent Engine (source-based, no cloudpickle)
+cd ../..
+wrangler pipeline run manifests/pipeline_smoke_manifest.yaml
+
+# Step 5: Setup monitoring (logging sink + online evaluators)
 bash examples/multi_model_agents/scripts/setup_monitoring.sh
 
-# Step 5: Run the full optimization experiment
+# Step 6: Run the full optimization experiment
 wrangler run examples/multi_model_agents/manifest.yaml
 ```
 
