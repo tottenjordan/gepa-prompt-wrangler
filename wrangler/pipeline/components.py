@@ -6,6 +6,11 @@ Heavy components use code injection from GCS following the NovaStorm pattern.
 IMPORTANT: KFP serializes each @dsl.component function in isolation. All helper
 logic (code injection, env setup, GCS I/O) must be defined INLINE within each
 component body — module-level functions are NOT available at runtime.
+
+The "Code injection" and "Secret Manager" blocks are intentionally duplicated
+across deploy, eval, optimize, redeploy, and analysis components. KFP's
+isolation model makes extraction impossible. When updating these blocks,
+grep for "Code injection" and update ALL copies.
 """
 
 from kfp import dsl
@@ -78,6 +83,7 @@ def deploy_single_agent(
     pair_json: str,
     agent_module: str,
     secret_id: str,
+    cache_bust: str,
     metrics: Output[Metrics],
     summary: Output[Markdown],
 ) -> str:
@@ -125,9 +131,6 @@ def deploy_single_agent(
         os.environ.pop("GOOGLE_API_KEY", None)
         os.environ.pop("GEMINI_API_KEY", None)
 
-    from wrangler.core.config import resolve_model
-    from wrangler.core import deploy as deployer
-
     existing_engine_id = pair.get("engine_id", "")
     if existing_engine_id:
         logging.info(f"[{pair_id}] Reusing existing engine: {existing_engine_id}")
@@ -136,29 +139,17 @@ def deploy_single_agent(
             "model": model, "source": "existing", "elapsed": 0,
         }
     else:
-        from pathlib import Path
-        agent_path = Path(f"/app/{agent_module}")
-        sys.path.insert(0, str(agent_path.parent))
-        module_name = agent_path.name
-        mod = __import__(module_name)
-
-        if hasattr(mod, "create_agent"):
-            agent = mod.create_agent(model, pair["system_prompt"])
-        else:
-            agent = getattr(mod, "root_agent", None) or mod.agent.root_agent
-            agent.model = resolve_model(model)
-            agent.instruction = pair["system_prompt"]
-
-        agent_parent = str(Path(f"/app/{agent_module}").parent)
-        extra_pkgs = [agent_parent]
+        from wrangler.core.deploy import deploy_agent_from_source
 
         mcp_env = {k: v for k, v in os.environ.items()
                    if k.startswith(("SEARCH_MCP", "BOOKING_MCP", "EXPENSE_MCP"))}
 
         t0 = time.time()
-        engine_id = deployer.deploy_agent(
-            agent, display_name=f"gepa-{pair_id}",
-            extra_packages=extra_pkgs,
+        engine_id = deploy_agent_from_source(
+            agent_module=f"/app/{agent_module}",
+            model=model,
+            instruction=pair["system_prompt"],
+            display_name=f"gepa-{pair_id}",
             env_vars=mcp_env,
         )
         elapsed = time.time() - t0
@@ -521,10 +512,8 @@ def redeploy_single_agent(
 ) -> str:
     """Redeploy a single agent with its optimized prompt.
 
-    Downloads the existing pickle from GCS, modifies the instruction
-    inside it, re-uploads, and triggers a redeploy. Requires code
-    injection + secrets because cloudpickle needs the agent's module
-    dependencies (registry, config, etc.) to deserialize.
+    Rebuilds the source package with the new instruction and calls
+    update_agent_from_source — no cloudpickle manipulation.
     """
     import io
     import json
@@ -540,6 +529,7 @@ def redeploy_single_agent(
     logging.basicConfig(level=logging.INFO)
     pair = json.loads(pair_json)
     pair_id = pair["id"]
+    model = pair.get("model", "")
 
     # -- Code injection --
     gcs = storage.Client(project=project_id)
@@ -568,12 +558,6 @@ def redeploy_single_agent(
         os.environ.pop("GOOGLE_API_KEY", None)
         os.environ.pop("GEMINI_API_KEY", None)
 
-    # Add agent module paths for cloudpickle deserialization
-    from pathlib import Path
-    agent_path = Path(f"/app/{agent_module}")
-    sys.path.insert(0, str(agent_path.parent))
-    sys.path.insert(0, str(agent_path.parent.parent))
-
     # Read deploy + optimize results from GCS
     deploy_data = json.loads(
         gcs.bucket(bucket_name).blob(f"pipeline-runs/{run_id}/stages/deploy/{pair_id}.json").download_as_text())
@@ -582,39 +566,21 @@ def redeploy_single_agent(
 
     engine_id = deploy_data["engine_id"]
     optimized_prompt = optimize_data["optimized_prompt"]
+    model = model or deploy_data.get("model", "")
 
-    # Get the pickle URI from the deployed agent
-    import vertexai
-    vertexai.init(project=project_id, location=location, staging_bucket=f"gs://{bucket_name}")
-    client = vertexai.Client(project=project_id, location=location)
+    from wrangler.core.deploy import update_agent_from_source
 
-    if not engine_id.startswith("projects/"):
-        full_name = f"projects/{project_id}/locations/{location}/reasoningEngines/{engine_id}"
-    else:
-        full_name = engine_id
+    mcp_env = {k: v for k, v in os.environ.items()
+               if k.startswith(("SEARCH_MCP", "BOOKING_MCP", "EXPENSE_MCP"))}
 
-    agent_engine = client.agent_engines.get(name=full_name)
-    pickle_uri = agent_engine.api_resource.spec.package_spec.pickle_object_gcs_uri
-    logging.info(f"[{pair_id}] Pickle URI: {pickle_uri}")
-
-    # Download, modify instruction, re-upload
-    import cloudpickle
-    pickle_bucket = pickle_uri.replace("gs://", "").split("/")[0]
-    pickle_blob_path = "/".join(pickle_uri.replace("gs://", "").split("/")[1:])
-    blob = gcs.bucket(pickle_bucket).blob(pickle_blob_path)
-    pickle_data = blob.download_as_bytes()
-
-    agent_obj = cloudpickle.loads(pickle_data)
-    old_instruction = agent_obj._tmpl_attrs["agent"].instruction
-    agent_obj._tmpl_attrs["agent"].instruction = optimized_prompt
-    blob.upload_from_string(cloudpickle.dumps(agent_obj))
-    logging.info(f"[{pair_id}] Updated instruction: {len(old_instruction)} → {len(optimized_prompt)} chars")
-
-    # Trigger redeploy
     t0 = time.time()
-    client.agent_engines.update(
-        name=full_name,
-        config={"display_name": f"gepa-{pair_id}", "labels": {"solution": "promp-wrangler"}},
+    update_agent_from_source(
+        engine_id=engine_id,
+        agent_module=f"/app/{agent_module}",
+        model=model,
+        instruction=optimized_prompt,
+        display_name=f"gepa-{pair_id}",
+        env_vars=mcp_env,
     )
     elapsed = time.time() - t0
 

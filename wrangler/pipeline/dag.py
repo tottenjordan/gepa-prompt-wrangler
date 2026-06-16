@@ -73,7 +73,7 @@ def build_pipeline(image_uri: str):
         archive_task.set_caching_options(enable_caching=True)
         archive_task.set_display_name("Archive agent Code")
 
-        with dsl.ParallelFor(pairs_json) as pair_config:
+        with dsl.ParallelFor(pairs_json, parallelism=1) as pair_config:
             deploy_task = comps["deploy"](
                 project_id=project_id,
                 location=location,
@@ -82,6 +82,7 @@ def build_pipeline(image_uri: str):
                 pair_json=pair_config,
                 agent_module=agent_module,
                 secret_id=secret_id,
+                cache_bust=cache_bust,
             )
             deploy_task.set_caching_options(enable_caching=True)
             deploy_task.after(archive_task)

@@ -1,10 +1,24 @@
-"""Deploy/update agents on the Gemini Enterprise Agent Platform (GEAP)."""
+"""Deploy/update agents on the Gemini Enterprise Agent Platform (GEAP).
+
+Two deployment paths:
+  - Legacy (cloudpickle): deploy_agent() / update_agent()
+  - Source-based: deploy_agent_from_source() / update_agent_from_source()
+
+Source-based deployment uploads a self-contained build package and lets GEAP
+build the container from source — no cloudpickle serialization, no module
+path issues.
+"""
 
 import os
+import re
+import shutil
+from pathlib import Path
 
 import vertexai
 
 from .config import GCP_PROJECT_ID, GCP_REGION, GCP_STAGING_BUCKET
+
+# --- Legacy pickle-based requirements ---
 
 REQUIREMENTS = [
     "google-cloud-aiplatform[adk,agent-engines,evaluation]>=1.154.0",
@@ -15,8 +29,292 @@ REQUIREMENTS = [
     "litellm>=1.83.14",
     "python-dotenv>=1.0.0",
     "pydantic>=2.12.5",
-    "cloudpickle>=3.0,<4.0",
 ]
+
+# --- Source-based deployment constants ---
+
+_SOURCE_REQUIREMENTS = [
+    "google-cloud-aiplatform[adk,agent-engines]>=1.154.0",
+    "google-genai>=1.66.0",
+    "google-auth>=2.52.0",
+    "google-adk[a2a,agent-identity,eval,mcp]>=2.2.0",
+    "anthropic[vertex]>=0.49.0",
+    "litellm>=1.83.14",
+    "python-dotenv>=1.0.0",
+    "pydantic>=2.12.5",
+    "httpx>=0.28.0",
+]
+
+# Standard ADK class_methods for Agent Engine — copied from
+# google.adk.cli.cli_deploy._AGENT_ENGINE_CLASS_METHODS (ADK 2.2.0).
+_ADK_CLASS_METHODS = [
+    {
+        "name": "get_session",
+        "description": "Deprecated. Use async_get_session instead.\n\n        Get a session for the given user.\n        ",
+        "parameters": {
+            "properties": {
+                "user_id": {"type": "string"},
+                "session_id": {"type": "string"},
+            },
+            "required": ["user_id", "session_id"],
+            "type": "object",
+        },
+        "api_mode": "",
+    },
+    {
+        "name": "list_sessions",
+        "description": "Deprecated. Use async_list_sessions instead.\n\n        List sessions for the given user.\n        ",
+        "parameters": {
+            "properties": {"user_id": {"type": "string"}},
+            "required": ["user_id"],
+            "type": "object",
+        },
+        "api_mode": "",
+    },
+    {
+        "name": "create_session",
+        "description": "Deprecated. Use async_create_session instead.\n\n        Creates a new session.\n        ",
+        "parameters": {
+            "properties": {
+                "user_id": {"type": "string"},
+                "session_id": {"type": "string", "nullable": True},
+                "state": {"type": "object", "nullable": True},
+            },
+            "required": ["user_id"],
+            "type": "object",
+        },
+        "api_mode": "",
+    },
+    {
+        "name": "delete_session",
+        "description": "Deprecated. Use async_delete_session instead.\n\n        Deletes a session for the given user.\n        ",
+        "parameters": {
+            "properties": {
+                "user_id": {"type": "string"},
+                "session_id": {"type": "string"},
+            },
+            "required": ["user_id", "session_id"],
+            "type": "object",
+        },
+        "api_mode": "",
+    },
+    {
+        "name": "async_get_session",
+        "description": "Get a session for the given user.",
+        "parameters": {
+            "properties": {
+                "user_id": {"type": "string"},
+                "session_id": {"type": "string"},
+            },
+            "required": ["user_id", "session_id"],
+            "type": "object",
+        },
+        "api_mode": "async",
+    },
+    {
+        "name": "async_list_sessions",
+        "description": "List sessions for the given user.",
+        "parameters": {
+            "properties": {"user_id": {"type": "string"}},
+            "required": ["user_id"],
+            "type": "object",
+        },
+        "api_mode": "async",
+    },
+    {
+        "name": "async_create_session",
+        "description": "Creates a new session.",
+        "parameters": {
+            "properties": {
+                "user_id": {"type": "string"},
+                "session_id": {"type": "string", "nullable": True},
+                "state": {"type": "object", "nullable": True},
+            },
+            "required": ["user_id"],
+            "type": "object",
+        },
+        "api_mode": "async",
+    },
+    {
+        "name": "async_delete_session",
+        "description": "Deletes a session for the given user.",
+        "parameters": {
+            "properties": {
+                "user_id": {"type": "string"},
+                "session_id": {"type": "string"},
+            },
+            "required": ["user_id", "session_id"],
+            "type": "object",
+        },
+        "api_mode": "async",
+    },
+    {
+        "name": "async_add_session_to_memory",
+        "description": "Generates memories.",
+        "parameters": {
+            "properties": {
+                "session": {"additionalProperties": True, "type": "object"}
+            },
+            "required": ["session"],
+            "type": "object",
+        },
+        "api_mode": "async",
+    },
+    {
+        "name": "async_search_memory",
+        "description": "Searches memories for the given user.",
+        "parameters": {
+            "properties": {
+                "user_id": {"type": "string"},
+                "query": {"type": "string"},
+            },
+            "required": ["user_id", "query"],
+            "type": "object",
+        },
+        "api_mode": "async",
+    },
+    {
+        "name": "stream_query",
+        "description": "Deprecated. Use async_stream_query instead.\n\n        Streams responses from the ADK application in response to a message.",
+        "parameters": {
+            "properties": {
+                "message": {
+                    "anyOf": [
+                        {"type": "string"},
+                        {"additionalProperties": True, "type": "object"},
+                    ]
+                },
+                "user_id": {"type": "string"},
+                "session_id": {"type": "string", "nullable": True},
+                "run_config": {"type": "object", "nullable": True},
+            },
+            "required": ["message", "user_id"],
+            "type": "object",
+        },
+        "api_mode": "stream",
+    },
+    {
+        "name": "async_stream_query",
+        "description": "Streams responses asynchronously from the ADK application.",
+        "parameters": {
+            "properties": {
+                "message": {
+                    "anyOf": [
+                        {"type": "string"},
+                        {"additionalProperties": True, "type": "object"},
+                    ]
+                },
+                "user_id": {"type": "string"},
+                "session_id": {"type": "string", "nullable": True},
+                "run_config": {"type": "object", "nullable": True},
+            },
+            "required": ["message", "user_id"],
+            "type": "object",
+        },
+        "api_mode": "async_stream",
+    },
+    {
+        "name": "streaming_agent_run_with_events",
+        "description": "Streams responses asynchronously from the ADK application (AgentSpace).",
+        "parameters": {
+            "properties": {"request_json": {"type": "string"}},
+            "required": ["request_json"],
+            "type": "object",
+        },
+        "api_mode": "async_stream",
+    },
+]
+
+_APP_PY_TEMPLATE = '''\
+"""Auto-generated GEAP entrypoint."""
+import os
+from pathlib import Path
+
+from google.adk.agents import LlmAgent
+from google.adk.tools.preload_memory_tool import PreloadMemoryTool
+from vertexai.agent_engines import AdkApp
+
+from .config import resolve_model, SEARCH_MCP_SERVER, BOOKING_MCP_SERVER, EXPENSE_MCP_SERVER
+from .registry import get_mcp_tools
+
+_here = Path(__file__).parent
+INSTRUCTION = (_here / "instruction.txt").read_text().strip()
+MODEL = os.environ.get("AGENT_MODEL", "{model}")
+
+root_agent = LlmAgent(
+    model=resolve_model(MODEL),
+    name="{agent_name}",
+    description="Corporate travel and expense assistant with access to flight, hotel, and expense management tools.",
+    instruction=INSTRUCTION,
+    tools=[
+        get_mcp_tools(SEARCH_MCP_SERVER),
+        get_mcp_tools(BOOKING_MCP_SERVER),
+        get_mcp_tools(EXPENSE_MCP_SERVER),
+        PreloadMemoryTool(),
+    ],
+)
+
+app = AdkApp(agent=root_agent, enable_tracing=True)
+'''
+
+_REGISTRY_PY_TEMPLATE = '''\
+"""MCP tool discovery for GEAP deployment.
+
+Uses direct Cloud Run URLs with GoogleAuth — the GEAP container's service
+account provides ADC credentials for Cloud Run invoker auth automatically.
+"""
+import os
+
+import httpx
+import google.auth
+from google.auth.transport.requests import Request
+from google.adk.tools.mcp_tool import McpToolset
+from google.adk.tools.mcp_tool.mcp_session_manager import StreamableHTTPConnectionParams
+
+
+class _GoogleAuth(httpx.Auth):
+    """Attaches Google ADC bearer token to every request."""
+
+    def __init__(self):
+        self.creds, _ = google.auth.default()
+
+    def auth_flow(self, request):
+        if not self.creds.valid:
+            self.creds.refresh(Request())
+        request.headers["Authorization"] = f"Bearer {self.creds.token}"
+        yield request
+
+
+def _create_authed_client(**kwargs):
+    kwargs.pop("timeout", None)
+    kwargs.pop("limits", None)
+    return httpx.AsyncClient(
+        auth=_GoogleAuth(),
+        limits=httpx.Limits(max_connections=10, max_keepalive_connections=5),
+        timeout=httpx.Timeout(connect=60.0, read=180.0, write=30.0, pool=30.0),
+        **kwargs,
+    )
+
+
+_MCP_URLS = {
+    os.environ.get("SEARCH_MCP_SERVER", ""): os.environ.get("SEARCH_MCP_URL", ""),
+    os.environ.get("BOOKING_MCP_SERVER", ""): os.environ.get("BOOKING_MCP_URL", ""),
+    os.environ.get("EXPENSE_MCP_SERVER", ""): os.environ.get("EXPENSE_MCP_URL", ""),
+}
+
+
+def get_mcp_tools(server_name):
+    url = _MCP_URLS.get(server_name, "")
+    if not url:
+        raise ValueError(f"No MCP URL configured for {server_name}")
+    return McpToolset(connection_params=StreamableHTTPConnectionParams(
+        url=url,
+        timeout=60.0,
+        sse_read_timeout=180.0,
+        terminate_on_close=False,
+        httpx_client_factory=_create_authed_client,
+    ))
+'''
 
 
 def _get_client():
@@ -110,6 +408,264 @@ def update_agent(
     remote = _get_client().agent_engines.update(
         name=engine_id, agent=agent, config=config,
     )
+    resource_name = getattr(remote, "resource_name", None) or remote.api_resource.name
+    print(f"  Updated: {resource_name.split('/')[-1]}")
+    return resource_name.split("/")[-1]
+
+
+# --- Source-based deployment (no cloudpickle) ---
+
+
+def build_source_package(
+    agent_module: str,
+    instruction: str,
+    model: str,
+    build_dir: str | None = None,
+) -> str:
+    """Assemble a self-contained source package for GEAP deployment.
+
+    Creates a directory containing app.py (AdkApp entrypoint), config.py,
+    registry.py, prompts/, instruction.txt, and requirements.txt — everything
+    GEAP needs to build and run the agent from source.
+
+    The build_dir defaults to a ``_geap_build_pkg`` subdirectory next to the
+    agent module.  The Vertex AI SDK requires source_packages to be under the
+    project directory — ``/tmp`` is rejected.
+
+    Args:
+        agent_module: Path to the agent module (e.g. "examples/multi_model_agents/agents/sonnet_agent").
+        instruction: The system prompt text.
+        model: Model string (e.g. "claude-sonnet-4-6").
+        build_dir: Where to assemble the package.  Defaults to a sibling of agent_module.
+
+    Returns:
+        The build_dir path.
+    """
+    agent_path = Path(agent_module)
+    agent_parent = agent_path.parent
+
+    # config.py may live alongside the agents/ directory, not inside it.
+    # Walk up until we find it.
+    if not (agent_parent / "config.py").exists():
+        found = False
+        for _ in range(3):
+            candidate = agent_parent.parent
+            if (candidate / "config.py").exists():
+                agent_parent = candidate
+                found = True
+                break
+            agent_parent = candidate
+        if not found:
+            import logging
+            logging.getLogger(__name__).warning(
+                f"config.py not found within 3 levels of {agent_module} — "
+                f"build package may be incomplete"
+            )
+
+    if build_dir is None:
+        # The SDK's tar.add() uses relative paths from CWD.  The GEAP server
+        # extracts the tarball into /code/ and adds /code/ to sys.path.  So
+        # the build package must be a relative path from CWD (project root)
+        # to appear at /code/_geap_build_pkg/ and be importable.
+        build_dir = str(Path.cwd() / "_geap_build_pkg")
+
+    build_path = Path(build_dir)
+    if build_path.exists():
+        shutil.rmtree(build_path)
+    build_path.mkdir(parents=True)
+
+    # Copy agent dependency files into the build package
+    config_src = agent_parent / "config.py"
+    if config_src.exists():
+        shutil.copy2(config_src, build_path / "config.py")
+
+    prompts_src = agent_parent / "prompts"
+    if prompts_src.is_dir():
+        shutil.copytree(
+            prompts_src, build_path / "prompts",
+            ignore=shutil.ignore_patterns("__pycache__"),
+        )
+
+    # Generate a GEAP-specific registry.py that uses Agent Registry with
+    # ADC auth instead of direct Cloud Run URLs.  The GEAP container's
+    # service account provides ADC automatically.
+    (build_path / "registry.py").write_text(_REGISTRY_PY_TEMPLATE)
+
+    # Rewrite hard os.environ["KEY"] lookups to os.environ.get() so the
+    # module doesn't crash if env vars arrive via the config dict rather
+    # than .env.  Only patches MCP_SERVER vars (the known offenders).
+    config_copy = build_path / "config.py"
+    if config_copy.exists():
+        text = config_copy.read_text()
+        text = re.sub(
+            r'= os\.environ\["(SEARCH_MCP_SERVER|BOOKING_MCP_SERVER|EXPENSE_MCP_SERVER)"\]',
+            r'= os.environ.get("\1", "")',
+            text,
+        )
+        config_copy.write_text(text)
+
+    # Write instruction file (replaced during redeploy)
+    (build_path / "instruction.txt").write_text(instruction)
+
+    # Write requirements
+    (build_path / "requirements.txt").write_text(
+        "\n".join(_SOURCE_REQUIREMENTS) + "\n"
+    )
+
+    # Write __init__.py
+    (build_path / "__init__.py").write_text("")
+
+    # Write app.py from template
+    agent_name = agent_path.stem.replace("_agent", "") + "_agent"
+    app_content = _APP_PY_TEMPLATE.format(
+        model=model,
+        agent_name=agent_name,
+    )
+    (build_path / "app.py").write_text(app_content)
+
+    return str(build_path)
+
+
+def _build_source_config(
+    build_dir: str,
+    display_name: str,
+    env_vars: dict | None = None,
+) -> dict:
+    """Build the config dict for source-based deployment."""
+    pkg_name = Path(build_dir).name
+    # source_packages must use a path relative to CWD — the SDK's
+    # tar.add() preserves the path structure in the archive.  An absolute
+    # path would create a broken archive on the GEAP server.
+    try:
+        rel_path = str(Path(build_dir).relative_to(Path.cwd()))
+    except ValueError:
+        rel_path = build_dir
+    return {
+        "staging_bucket": f"gs://{GCP_STAGING_BUCKET}",
+        "source_packages": [rel_path],
+        "requirements_file": f"{rel_path}/requirements.txt",
+        "entrypoint_module": f"{pkg_name}.app",
+        "entrypoint_object": "app",
+        "class_methods": _ADK_CLASS_METHODS,
+        "agent_framework": "google-adk",
+        "display_name": display_name,
+        "labels": {"solution": "promp-wrangler"},
+        "env_vars": {
+            "GCP_PROJECT_ID": GCP_PROJECT_ID,
+            "GCP_REGION": GCP_REGION,
+            "GOOGLE_GENAI_USE_VERTEXAI": "1",
+            "GOOGLE_CLOUD_AGENT_ENGINE_ENABLE_TELEMETRY": "true",
+            "OTEL_SEMCONV_STABILITY_OPT_IN": "gen_ai_latest_experimental",
+            "OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT": "EVENT_ONLY",
+            **(env_vars or {}),
+        },
+    }
+
+
+def deploy_agent_from_source(
+    agent_module: str,
+    model: str,
+    instruction: str,
+    display_name: str | None = None,
+    env_vars: dict | None = None,
+) -> str:
+    """Deploy a new agent to GEAP using source-based deployment. Returns engine_id.
+
+    Assembles a build package from the agent's source files and deploys via
+    source_packages — no cloudpickle serialization.
+    """
+    import time as _time
+
+    vertexai.init(
+        project=GCP_PROJECT_ID,
+        location=GCP_REGION,
+        staging_bucket=f"gs://{GCP_STAGING_BUCKET}",
+    )
+
+    print(f"  Deploying from source ({Path(agent_module).stem})...")
+    last_err = None
+    for attempt in range(3):
+        try:
+            build_dir = build_source_package(agent_module, instruction, model)
+            config = _build_source_config(
+                build_dir,
+                display_name=display_name or "gepa-agent",
+                env_vars=env_vars,
+            )
+            remote = _get_client().agent_engines.create(config=config)
+            break
+        except Exception as e:
+            last_err = e
+            shutil.rmtree(build_dir, ignore_errors=True)
+            if attempt < 2:
+                wait = 30 * (attempt + 1)
+                print(f"  Deploy attempt {attempt + 1} failed (GEAP transient error), retrying in {wait}s...")
+                _time.sleep(wait)
+            else:
+                import logging
+                logging.getLogger(__name__).error(
+                    f"Deploy failed after 3 attempts for {display_name or 'gepa-agent'}: {e}"
+                )
+                raise
+    else:
+        raise last_err  # unreachable, but satisfies type checker
+
+    shutil.rmtree(build_dir, ignore_errors=True)
+    resource_name = getattr(remote, "resource_name", None) or remote.api_resource.name
+    engine_id = resource_name.split("/")[-1]
+    print(f"  Deployed: {engine_id}")
+    return engine_id
+
+
+def update_agent_from_source(
+    engine_id: str,
+    agent_module: str,
+    model: str,
+    instruction: str,
+    display_name: str | None = None,
+    env_vars: dict | None = None,
+) -> str:
+    """Update an existing agent on GEAP using source-based deployment. Returns engine_id."""
+    vertexai.init(
+        project=GCP_PROJECT_ID,
+        location=GCP_REGION,
+        staging_bucket=f"gs://{GCP_STAGING_BUCKET}",
+    )
+
+    import time as _time
+
+    if not engine_id.startswith("projects/"):
+        engine_id = f"projects/{GCP_PROJECT_ID}/locations/{GCP_REGION}/reasoningEngines/{engine_id}"
+
+    print(f"  Updating from source ({engine_id.split('/')[-1]})...")
+    last_err = None
+    for attempt in range(3):
+        try:
+            build_dir = build_source_package(agent_module, instruction, model)
+            config = _build_source_config(
+                build_dir,
+                display_name=display_name or "gepa-agent",
+                env_vars=env_vars,
+            )
+            remote = _get_client().agent_engines.update(name=engine_id, config=config)
+            break
+        except Exception as e:
+            last_err = e
+            shutil.rmtree(build_dir, ignore_errors=True)
+            if attempt < 2:
+                wait = 30 * (attempt + 1)
+                print(f"  Update attempt {attempt + 1} failed (GEAP transient error), retrying in {wait}s...")
+                _time.sleep(wait)
+            else:
+                import logging
+                logging.getLogger(__name__).error(
+                    f"Update failed after 3 attempts for {engine_id.split('/')[-1]}: {e}"
+                )
+                raise
+    else:
+        raise last_err
+
+    shutil.rmtree(build_dir, ignore_errors=True)
     resource_name = getattr(remote, "resource_name", None) or remote.api_resource.name
     print(f"  Updated: {resource_name.split('/')[-1]}")
     return resource_name.split("/")[-1]

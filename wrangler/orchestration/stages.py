@@ -90,7 +90,13 @@ def _post_eval_sanity_check(
 
 
 def _load_agent(manifest: Manifest, pair: AgentPromptPair, manifest_dir: Path | None = None):
-    """Import and instantiate the agent with the pair's model and prompt."""
+    """Import and instantiate the agent with the pair's model and prompt.
+
+    Deprecated: used only by the legacy ``deploy`` CLI command and
+    ``WranglerPipeline`` runner.  The pipeline and local workflow now use
+    ``deploy_agent_from_source`` / ``update_agent_from_source`` which don't
+    need to instantiate the agent locally.
+    """
     module_ref = pair.agent_module or manifest.agent_module
     search_bases = [Path(".")] if manifest_dir is None else [manifest_dir, Path(".")]
 
@@ -222,10 +228,15 @@ def stage_deploy(exp: Experiment, pair_id: str | None = None) -> None:
         else:
             print(f"  {tag} Deploying...", end="", flush=True)
             t0 = time.time()
-            agent = _load_agent(manifest, pair, mdir)
             version_tag = exp.version.replace("_", "-") if exp.version else ""
             display = f"{pair.id}_{version_tag}" if version_tag else pair.id
-            engine_id = deployer.deploy_agent(agent, display_name=display)
+            agent_ref = pair.agent_module or manifest.agent_module
+            engine_id = deployer.deploy_agent_from_source(
+                agent_module=str(mdir / agent_ref),
+                model=pair.model,
+                instruction=pair.system_prompt,
+                display_name=display,
+            )
             print(f" {_fmt_duration(time.time() - t0)}")
             exp.merge_pair("deploy", pair.id, {
                 "engine_id": engine_id,
@@ -423,13 +434,18 @@ def stage_redeploy(exp: Experiment, pair_id: str | None = None) -> None:
             print(f"  [{pair.id}] No optimized_prompt — skipping")
             continue
 
-        pair.system_prompt = optimized_prompt
         print(f"  [{pair.id}] ({i}/{len(pairs)}) Redeploying...", end="", flush=True)
         t0 = time.time()
-        agent = _load_agent(manifest, pair, mdir)
         version_tag = exp.version.replace("_", "-") if exp.version else ""
         display = f"{pair.id}_{version_tag}" if version_tag else pair.id
-        deployer.update_agent(agent, engine_id, display_name=display)
+        agent_ref = pair.agent_module or manifest.agent_module
+        deployer.update_agent_from_source(
+            engine_id=engine_id,
+            agent_module=str(mdir / agent_ref),
+            model=pair.model,
+            instruction=optimized_prompt,
+            display_name=display,
+        )
         elapsed = time.time() - t0
         print(f" {_fmt_duration(elapsed)}")
 

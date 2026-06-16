@@ -308,11 +308,16 @@ def run_batch_eval(
 
     print(f"  {tag}Inference complete ({_fmt_elapsed(t0)})", flush=True)
 
-    # Clean invalid rows before scoring — rows with NaN/float agent_data cause ValidationError
+    # Clean invalid rows before scoring — rows with NaN/float in response or
+    # agent_data cause ValidationError in the SDK
     result_df = inference_result.eval_dataset_df
-    invalid_mask = result_df["response"].apply(
-        lambda r: r is None or (isinstance(r, float) and pd.isna(r)) or r == ""
-    )
+
+    def _is_invalid(val):
+        return val is None or (isinstance(val, float) and pd.isna(val)) or val == ""
+
+    invalid_mask = result_df["response"].apply(_is_invalid)
+    if "agent_data" in result_df.columns:
+        invalid_mask = invalid_mask | result_df["agent_data"].apply(_is_invalid)
     n_invalid = invalid_mask.sum()
     if n_invalid > 0:
         print(f"  {tag}Dropped {n_invalid}/{len(result_df)} rows with invalid agent_data", flush=True)

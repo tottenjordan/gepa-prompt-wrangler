@@ -126,6 +126,7 @@ def package_and_upload_code(
     excludes = {
         ".venv", ".git", ".claude", "__pycache__", ".pytest_cache",
         "outputs", "experiments", "node_modules", ".mypy_cache",
+        "_geap_build_pkg",
     }
 
     with tarfile.open(tarball_path, "w:gz") as tar:

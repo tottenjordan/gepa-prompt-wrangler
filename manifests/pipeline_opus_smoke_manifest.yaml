@@ -1,14 +1,14 @@
-name: "pipeline-opus-smoke"
+name: "pipeline-claude-smoke"
 description: >
-  Quick pipeline test — opus-4-7 vs fable-5 on 5 eval cases.
+  Quick pipeline test — opus-4-6 + fable-5 source-based deploy on 5 eval cases.
 
 agent_module: "examples/multi_model_agents/agents/opus_agent"
 eval_data: "examples/multi_model_agents/eval_data/eval_cases_smoke.yaml"
 
 pairs:
-  - id: "opus47"
-    model: "claude-opus-4-7"
-    description: "Claude Opus 4.7"
+  - id: "opus"
+    model: "claude-opus-4-6"
+    description: "Claude Opus 4.6"
     agent_module: "examples/multi_model_agents/agents/opus_agent"
     system_prompt: "You are a helpful assistant. Use the available tools to answer user questions."
 
@@ -25,5 +25,5 @@ eval_config:
 
 pipeline:
   secret_id: wrangler-agent-env
-  max_metric_calls: 30
-  cache_bust: "v1"
+  max_metric_calls: 20
+  cache_bust: "v3"
