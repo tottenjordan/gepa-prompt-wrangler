@@ -288,6 +288,7 @@ class _GoogleAuth(httpx.Auth):
 def _create_authed_client(**kwargs):
     kwargs.pop("timeout", None)
     kwargs.pop("limits", None)
+    kwargs.pop("auth", None)
     return httpx.AsyncClient(
         auth=_GoogleAuth(),
         limits=httpx.Limits(max_connections=10, max_keepalive_connections=5),
@@ -491,9 +492,11 @@ def build_source_package(
     # service account provides ADC automatically.
     (build_path / "registry.py").write_text(_REGISTRY_PY_TEMPLATE)
 
-    # Rewrite hard os.environ["KEY"] lookups to os.environ.get() so the
-    # module doesn't crash if env vars arrive via the config dict rather
-    # than .env.  Only patches MCP_SERVER vars (the known offenders).
+    # Patch config.py for GEAP compatibility:
+    # 1. Rewrite hard os.environ["KEY"] to os.environ.get() for MCP vars
+    # 2. Patch resolve_model() so Claude models use full resource name with
+    #    locations/global — GEAP sets GOOGLE_CLOUD_LOCATION=us-central1
+    #    (restricted env var) but Claude requires global.
     config_copy = build_path / "config.py"
     if config_copy.exists():
         text = config_copy.read_text()
@@ -501,6 +504,14 @@ def build_source_package(
             r'= os\.environ\["(SEARCH_MCP_SERVER|BOOKING_MCP_SERVER|EXPENSE_MCP_SERVER)"\]',
             r'= os.environ.get("\1", "")',
             text,
+        )
+        # Patch resolve_model: Claude models need global endpoint.
+        # GEAP sets GOOGLE_CLOUD_LOCATION=us-central1 (restricted) but
+        # Claude requires global.  Use full resource name to override.
+        text = text.replace(
+            'return Claude(model=model_str)',
+            '_proj = os.environ.get("GOOGLE_CLOUD_PROJECT", os.environ.get("GCP_PROJECT_ID", ""))\n'
+            '        return Claude(model=f"projects/{_proj}/locations/global/publishers/anthropic/models/{model_str}")',
         )
         config_copy.write_text(text)
 

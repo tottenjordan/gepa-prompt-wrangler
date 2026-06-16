@@ -100,7 +100,7 @@ def build_pipeline(image_uri: str):
                 num_runs=num_runs,
                 judge_model=judge_model,
                 redeploy_output="",
-                cache_bust="",
+                cache_bust=cache_bust,
             )
             eval_before_task.set_cpu_limit("4")
             eval_before_task.set_memory_limit("16G")

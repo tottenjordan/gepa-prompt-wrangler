@@ -46,6 +46,7 @@ deploy_mcp() {
         --port "$port" \
         --min-instances 3 \
         --concurrency 250 \
+        --session-affinity \
         --allow-unauthenticated \
         --quiet 2>&1 | tail -2
 }

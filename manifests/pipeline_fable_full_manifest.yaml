@@ -1,14 +1,14 @@
-name: "pipeline-fable-full"
+name: "pipeline-opus48-full"
 description: >
-  Full pipeline run — claude-fable-5 on 64 eval cases.
+  Full pipeline run — claude-opus-4-8 on 64 eval cases.
 
 agent_module: "examples/multi_model_agents/agents/opus_agent"
 eval_data: "examples/multi_model_agents/eval_data/eval_cases.yaml"
 
 pairs:
-  - id: "fable"
-    model: "claude-fable-5"
-    description: "Claude Fable 5 — full optimization run"
+  - id: "opus48"
+    model: "claude-opus-4-8"
+    description: "Claude Opus 4.8 — full optimization run"
     agent_module: "examples/multi_model_agents/agents/opus_agent"
     system_prompt: "You are a helpful assistant. Use the available tools to answer user questions."
 
@@ -20,4 +20,4 @@ eval_config:
 pipeline:
   secret_id: wrangler-agent-env
   max_metric_calls: 50
-  cache_bust: "v5"
+  cache_bust: "v2"

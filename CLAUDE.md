@@ -127,13 +127,16 @@ For redeploy: `update_agent_from_source()` rebuilds the package with the new ins
 
 6. **`config.py` MCP vars rewritten to safe defaults** — the original has `os.environ["SEARCH_MCP_SERVER"]` (crashes if unset). `build_source_package()` rewrites these to `os.environ.get("SEARCH_MCP_SERVER", "")` so the module loads cleanly. Actual values come via the `env_vars` config dict.
 
-7. **Cloud Run MCP services need IAM invoker for GEAP** — the GEAP service account (`service-{PROJECT_NUMBER}@gcp-sa-aiplatform-re.iam.gserviceaccount.com`) must have `roles/run.invoker` on each Cloud Run MCP service, or the deployed agent's tool calls will timeout silently. Grant with:
+7. **Cloud Run MCP services need IAM invoker + session affinity** — the GEAP service account (`service-{PROJECT_NUMBER}@gcp-sa-aiplatform-re.iam.gserviceaccount.com`) must have `roles/run.invoker` on each Cloud Run MCP service. Session affinity must be enabled so MCP sessions stick to the same instance (without it, follow-up tool calls get 404). Grant and configure with:
    ```bash
    SA="service-934903580331@gcp-sa-aiplatform-re.iam.gserviceaccount.com"
    for SVC in wrangler-search-mcp wrangler-booking-mcp wrangler-expense-mcp; do
      gcloud run services add-iam-policy-binding $SVC \
        --region=us-central1 --project=hybrid-vertex \
        --member="serviceAccount:$SA" --role="roles/run.invoker" --quiet
+     gcloud run services update $SVC \
+       --region=us-central1 --project=hybrid-vertex \
+       --session-affinity --quiet
    done
    ```
 
