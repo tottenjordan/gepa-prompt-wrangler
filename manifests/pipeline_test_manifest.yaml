@@ -10,7 +10,6 @@ pairs:
     model: "claude-sonnet-4-6"
     description: "Claude Sonnet with generic prompt"
     agent_module: "examples/multi_model_agents/agents/sonnet_agent"
-    engine_id: "6943994822277464064"
     system_prompt: "You are a helpful assistant. Use the available tools to answer user questions."
 
 eval_config:

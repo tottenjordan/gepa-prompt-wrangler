@@ -131,6 +131,9 @@ def deploy_single_agent(
         os.environ.pop("GOOGLE_API_KEY", None)
         os.environ.pop("GEMINI_API_KEY", None)
 
+    instruction = pair.get("system_prompt", "")
+    logging.info(f"[{pair_id}] Deploy config: model={model}, instruction={len(instruction)}chars, module={agent_module}")
+
     existing_engine_id = pair.get("engine_id", "")
     if existing_engine_id:
         logging.info(f"[{pair_id}] Reusing existing engine: {existing_engine_id}")
@@ -405,6 +408,10 @@ def optimize_single_agent(
     eval_thresholds = json.loads(eval_thresholds_json) if eval_thresholds_json else None
 
     original_prompt = pair.get("system_prompt", "")
+    logging.info(f"[{pair_id}] Optimize config: model={model}, opt_dir={agent_path}")
+    logging.info(f"[{pair_id}] Baseline prompt ({len(original_prompt)}chars): '{original_prompt[:100]}...'")
+    logging.info(f"[{pair_id}] Sampler config: {sampler_cfg if sampler_cfg.exists() else 'auto-generated'}")
+    logging.info(f"[{pair_id}] Max metric calls: {max_metric_calls}")
     t0 = time.time()
     optimized_prompt = optimize(
         str(agent_path),
@@ -414,6 +421,7 @@ def optimize_single_agent(
         eval_thresholds=eval_thresholds,
         judge_model=judge_model,
         max_metric_calls=max_metric_calls if max_metric_calls > 0 else None,
+        initial_instruction=original_prompt,
     )
     elapsed = time.time() - t0
 
@@ -566,7 +574,11 @@ def redeploy_single_agent(
 
     engine_id = deploy_data["engine_id"]
     optimized_prompt = optimize_data["optimized_prompt"]
+    original_prompt = deploy_data.get("original_prompt", "")
     model = model or deploy_data.get("model", "")
+    prompt_changed = optimized_prompt != original_prompt
+    logging.info(f"[{pair_id}] Redeploy: engine={engine_id}, model={model}")
+    logging.info(f"[{pair_id}] Prompt: {len(original_prompt)}→{len(optimized_prompt)}chars, changed={prompt_changed}")
 
     from wrangler.core.deploy import update_agent_from_source
 

@@ -357,6 +357,7 @@ def optimize(
     eval_thresholds: dict[str, float] | None = None,
     judge_model: str = "gemini-3.5-flash",
     max_metric_calls: int | None = None,
+    initial_instruction: str | None = None,
 ) -> str:
     """Run GEPA optimization. Returns the optimized instruction string.
 
@@ -427,6 +428,12 @@ def optimize(
             f"  Module exports: {exports}\n"
             f"  Expected: agent.root_agent (SimpleNamespace) or root_agent (LlmAgent)"
         )
+
+    if initial_instruction:
+        root_agent.instruction = initial_instruction
+        print(f"{tag}  Instruction override: {len(initial_instruction)} chars (from manifest)", flush=True)
+    else:
+        print(f"{tag}  Instruction: {len(root_agent.instruction)} chars (from _opt module)", flush=True)
     print(f"{tag}  Agent: {root_agent.name}", flush=True)
 
     app_name = os.path.basename(agent_module_path)

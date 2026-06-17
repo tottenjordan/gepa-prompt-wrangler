@@ -297,11 +297,20 @@ def _create_authed_client(**kwargs):
     )
 
 
-_MCP_URLS = {
+_MCP_URLS = {k: v for k, v in {
     os.environ.get("SEARCH_MCP_SERVER", ""): os.environ.get("SEARCH_MCP_URL", ""),
     os.environ.get("BOOKING_MCP_SERVER", ""): os.environ.get("BOOKING_MCP_URL", ""),
     os.environ.get("EXPENSE_MCP_SERVER", ""): os.environ.get("EXPENSE_MCP_URL", ""),
-}
+}.items() if k and v}
+
+if not _MCP_URLS:
+    import logging as _log
+    _log.getLogger(__name__).error(
+        "No MCP server URLs configured. Set SEARCH_MCP_SERVER/SEARCH_MCP_URL, "
+        "BOOKING_MCP_SERVER/BOOKING_MCP_URL, EXPENSE_MCP_SERVER/EXPENSE_MCP_URL "
+        "via env_vars or .env file."
+    )
+    raise RuntimeError("No MCP server URLs configured — agent cannot use tools.")
 
 
 def get_mcp_tools(server_name):
@@ -514,6 +523,13 @@ def build_source_package(
             '        return Claude(model=f"projects/{_proj}/locations/global/publishers/anthropic/models/{model_str}")',
         )
         config_copy.write_text(text)
+
+    # Copy .env as fallback for MCP server env vars — config.py's
+    # load_dotenv() will read it if env_vars from the deployment config
+    # are missing or incomplete.
+    env_file = agent_parent / ".env"
+    if env_file.exists():
+        shutil.copy2(env_file, build_path / ".env")
 
     # Write instruction file (replaced during redeploy)
     (build_path / "instruction.txt").write_text(instruction)

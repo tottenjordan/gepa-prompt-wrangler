@@ -25,7 +25,7 @@ MODEL_COSTS = {
     "gemini-2.5-pro": {"input": 1.25, "output": 10.0},
     "gemini-3.1-flash-lite": {"input": 0.25, "output": 1.5},
     "gemini-3.5-flash": {"input": 1.50, "output": 9.0},
-    "gemini-3.1-pro-preview": {"input": 4.0, "output": 18.0},
+    "gemini-3.1-pro-preview": {"input": 4.0, "output": 18.0}, # gemini-3.1-pro-preview | gemini-3.1-pro
     "claude-sonnet-4-6": {"input": 3.0, "output": 15.0},
     "claude-opus-4-6": {"input": 5.0, "output": 25.0},
     "claude-opus-4-7": {"input": 5.0, "output": 25.0},
@@ -50,7 +50,7 @@ def blended_cost(model: str, custom_costs: dict[str, float] | None = None) -> fl
 RATE_LIMITS = {
     "gemini-3.1-flash-lite": 5,
     "gemini-3.5-flash": 5,
-    "gemini-3.1-pro": 5,
+    "gemini-3.1-pro-preview": 5, # gemini-3.1-pro-preview | gemini-3.1-pro
     "gemini-2.5-flash": 100,
     "gemini-2.5-pro": 80,
     "claude-sonnet-4-6": 2000,

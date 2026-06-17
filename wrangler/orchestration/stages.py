@@ -335,6 +335,7 @@ def stage_optimize(exp: Experiment, pair_id: str | None = None) -> None:
             agent_name=pair.id,
             eval_thresholds=eval_thresholds,
             judge_model=judge,
+            initial_instruction=pair.system_prompt,
         )
         elapsed = time.time() - t0
         print(f"  [{pair.id}] Done ({_fmt_duration(elapsed)}) — {len(optimized)} chars")

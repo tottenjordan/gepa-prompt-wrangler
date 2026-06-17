@@ -205,6 +205,18 @@ The MCP session manager passes `headers`, `timeout`, and other kwargs to `httpx_
 ### Two config.py Files
 `wrangler/core/config.py` and `examples/multi_model_agents/config.py` both have `resolve_model()`. Keep them in sync — the multi-model agents import from their local config, not wrangler's.
 
+### Optimizer Prompt Flow
+
+The optimizer loads the agent from `*_opt/__init__.py` but overrides the instruction with the manifest's `system_prompt` via the `initial_instruction` parameter in `optimize()`. This ensures GEPA optimizes the same prompt that eval-before tests.
+
+```
+manifest system_prompt → deploy (instruction.txt) → eval-before (deployed agent)
+                       → optimize(initial_instruction=system_prompt) → GEPA evolves
+                       → redeploy (optimized prompt) → eval-after
+```
+
+The `_opt/__init__.py` files should NOT override `instruction` — the `initial_instruction` parameter handles prompt selection.
+
 ### deploy.py Requirements Lists
 `wrangler/core/deploy.py` has two requirements lists:
 - `REQUIREMENTS` — legacy pickle-based deployment (includes `cloudpickle`). Not used by current workflow.
