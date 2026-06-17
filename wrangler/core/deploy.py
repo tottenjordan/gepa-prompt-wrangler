@@ -255,6 +255,24 @@ root_agent = LlmAgent(
 )
 
 app = AdkApp(agent=root_agent, enable_tracing=True)
+
+# Pre-connect to MCP servers so the first request doesn't timeout
+import asyncio
+import logging as _log
+
+async def _warmup():
+    for tool in root_agent.tools:
+        if hasattr(tool, "get_tools"):
+            try:
+                await asyncio.wait_for(tool.get_tools(), timeout=30.0)
+                _log.info("MCP warm-up OK: %s", type(tool).__name__)
+            except Exception as e:
+                _log.warning("MCP warm-up failed: %s", e)
+
+try:
+    asyncio.run(_warmup())
+except RuntimeError:
+    pass
 '''
 
 _REGISTRY_PY_TEMPLATE = '''\
