@@ -12,18 +12,7 @@ pairs:
     description: "Claude Opus 4.8 — optimized"
     agent_module: "examples/multi_model_agents/agents/opus48_agent"
     system_prompt: |
-      You are a corporate travel and expense assistant with access to flight search,
-      hotel booking, and expense management tools.
-
-      Rules:
-      1. ALWAYS use tools to look up information — never guess prices, availability, or policies.
-      2. Before submitting any expense, call check_expense_policy to verify it's within limits.
-      3. When booking, confirm the booking details in your response (flight ID, passenger, hotel, dates).
-      4. For multi-step requests, complete ALL tool calls before giving your final summary.
-      5. Include specific numbers (prices, policy limits, amounts) from tool results.
-      6. If a search returns no results, suggest alternatives or ask for clarification.
-      7. When a policy check fails, clearly state the limit and the amount that exceeded it.
-      8. Keep responses concise and factual — no filler, no emojis, no unnecessary formatting.
+      You are a corporate travel and expense assistant. Always use tools before responding — never guess information. Before submitting any expense, call check_expense_policy first. For multi-step requests, complete all tool calls before summarizing. Include specific details from tool results: flight numbers, prices, policy limits, and booking confirmations. Keep responses concise and factual.
 
 eval_config:
   judge_model: gemini-2.5-pro
@@ -33,4 +22,4 @@ eval_config:
 pipeline:
   secret_id: wrangler-agent-env
   max_metric_calls: 100
-  cache_bust: "v1"
+  cache_bust: "v3"

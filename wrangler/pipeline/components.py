@@ -86,6 +86,7 @@ def deploy_single_agent(
     cache_bust: str,
     metrics: Output[Metrics],
     summary: Output[Markdown],
+    agent_prompt: Output[Markdown],
 ) -> str:
     """Deploy a single agent-prompt pair to GEAP."""
     import json
@@ -177,6 +178,11 @@ def deploy_single_agent(
         f.write(f"- **Source**: {result['source']}\n")
         f.write(f"- **Elapsed**: {result.get('elapsed', 0):.0f}s\n")
 
+    with open(agent_prompt.path, "w") as f:
+        f.write(f"## Agent Prompt (Deploy): {pair_id}\n\n")
+        f.write(f"**Model**: `{model}` | **Length**: {len(instruction)} chars\n\n")
+        f.write(f"```\n{instruction}\n```\n")
+
     return json.dumps(result)
 
 
@@ -198,6 +204,7 @@ def eval_single_agent(
     cache_bust: str,
     metrics: Output[Metrics],
     summary: Output[Markdown],
+    agent_prompt: Output[Markdown],
 ) -> str:
     """Evaluate a single deployed agent (before or after optimization)."""
     import json
@@ -236,6 +243,14 @@ def eval_single_agent(
     deploy_blob = gcs.bucket(bucket_name).blob(f"pipeline-runs/{run_id}/stages/deploy/{pair_id}.json")
     deploy_data = json.loads(deploy_blob.download_as_text())
     engine_id = deploy_data["engine_id"]
+
+    # Resolve the prompt being evaluated
+    if phase == "after":
+        opt_blob = gcs.bucket(bucket_name).blob(f"pipeline-runs/{run_id}/stages/optimize/{pair_id}.json")
+        opt_data = json.loads(opt_blob.download_as_text())
+        active_prompt = opt_data.get("optimized_prompt", "")
+    else:
+        active_prompt = deploy_data.get("original_prompt", pair.get("system_prompt", ""))
 
     eval_cases = load_eval_file(f"/app/{eval_data_path}")
     logging.info(f"[{pair_id}] {phase} eval: {len(eval_cases)} cases, {num_runs} runs")
@@ -293,6 +308,11 @@ def eval_single_agent(
         f.write(f"| Input cost | ${input_cost:.4f} |\n")
         f.write(f"| Output cost | ${output_cost:.4f} |\n")
         f.write(f"| **Total cost** | **${input_cost + output_cost:.4f}** |\n")
+
+    with open(agent_prompt.path, "w") as f:
+        f.write(f"## Agent Prompt (Eval {phase}): {pair_id}\n\n")
+        f.write(f"**Model**: `{model}` | **Length**: {len(active_prompt)} chars\n\n")
+        f.write(f"```\n{active_prompt}\n```\n")
 
     logging.info(f"[{pair_id}] {phase} eval done: avg={avg_score:.3f}, {elapsed:.0f}s")
     return json.dumps(stage_data)
@@ -517,6 +537,7 @@ def redeploy_single_agent(
     cache_bust: str,
     metrics: Output[Metrics],
     summary: Output[Markdown],
+    agent_prompt: Output[Markdown],
 ) -> str:
     """Redeploy a single agent with its optimized prompt.
 
@@ -610,7 +631,15 @@ def redeploy_single_agent(
         f.write(f"## Redeploy: {pair_id}\n\n")
         f.write(f"- **Engine ID**: `{engine_id}`\n")
         f.write(f"- **Prompt length**: {len(optimized_prompt)} chars\n")
+        f.write(f"- **Prompt changed**: {prompt_changed}\n")
         f.write(f"- **Elapsed**: {elapsed:.0f}s\n")
+
+    with open(agent_prompt.path, "w") as f:
+        f.write(f"## Agent Prompt (Redeploy): {pair_id}\n\n")
+        f.write(f"**Model**: `{model}` | **Changed**: {prompt_changed} | ")
+        f.write(f"**Length**: {len(original_prompt)} → {len(optimized_prompt)} chars\n\n")
+        f.write(f"### Original Prompt\n\n```\n{original_prompt}\n```\n\n")
+        f.write(f"### Optimized Prompt\n\n```\n{optimized_prompt}\n```\n")
 
     logging.info(f"[{pair_id}] Redeployed in {elapsed:.0f}s")
     return json.dumps(result)
