@@ -532,13 +532,18 @@ def build_source_package(
             r'= os.environ.get("\1", "")',
             text,
         )
-        # Patch resolve_model: Claude models need global endpoint.
+        # Patch resolve_model: Claude AND Gemini 3.x models need global endpoint.
         # GEAP sets GOOGLE_CLOUD_LOCATION=us-central1 (restricted) but
-        # Claude requires global.  Use full resource name to override.
+        # 3.x models require global.  Use full resource name to override.
         text = text.replace(
             'return Claude(model=model_str)',
-            '_proj = os.environ.get("GOOGLE_CLOUD_PROJECT", os.environ.get("GCP_PROJECT_ID", ""))\n'
+            '_proj = os.environ.get("GCP_PROJECT_ID", os.environ.get("GOOGLE_CLOUD_PROJECT", ""))\n'
             '        return Claude(model=f"projects/{_proj}/locations/global/publishers/anthropic/models/{model_str}")',
+        )
+        text = text.replace(
+            'return Gemini(model=model_str)',
+            '_proj = os.environ.get("GCP_PROJECT_ID", os.environ.get("GOOGLE_CLOUD_PROJECT", ""))\n'
+            '    return Gemini(model=f"projects/{_proj}/locations/global/publishers/google/models/{model_str}")',
         )
         config_copy.write_text(text)
 
