@@ -145,13 +145,18 @@ def _patch_adk():
             norm_text = _fuzzy_normalize(rubric_response.property_text)
             rubric = normalized_map.get(norm_text)
 
-            if not rubric:
+            if not rubric and norm_text:
                 candidates = [
                     r for ct, r in normalized_map.items()
-                    if ct in norm_text or norm_text in ct
+                    if ct and (ct in norm_text or norm_text in ct)
                 ]
                 if len(candidates) == 1:
                     rubric = candidates[0]
+                    log.debug(
+                        "Rubric substring fallback: '%s' → '%s'",
+                        rubric_response.property_text[:60],
+                        rubric.rubric_id,
+                    )
 
             if rubric:
                 rubric_scores.append(RubricScore(
@@ -161,7 +166,7 @@ def _patch_adk():
                 ))
             else:
                 log.warning(
-                    "Rubric not matched (even with fuzzy): %s",
+                    "Rubric not matched (even with fuzzy): '%s'",
                     rubric_response.property_text[:80],
                 )
 
