@@ -228,6 +228,8 @@ _ADK_CLASS_METHODS = [
 _APP_PY_TEMPLATE = '''\
 """Auto-generated GEAP entrypoint."""
 import os
+import asyncio
+import logging as _log
 from pathlib import Path
 
 from google.adk.agents import LlmAgent
@@ -237,12 +239,27 @@ from vertexai.agent_engines import AdkApp
 from .config import resolve_model, SEARCH_MCP_SERVER, BOOKING_MCP_SERVER, EXPENSE_MCP_SERVER
 from .registry import get_mcp_tools
 
+_log.basicConfig(level=_log.INFO)
 _here = Path(__file__).parent
 INSTRUCTION = (_here / "instruction.txt").read_text().strip()
 MODEL = os.environ.get("AGENT_MODEL", "{model}")
 
+_log.info("[GEAP startup] model=%s, location=%s, project=%s",
+          MODEL, os.environ.get("GOOGLE_CLOUD_LOCATION", "unset"),
+          os.environ.get("GCP_PROJECT_ID", os.environ.get("GOOGLE_CLOUD_PROJECT", "unset")))
+_log.info("[GEAP startup] instruction=%d chars, MCP servers: search=%s, booking=%s, expense=%s",
+          len(INSTRUCTION), bool(SEARCH_MCP_SERVER), bool(BOOKING_MCP_SERVER), bool(EXPENSE_MCP_SERVER))
+
+# -- Validate model connectivity before serving --
+try:
+    resolved = resolve_model(MODEL)
+    _log.info("[GEAP startup] model resolved: %s (type=%s)", resolved, type(resolved).__name__)
+except Exception as exc:
+    _log.error("[GEAP startup] FATAL: resolve_model(%s) failed: %s", MODEL, exc)
+    raise
+
 root_agent = LlmAgent(
-    model=resolve_model(MODEL),
+    model=resolved,
     name="{agent_name}",
     description="Corporate travel and expense assistant with access to flight, hotel, and expense management tools.",
     instruction=INSTRUCTION,
@@ -256,23 +273,44 @@ root_agent = LlmAgent(
 
 app = AdkApp(agent=root_agent, enable_tracing=True)
 
-# Pre-connect to MCP servers so the first request doesn't timeout
-import asyncio
-import logging as _log
-
-async def _warmup():
+# -- Startup checks: MCP tools + model ping --
+async def _startup_checks():
+    # 1. MCP tool warm-up
+    mcp_ok, mcp_fail = 0, 0
     for tool in root_agent.tools:
         if hasattr(tool, "get_tools"):
             try:
-                await asyncio.wait_for(tool.get_tools(), timeout=30.0)
-                _log.info("MCP warm-up OK: %s", type(tool).__name__)
-            except Exception as e:
-                _log.warning("MCP warm-up failed: %s", e)
+                tools = await asyncio.wait_for(tool.get_tools(), timeout=30.0)
+                tool_names = [t.name for t in tools] if tools else []
+                _log.info("[GEAP startup] MCP OK: %s -> %d tools %s",
+                          type(tool).__name__, len(tool_names), tool_names[:3])
+                mcp_ok += 1
+            except Exception as exc:
+                _log.error("[GEAP startup] MCP FAILED: %s -> %s", type(tool).__name__, exc)
+                mcp_fail += 1
+    _log.info("[GEAP startup] MCP summary: %d OK, %d failed", mcp_ok, mcp_fail)
+    if mcp_ok == 0 and mcp_fail > 0:
+        _log.error("[GEAP startup] FATAL: no MCP tools connected — agent cannot use tools")
+
+    # 2. Model ping — send a trivial request to verify the model endpoint works
+    try:
+        from google import genai
+        client = genai.Client(vertexai=True,
+                              project=os.environ.get("GCP_PROJECT_ID", ""),
+                              location=os.environ.get("GOOGLE_CLOUD_LOCATION", "global"))
+        response = await client.aio.models.generate_content(
+            model=MODEL, contents="Say OK")
+        _log.info("[GEAP startup] model ping OK: %s",
+                  response.text[:50] if response.text else "(empty)")
+    except Exception as exc:
+        _log.error("[GEAP startup] FATAL: model ping failed for %s: %s", MODEL, exc)
+        raise RuntimeError("Model %s is not reachable: %s" % (MODEL, exc)) from exc
 
 try:
-    asyncio.run(_warmup())
-except RuntimeError:
-    pass
+    asyncio.run(_startup_checks())
+except RuntimeError as exc:
+    if "cannot be called from a running event loop" not in str(exc):
+        raise
 '''
 
 _REGISTRY_PY_TEMPLATE = '''\
@@ -379,6 +417,7 @@ def deploy_agent(
         "env_vars": {
             "GCP_PROJECT_ID": GCP_PROJECT_ID,
             "GCP_REGION": GCP_REGION,
+            "GOOGLE_CLOUD_LOCATION": "global",
             "GOOGLE_GENAI_USE_VERTEXAI": "1",
             "GOOGLE_CLOUD_AGENT_ENGINE_ENABLE_TELEMETRY": "true",
             "OTEL_SEMCONV_STABILITY_OPT_IN": "gen_ai_latest_experimental",
@@ -422,6 +461,7 @@ def update_agent(
         "env_vars": {
             "GCP_PROJECT_ID": GCP_PROJECT_ID,
             "GCP_REGION": GCP_REGION,
+            "GOOGLE_CLOUD_LOCATION": "global",
             "GOOGLE_GENAI_USE_VERTEXAI": "1",
             "GOOGLE_CLOUD_AGENT_ENGINE_ENABLE_TELEMETRY": "true",
             "OTEL_SEMCONV_STABILITY_OPT_IN": "gen_ai_latest_experimental",
@@ -532,18 +572,13 @@ def build_source_package(
             r'= os.environ.get("\1", "")',
             text,
         )
-        # Patch resolve_model: Claude AND Gemini 3.x models need global endpoint.
-        # GEAP sets GOOGLE_CLOUD_LOCATION=us-central1 (restricted) but
-        # 3.x models require global.  Use full resource name to override.
+        # Patch resolve_model: Claude models need full resource name with
+        # locations/global. Gemini 3.x models use the GOOGLE_CLOUD_LOCATION
+        # env var set in app.py (no resource name rewrite needed).
         text = text.replace(
             'return Claude(model=model_str)',
             '_proj = os.environ.get("GCP_PROJECT_ID", os.environ.get("GOOGLE_CLOUD_PROJECT", ""))\n'
             '        return Claude(model=f"projects/{_proj}/locations/global/publishers/anthropic/models/{model_str}")',
-        )
-        text = text.replace(
-            'return Gemini(model=model_str)',
-            '_proj = os.environ.get("GCP_PROJECT_ID", os.environ.get("GOOGLE_CLOUD_PROJECT", ""))\n'
-            '    return Gemini(model=f"projects/{_proj}/locations/global/publishers/google/models/{model_str}")',
         )
         config_copy.write_text(text)
 
@@ -603,6 +638,7 @@ def _build_source_config(
         "env_vars": {
             "GCP_PROJECT_ID": GCP_PROJECT_ID,
             "GCP_REGION": GCP_REGION,
+            "GOOGLE_CLOUD_LOCATION": "global",
             "GOOGLE_GENAI_USE_VERTEXAI": "1",
             "GOOGLE_CLOUD_AGENT_ENGINE_ENABLE_TELEMETRY": "true",
             "OTEL_SEMCONV_STABILITY_OPT_IN": "gen_ai_latest_experimental",
