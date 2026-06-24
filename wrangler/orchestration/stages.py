@@ -61,7 +61,7 @@ def _validate_sampler_config(
                 if isinstance(val, dict):
                     cfg_thresh = val.get("threshold")
                     if cfg_thresh is not None and cfg_thresh != threshold:
-                        warnings.append(f"{actual_key} threshold {cfg_thresh} != experiment {threshold} (will be overridden)")
+                        warnings.append(f"{actual_key} threshold {cfg_thresh} (sampler_config, authoritative) != experiment/report {threshold}")
 
     for w in warnings:
         print(f"  [{pair_id}] Warning: sampler_config — {w}")

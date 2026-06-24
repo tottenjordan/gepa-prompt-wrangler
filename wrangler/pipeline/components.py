@@ -331,7 +331,6 @@ def optimize_single_agent(
     eval_data_path: str,
     agent_module: str,
     judge_model: str,
-    eval_thresholds_json: str,
     secret_id: str,
     max_metric_calls: int,
     cache_bust: str,
@@ -425,7 +424,6 @@ def optimize_single_agent(
         agent_path = opt_dir
 
     sampler_cfg = agent_path / "sampler_config.json"
-    eval_thresholds = json.loads(eval_thresholds_json) if eval_thresholds_json else None
 
     original_prompt = pair.get("system_prompt", "")
     logging.info(f"[{pair_id}] Optimize config: model={model}, opt_dir={agent_path}")
@@ -470,7 +468,6 @@ def optimize_single_agent(
         eval_data_path=f"/app/{eval_data_path}",
         sampler_config_path=str(sampler_cfg) if sampler_cfg.exists() else None,
         agent_name=pair_id,
-        eval_thresholds=eval_thresholds,
         judge_model=judge_model,
         max_metric_calls=max_metric_calls if max_metric_calls > 0 else None,
         initial_instruction=original_prompt,

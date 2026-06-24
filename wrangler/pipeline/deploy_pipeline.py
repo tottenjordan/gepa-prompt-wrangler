@@ -197,15 +197,6 @@ def deploy_pipeline(
     max_metric_calls = pipeline_config.get("max_metric_calls", 50)
     cache_bust = pipeline_config.get("cache_bust", "")
 
-    defaults = {
-        "tool_use_quality_v1": 0.3,
-        "final_response_quality_v1": 0.7,
-        "hallucinations_v1": 0.8,
-        "safety_v1": 0.8,
-    }
-    configured = manifest.eval_config.get("thresholds", {})
-    eval_thresholds = {**defaults, **configured}
-
     manifest_dict = {
         "name": manifest.name,
         "description": manifest.description,
@@ -299,7 +290,6 @@ def deploy_pipeline(
             "eval_data_path": manifest.eval_data,
             "num_runs": num_runs,
             "judge_model": judge_model,
-            "eval_thresholds_json": json.dumps(eval_thresholds),
             "secret_id": secret_id,
             "max_metric_calls": max_metric_calls,
             "cache_bust": cache_bust,
