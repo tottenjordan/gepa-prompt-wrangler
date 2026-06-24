@@ -125,22 +125,15 @@ class TestScoreKeyAlias:
         # "tool_use_quality_v1". The alias bridges them in run_batch_eval.
         assert _TOOL_USE_METRIC_NAME != _TOOL_USE_REPORT_KEY
 
-    def test_run_batch_eval_aliases_short_name(self):
-        """Mirror the score-extraction logic in run_batch_eval to prove the
-        custom metric's short name is aliased to the report key."""
-        # Simulate what run_batch_eval does with summary metrics.
-        raw_metrics = {
-            "Candidate 1/tool_use_quality/AVERAGE": 1.0,
-            "Candidate 1/final_response_quality_v1/AVERAGE": 0.9,
-        }
-        scores = {}
-        for key, value in raw_metrics.items():
-            if "/AVERAGE" in key:
-                metric_name = key.rsplit("/AVERAGE", 1)[0]
-                short = metric_name.split("/")[-1] if "/" in metric_name else metric_name
-                if short == evaluator._TOOL_USE_METRIC_NAME:
-                    short = evaluator._TOOL_USE_REPORT_KEY
-                scores[short] = float(value)
-        assert "tool_use_quality_v1" in scores
-        assert scores["tool_use_quality_v1"] == 1.0
-        assert "tool_use_quality" not in scores
+    def test_alias_helper_maps_custom_name_to_report_key(self):
+        """Exercise the real alias helper used by run_batch_eval and
+        online_monitors (not a re-implementation of the loop)."""
+        assert evaluator._alias_tool_use_key("tool_use_quality") == "tool_use_quality_v1"
+        assert evaluator._alias_tool_use_key(evaluator._TOOL_USE_METRIC_NAME) == (
+            evaluator._TOOL_USE_REPORT_KEY
+        )
+        # Other metric names pass through unchanged.
+        assert evaluator._alias_tool_use_key("safety") == "safety"
+        assert evaluator._alias_tool_use_key("final_response_quality_v1") == (
+            "final_response_quality_v1"
+        )

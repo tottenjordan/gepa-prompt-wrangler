@@ -17,7 +17,6 @@ import time
 import pandas as pd
 import vertexai
 from vertexai import Client, types
-from vertexai._genai import _evals_common  # noqa: F401
 
 from wrangler.core.config import (
     GCP_PROJECT_ID, GCP_REGION, GCP_STAGING_BUCKET, disable_pyopenssl,

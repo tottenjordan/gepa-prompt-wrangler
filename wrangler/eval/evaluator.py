@@ -70,6 +70,16 @@ _TOOL_USE_METRIC_NAME = "tool_use_quality"
 _TOOL_USE_REPORT_KEY = "tool_use_quality_v1"
 
 
+def _alias_tool_use_key(short: str) -> str:
+    """Map the custom tool-use metric's short name to the report key.
+
+    Returns ``_TOOL_USE_REPORT_KEY`` when ``short`` is the custom metric name,
+    otherwise returns ``short`` unchanged. Shared by run_batch_eval (aggregate
+    + per_case) and online_monitors so all entry points alias identically.
+    """
+    return _TOOL_USE_REPORT_KEY if short == _TOOL_USE_METRIC_NAME else short
+
+
 def _tool_use_metric() -> "types.LLMMetric":
     """Build the tool-use metric used by batch eval.
 
@@ -462,15 +472,16 @@ def run_batch_eval(
             metric_name = key.rsplit("/AVERAGE", 1)[0]
             short = metric_name.split("/")[-1] if "/" in metric_name else metric_name
             # Alias the custom LLM-judge tool-use metric back to the predefined
-            # report key so reporting/analysis lookups keep working.
-            if short == _TOOL_USE_METRIC_NAME:
-                short = _TOOL_USE_REPORT_KEY
-            scores[short] = float(value)
+            # report key so reporting/analysis lookups keep working. Safe to
+            # clobber _TOOL_USE_REPORT_KEY: only one tool-use metric is ever
+            # sent, so the predefined key never co-occurs with the aliased one.
+            scores[_alias_tool_use_key(short)] = float(value)
 
     per_case = _extract_per_case_scores(evaluation_run)
     for case_scores in per_case:
+        # Same single-tool-use-metric clobber assumption as above.
         if _TOOL_USE_METRIC_NAME in case_scores:
-            case_scores[_TOOL_USE_REPORT_KEY] = case_scores.pop(_TOOL_USE_METRIC_NAME)
+            case_scores[_alias_tool_use_key(_TOOL_USE_METRIC_NAME)] = case_scores.pop(_TOOL_USE_METRIC_NAME)
     token_usage = _estimate_token_usage(inference_result.eval_dataset_df)
 
     print(f"  {tag}Eval complete — total: {_fmt_elapsed(t0)}, {len(scores)} metrics, {len(per_case)} cases, "

@@ -21,6 +21,12 @@ import vertexai
 from vertexai import Client, types
 
 from ..core.config import GCP_PROJECT_ID, GCP_REGION, GCP_STAGING_BUCKET, OUTPUTS_DIR
+from .evaluator import (
+    _alias_tool_use_key,
+    _TOOL_USE_METRIC_NAME,
+    _TOOL_USE_REPORT_KEY,
+    _tool_use_metric,
+)
 
 QUICK_EVAL_CASES = [
     "Find flights from SFO to JFK",
@@ -32,8 +38,6 @@ QUICK_EVAL_CASES = [
     "Find flights to NYC and compare options",
     "Show expenses for user EMP001",
 ]
-
-from .evaluator import _tool_use_metric
 
 # Use the explicit-rubric tool-use metric, NOT the predefined TOOL_USE_QUALITY:
 # the predefined one auto-generates inverted rubrics that penalize correct tool
@@ -113,7 +117,10 @@ def run_quick_eval(agent_id: str, num_cases: int = None) -> dict:
                     for k, v in (dict(nested) if not isinstance(nested, dict) else nested).items():
                         if "/AVERAGE" in k:
                             short = k.rsplit("/AVERAGE", 1)[0].split("/")[-1]
-                            scores[short] = float(v)
+                            # Alias the custom tool-use metric to the report key,
+                            # matching run_batch_eval (single tool-use metric, so
+                            # the predefined key never co-occurs).
+                            scores[_alias_tool_use_key(short)] = float(v)
     except Exception as e:
         print(f"  Warning: {e}")
 
