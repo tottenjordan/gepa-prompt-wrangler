@@ -653,7 +653,7 @@
           "user_content": {
             "parts": [
               {
-                "text": "Find flights to JFK and compare the cheapest options by airline"
+                "text": "Find flights from SFO to JFK and compare the cheapest options by airline"
               }
             ],
             "role": "user"
@@ -671,6 +671,7 @@
               {
                 "name": "wrangler_search_mcp_search_flights",
                 "args": {
+                  "origin": "SFO",
                   "destination": "JFK"
                 }
               }
@@ -1003,7 +1004,8 @@
                 "args": {
                   "user_id": "EMP001",
                   "category": "meals",
-                  "amount": 75
+                  "amount": 75,
+                  "description": "business meal"
                 }
               }
             ]
@@ -1176,7 +1178,8 @@
                 "args": {
                   "user_id": "EMP002",
                   "category": "supplies",
-                  "amount": 80
+                  "amount": 80,
+                  "description": "office supplies"
                 }
               }
             ]
@@ -1405,7 +1408,9 @@
               },
               {
                 "name": "wrangler_booking_mcp_cancel_booking",
-                "args": {}
+                "args": {
+                  "booking_id": "<runtime>"
+                }
               }
             ]
           }
@@ -1451,7 +1456,9 @@
               },
               {
                 "name": "wrangler_booking_mcp_get_booking_details",
-                "args": {}
+                "args": {
+                  "booking_id": "<runtime>"
+                }
               }
             ]
           }
@@ -1812,7 +1819,7 @@
           "user_content": {
             "parts": [
               {
-                "text": "Search for flights from LAX to JFK, then book the cheapest one for me \u2014 my name is Tom Reyes"
+                "text": "Search for flights from SFO to JFK, then book the cheapest one for me \u2014 my name is Tom Reyes"
               }
             ],
             "role": "user"
@@ -1820,7 +1827,7 @@
           "final_response": {
             "parts": [
               {
-                "text": "Found LAX to JFK flights. Cheapest option booked for Tom Reyes."
+                "text": "Found SFO to JFK flights. Cheapest option FL001 ($450) booked for Tom Reyes."
               }
             ],
             "role": "model"
@@ -1830,13 +1837,14 @@
               {
                 "name": "wrangler_search_mcp_search_flights",
                 "args": {
-                  "origin": "LAX",
+                  "origin": "SFO",
                   "destination": "JFK"
                 }
               },
               {
                 "name": "wrangler_booking_mcp_book_flight",
                 "args": {
+                  "flight_id": "FL001",
                   "passenger_name": "Tom Reyes"
                 }
               }
@@ -1874,10 +1882,7 @@
           "intermediate_data": {
             "tool_uses": [
               {
-                "name": "wrangler_booking_mcp_list_all_bookings",
-                "args": {
-                  "user_id": "EMP001"
-                }
+                "name": "wrangler_booking_mcp_list_all_bookings"
               }
             ]
           }
@@ -2146,10 +2151,7 @@
           "intermediate_data": {
             "tool_uses": [
               {
-                "name": "wrangler_booking_mcp_list_all_bookings",
-                "args": {
-                  "user_id": "EMP002"
-                }
+                "name": "wrangler_booking_mcp_list_all_bookings"
               },
               {
                 "name": "wrangler_booking_mcp_cancel_booking",
@@ -2206,6 +2208,7 @@
               {
                 "name": "wrangler_booking_mcp_book_flight",
                 "args": {
+                  "flight_id": "FL005",
                   "passenger_name": "Lisa Wang"
                 }
               }
@@ -2478,7 +2481,8 @@
                 "args": {
                   "user_id": "EMP003",
                   "category": "supplies",
-                  "amount": 100
+                  "amount": 100,
+                  "description": "office supplies"
                 }
               },
               {
@@ -2745,13 +2749,15 @@
               {
                 "name": "wrangler_search_mcp_search_flights",
                 "args": {
+                  "origin": "SFO",
                   "destination": "JFK"
                 }
               },
               {
                 "name": "wrangler_expense_mcp_check_expense_policy",
                 "args": {
-                  "category": "lodging"
+                  "category": "lodging",
+                  "amount": 0
                 }
               },
               {

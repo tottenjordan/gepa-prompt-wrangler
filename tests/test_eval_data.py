@@ -20,6 +20,17 @@ from mcp_servers.expense.mock_db import POLICY_LIMITS
 YAML_PATH = EVAL_DATA_DIR / "eval_cases.yaml"
 MODELS = ["lite", "flash", "pro", "sonnet", "opus"]
 
+# All 6 evalset files: (dir_name, filename, expected_eval_set_id).
+# The 5 standard model agents follow the {model}_eval_set naming. opus48_opt is
+# a variant that reuses the opus agent + eval_set_id "opus_eval_set" with a
+# distinct filename/app_name, so it cannot be derived from the MODELS pattern.
+EVALSET_FILES = [
+    (f"{model}_opt", f"{model}_eval_set.evalset.json", f"{model}_eval_set")
+    for model in MODELS
+] + [
+    ("opus48_opt", "opus_eval_set.evalset.json", "opus_eval_set"),
+]
+
 
 def _load_yaml_cases():
     with open(YAML_PATH) as f:
@@ -166,55 +177,77 @@ class TestAgentEvalConfigs:
 # evalset.json files
 # ---------------------------------------------------------------------------
 class TestEvalsetJsonFiles:
-    def test_all_five_evalsets_exist(self):
-        for model in MODELS:
-            path = AGENTS_DIR / f"{model}_opt" / f"{model}_eval_set.evalset.json"
+    def test_all_six_evalsets_exist(self):
+        for dir_name, filename, _ in EVALSET_FILES:
+            path = AGENTS_DIR / dir_name / filename
             assert path.exists(), f"Missing evalset: {path}"
 
     def test_evalsets_valid_json(self):
-        for model in MODELS:
-            path = AGENTS_DIR / f"{model}_opt" / f"{model}_eval_set.evalset.json"
+        for dir_name, filename, _ in EVALSET_FILES:
+            path = AGENTS_DIR / dir_name / filename
             with open(path) as f:
                 data = json.load(f)
             assert isinstance(data, dict)
 
     def test_evalsets_have_correct_structure(self):
-        for model in MODELS:
-            path = AGENTS_DIR / f"{model}_opt" / f"{model}_eval_set.evalset.json"
+        for dir_name, filename, expected_id in EVALSET_FILES:
+            path = AGENTS_DIR / dir_name / filename
             with open(path) as f:
                 data = json.load(f)
-            assert "eval_set_id" in data, f"{model}: missing eval_set_id"
-            assert "eval_cases" in data, f"{model}: missing eval_cases"
-            assert data["eval_set_id"] == f"{model}_eval_set"
+            assert "eval_set_id" in data, f"{dir_name}: missing eval_set_id"
+            assert "eval_cases" in data, f"{dir_name}: missing eval_cases"
+            assert data["eval_set_id"] == expected_id, (
+                f"{dir_name}: eval_set_id {data['eval_set_id']!r} != {expected_id!r}"
+            )
+
+    def test_evalsets_have_64_cases(self):
+        for dir_name, filename, _ in EVALSET_FILES:
+            path = AGENTS_DIR / dir_name / filename
+            with open(path) as f:
+                data = json.load(f)
+            assert len(data["eval_cases"]) == 64, (
+                f"{dir_name}: expected 64 cases, got {len(data['eval_cases'])}"
+            )
 
     def test_evalset_cases_have_conversation(self):
-        for model in MODELS:
-            path = AGENTS_DIR / f"{model}_opt" / f"{model}_eval_set.evalset.json"
+        for dir_name, filename, _ in EVALSET_FILES:
+            path = AGENTS_DIR / dir_name / filename
             with open(path) as f:
                 data = json.load(f)
             for case in data["eval_cases"]:
-                assert "eval_id" in case, f"{model}: case missing eval_id"
-                assert "conversation" in case, f"{model}: case missing conversation"
-                assert "session_input" in case, f"{model}: case missing session_input"
+                assert "eval_id" in case, f"{dir_name}: case missing eval_id"
+                assert "conversation" in case, f"{dir_name}: case missing conversation"
+                assert "session_input" in case, f"{dir_name}: case missing session_input"
 
     def test_evalset_session_input_has_category(self):
-        for model in MODELS:
-            path = AGENTS_DIR / f"{model}_opt" / f"{model}_eval_set.evalset.json"
+        for dir_name, filename, _ in EVALSET_FILES:
+            path = AGENTS_DIR / dir_name / filename
             with open(path) as f:
                 data = json.load(f)
             for case in data["eval_cases"]:
                 si = case["session_input"]
-                assert "category" in si, f"{model}: {case['eval_id']} missing category in session_input"
-                assert "tier" in si, f"{model}: {case['eval_id']} missing tier in session_input"
+                assert "category" in si, f"{dir_name}: {case['eval_id']} missing category in session_input"
+                assert "tier" in si, f"{dir_name}: {case['eval_id']} missing tier in session_input"
+
+    def test_evalset_session_input_app_name_matches_dir(self):
+        for dir_name, filename, _ in EVALSET_FILES:
+            path = AGENTS_DIR / dir_name / filename
+            with open(path) as f:
+                data = json.load(f)
+            for case in data["eval_cases"]:
+                assert case["session_input"]["app_name"] == dir_name, (
+                    f"{dir_name}: {case['eval_id']} app_name "
+                    f"{case['session_input']['app_name']!r} != {dir_name!r}"
+                )
 
     def test_evalset_eval_ids_include_category(self):
-        for model in MODELS:
-            path = AGENTS_DIR / f"{model}_opt" / f"{model}_eval_set.evalset.json"
+        for dir_name, filename, _ in EVALSET_FILES:
+            path = AGENTS_DIR / dir_name / filename
             with open(path) as f:
                 data = json.load(f)
             for case in data["eval_cases"]:
                 parts = case["eval_id"].split("_", 3)
-                assert len(parts) >= 3, f"{model}: eval_id '{case['eval_id']}' missing tier"
+                assert len(parts) >= 3, f"{dir_name}: eval_id '{case['eval_id']}' missing tier"
 
 
 # ---------------------------------------------------------------------------
