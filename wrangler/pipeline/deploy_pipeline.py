@@ -13,6 +13,9 @@ from dotenv import load_dotenv
 
 load_dotenv(override=True)
 
+from ..core.config import disable_pyopenssl
+disable_pyopenssl()
+
 logger = logging.getLogger(__name__)
 
 IMAGE_REPO = "gepa-wrangler"
