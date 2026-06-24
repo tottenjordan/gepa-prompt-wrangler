@@ -2153,7 +2153,9 @@
               },
               {
                 "name": "wrangler_booking_mcp_cancel_booking",
-                "args": {}
+                "args": {
+                  "booking_id": "BK-005"
+                }
               }
             ]
           }

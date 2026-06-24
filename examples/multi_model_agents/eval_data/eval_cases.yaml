@@ -510,7 +510,7 @@ eval_cases:
       - name: wrangler_booking_mcp_list_all_bookings
         args: {user_id: EMP002}
       - name: wrangler_booking_mcp_cancel_booking
-        args: {}
+        args: {booking_id: BK-005}
 
   - prompt: "Cancel booking BK-004, find flights from SFO to LAX, and book the replacement flight for Lisa Wang"
     expected_response: "BK-004 cancelled. SFO-LAX flights found. Replacement flight booked for Lisa Wang."
