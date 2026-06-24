@@ -6,7 +6,12 @@ Usage:
 
 Reads eval_cases.yaml (which has tier/category metadata on each case) and
 produces a balanced evalset for each model agent (lite, flash, pro, sonnet,
-opus), writing to their respective *_opt/ dirs.
+opus, plus the opus48 variant), writing to their respective *_opt/ dirs.
+
+Sampler configs are HAND-TUNED and are the project's single source of truth
+(per CLAUDE.md). This script will NOT overwrite an existing sampler_config.json;
+it only bootstraps one when absent. The train/val split-coverage assertions run
+regardless, validating the generated evalset itself.
 """
 
 import json
@@ -19,6 +24,26 @@ EVAL_DATA_DIR = EXAMPLE_ROOT / "eval_data"
 AGENTS_DIR = EXAMPLE_ROOT / "agents"
 
 MODELS = ["lite", "flash", "pro", "sonnet", "opus"]
+
+# Evalset generation targets. The 5 standard model agents derive their
+# filename/eval_set_id/app_name from the model name; opus48 is a variant that
+# reuses the opus agent + eval_set_id "opus_eval_set" but a distinct app_name.
+EVALSET_TARGETS = [
+    {
+        "dir_name": f"{model}_opt",
+        "app_name": f"{model}_opt",
+        "eval_set_id": f"{model}_eval_set",
+        "filename": f"{model}_eval_set.evalset.json",
+    }
+    for model in MODELS
+] + [
+    {
+        "dir_name": "opus48_opt",
+        "app_name": "opus48_opt",
+        "eval_set_id": "opus_eval_set",
+        "filename": "opus_eval_set.evalset.json",
+    }
+]
 
 # Stratified ~77/23 train/val split — deterministic, balanced across all 8 categories.
 # Every category has at least 1 case in val for coverage.
@@ -105,14 +130,15 @@ def build_eval_case(idx: int, tier: str, case: dict, app_name: str) -> dict:
     }
 
 
-def generate_evalset(selected: list[tuple[str, dict]], model: str) -> dict:
-    app_name = f"{model}_opt"
+def generate_evalset(
+    selected: list[tuple[str, dict]], app_name: str, eval_set_id: str
+) -> dict:
     eval_cases = []
     for idx, (tier, case) in enumerate(selected, start=1):
         eval_cases.append(build_eval_case(idx, tier, case, app_name))
 
     return {
-        "eval_set_id": f"{model}_eval_set",
+        "eval_set_id": eval_set_id,
         "eval_cases": eval_cases,
     }
 
@@ -128,10 +154,13 @@ def main():
     print(f"Loaded {len(all_cases)} eval cases from eval_cases.yaml")
     print(f"Selected {len(selected)} cases: {tier_counts}")
 
-    for model in MODELS:
-        evalset = generate_evalset(selected, model)
-        out_dir = AGENTS_DIR / f"{model}_opt"
-        out_path = out_dir / f"{model}_eval_set.evalset.json"
+    for target in EVALSET_TARGETS:
+        out_dir = AGENTS_DIR / target["dir_name"]
+        app_name = target["app_name"]
+        eval_set_name = target["eval_set_id"]
+
+        evalset = generate_evalset(selected, app_name, eval_set_name)
+        out_path = out_dir / target["filename"]
 
         with open(out_path, "w") as f:
             json.dump(evalset, f, indent=2)
@@ -139,16 +168,21 @@ def main():
 
         print(f"  {out_path.relative_to(EXAMPLE_ROOT)} ({len(evalset['eval_cases'])} cases)")
 
-        # Validate split covers all cases
+        # Validate split covers all cases (independent of sampler config write)
         all_ids = {c["eval_id"] for c in evalset["eval_cases"]}
         train_set = set(TRAIN_CASE_IDS)
         val_set = set(VAL_CASE_IDS)
         assert train_set & val_set == set(), f"Train/val overlap: {train_set & val_set}"
         assert train_set | val_set == all_ids, f"Split missing cases: {all_ids - (train_set | val_set)}"
 
-        # Write sampler config with train/val split
-        eval_set_name = f"{model}_eval_set"
-        app_name = f"{model}_opt"
+        # Sampler configs are the hand-tuned source of truth — never overwrite.
+        # Only bootstrap one when absent.
+        config_path = out_dir / "sampler_config.json"
+        if config_path.exists():
+            print(f"    preserved existing sampler_config (source of truth): "
+                  f"{config_path.relative_to(EXAMPLE_ROOT)}")
+            continue
+
         sampler_config = {
             "eval_config": {
                 "criteria": {
@@ -206,13 +240,14 @@ def main():
             "train_eval_case_ids": TRAIN_CASE_IDS,
             "validation_eval_case_ids": VAL_CASE_IDS,
         }
-        config_path = out_dir / "sampler_config.json"
         with open(config_path, "w") as f:
             json.dump(sampler_config, f, indent=2)
             f.write("\n")
+        print(f"    bootstrapped sampler_config: {config_path.relative_to(EXAMPLE_ROOT)}")
 
     print(f"\nTrain/val split: {len(TRAIN_CASE_IDS)} train / {len(VAL_CASE_IDS)} val")
-    print("Done. All evalset.json and sampler_config.json files regenerated.")
+    print("Done. All evalset.json files regenerated; existing sampler_config.json "
+          "files preserved (only absent ones bootstrapped).")
 
 
 if __name__ == "__main__":

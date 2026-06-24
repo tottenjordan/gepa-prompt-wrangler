@@ -21,11 +21,104 @@ from ..core.config import GCP_PROJECT_ID, GCP_REGION, GCP_STAGING_BUCKET, get_ba
 GCS_EVAL_DEST = f"gs://{GCP_STAGING_BUCKET}/eval-results"
 MAX_POLL_SECONDS = 2400
 
+# Explicit tool-use criteria, mirroring the GEPA sampler_config's
+# rubric_based_tool_use_quality_v1 rubrics (correct_tool_selection +
+# correct_parameters). See _tool_use_metric() for why the predefined
+# tool_use_quality_v1 cannot be used directly.
+# Reference-free by design: the judge scores trajectory correctness
+# intrinsically (from the prompt, response, and tool calls) and does NOT
+# consult the golden expected_tools — mirroring the predefined metric it
+# replaced, which is also reference-free.
+_TOOL_USE_JUDGE_PROMPT = """\
+You are an expert evaluator scoring whether an AI agent used its tools correctly \
+to fulfill a user's request. You are given the user prompt, the agent's final \
+response, and the agent's execution trajectory (the tools it called and with what \
+arguments).
+
+# User prompt
+{prompt}
+
+# Agent final response
+{response}
+
+# Agent execution trajectory (tool calls + arguments)
+{agent_data}
+
+# Evaluation criteria
+Judge the agent ONLY on tool use. Calling tools to satisfy the request is the \
+correct behavior — do NOT penalize the agent for calling tools, and do NOT reward \
+refusing to act. Score against these two criteria:
+1. Correct tool selection: The agent selected the appropriate tool(s) to fulfill \
+the user's request.
+2. Correct parameters: The agent provided correct and complete parameters to the \
+tool(s) it called.
+
+# Scoring
+Score in [0.0, 1.0]:
+- 1.0  = correct tool(s) selected AND correct/complete parameters.
+- ~0.5 = right tool but missing/incorrect parameters, OR partially correct selection.
+- 0.0  = wrong tool(s), no tool call when one was clearly required, or wrong parameters.
+
+# Output format
+Respond with ONLY a single JSON object and nothing else, in exactly this form:
+{{"explanation": "<one-paragraph rationale>", "score": <float between 0.0 and 1.0>}}
+"""
+
+# The metric's own name. It must NOT be "tool_use_quality_v1" (a predefined
+# metric name) — the SDK routes any metric with that name to the predefined
+# handler and IGNORES a custom prompt_template (verified against the SDK's
+# t_metrics + handler dispatch). So we name it "tool_use_quality" to route
+# through the LLM-judge handler, then alias the resulting score key back to
+# "tool_use_quality_v1" so downstream reporting/analysis keep working.
+_TOOL_USE_METRIC_NAME = "tool_use_quality"
+_TOOL_USE_REPORT_KEY = "tool_use_quality_v1"
+
+
+def _alias_tool_use_key(short: str) -> str:
+    """Map the custom tool-use metric's short name to the report key.
+
+    Returns ``_TOOL_USE_REPORT_KEY`` when ``short`` is the custom metric name,
+    otherwise returns ``short`` unchanged. Shared by run_batch_eval (aggregate
+    + per_case) and online_monitors so all entry points alias identically.
+    """
+    return _TOOL_USE_REPORT_KEY if short == _TOOL_USE_METRIC_NAME else short
+
+
+def _tool_use_metric() -> "types.LLMMetric":
+    """Build the tool-use metric used by batch eval.
+
+    The predefined ``tool_use_quality_v1`` metric (``RubricMetric.TOOL_USE_QUALITY``)
+    auto-generates its rubrics server-side while BLIND to the agent's available
+    tools. For a correctly-tool-using agent it produces inverted rubrics that
+    PENALIZE tool use (e.g. ``NO_TOOL_CALL``: "correctly refrains from making a
+    tool call, as no tools have been provided", ``INFORMS_USER_OF_INABILITY``).
+    Only the INTENT rubric passes, structurally capping the score near ~0.33-0.5
+    even when the agent calls the correct tool with correct args.
+
+    To fix this we score with an explicit LLM-judge metric whose criteria mirror
+    the GEPA sampler_config's ``rubric_based_tool_use_quality_v1`` rubrics
+    (correct_tool_selection + correct_parameters), so correct tool use scores
+    well. We use ``LLMMetric`` (not the predefined name) because a metric named
+    ``tool_use_quality_v1`` is routed to the predefined handler regardless of any
+    custom prompt — the predefined path ignores explicit criteria. The resulting
+    score key is aliased back to ``tool_use_quality_v1`` in run_batch_eval so
+    report lookups are unaffected.
+    """
+    # NOTE: do not set judge_model to a bare model id here — the evaluation_run
+    # API requires a full autorater_model resource name and rejects "gemini-2.5-flash"
+    # with INVALID_ARGUMENT. Leaving it unset uses the service default autorater,
+    # matching how the predefined metrics behave.
+    return types.LLMMetric(
+        name=_TOOL_USE_METRIC_NAME,
+        prompt_template=_TOOL_USE_JUDGE_PROMPT,
+    )
+
+
 DEFAULT_METRICS = [
     types.RubricMetric.FINAL_RESPONSE_QUALITY,
     types.RubricMetric.HALLUCINATION,
     types.RubricMetric.SAFETY,
-    types.RubricMetric.TOOL_USE_QUALITY,
+    _tool_use_metric(),
     types.RubricMetric.INSTRUCTION_FOLLOWING,
 ]
 
@@ -63,6 +156,42 @@ def _resolve_resource_name(engine_id: str) -> str:
     if engine_id.startswith("projects/"):
         return engine_id
     return f"projects/{GCP_PROJECT_ID}/locations/{GCP_REGION}/reasoningEngines/{engine_id}"
+
+
+def _extract_aggregate_scores(evaluation_run) -> dict[str, float]:
+    """Extract aggregate (run-level) metric scores from an evaluation run.
+
+    Reads ``evaluation_run.evaluation_run_results.summary_metrics.metrics``,
+    keeps only the ``<metric>/AVERAGE`` entries, strips the metric short name,
+    and aliases the custom tool-use metric key back to the predefined report
+    key via ``_alias_tool_use_key`` so reporting/analysis lookups keep working.
+
+    Pure and network-free — factored out of run_batch_eval so the
+    extraction+alias path can be unit-tested against a stub run object.
+    """
+    raw_metrics: dict = {}
+    try:
+        run_results = getattr(evaluation_run, "evaluation_run_results", None)
+        if run_results:
+            sm = getattr(run_results, "summary_metrics", None)
+            if sm:
+                nested = getattr(sm, "metrics", None)
+                if nested:
+                    raw_metrics = dict(nested) if not isinstance(nested, dict) else nested
+    except Exception as e:
+        print(f"  Warning extracting aggregate scores: {e}")
+
+    scores: dict[str, float] = {}
+    for key, value in raw_metrics.items():
+        if "/AVERAGE" in key:
+            metric_name = key.rsplit("/AVERAGE", 1)[0]
+            short = metric_name.split("/")[-1] if "/" in metric_name else metric_name
+            # Alias the custom LLM-judge tool-use metric back to the predefined
+            # report key so reporting/analysis lookups keep working. Safe to
+            # clobber _TOOL_USE_REPORT_KEY: only one tool-use metric is ever
+            # sent, so the predefined key never co-occurs with the aliased one.
+            scores[_alias_tool_use_key(short)] = float(value)
+    return scores
 
 
 def _extract_per_case_scores(evaluation_run) -> list[dict[str, float]]:
@@ -365,26 +494,13 @@ def run_batch_eval(
         include_evaluation_items=True,
     )
 
-    raw_metrics: dict = {}
-    try:
-        run_results = getattr(evaluation_run, "evaluation_run_results", None)
-        if run_results:
-            sm = getattr(run_results, "summary_metrics", None)
-            if sm:
-                nested = getattr(sm, "metrics", None)
-                if nested:
-                    raw_metrics = dict(nested) if not isinstance(nested, dict) else nested
-    except Exception as e:
-        print(f"  {tag}Warning: {e}")
-
-    scores = {}
-    for key, value in raw_metrics.items():
-        if "/AVERAGE" in key:
-            metric_name = key.rsplit("/AVERAGE", 1)[0]
-            short = metric_name.split("/")[-1] if "/" in metric_name else metric_name
-            scores[short] = float(value)
+    scores = _extract_aggregate_scores(evaluation_run)
 
     per_case = _extract_per_case_scores(evaluation_run)
+    for case_scores in per_case:
+        # Same single-tool-use-metric clobber assumption as above.
+        if _TOOL_USE_METRIC_NAME in case_scores:
+            case_scores[_alias_tool_use_key(_TOOL_USE_METRIC_NAME)] = case_scores.pop(_TOOL_USE_METRIC_NAME)
     token_usage = _estimate_token_usage(inference_result.eval_dataset_df)
 
     print(f"  {tag}Eval complete — total: {_fmt_elapsed(t0)}, {len(scores)} metrics, {len(per_case)} cases, "
