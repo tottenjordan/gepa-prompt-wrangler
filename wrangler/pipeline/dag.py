@@ -58,7 +58,7 @@ def build_pipeline(image_uri: str):
         agent_module: str,
         eval_data_path: str,
         num_runs: int = 1,
-        judge_model: str = "gemini-2.5-pro",
+        judge_model: str = "gemini-2.5-flash",
         secret_id: str = "",
         max_metric_calls: int = 50,
         cache_bust: str = "",

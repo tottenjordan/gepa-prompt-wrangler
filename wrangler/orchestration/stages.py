@@ -333,7 +333,7 @@ def stage_optimize(exp: Experiment, pair_id: str | None = None) -> None:
 
     eval_path = _resolve_eval_path(manifest, mdir)
 
-    judge = exp.config.get("eval_config", {}).get("judge_model", "gemini-3.5-flash")
+    judge = exp.config.get("eval_config", {}).get("judge_model", "gemini-2.5-flash")
 
     for i, pair in enumerate(pairs, 1):
         print(f"\n  [{pair.id}] ({i}/{len(pairs)}) Optimizing...", flush=True)

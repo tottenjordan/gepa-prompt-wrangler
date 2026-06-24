@@ -218,7 +218,7 @@ class TestSamplerConfig:
 
         config = generate_sampler_config("test_opt")
         criteria = config["eval_config"]["criteria"]
-        assert criteria["rubric_based_final_response_quality_v1"]["judge_model_options"]["judge_model"] == "gemini-3.5-flash"
+        assert criteria["rubric_based_final_response_quality_v1"]["judge_model_options"]["judge_model"] == "gemini-2.5-flash"
 
     def test_judge_model_propagated(self):
         from wrangler.core.converter import generate_sampler_config

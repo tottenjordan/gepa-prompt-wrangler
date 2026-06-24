@@ -326,7 +326,7 @@ _DEFAULT_THRESHOLDS = {
 
 def build_gepa_criteria(
     thresholds: dict[str, float] | None = None,
-    judge_model: str = "gemini-3.5-flash",
+    judge_model: str = "gemini-2.5-flash",
 ) -> dict:
     """Build the GEPA ``eval_config.criteria`` dict with calibrated thresholds.
 
@@ -387,7 +387,7 @@ def build_gepa_criteria(
 def generate_sampler_config(
     app_name: str,
     eval_set_name: str = "eval_set",
-    judge_model: str = "gemini-3.5-flash",
+    judge_model: str = "gemini-2.5-flash",
     output_dir: str | Path | None = None,
     train_eval_case_ids: list[str] | None = None,
     validation_eval_case_ids: list[str] | None = None,

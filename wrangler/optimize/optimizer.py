@@ -237,7 +237,7 @@ def optimize(
     eval_data_path: str = None,
     agent_name: str = "",
     eval_thresholds: dict[str, float] | None = None,
-    judge_model: str = "gemini-3.5-flash",
+    judge_model: str = "gemini-2.5-flash",
     max_metric_calls: int | None = None,
     initial_instruction: str | None = None,
 ) -> str:

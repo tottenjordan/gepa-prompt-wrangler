@@ -193,7 +193,7 @@ def deploy_pipeline(
         run_id = f"run-{cache_key}"
 
     num_runs = pipeline_config.get("num_runs", num_runs)
-    judge_model = manifest.eval_config.get("judge_model", "gemini-2.5-pro")
+    judge_model = manifest.eval_config.get("judge_model", "gemini-2.5-flash")
     max_metric_calls = pipeline_config.get("max_metric_calls", 50)
     cache_bust = pipeline_config.get("cache_bust", "")
 
