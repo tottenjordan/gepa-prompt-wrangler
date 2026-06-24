@@ -33,10 +33,15 @@ QUICK_EVAL_CASES = [
     "Show expenses for user EMP001",
 ]
 
+from .evaluator import _tool_use_metric
+
+# Use the explicit-rubric tool-use metric, NOT the predefined TOOL_USE_QUALITY:
+# the predefined one auto-generates inverted rubrics that penalize correct tool
+# use (see wrangler.eval.evaluator._tool_use_metric for details).
 EVAL_METRICS = [
     types.RubricMetric.FINAL_RESPONSE_QUALITY,
     types.RubricMetric.SAFETY,
-    types.RubricMetric.TOOL_USE_QUALITY,
+    _tool_use_metric(),
 ]
 
 

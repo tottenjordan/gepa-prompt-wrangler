@@ -21,11 +21,90 @@ from ..core.config import GCP_PROJECT_ID, GCP_REGION, GCP_STAGING_BUCKET, get_ba
 GCS_EVAL_DEST = f"gs://{GCP_STAGING_BUCKET}/eval-results"
 MAX_POLL_SECONDS = 2400
 
+# Explicit tool-use criteria, mirroring the GEPA sampler_config's
+# rubric_based_tool_use_quality_v1 rubrics (correct_tool_selection +
+# correct_parameters). See _tool_use_metric() for why the predefined
+# tool_use_quality_v1 cannot be used directly.
+_TOOL_USE_JUDGE_PROMPT = """\
+You are an expert evaluator scoring whether an AI agent used its tools correctly \
+to fulfill a user's request. You are given the user prompt, the agent's final \
+response, and the agent's execution trajectory (the tools it called and with what \
+arguments).
+
+# User prompt
+{prompt}
+
+# Agent final response
+{response}
+
+# Agent execution trajectory (tool calls + arguments)
+{agent_data}
+
+# Evaluation criteria
+Judge the agent ONLY on tool use. Calling tools to satisfy the request is the \
+correct behavior — do NOT penalize the agent for calling tools, and do NOT reward \
+refusing to act. Score against these two criteria:
+1. Correct tool selection: The agent selected the appropriate tool(s) to fulfill \
+the user's request.
+2. Correct parameters: The agent provided correct and complete parameters to the \
+tool(s) it called.
+
+# Scoring
+Score in [0.0, 1.0]:
+- 1.0  = correct tool(s) selected AND correct/complete parameters.
+- ~0.5 = right tool but missing/incorrect parameters, OR partially correct selection.
+- 0.0  = wrong tool(s), no tool call when one was clearly required, or wrong parameters.
+
+# Output format
+Respond with ONLY a single JSON object and nothing else, in exactly this form:
+{{"explanation": "<one-paragraph rationale>", "score": <float between 0.0 and 1.0>}}
+"""
+
+# The metric's own name. It must NOT be "tool_use_quality_v1" (a predefined
+# metric name) — the SDK routes any metric with that name to the predefined
+# handler and IGNORES a custom prompt_template (verified against the SDK's
+# t_metrics + handler dispatch). So we name it "tool_use_quality" to route
+# through the LLM-judge handler, then alias the resulting score key back to
+# "tool_use_quality_v1" so downstream reporting/analysis keep working.
+_TOOL_USE_METRIC_NAME = "tool_use_quality"
+_TOOL_USE_REPORT_KEY = "tool_use_quality_v1"
+
+
+def _tool_use_metric() -> "types.LLMMetric":
+    """Build the tool-use metric used by batch eval.
+
+    The predefined ``tool_use_quality_v1`` metric (``RubricMetric.TOOL_USE_QUALITY``)
+    auto-generates its rubrics server-side while BLIND to the agent's available
+    tools. For a correctly-tool-using agent it produces inverted rubrics that
+    PENALIZE tool use (e.g. ``NO_TOOL_CALL``: "correctly refrains from making a
+    tool call, as no tools have been provided", ``INFORMS_USER_OF_INABILITY``).
+    Only the INTENT rubric passes, structurally capping the score near ~0.33-0.5
+    even when the agent calls the correct tool with correct args.
+
+    To fix this we score with an explicit LLM-judge metric whose criteria mirror
+    the GEPA sampler_config's ``rubric_based_tool_use_quality_v1`` rubrics
+    (correct_tool_selection + correct_parameters), so correct tool use scores
+    well. We use ``LLMMetric`` (not the predefined name) because a metric named
+    ``tool_use_quality_v1`` is routed to the predefined handler regardless of any
+    custom prompt — the predefined path ignores explicit criteria. The resulting
+    score key is aliased back to ``tool_use_quality_v1`` in run_batch_eval so
+    report lookups are unaffected.
+    """
+    # NOTE: do not set judge_model to a bare model id here — the evaluation_run
+    # API requires a full autorater_model resource name and rejects "gemini-2.5-flash"
+    # with INVALID_ARGUMENT. Leaving it unset uses the service default autorater,
+    # matching how the predefined metrics behave.
+    return types.LLMMetric(
+        name=_TOOL_USE_METRIC_NAME,
+        prompt_template=_TOOL_USE_JUDGE_PROMPT,
+    )
+
+
 DEFAULT_METRICS = [
     types.RubricMetric.FINAL_RESPONSE_QUALITY,
     types.RubricMetric.HALLUCINATION,
     types.RubricMetric.SAFETY,
-    types.RubricMetric.TOOL_USE_QUALITY,
+    _tool_use_metric(),
     types.RubricMetric.INSTRUCTION_FOLLOWING,
 ]
 
@@ -382,9 +461,16 @@ def run_batch_eval(
         if "/AVERAGE" in key:
             metric_name = key.rsplit("/AVERAGE", 1)[0]
             short = metric_name.split("/")[-1] if "/" in metric_name else metric_name
+            # Alias the custom LLM-judge tool-use metric back to the predefined
+            # report key so reporting/analysis lookups keep working.
+            if short == _TOOL_USE_METRIC_NAME:
+                short = _TOOL_USE_REPORT_KEY
             scores[short] = float(value)
 
     per_case = _extract_per_case_scores(evaluation_run)
+    for case_scores in per_case:
+        if _TOOL_USE_METRIC_NAME in case_scores:
+            case_scores[_TOOL_USE_REPORT_KEY] = case_scores.pop(_TOOL_USE_METRIC_NAME)
     token_usage = _estimate_token_usage(inference_result.eval_dataset_df)
 
     print(f"  {tag}Eval complete — total: {_fmt_elapsed(t0)}, {len(scores)} metrics, {len(per_case)} cases, "
