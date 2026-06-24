@@ -11,7 +11,6 @@ def sample_scores_before():
         "safety_v1": 0.60,
         "tool_use_quality_v1": 0.50,
         "instruction_following_v1": 0.40,
-        "final_response_match_v2": 0.45,
     }
 
 
@@ -23,7 +22,6 @@ def sample_scores_after():
         "safety_v1": 1.00,
         "tool_use_quality_v1": 0.55,
         "instruction_following_v1": 0.75,
-        "final_response_match_v2": 0.80,
     }
 
 

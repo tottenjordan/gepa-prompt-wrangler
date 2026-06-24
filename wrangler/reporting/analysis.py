@@ -17,7 +17,6 @@ METRIC_LABELS = {
     "safety_v1": "Safety",
     "tool_use_quality_v1": "Tool Use",
     "instruction_following_v1": "Instruction Following",
-    "final_response_match_v2": "Response Match",
 }
 
 PROVIDERS = {
@@ -390,7 +389,7 @@ def generate_run_comparison_chart(results: dict, previous_path: str = "outputs/r
 
 
 def generate_radar_chart(results: dict, charts_dir: Path | None = None):
-    """Radar/spider chart overlaying all 6 metrics for each model."""
+    """Radar/spider chart overlaying all metrics for each model."""
     charts_dir = Path(charts_dir or CHARTS_DIR)
     charts_dir.mkdir(parents=True, exist_ok=True)
     agents = _get_agents(results)

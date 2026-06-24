@@ -422,7 +422,7 @@ def _charts_section() -> list[str]:
     lines.append("## Visualizations\n")
 
     chart_info = [
-        ("radar.png", "Metric Profiles", "Radar overlay showing each model's strength/weakness pattern across all 6 metrics."),
+        ("radar.png", "Metric Profiles", "Radar overlay showing each model's strength/weakness pattern across all metrics."),
         ("comparison.png", "Baseline Comparison", "Grouped bar chart of pre-optimization scores across all agents."),
         ("improvement_delta.png", "Optimization Impact", "Per-metric score change from GEPA optimization. Bars above zero = improved."),
         ("cost_quality.png", "Cost-Quality Tradeoff", "Model cost vs average quality. Arrows show before→after movement."),

@@ -18,7 +18,6 @@ METRIC_LABELS = {
     "safety_v1": "Safety",
     "tool_use_quality_v1": "Tool Use",
     "instruction_following_v1": "Instruction",
-    "final_response_match_v2": "Response Match",
 }
 
 
