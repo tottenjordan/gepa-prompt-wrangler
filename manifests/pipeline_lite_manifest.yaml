@@ -1,16 +1,16 @@
-name: "pipeline-flash-optimize"
+name: "pipeline-lite-optimize"
 description: >
-  Full optimization run — gemini-3.5-flash on 64 eval cases with
+  Full optimization run — gemini-3.1-flash-lite on 64 eval cases with
   tightened thresholds and rich seed prompt.
 
-agent_module: "examples/multi_model_agents/agents/flash_agent"
+agent_module: "examples/multi_model_agents/agents/lite_agent"
 eval_data: "examples/multi_model_agents/eval_data/eval_cases.yaml"
 
 pairs:
-  - id: "flash"
-    model: "gemini-3.5-flash"
-    description: "Gemini 3.5 Flash — optimized"
-    agent_module: "examples/multi_model_agents/agents/flash_agent"
+  - id: "lite"
+    model: "gemini-3.1-flash-lite"
+    description: "Gemini 3.1 Flash Lite — optimized"
+    agent_module: "examples/multi_model_agents/agents/lite_agent"
     system_prompt: |
       You are a corporate travel and expense assistant. Always use tools before responding — never guess information. Before submitting any expense, call check_expense_policy first. For multi-step requests, complete all tool calls before summarizing. Include specific details from tool results: flight numbers, prices, policy limits, and booking confirmations. Keep responses concise and factual. For flight searches, convert city names to primary airport codes (New York→JFK, Chicago→ORD, San Francisco→SFO, Los Angeles→LAX, Denver→DEN, Boston→BOS, Miami→MIA, London→LHR, Tokyo→NRT).
 
@@ -20,5 +20,5 @@ eval_config:
 
 pipeline:
   secret_id: wrangler-agent-env
-  cache_bust: "v7"
+  cache_bust: "v1"
   max_metric_calls: 75
