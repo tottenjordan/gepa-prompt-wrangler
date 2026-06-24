@@ -432,6 +432,38 @@ def optimize_single_agent(
     logging.info(f"[{pair_id}] Baseline prompt ({len(original_prompt)}chars): '{original_prompt[:100]}...'")
     logging.info(f"[{pair_id}] Sampler config: {sampler_cfg if sampler_cfg.exists() else 'auto-generated'}")
     logging.info(f"[{pair_id}] Max metric calls: {max_metric_calls}")
+
+    # -- Pre-flight: check if baseline already exceeds all thresholds --
+    eval_before_blob = gcs.bucket(bucket_name).blob(
+        f"pipeline-runs/{run_id}/stages/eval_before/{pair_id}.json")
+    if eval_before_blob.exists() and sampler_cfg.exists():
+        eval_before = json.loads(eval_before_blob.download_as_text())
+        baseline_scores = eval_before.get("scores", {})
+        with open(sampler_cfg) as f:
+            sc = json.loads(f.read())
+        criteria = sc.get("eval_config", {}).get("criteria", {})
+
+        _METRIC_MAP = {
+            "safety_v1": "safety_v1",
+            "hallucinations_v1": "hallucination_v1",
+            "rubric_based_final_response_quality_v1": "final_response_quality_v1",
+            "rubric_based_tool_use_quality_v1": "tool_use_quality_v1",
+        }
+        all_above = True
+        for gepa_key, cfg_val in criteria.items():
+            threshold = cfg_val if isinstance(cfg_val, (int, float)) else cfg_val.get("threshold", 0)
+            eval_key = _METRIC_MAP.get(gepa_key, gepa_key)
+            baseline = baseline_scores.get(eval_key)
+            margin = (baseline - threshold) if baseline is not None else None
+            status = "ABOVE" if margin and margin > 0 else "BELOW"
+            if margin is not None and margin <= 0:
+                all_above = False
+            logging.info(f"[{pair_id}] Pre-flight: {eval_key}={baseline:.3f} vs threshold={threshold} → {status} (margin={margin:+.3f})" if baseline is not None else f"[{pair_id}] Pre-flight: {eval_key}=N/A vs threshold={threshold}")
+
+        if all_above:
+            logging.warning(f"[{pair_id}] *** PRE-FLIGHT WARNING: baseline ALREADY EXCEEDS ALL sampler_config thresholds! ***")
+            logging.warning(f"[{pair_id}] GEPA will likely return the prompt unchanged. Consider raising thresholds.")
+
     t0 = time.time()
     optimized_prompt = optimize(
         str(agent_path),
