@@ -20,5 +20,5 @@ eval_config:
 
 pipeline:
   secret_id: wrangler-agent-env
-  cache_bust: "v4"
+  cache_bust: "v5"
   max_metric_calls: 150
