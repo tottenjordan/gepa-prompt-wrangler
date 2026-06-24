@@ -21,12 +21,7 @@ import vertexai
 from vertexai import Client, types
 
 from ..core.config import GCP_PROJECT_ID, GCP_REGION, GCP_STAGING_BUCKET, OUTPUTS_DIR
-from .evaluator import (
-    _alias_tool_use_key,
-    _TOOL_USE_METRIC_NAME,
-    _TOOL_USE_REPORT_KEY,
-    _tool_use_metric,
-)
+from .evaluator import _alias_tool_use_key, _tool_use_metric
 
 QUICK_EVAL_CASES = [
     "Find flights from SFO to JFK",
