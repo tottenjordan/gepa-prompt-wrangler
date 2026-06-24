@@ -25,6 +25,10 @@ MAX_POLL_SECONDS = 2400
 # rubric_based_tool_use_quality_v1 rubrics (correct_tool_selection +
 # correct_parameters). See _tool_use_metric() for why the predefined
 # tool_use_quality_v1 cannot be used directly.
+# Reference-free by design: the judge scores trajectory correctness
+# intrinsically (from the prompt, response, and tool calls) and does NOT
+# consult the golden expected_tools — mirroring the predefined metric it
+# replaced, which is also reference-free.
 _TOOL_USE_JUDGE_PROMPT = """\
 You are an expert evaluator scoring whether an AI agent used its tools correctly \
 to fulfill a user's request. You are given the user prompt, the agent's final \
@@ -152,6 +156,42 @@ def _resolve_resource_name(engine_id: str) -> str:
     if engine_id.startswith("projects/"):
         return engine_id
     return f"projects/{GCP_PROJECT_ID}/locations/{GCP_REGION}/reasoningEngines/{engine_id}"
+
+
+def _extract_aggregate_scores(evaluation_run) -> dict[str, float]:
+    """Extract aggregate (run-level) metric scores from an evaluation run.
+
+    Reads ``evaluation_run.evaluation_run_results.summary_metrics.metrics``,
+    keeps only the ``<metric>/AVERAGE`` entries, strips the metric short name,
+    and aliases the custom tool-use metric key back to the predefined report
+    key via ``_alias_tool_use_key`` so reporting/analysis lookups keep working.
+
+    Pure and network-free — factored out of run_batch_eval so the
+    extraction+alias path can be unit-tested against a stub run object.
+    """
+    raw_metrics: dict = {}
+    try:
+        run_results = getattr(evaluation_run, "evaluation_run_results", None)
+        if run_results:
+            sm = getattr(run_results, "summary_metrics", None)
+            if sm:
+                nested = getattr(sm, "metrics", None)
+                if nested:
+                    raw_metrics = dict(nested) if not isinstance(nested, dict) else nested
+    except Exception as e:
+        print(f"  Warning extracting aggregate scores: {e}")
+
+    scores: dict[str, float] = {}
+    for key, value in raw_metrics.items():
+        if "/AVERAGE" in key:
+            metric_name = key.rsplit("/AVERAGE", 1)[0]
+            short = metric_name.split("/")[-1] if "/" in metric_name else metric_name
+            # Alias the custom LLM-judge tool-use metric back to the predefined
+            # report key so reporting/analysis lookups keep working. Safe to
+            # clobber _TOOL_USE_REPORT_KEY: only one tool-use metric is ever
+            # sent, so the predefined key never co-occurs with the aliased one.
+            scores[_alias_tool_use_key(short)] = float(value)
+    return scores
 
 
 def _extract_per_case_scores(evaluation_run) -> list[dict[str, float]]:
@@ -454,28 +494,7 @@ def run_batch_eval(
         include_evaluation_items=True,
     )
 
-    raw_metrics: dict = {}
-    try:
-        run_results = getattr(evaluation_run, "evaluation_run_results", None)
-        if run_results:
-            sm = getattr(run_results, "summary_metrics", None)
-            if sm:
-                nested = getattr(sm, "metrics", None)
-                if nested:
-                    raw_metrics = dict(nested) if not isinstance(nested, dict) else nested
-    except Exception as e:
-        print(f"  {tag}Warning: {e}")
-
-    scores = {}
-    for key, value in raw_metrics.items():
-        if "/AVERAGE" in key:
-            metric_name = key.rsplit("/AVERAGE", 1)[0]
-            short = metric_name.split("/")[-1] if "/" in metric_name else metric_name
-            # Alias the custom LLM-judge tool-use metric back to the predefined
-            # report key so reporting/analysis lookups keep working. Safe to
-            # clobber _TOOL_USE_REPORT_KEY: only one tool-use metric is ever
-            # sent, so the predefined key never co-occurs with the aliased one.
-            scores[_alias_tool_use_key(short)] = float(value)
+    scores = _extract_aggregate_scores(evaluation_run)
 
     per_case = _extract_per_case_scores(evaluation_run)
     for case_scores in per_case:

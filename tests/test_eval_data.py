@@ -37,6 +37,17 @@ def _load_yaml_cases():
         return yaml.safe_load(f)["eval_cases"]
 
 
+# Import the generator's OWN case-building code path so the parity test derives
+# expected tool_uses exactly as generate_evalsets.py does — no re-implementation
+# of the YAML→JSON conversion. EXAMPLE_ROOT is already on sys.path above.
+from scripts.generate_evalsets import (  # noqa: E402
+    EVALSET_TARGETS as GEN_EVALSET_TARGETS,
+    build_eval_case as _gen_build_eval_case,
+    load_yaml_cases as _gen_load_yaml_cases,
+    select_cases as _gen_select_cases,
+)
+
+
 FLIGHT_ID_RE = re.compile(r"^FL\d{3}$")
 HOTEL_ID_RE = re.compile(r"^HT\d{3}$")
 
@@ -291,3 +302,66 @@ class TestMockDataConsistency:
                         for city in city_signals:
                             if city.lower() in ALL_HOTEL_CITIES:
                                 break
+
+
+# ---------------------------------------------------------------------------
+# YAML ↔ committed evalset.json parity (drift guard)
+# ---------------------------------------------------------------------------
+class TestYamlEvalsetParity:
+    """Fail if a committed *.evalset.json drifts from eval_cases.yaml.
+
+    "Edited the YAML but forgot to re-run generate_evalsets.py" is the silent
+    drift this branch exists to prevent. For each evalset target we rebuild the
+    expected cases using the generator's OWN build_eval_case() (not a copy of
+    the conversion), then assert the committed JSON's per-case tool_uses
+    (tool name + args) match exactly. Network-free and deterministic.
+    """
+
+    def _expected_evalset(self, target):
+        """Derive the expected eval_cases list for a target via the generator."""
+        all_cases = _gen_load_yaml_cases()
+        selected = _gen_select_cases(all_cases)
+        return [
+            _gen_build_eval_case(idx, tier, case, target["app_name"])
+            for idx, (tier, case) in enumerate(selected, start=1)
+        ]
+
+    @staticmethod
+    def _tool_uses(eval_case):
+        """Pull the (name, args) tool_uses list out of an eval case dict."""
+        conv = eval_case["conversation"][0]
+        return conv["intermediate_data"]["tool_uses"]
+
+    def test_targets_match_test_file_list(self):
+        """The generator's EVALSET_TARGETS and this test file's EVALSET_FILES
+        must describe the same six evalsets — otherwise a target could drift
+        unguarded."""
+        gen = {(t["dir_name"], t["filename"]) for t in GEN_EVALSET_TARGETS}
+        local = {(d, f) for d, f, _ in EVALSET_FILES}
+        assert gen == local, f"target list mismatch: {gen ^ local}"
+
+    def test_committed_json_tool_uses_match_yaml(self):
+        for target in GEN_EVALSET_TARGETS:
+            path = AGENTS_DIR / target["dir_name"] / target["filename"]
+            with open(path) as f:
+                committed = json.load(f)
+            expected_cases = self._expected_evalset(target)
+
+            committed_cases = committed["eval_cases"]
+            assert len(committed_cases) == len(expected_cases), (
+                f"{target['dir_name']}: committed has {len(committed_cases)} cases, "
+                f"YAML derives {len(expected_cases)} — regenerate evalsets"
+            )
+
+            for exp, got in zip(expected_cases, committed_cases):
+                assert got["eval_id"] == exp["eval_id"], (
+                    f"{target['dir_name']}: eval_id drift "
+                    f"{got['eval_id']!r} != {exp['eval_id']!r} — regenerate evalsets"
+                )
+                exp_tools = self._tool_uses(exp)
+                got_tools = self._tool_uses(got)
+                assert got_tools == exp_tools, (
+                    f"{target['dir_name']}/{exp['eval_id']}: tool_uses drift from "
+                    f"eval_cases.yaml.\n  committed: {got_tools}\n  from YAML : {exp_tools}\n"
+                    "Run scripts/generate_evalsets.py to regenerate."
+                )

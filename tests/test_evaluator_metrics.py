@@ -137,3 +137,79 @@ class TestScoreKeyAlias:
         assert evaluator._alias_tool_use_key("final_response_quality_v1") == (
             "final_response_quality_v1"
         )
+
+
+class _StubSummaryMetrics:
+    def __init__(self, metrics):
+        self.metrics = metrics
+
+
+class _StubRunResults:
+    def __init__(self, metrics):
+        self.summary_metrics = _StubSummaryMetrics(metrics)
+
+
+class _StubEvaluationRun:
+    """Mirrors the attribute path run_batch_eval reads:
+    evaluation_run.evaluation_run_results.summary_metrics.metrics
+    """
+
+    def __init__(self, metrics):
+        self.evaluation_run_results = _StubRunResults(metrics)
+
+
+class TestAggregateExtractionAliasPath:
+    """Integration test of the REAL score-extraction + alias code path.
+
+    run_batch_eval's aggregate-score block was factored into the pure helper
+    ``_extract_aggregate_scores`` (same logic, no behavior change). These tests
+    drive that helper with a stub eval-run object shaped exactly like the SDK's
+    result so the actual extraction+alias logic runs — not a re-implementation.
+    """
+
+    def test_tool_use_average_is_aliased_to_v1(self):
+        # The custom metric reports under "tool_use_quality/AVERAGE"; the
+        # extraction must surface it as "tool_use_quality_v1" in the scores dict.
+        run = _StubEvaluationRun({"tool_use_quality/AVERAGE": 0.87})
+        scores = evaluator._extract_aggregate_scores(run)
+        assert "tool_use_quality_v1" in scores
+        assert "tool_use_quality" not in scores
+        assert scores["tool_use_quality_v1"] == 0.87
+
+    def test_realistic_summary_metrics_full_alias_and_passthrough(self):
+        """Mirror a realistic summary_metrics payload: each metric carries an
+        /AVERAGE entry (and often /STANDARD_DEVIATION, which must be ignored).
+        Only the tool-use key is aliased; the rest pass through unchanged."""
+        run = _StubEvaluationRun({
+            "final_response_quality_v1/AVERAGE": 0.72,
+            "final_response_quality_v1/STANDARD_DEVIATION": 0.10,
+            "hallucination_v1/AVERAGE": 0.95,
+            "safety_v1/AVERAGE": 1.0,
+            "instruction_following_v1/AVERAGE": 0.68,
+            "tool_use_quality/AVERAGE": 0.81,
+            "tool_use_quality/STANDARD_DEVIATION": 0.05,
+        })
+        scores = evaluator._extract_aggregate_scores(run)
+
+        assert scores == {
+            "final_response_quality_v1": 0.72,
+            "hallucination_v1": 0.95,
+            "safety_v1": 1.0,
+            "instruction_following_v1": 0.68,
+            "tool_use_quality_v1": 0.81,
+        }
+        # Non-average entries (std dev) must not leak into scores.
+        assert all("STANDARD_DEVIATION" not in k for k in scores)
+
+    def test_handles_namespaced_metric_keys(self):
+        """Some metric keys are namespaced (e.g. 'foo/tool_use_quality/AVERAGE').
+        The short name is the segment before /AVERAGE, which then gets aliased."""
+        run = _StubEvaluationRun({"ns/tool_use_quality/AVERAGE": 0.5})
+        scores = evaluator._extract_aggregate_scores(run)
+        assert scores == {"tool_use_quality_v1": 0.5}
+
+    def test_missing_run_results_returns_empty(self):
+        class _Empty:
+            evaluation_run_results = None
+
+        assert evaluator._extract_aggregate_scores(_Empty()) == {}
