@@ -510,11 +510,29 @@ def optimize_single_agent(
     input_cost = est_input * judge_costs["input"] / 1_000_000
     output_cost = est_output * judge_costs["output"] / 1_000_000
 
+    # Record the GEPA thresholds (from sampler_config.json — the source of truth),
+    # keyed by eval/report metric name, for report provenance.
+    gepa_thresholds = {}
+    if sampler_cfg.exists():
+        _METRIC_MAP = {
+            "safety_v1": "safety_v1",
+            "hallucinations_v1": "hallucination_v1",
+            "rubric_based_final_response_quality_v1": "final_response_quality_v1",
+            "rubric_based_tool_use_quality_v1": "tool_use_quality_v1",
+        }
+        with open(sampler_cfg) as f:
+            _sc = json.load(f)
+        for k, v in _sc.get("eval_config", {}).get("criteria", {}).items():
+            thr = v if isinstance(v, (int, float)) else (v.get("threshold") if isinstance(v, dict) else None)
+            if thr is not None:
+                gepa_thresholds[_METRIC_MAP.get(k, k)] = float(thr)
+
     stage_data = {
         "optimized_prompt": optimized_prompt,
         "elapsed": elapsed,
         "original_chars": len(original_prompt),
         "optimized_chars": len(optimized_prompt),
+        "thresholds": gepa_thresholds,
         "token_usage": {
             "input_tokens": est_input,
             "output_tokens": est_output,
@@ -758,6 +776,7 @@ def generate_analysis(
             "after_std": eval_after.get("scores_std", {}),
             "num_runs": eval_before.get("num_runs", 1),
             "optimized_prompt": optimize_data.get("optimized_prompt", ""),
+            "thresholds": optimize_data.get("thresholds", {}),
         }
 
         for stage_data in [eval_before, optimize_data, eval_after]:

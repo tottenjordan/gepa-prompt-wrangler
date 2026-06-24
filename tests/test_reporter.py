@@ -129,6 +129,47 @@ class TestGenerateReport:
     @patch("wrangler.reporting.analysis.plt")
     @patch("wrangler.reporting.reporter.CHARTS_DIR")
     @patch("wrangler.reporting.reporter.REPORTS_DIR")
+    def test_threshold_section_rendered(self, mock_reports, mock_charts, mock_plt, tmp_path):
+        mock_reports.__truediv__ = lambda s, x: tmp_path / x
+        mock_reports.mkdir = MagicMock()
+        mock_charts.__truediv__ = lambda s, x: tmp_path / "charts" / x
+        mock_charts.mkdir = MagicMock()
+        mock_plt.subplots.return_value = (MagicMock(), MagicMock())
+        mock_plt.cm.Set2 = MagicMock(return_value=[(0, 0, 0, 1)] * 6)
+
+        from wrangler.reporting.reporter import generate_report
+        results = {"test": {
+            "model": "m",
+            "before": {"tool_use_quality_v1": 0.40, "safety_v1": 0.97},
+            "after": {"tool_use_quality_v1": 0.45, "safety_v1": 0.97},
+            "thresholds": {"tool_use_quality_v1": 0.5, "safety_v1": 0.95},
+        }}
+        generate_report(results, "test", use_paperbanana=False)
+        content = (tmp_path / "experiment_report.md").read_text()
+        assert "GEPA Threshold Alignment" in content
+        assert "BELOW" in content  # tool_use after 0.45 < 0.50
+        assert "PASS" in content   # safety 0.97 >= 0.95
+
+    @patch("wrangler.reporting.analysis.plt")
+    @patch("wrangler.reporting.reporter.CHARTS_DIR")
+    @patch("wrangler.reporting.reporter.REPORTS_DIR")
+    def test_threshold_section_absent_without_thresholds(self, mock_reports, mock_charts, mock_plt, tmp_path):
+        mock_reports.__truediv__ = lambda s, x: tmp_path / x
+        mock_reports.mkdir = MagicMock()
+        mock_charts.__truediv__ = lambda s, x: tmp_path / "charts" / x
+        mock_charts.mkdir = MagicMock()
+        mock_plt.subplots.return_value = (MagicMock(), MagicMock())
+        mock_plt.cm.Set2 = MagicMock(return_value=[(0, 0, 0, 1)] * 6)
+
+        from wrangler.reporting.reporter import generate_report
+        results = {"test": {"model": "m", "before": {"safety_v1": 0.9}, "after": {"safety_v1": 0.9}}}
+        generate_report(results, "test", use_paperbanana=False)
+        content = (tmp_path / "experiment_report.md").read_text()
+        assert "GEPA Threshold Alignment" not in content
+
+    @patch("wrangler.reporting.analysis.plt")
+    @patch("wrangler.reporting.reporter.CHARTS_DIR")
+    @patch("wrangler.reporting.reporter.REPORTS_DIR")
     def test_includes_optimized_prompts(self, mock_reports, mock_charts, mock_plt, tmp_path):
         mock_reports.__truediv__ = lambda s, x: tmp_path / x
         mock_reports.mkdir = MagicMock()

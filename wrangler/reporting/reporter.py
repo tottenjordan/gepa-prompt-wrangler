@@ -174,6 +174,54 @@ def _scores_section(results: dict, ordered: list[str]) -> list[str]:
     return lines
 
 
+def _threshold_section(results: dict, ordered: list[str]) -> list[str]:
+    """GEPA threshold provenance — the sampler_config.json thresholds GEPA
+    optimized against, vs before/after scores with pass/fail status."""
+    lines = []
+    if not any(results[n].get("thresholds") for n in ordered):
+        return lines
+
+    lines.append("## GEPA Threshold Alignment\n")
+    lines.append(
+        "Thresholds GEPA optimized against, sourced from each agent's "
+        "`sampler_config.json` (the single source of truth). A metric below its "
+        "threshold gives GEPA a gradient to improve; one already above has no pressure.\n"
+    )
+
+    for name in ordered:
+        thr = results[name].get("thresholds") or {}
+        if not thr:
+            continue
+        before = results[name].get("before", {})
+        after = results[name].get("after", {})
+        has_after = bool(after)
+        model = results[name].get("model", "")
+        lines.append(f"### {name.title()} (`{model}`)\n")
+        if has_after:
+            lines.append("| Metric | Threshold | Before | After | Status |")
+            lines.append("|--------|-----------|--------|-------|--------|")
+        else:
+            lines.append("| Metric | Threshold | Baseline | Status |")
+            lines.append("|--------|-----------|----------|--------|")
+        for key, t in sorted(thr.items()):
+            label = METRIC_LABELS.get(key, key)
+            b = before.get(key)
+            a = after.get(key)
+            if has_after:
+                ref = a if a is not None else b
+                status = "PASS" if (ref is not None and ref >= t) else "BELOW"
+                bcell = f"{b:.2f}" if b is not None else "—"
+                acell = f"{a:.2f}" if a is not None else "—"
+                lines.append(f"| {label} | {t:.2f} | {bcell} | {acell} | {status} |")
+            else:
+                status = "PASS" if (b is not None and b >= t) else "BELOW"
+                bcell = f"{b:.2f}" if b is not None else "—"
+                lines.append(f"| {label} | {t:.2f} | {bcell} | {status} |")
+        lines.append("")
+
+    return lines
+
+
 def _significance_section(results: dict, ordered: list[str]) -> list[str]:
     """Flag which metric deltas are statistically significant."""
     lines = []
@@ -469,6 +517,7 @@ def generate_report(
     lines.extend(_methodology_section(normalized, ordered, experiment_name))
     lines.extend(_charts_section())
     lines.extend(_scores_section(normalized, ordered))
+    lines.extend(_threshold_section(normalized, ordered))
     lines.extend(_significance_section(normalized, ordered))
     lines.extend(_per_case_winners_losers(normalized, ordered, case_metadata))
     lines.extend(_per_model_section(normalized, ordered))
