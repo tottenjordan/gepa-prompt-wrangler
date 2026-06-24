@@ -445,7 +445,7 @@ eval_cases:
     tier: low
     category: booking
     expected_tools:
-      - name: wrangler_booking_mcp_list_bookings
+      - name: wrangler_booking_mcp_list_all_bookings
         args: {user_id: EMP001}
 
   - prompt: "Book hotel HT002 for Mark Chen June 10-12 and submit a $250 lodging expense for EMP003"
@@ -465,7 +465,7 @@ eval_cases:
     tier: low
     category: booking
     expected_tools:
-      - name: wrangler_booking_mcp_get_booking
+      - name: wrangler_booking_mcp_get_booking_details
         args: {booking_id: BK-001}
 
   # ============================================================
@@ -481,14 +481,16 @@ eval_cases:
         args: {booking_id: BK-002}
 
   - prompt: "Cancel booking BK-003 and then rebook flight FL001 for the same passenger"
-    expected_response: "Booking BK-003 cancelled. Flight FL001 rebooked for the original passenger."
+    expected_response: "Booking BK-003 cancelled. Flight FL001 rebooked for Bob Smith."
     tier: medium
     category: cancellation
     expected_tools:
+      - name: wrangler_booking_mcp_get_booking_details
+        args: {booking_id: BK-003}
       - name: wrangler_booking_mcp_cancel_booking
         args: {booking_id: BK-003}
       - name: wrangler_booking_mcp_book_flight
-        args: {flight_id: FL001}
+        args: {flight_id: FL001, passenger_name: Bob Smith}
 
   - prompt: "I need to cancel my hotel booking BK-005 and find a cheaper hotel in New York instead"
     expected_response: "Hotel booking BK-005 cancelled. Here are cheaper hotel options in New York."
@@ -505,7 +507,7 @@ eval_cases:
     tier: medium
     category: cancellation
     expected_tools:
-      - name: wrangler_booking_mcp_list_bookings
+      - name: wrangler_booking_mcp_list_all_bookings
         args: {user_id: EMP002}
       - name: wrangler_booking_mcp_cancel_booking
         args: {}
@@ -527,7 +529,7 @@ eval_cases:
     tier: low
     category: cancellation
     expected_tools:
-      - name: wrangler_booking_mcp_get_booking
+      - name: wrangler_booking_mcp_get_booking_details
         args: {booking_id: BK-006}
 
   # ============================================================
@@ -597,7 +599,7 @@ eval_cases:
         args: {origin: JFK, destination: LAX, date: "2026-06-15"}
 
   - prompt: "Search for hotels in Chicago under $300 per night"
-    expected_response: "Palmer House Chicago at $250/night (4.4 rating)."
+    expected_response: "The Palmer House in Chicago at $250/night (4.3 rating)."
     tier: low
     category: search
     expected_tools:

@@ -445,7 +445,7 @@
           "user_content": {
             "parts": [
               {
-                "text": "Find flights from XYZ to ABC"
+                "text": "Find flights from San Fransisco to New Yrok"
               }
             ],
             "role": "user"
@@ -453,7 +453,7 @@
           "final_response": {
             "parts": [
               {
-                "text": "No flights found for the route XYZ to ABC. Please provide valid airport codes."
+                "text": "I'll search for flights from SFO to JFK. I found flights: United FL001 departing 08:00 at $450, and Delta FL002 departing 10:30 at $520."
               }
             ],
             "role": "model"
@@ -463,8 +463,8 @@
               {
                 "name": "wrangler_search_mcp_search_flights",
                 "args": {
-                  "origin": "XYZ",
-                  "destination": "ABC"
+                  "origin": "SFO",
+                  "destination": "JFK"
                 }
               }
             ]
@@ -1404,7 +1404,8 @@
                 }
               },
               {
-                "name": "wrangler_booking_mcp_cancel_booking"
+                "name": "wrangler_booking_mcp_cancel_booking",
+                "args": {}
               }
             ]
           }
@@ -1449,7 +1450,8 @@
                 }
               },
               {
-                "name": "wrangler_booking_mcp_get_booking_details"
+                "name": "wrangler_booking_mcp_get_booking_details",
+                "args": {}
               }
             ]
           }
@@ -1872,7 +1874,7 @@
           "intermediate_data": {
             "tool_uses": [
               {
-                "name": "wrangler_booking_mcp_list_bookings",
+                "name": "wrangler_booking_mcp_list_all_bookings",
                 "args": {
                   "user_id": "EMP001"
                 }
@@ -1969,7 +1971,7 @@
           "intermediate_data": {
             "tool_uses": [
               {
-                "name": "wrangler_booking_mcp_get_booking",
+                "name": "wrangler_booking_mcp_get_booking_details",
                 "args": {
                   "booking_id": "BK-001"
                 }
@@ -2039,13 +2041,19 @@
           "final_response": {
             "parts": [
               {
-                "text": "Booking BK-003 cancelled. Flight FL001 rebooked for the original passenger."
+                "text": "Booking BK-003 cancelled. Flight FL001 rebooked for Bob Smith."
               }
             ],
             "role": "model"
           },
           "intermediate_data": {
             "tool_uses": [
+              {
+                "name": "wrangler_booking_mcp_get_booking_details",
+                "args": {
+                  "booking_id": "BK-003"
+                }
+              },
               {
                 "name": "wrangler_booking_mcp_cancel_booking",
                 "args": {
@@ -2055,7 +2063,8 @@
               {
                 "name": "wrangler_booking_mcp_book_flight",
                 "args": {
-                  "flight_id": "FL001"
+                  "flight_id": "FL001",
+                  "passenger_name": "Bob Smith"
                 }
               }
             ]
@@ -2137,13 +2146,14 @@
           "intermediate_data": {
             "tool_uses": [
               {
-                "name": "wrangler_booking_mcp_list_bookings",
+                "name": "wrangler_booking_mcp_list_all_bookings",
                 "args": {
                   "user_id": "EMP002"
                 }
               },
               {
-                "name": "wrangler_booking_mcp_cancel_booking"
+                "name": "wrangler_booking_mcp_cancel_booking",
+                "args": {}
               }
             ]
           }
@@ -2231,7 +2241,7 @@
           "intermediate_data": {
             "tool_uses": [
               {
-                "name": "wrangler_booking_mcp_get_booking",
+                "name": "wrangler_booking_mcp_get_booking_details",
                 "args": {
                   "booking_id": "BK-006"
                 }
@@ -2543,7 +2553,7 @@
           "final_response": {
             "parts": [
               {
-                "text": "Palmer House Chicago at $250/night (4.4 rating)."
+                "text": "The Palmer House in Chicago at $250/night (4.3 rating)."
               }
             ],
             "role": "model"
