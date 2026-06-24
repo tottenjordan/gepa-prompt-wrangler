@@ -23,13 +23,46 @@ def _fmt_duration(seconds: float) -> str:
     return f"{m}m {s:02d}s"
 
 
+# Canonical map: sampler_config.json (GEPA) criteria key → eval/report metric name.
+_SAMPLER_TO_REPORT_METRIC = {
+    "safety_v1": "safety_v1",
+    "hallucinations_v1": "hallucination_v1",
+    "rubric_based_final_response_quality_v1": "final_response_quality_v1",
+    "rubric_based_tool_use_quality_v1": "tool_use_quality_v1",
+}
+
+
+def thresholds_from_sampler_config(sampler_cfg_path: Path) -> dict[str, float]:
+    """Read GEPA thresholds from a sampler_config.json, keyed by eval/report metric name.
+
+    sampler_config.json is the single source of truth for GEPA criteria. Plain
+    metrics store the threshold as a number; rubric metrics store it under a
+    'threshold' key. Returns {} if the file is missing/unreadable.
+    """
+    import json
+    try:
+        with open(sampler_cfg_path) as f:
+            cfg = json.load(f)
+    except (json.JSONDecodeError, OSError, TypeError):
+        return {}
+
+    criteria = cfg.get("eval_config", {}).get("criteria", {})
+    out: dict[str, float] = {}
+    for key, val in criteria.items():
+        report_key = _SAMPLER_TO_REPORT_METRIC.get(key, key)
+        if isinstance(val, (int, float)):
+            out[report_key] = float(val)
+        elif isinstance(val, dict) and val.get("threshold") is not None:
+            out[report_key] = float(val["threshold"])
+    return out
+
+
 def _validate_sampler_config(
     sampler_cfg_path: Path,
-    eval_thresholds: dict[str, float] | None,
     judge_model: str,
     pair_id: str,
 ) -> None:
-    """Warn about sampler config misalignment before optimization."""
+    """Warn about sampler config / judge-model misalignment before optimization."""
     import json
     try:
         with open(sampler_cfg_path) as f:
@@ -41,30 +74,12 @@ def _validate_sampler_config(
     if not criteria:
         return
 
-    warnings = []
     for key, val in criteria.items():
         if isinstance(val, dict) and "judge_model_options" in val:
             cfg_judge = val["judge_model_options"].get("judge_model", "")
             if cfg_judge and cfg_judge != judge_model:
-                warnings.append(f"judge model mismatch: {key} uses '{cfg_judge}', experiment uses '{judge_model}'")
-
-    if eval_thresholds:
-        from ..optimize.optimizer import METRIC_NAME_MAP
-        for metric, threshold in eval_thresholds.items():
-            actual_key = metric
-            if metric not in criteria and metric in METRIC_NAME_MAP:
-                rb_key = METRIC_NAME_MAP[metric]
-                if rb_key in criteria:
-                    actual_key = rb_key
-            if actual_key in criteria:
-                val = criteria[actual_key]
-                if isinstance(val, dict):
-                    cfg_thresh = val.get("threshold")
-                    if cfg_thresh is not None and cfg_thresh != threshold:
-                        warnings.append(f"{actual_key} threshold {cfg_thresh} (sampler_config, authoritative) != experiment/report {threshold}")
-
-    for w in warnings:
-        print(f"  [{pair_id}] Warning: sampler_config — {w}")
+                print(f"  [{pair_id}] Warning: sampler_config — judge model mismatch: "
+                      f"{key} uses '{cfg_judge}', experiment uses '{judge_model}'")
 
 
 def _post_eval_sanity_check(
@@ -318,22 +333,23 @@ def stage_optimize(exp: Experiment, pair_id: str | None = None) -> None:
 
     eval_path = _resolve_eval_path(manifest, mdir)
 
-    eval_thresholds = exp.eval_thresholds
     judge = exp.config.get("eval_config", {}).get("judge_model", "gemini-3.5-flash")
 
     for i, pair in enumerate(pairs, 1):
         print(f"\n  [{pair.id}] ({i}/{len(pairs)}) Optimizing...", flush=True)
         agent_path = _resolve_optimize_module(manifest, pair, mdir)
         sampler_cfg = agent_path / "sampler_config.json"
+        # sampler_config.json is the source of truth for what GEPA optimizes
+        # against; record the thresholds it uses for the report.
+        thresholds = thresholds_from_sampler_config(sampler_cfg) if sampler_cfg.exists() else {}
         if sampler_cfg.exists():
-            _validate_sampler_config(sampler_cfg, eval_thresholds, judge, pair.id)
+            _validate_sampler_config(sampler_cfg, judge, pair.id)
         t0 = time.time()
         optimized = optimize(
             str(agent_path),
             eval_data_path=str(eval_path),
             sampler_config_path=str(sampler_cfg) if sampler_cfg.exists() else None,
             agent_name=pair.id,
-            eval_thresholds=eval_thresholds,
             judge_model=judge,
             initial_instruction=pair.system_prompt,
         )
@@ -344,6 +360,7 @@ def stage_optimize(exp: Experiment, pair_id: str | None = None) -> None:
             "optimized_prompt": optimized,
             "elapsed": elapsed,
             "chars": len(optimized),
+            "thresholds": thresholds,
         })
 
         _save_optimized_prompt(exp, pair, optimized)

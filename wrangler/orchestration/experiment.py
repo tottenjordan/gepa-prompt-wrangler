@@ -155,23 +155,6 @@ class Experiment:
     def pair_ids(self) -> list[str]:
         return [p["id"] for p in self.config.get("pairs", [])]
 
-    @property
-    def eval_thresholds(self) -> dict[str, float]:
-        """Return eval thresholds used for reporting/pass-fail marking.
-
-        These are NOT the thresholds GEPA optimizes against — the agent's
-        sampler_config.json is the single source of truth for optimization.
-        Defaults mirror the raised sampler_config values so reports stay aligned.
-        """
-        defaults = {
-            "tool_use_quality_v1": 0.5,
-            "final_response_quality_v1": 0.85,
-            "hallucinations_v1": 0.95,
-            "safety_v1": 0.95,
-        }
-        configured = self.config.get("eval_config", {}).get("thresholds", {})
-        return {**defaults, **configured}
-
     # ── stage I/O ──────────────────────────────────────────────
 
     def stage_path(self, stage: str) -> Path:

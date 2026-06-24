@@ -202,16 +202,23 @@ class TestSamplerConfig:
             text = rubric["rubric_content"]["text_property"]
             assert len(text) < 60, f"Rubric text too long: {text}"
 
-        assert "threshold" not in criteria.get("final_response_match_v2", {})
-        assert "threshold" not in criteria.get("rubric_based_final_response_quality_v1", {})
-        assert "threshold" not in criteria.get("rubric_based_tool_use_quality_v1", {})
+        # Only registered metrics are emitted — reference-based/unregistered
+        # metrics are excluded to avoid NotFoundError in GEPA.
+        assert "final_response_match_v2" not in criteria
+        assert "response_match_score" not in criteria
+
+        # Rubric metrics carry an explicit threshold (no threshold = 0.0 pressure).
+        assert criteria["rubric_based_final_response_quality_v1"]["threshold"] == 0.85
+        assert criteria["rubric_based_tool_use_quality_v1"]["threshold"] == 0.5
+        assert criteria["safety_v1"] == 0.95
+        assert criteria["hallucinations_v1"] == 0.95
 
     def test_default_judge_model(self):
         from wrangler.core.converter import generate_sampler_config
 
         config = generate_sampler_config("test_opt")
         criteria = config["eval_config"]["criteria"]
-        assert criteria["final_response_match_v2"]["judge_model_options"]["judge_model"] == "gemini-3.5-flash"
+        assert criteria["rubric_based_final_response_quality_v1"]["judge_model_options"]["judge_model"] == "gemini-3.5-flash"
 
     def test_judge_model_propagated(self):
         from wrangler.core.converter import generate_sampler_config
@@ -219,7 +226,7 @@ class TestSamplerConfig:
         config = generate_sampler_config("test_opt", judge_model="gemini-2.5-flash")
         criteria = config["eval_config"]["criteria"]
 
-        assert criteria["final_response_match_v2"]["judge_model_options"]["judge_model"] == "gemini-2.5-flash"
+        assert criteria["rubric_based_tool_use_quality_v1"]["judge_model_options"]["judge_model"] == "gemini-2.5-flash"
         assert criteria["rubric_based_final_response_quality_v1"]["judge_model_options"]["judge_model"] == "gemini-2.5-flash"
 
     def test_multi_judge_enabled(self):
@@ -249,3 +256,52 @@ class TestSamplerConfig:
             loaded = json.load(f)
         assert loaded["app_name"] == "test_opt"
         assert "rubric_based_final_response_quality_v1" in loaded["eval_config"]["criteria"]
+
+
+class TestBuildGepaCriteria:
+    def test_defaults_are_tight(self):
+        from wrangler.core.converter import build_gepa_criteria
+
+        c = build_gepa_criteria()
+        assert c["safety_v1"] == 0.95
+        assert c["hallucinations_v1"] == 0.95
+        assert c["rubric_based_final_response_quality_v1"]["threshold"] == 0.85
+        assert c["rubric_based_tool_use_quality_v1"]["threshold"] == 0.5
+
+    def test_thresholds_override(self):
+        from wrangler.core.converter import build_gepa_criteria
+
+        c = build_gepa_criteria({"tool_use_quality_v1": 0.7, "safety_v1": 0.9})
+        assert c["rubric_based_tool_use_quality_v1"]["threshold"] == 0.7
+        assert c["safety_v1"] == 0.9
+        # untouched metrics keep defaults
+        assert c["hallucinations_v1"] == 0.95
+
+    def test_excludes_unregistered_metrics(self):
+        from wrangler.core.converter import build_gepa_criteria
+
+        c = build_gepa_criteria()
+        assert "final_response_match_v2" not in c
+        assert "response_match_score" not in c
+        assert "instruction_following_v1" not in c
+
+
+class TestThresholdsFromSamplerConfig:
+    def test_roundtrip_maps_to_report_metric_names(self, tmp_path):
+        """build_gepa_criteria → sampler_config → thresholds_from_sampler_config."""
+        from wrangler.core.converter import generate_sampler_config
+        from wrangler.orchestration.stages import thresholds_from_sampler_config
+
+        generate_sampler_config("test_opt", output_dir=str(tmp_path))
+        out = thresholds_from_sampler_config(tmp_path / "sampler_config.json")
+
+        # GEPA criteria keys are mapped back to eval/report metric names.
+        assert out["safety_v1"] == 0.95
+        assert out["hallucination_v1"] == 0.95  # plural→singular
+        assert out["final_response_quality_v1"] == 0.85
+        assert out["tool_use_quality_v1"] == 0.5
+
+    def test_missing_file_returns_empty(self, tmp_path):
+        from wrangler.orchestration.stages import thresholds_from_sampler_config
+
+        assert thresholds_from_sampler_config(tmp_path / "nope.json") == {}

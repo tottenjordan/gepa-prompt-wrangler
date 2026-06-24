@@ -90,9 +90,15 @@ def analyze_experiment(exp: Experiment) -> ExperimentAnalysis:
     optimize_data = exp.read_stage("optimize")
     deploy_data = exp.read_stage("deploy")
 
+    # Thresholds come from the sampler_config.json GEPA actually optimized
+    # against, recorded per-pair by stage_optimize (single source of truth).
+    thresholds: dict[str, float] = {}
+    for pair_id in exp.pair_ids:
+        thresholds.update(optimize_data.get(pair_id, {}).get("thresholds", {}))
+
     analysis = ExperimentAnalysis(
         experiment_name=exp.name,
-        thresholds=exp.eval_thresholds,
+        thresholds=thresholds,
     )
 
     pair_descriptions = {

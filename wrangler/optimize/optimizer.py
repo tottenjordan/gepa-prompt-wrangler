@@ -230,80 +230,6 @@ async def _prewarm_mcp_toolsets(agent, tag: str = "  ", max_retries: int = 3) ->
     return warmed
 
 
-METRIC_NAME_MAP = {
-    "final_response_quality_v1": "rubric_based_final_response_quality_v1",
-    "tool_use_quality_v1": "rubric_based_tool_use_quality_v1",
-}
-
-
-def _build_criteria(thresholds: dict[str, float] | None = None, judge_model: str = "gemini-3.5-flash") -> dict:
-    """Build GEPA eval criteria dict with aligned metric names and calibrated thresholds.
-
-    Metric names match cloud eval (evaluator.py DEFAULT_METRICS):
-      - hallucination_v1 (not hallucinations_v1)
-      - final_response_quality_v1 (with custom rubrics)
-      - tool_use_quality_v1 (with custom rubrics)
-    Note: instruction_following_v1 is NOT in the ADK metric evaluator
-    registry (any version). hallucinations_v1 (plural) was added in ADK 2.x.
-    final_response_match_v2 and response_match_score are excluded because
-    they compare against reference responses which don't match real MCP
-    tool outputs.
-    """
-    t = {
-        "tool_use_quality_v1": 0.5,
-        "final_response_quality_v1": 0.85,
-        "hallucinations_v1": 0.95,
-        "safety_v1": 0.95,
-    }
-    if thresholds:
-        t.update(thresholds)
-
-    return {
-        "hallucinations_v1": t["hallucinations_v1"],
-        "safety_v1": t["safety_v1"],
-        "rubric_based_final_response_quality_v1": {
-            "judge_model_options": {"judge_model": judge_model},
-            "threshold": t["final_response_quality_v1"],
-            "rubrics": [
-                {
-                    "rubric_id": "instruction_adherence",
-                    "rubric_content": {
-                        "text_property": "Response follows system prompt instructions."
-                    },
-                    "type": "INSTRUCTION_ADHERENCE",
-                },
-                {
-                    "rubric_id": "completeness",
-                    "rubric_content": {
-                        "text_property": "Response fully addresses the user request."
-                    },
-                    "type": "FINAL_RESPONSE_QUALITY",
-                },
-            ],
-        },
-        "rubric_based_tool_use_quality_v1": {
-            "judge_model_options": {"judge_model": judge_model},
-            "threshold": t["tool_use_quality_v1"],
-            "rubrics": [
-                {
-                    "rubric_id": "correct_tool_selection",
-                    "rubric_content": {
-                        "text_property": "Correct tools selected."
-                    },
-                    "type": "TOOL_USE_QUALITY",
-                },
-                {
-                    "rubric_id": "correct_parameters",
-                    "rubric_content": {
-                        "text_property": "Accurate tool parameters provided."
-                    },
-                    "type": "TOOL_USE_QUALITY",
-                },
-            ],
-        },
-    }
-
-
 def optimize(
     agent_module_path: str,
     evalset_path: str = None,
@@ -405,12 +331,13 @@ def optimize(
         with open(sampler_config_path) as f:
             sampler_config = _json.load(f)
     else:
+        from ..core.converter import build_gepa_criteria
         evalset_stem = Path(evalset_path).stem if evalset_path else "eval_set"
         if evalset_stem.endswith(".evalset"):
             evalset_stem = evalset_stem[:-len(".evalset")]
         sampler_config = {
             "eval_config": {
-                "criteria": _build_criteria(eval_thresholds, judge_model),
+                "criteria": build_gepa_criteria(eval_thresholds, judge_model),
             },
             "app_name": app_name,
             "train_eval_set": evalset_stem,

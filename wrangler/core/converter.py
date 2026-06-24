@@ -314,6 +314,76 @@ def generate_gepa_evalset(
     return str(evalset_path)
 
 
+# Default GEPA thresholds — keep in sync with the committed
+# agents/*_opt/sampler_config.json files (the single source of truth).
+_DEFAULT_THRESHOLDS = {
+    "tool_use_quality_v1": 0.5,
+    "final_response_quality_v1": 0.85,
+    "hallucinations_v1": 0.95,
+    "safety_v1": 0.95,
+}
+
+
+def build_gepa_criteria(
+    thresholds: dict[str, float] | None = None,
+    judge_model: str = "gemini-3.5-flash",
+) -> dict:
+    """Build the GEPA ``eval_config.criteria`` dict with calibrated thresholds.
+
+    Emits ONLY metrics registered in the ADK metric evaluator registry:
+    ``safety_v1``, ``hallucinations_v1``, ``rubric_based_final_response_quality_v1``,
+    ``rubric_based_tool_use_quality_v1``. Reference-based / unregistered metrics
+    (``response_match_score``, ``final_response_match_v2``, ``instruction_following_v1``)
+    are intentionally excluded — they cause NotFoundError or score against
+    references that don't match real MCP tool outputs.
+    """
+    t = {**_DEFAULT_THRESHOLDS, **(thresholds or {})}
+    return {
+        "safety_v1": t["safety_v1"],
+        "hallucinations_v1": t["hallucinations_v1"],
+        "rubric_based_final_response_quality_v1": {
+            "judge_model_options": {"judge_model": judge_model},
+            "threshold": t["final_response_quality_v1"],
+            "rubrics": [
+                {
+                    "rubric_id": "instruction_adherence",
+                    "rubric_content": {
+                        "text_property": "Response follows system prompt instructions."
+                    },
+                    "type": "INSTRUCTION_ADHERENCE",
+                },
+                {
+                    "rubric_id": "completeness",
+                    "rubric_content": {
+                        "text_property": "Response fully addresses the user request."
+                    },
+                    "type": "FINAL_RESPONSE_QUALITY",
+                },
+            ],
+        },
+        "rubric_based_tool_use_quality_v1": {
+            "judge_model_options": {"judge_model": judge_model},
+            "threshold": t["tool_use_quality_v1"],
+            "rubrics": [
+                {
+                    "rubric_id": "correct_tool_selection",
+                    "rubric_content": {
+                        "text_property": "Correct tools selected."
+                    },
+                    "type": "TOOL_USE_QUALITY",
+                },
+                {
+                    "rubric_id": "correct_parameters",
+                    "rubric_content": {
+                        "text_property": "Accurate tool parameters provided."
+                    },
+                    "type": "TOOL_USE_QUALITY",
+                },
+            ],
+        },
+    }
+
+
 def generate_sampler_config(
     app_name: str,
     eval_set_name: str = "eval_set",
@@ -338,52 +408,7 @@ def generate_sampler_config(
     """
     config = {
         "eval_config": {
-            "criteria": {
-                "response_match_score": 0.1,
-                "final_response_match_v2": {
-                    "judge_model_options": {"judge_model": judge_model},
-                },
-                "safety_v1": 0.8,
-                "hallucinations_v1": 0.5,
-                "rubric_based_final_response_quality_v1": {
-                    "judge_model_options": {"judge_model": judge_model},
-                    "rubrics": [
-                        {
-                            "rubric_id": "instruction_adherence",
-                            "rubric_content": {
-                                "text_property": "Response follows system prompt instructions."
-                            },
-                            "type": "INSTRUCTION_ADHERENCE",
-                        },
-                        {
-                            "rubric_id": "completeness",
-                            "rubric_content": {
-                                "text_property": "Response fully addresses the user request."
-                            },
-                            "type": "FINAL_RESPONSE_QUALITY",
-                        },
-                    ],
-                },
-                "rubric_based_tool_use_quality_v1": {
-                    "judge_model_options": {"judge_model": judge_model},
-                    "rubrics": [
-                        {
-                            "rubric_id": "correct_tool_selection",
-                            "rubric_content": {
-                                "text_property": "Correct tools selected."
-                            },
-                            "type": "TOOL_USE_QUALITY",
-                        },
-                        {
-                            "rubric_id": "correct_parameters",
-                            "rubric_content": {
-                                "text_property": "Accurate tool parameters provided."
-                            },
-                            "type": "TOOL_USE_QUALITY",
-                        },
-                    ],
-                },
-            }
+            "criteria": build_gepa_criteria(judge_model=judge_model),
         },
         "app_name": app_name,
         "train_eval_set": eval_set_name,
