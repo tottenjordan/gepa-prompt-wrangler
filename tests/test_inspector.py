@@ -5,7 +5,7 @@ import pytest
 import yaml
 from types import SimpleNamespace
 
-from wrangler.inspector import ToolSpec, AgentSpec, _inspect_function_tool, AgentInspector
+from wrangler.tools.inspector import ToolSpec, AgentSpec, _inspect_function_tool, AgentInspector
 
 
 class TestToolSpec:

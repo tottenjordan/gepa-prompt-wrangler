@@ -1,0 +1,21 @@
+FROM python:3.11-slim
+
+WORKDIR /app
+
+COPY pyproject.toml .
+
+RUN pip install --no-cache-dir \
+    "google-cloud-aiplatform[adk,agent-engines,evaluation]>=1.154.0" \
+    "google-adk[a2a,agent-identity,eval,mcp]>=2.2.0" \
+    "google-genai>=1.66.0" \
+    "litellm>=1.83.14" \
+    "python-dotenv>=1.0.0" \
+    "pyyaml>=6.0" \
+    "matplotlib>=3.10.0" \
+    "pandas>=2.0.0" \
+    "paperbanana>=0.1.2" \
+    "rouge-score>=0.1.2" \
+    "google-cloud-storage>=3.0.0" \
+    "google-cloud-secret-manager>=2.0.0" \
+    "anthropic[vertex]>=0.49.0" \
+    "fastmcp>=2.0.0"

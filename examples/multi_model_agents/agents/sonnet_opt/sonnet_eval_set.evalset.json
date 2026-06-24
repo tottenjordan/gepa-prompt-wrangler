@@ -2,44 +2,7 @@
   "eval_set_id": "sonnet_eval_set",
   "eval_cases": [
     {
-      "eval_id": "case_1_low",
-      "conversation": [
-        {
-          "user_content": {
-            "parts": [
-              {
-                "text": "Search for hotels in New York"
-              }
-            ],
-            "role": "user"
-          },
-          "final_response": {
-            "parts": [
-              {
-                "text": "Grand Hyatt New York at $320/night (4.5 rating) and Budget Inn Downtown at $120/night (3.2 rating)."
-              }
-            ],
-            "role": "model"
-          },
-          "intermediate_data": {
-            "tool_uses": [
-              {
-                "name": "wrangler_search_mcp_search_hotels",
-                "args": {
-                  "city": "New York"
-                }
-              }
-            ]
-          }
-        }
-      ],
-      "session_input": {
-        "app_name": "sonnet_opt",
-        "user_id": "eval_user"
-      }
-    },
-    {
-      "eval_id": "case_2_low",
+      "eval_id": "case_1_low_search",
       "conversation": [
         {
           "user_content": {
@@ -73,17 +36,19 @@
       ],
       "session_input": {
         "app_name": "sonnet_opt",
-        "user_id": "eval_user"
+        "user_id": "eval_user",
+        "category": "search",
+        "tier": "low"
       }
     },
     {
-      "eval_id": "case_3_low",
+      "eval_id": "case_2_low_search",
       "conversation": [
         {
           "user_content": {
             "parts": [
               {
-                "text": "What's the lodging policy limit?"
+                "text": "Search for flights from LAX to Chicago"
               }
             ],
             "role": "user"
@@ -91,7 +56,205 @@
           "final_response": {
             "parts": [
               {
-                "text": "The corporate lodging policy limit is $400 per night."
+                "text": "American Airlines FL003 from LAX to ORD at $380, departing 07:00."
+              }
+            ],
+            "role": "model"
+          },
+          "intermediate_data": {
+            "tool_uses": [
+              {
+                "name": "wrangler_search_mcp_search_flights",
+                "args": {
+                  "origin": "LAX",
+                  "destination": "ORD"
+                }
+              }
+            ]
+          }
+        }
+      ],
+      "session_input": {
+        "app_name": "sonnet_opt",
+        "user_id": "eval_user",
+        "category": "search",
+        "tier": "low"
+      }
+    },
+    {
+      "eval_id": "case_3_low_search",
+      "conversation": [
+        {
+          "user_content": {
+            "parts": [
+              {
+                "text": "Are there flights from SFO to Los Angeles?"
+              }
+            ],
+            "role": "user"
+          },
+          "final_response": {
+            "parts": [
+              {
+                "text": "Southwest FL005 from SFO to LAX at $150, departing 06:00."
+              }
+            ],
+            "role": "model"
+          },
+          "intermediate_data": {
+            "tool_uses": [
+              {
+                "name": "wrangler_search_mcp_search_flights",
+                "args": {
+                  "origin": "SFO",
+                  "destination": "LAX"
+                }
+              }
+            ]
+          }
+        }
+      ],
+      "session_input": {
+        "app_name": "sonnet_opt",
+        "user_id": "eval_user",
+        "category": "search",
+        "tier": "low"
+      }
+    },
+    {
+      "eval_id": "case_4_low_search",
+      "conversation": [
+        {
+          "user_content": {
+            "parts": [
+              {
+                "text": "Search for hotels in New York"
+              }
+            ],
+            "role": "user"
+          },
+          "final_response": {
+            "parts": [
+              {
+                "text": "Grand Hyatt New York at $320/night (4.5 rating) and Budget Inn Downtown at $120/night (3.2 rating)."
+              }
+            ],
+            "role": "model"
+          },
+          "intermediate_data": {
+            "tool_uses": [
+              {
+                "name": "wrangler_search_mcp_search_hotels",
+                "args": {
+                  "city": "New York"
+                }
+              }
+            ]
+          }
+        }
+      ],
+      "session_input": {
+        "app_name": "sonnet_opt",
+        "user_id": "eval_user",
+        "category": "search",
+        "tier": "low"
+      }
+    },
+    {
+      "eval_id": "case_5_low_search",
+      "conversation": [
+        {
+          "user_content": {
+            "parts": [
+              {
+                "text": "Find hotels in New York under $200 per night"
+              }
+            ],
+            "role": "user"
+          },
+          "final_response": {
+            "parts": [
+              {
+                "text": "Budget Inn Downtown at $120/night (3.2 rating)."
+              }
+            ],
+            "role": "model"
+          },
+          "intermediate_data": {
+            "tool_uses": [
+              {
+                "name": "wrangler_search_mcp_search_hotels",
+                "args": {
+                  "city": "New York",
+                  "max_price": 200
+                }
+              }
+            ]
+          }
+        }
+      ],
+      "session_input": {
+        "app_name": "sonnet_opt",
+        "user_id": "eval_user",
+        "category": "search",
+        "tier": "low"
+      }
+    },
+    {
+      "eval_id": "case_6_low_search",
+      "conversation": [
+        {
+          "user_content": {
+            "parts": [
+              {
+                "text": "Find me a hotel in Miami"
+              }
+            ],
+            "role": "user"
+          },
+          "final_response": {
+            "parts": [
+              {
+                "text": "Fontainebleau Miami at $400/night with a 4.7 rating."
+              }
+            ],
+            "role": "model"
+          },
+          "intermediate_data": {
+            "tool_uses": [
+              {
+                "name": "wrangler_search_mcp_search_hotels",
+                "args": {
+                  "city": "Miami"
+                }
+              }
+            ]
+          }
+        }
+      ],
+      "session_input": {
+        "app_name": "sonnet_opt",
+        "user_id": "eval_user",
+        "category": "search",
+        "tier": "low"
+      }
+    },
+    {
+      "eval_id": "case_7_low_policy",
+      "conversation": [
+        {
+          "user_content": {
+            "parts": [
+              {
+                "text": "What is the corporate meal expense limit?"
+              }
+            ],
+            "role": "user"
+          },
+          "final_response": {
+            "parts": [
+              {
+                "text": "The corporate meal expense limit is $75.00. Amounts exceeding this limit require manager review and approval."
               }
             ],
             "role": "model"
@@ -101,8 +264,8 @@
               {
                 "name": "wrangler_expense_mcp_check_expense_policy",
                 "args": {
-                  "category": "lodging",
-                  "amount": 400
+                  "category": "meals",
+                  "amount": 75
                 }
               }
             ]
@@ -111,11 +274,13 @@
       ],
       "session_input": {
         "app_name": "sonnet_opt",
-        "user_id": "eval_user"
+        "user_id": "eval_user",
+        "category": "policy",
+        "tier": "low"
       }
     },
     {
-      "eval_id": "case_4_low",
+      "eval_id": "case_8_low_policy",
       "conversation": [
         {
           "user_content": {
@@ -149,17 +314,19 @@
       ],
       "session_input": {
         "app_name": "sonnet_opt",
-        "user_id": "eval_user"
+        "user_id": "eval_user",
+        "category": "policy",
+        "tier": "low"
       }
     },
     {
-      "eval_id": "case_5_low",
+      "eval_id": "case_9_low_policy",
       "conversation": [
         {
           "user_content": {
             "parts": [
               {
-                "text": "Can you help me write a Python script to process CSV files?"
+                "text": "What's the lodging policy limit?"
               }
             ],
             "role": "user"
@@ -167,49 +334,13 @@
           "final_response": {
             "parts": [
               {
-                "text": "I can only help with travel bookings and expense management. For coding assistance, please use a different tool."
-              }
-            ],
-            "role": "model"
-          },
-          "intermediate_data": {
-            "tool_uses": []
-          }
-        }
-      ],
-      "session_input": {
-        "app_name": "sonnet_opt",
-        "user_id": "eval_user"
-      }
-    },
-    {
-      "eval_id": "case_6_medium",
-      "conversation": [
-        {
-          "user_content": {
-            "parts": [
-              {
-                "text": "Search hotels in New York, then check if the nightly rate fits our lodging policy"
-              }
-            ],
-            "role": "user"
-          },
-          "final_response": {
-            "parts": [
-              {
-                "text": "Grand Hyatt $320/night within $400 policy. Budget Inn $120/night within policy."
+                "text": "The corporate lodging policy limit is $400 per night."
               }
             ],
             "role": "model"
           },
           "intermediate_data": {
             "tool_uses": [
-              {
-                "name": "wrangler_search_mcp_search_hotels",
-                "args": {
-                  "city": "New York"
-                }
-              },
               {
                 "name": "wrangler_expense_mcp_check_expense_policy",
                 "args": {
@@ -223,11 +354,211 @@
       ],
       "session_input": {
         "app_name": "sonnet_opt",
-        "user_id": "eval_user"
+        "user_id": "eval_user",
+        "category": "policy",
+        "tier": "low"
       }
     },
     {
-      "eval_id": "case_7_medium",
+      "eval_id": "case_10_low_booking",
+      "conversation": [
+        {
+          "user_content": {
+            "parts": [
+              {
+                "text": "Book flight FL001 for Alice Johnson"
+              }
+            ],
+            "role": "user"
+          },
+          "final_response": {
+            "parts": [
+              {
+                "text": "Flight FL001 has been successfully booked for Alice Johnson. Booking confirmed."
+              }
+            ],
+            "role": "model"
+          },
+          "intermediate_data": {
+            "tool_uses": [
+              {
+                "name": "wrangler_booking_mcp_book_flight",
+                "args": {
+                  "flight_id": "FL001",
+                  "passenger_name": "Alice Johnson"
+                }
+              }
+            ]
+          }
+        }
+      ],
+      "session_input": {
+        "app_name": "sonnet_opt",
+        "user_id": "eval_user",
+        "category": "booking",
+        "tier": "low"
+      }
+    },
+    {
+      "eval_id": "case_11_low_expense",
+      "conversation": [
+        {
+          "user_content": {
+            "parts": [
+              {
+                "text": "Show expenses for user EMP001"
+              }
+            ],
+            "role": "user"
+          },
+          "final_response": {
+            "parts": [
+              {
+                "text": "Here are the expenses for user EMP001, showing expense ID, amount, category, description, date, and approval status for each entry."
+              }
+            ],
+            "role": "model"
+          },
+          "intermediate_data": {
+            "tool_uses": [
+              {
+                "name": "wrangler_expense_mcp_get_user_expenses",
+                "args": {
+                  "user_id": "EMP001"
+                }
+              }
+            ]
+          }
+        }
+      ],
+      "session_input": {
+        "app_name": "sonnet_opt",
+        "user_id": "eval_user",
+        "category": "expense",
+        "tier": "low"
+      }
+    },
+    {
+      "eval_id": "case_12_low_error_handling",
+      "conversation": [
+        {
+          "user_content": {
+            "parts": [
+              {
+                "text": "Find flights from San Fransisco to New Yrok"
+              }
+            ],
+            "role": "user"
+          },
+          "final_response": {
+            "parts": [
+              {
+                "text": "I'll search for flights from SFO to JFK. I found flights: United FL001 departing 08:00 at $450, and Delta FL002 departing 10:30 at $520."
+              }
+            ],
+            "role": "model"
+          },
+          "intermediate_data": {
+            "tool_uses": [
+              {
+                "name": "wrangler_search_mcp_search_flights",
+                "args": {
+                  "origin": "SFO",
+                  "destination": "JFK"
+                }
+              }
+            ]
+          }
+        }
+      ],
+      "session_input": {
+        "app_name": "sonnet_opt",
+        "user_id": "eval_user",
+        "category": "error_handling",
+        "tier": "low"
+      }
+    },
+    {
+      "eval_id": "case_13_low_error_handling",
+      "conversation": [
+        {
+          "user_content": {
+            "parts": [
+              {
+                "text": "Search hotels in Atlantis"
+              }
+            ],
+            "role": "user"
+          },
+          "final_response": {
+            "parts": [
+              {
+                "text": "No hotels found in Atlantis. Please try a different city."
+              }
+            ],
+            "role": "model"
+          },
+          "intermediate_data": {
+            "tool_uses": [
+              {
+                "name": "wrangler_search_mcp_search_hotels",
+                "args": {
+                  "city": "Atlantis"
+                }
+              }
+            ]
+          }
+        }
+      ],
+      "session_input": {
+        "app_name": "sonnet_opt",
+        "user_id": "eval_user",
+        "category": "error_handling",
+        "tier": "low"
+      }
+    },
+    {
+      "eval_id": "case_14_low_error_handling",
+      "conversation": [
+        {
+          "user_content": {
+            "parts": [
+              {
+                "text": "Check policy for $500 in the 'unknown' category"
+              }
+            ],
+            "role": "user"
+          },
+          "final_response": {
+            "parts": [
+              {
+                "text": "The category 'unknown' is not valid. Valid categories: meals, transport, lodging, supplies, entertainment."
+              }
+            ],
+            "role": "model"
+          },
+          "intermediate_data": {
+            "tool_uses": [
+              {
+                "name": "wrangler_expense_mcp_check_expense_policy",
+                "args": {
+                  "category": "unknown",
+                  "amount": 500
+                }
+              }
+            ]
+          }
+        }
+      ],
+      "session_input": {
+        "app_name": "sonnet_opt",
+        "user_id": "eval_user",
+        "category": "error_handling",
+        "tier": "low"
+      }
+    },
+    {
+      "eval_id": "case_15_medium_expense",
       "conversation": [
         {
           "user_content": {
@@ -270,11 +601,313 @@
       ],
       "session_input": {
         "app_name": "sonnet_opt",
-        "user_id": "eval_user"
+        "user_id": "eval_user",
+        "category": "expense",
+        "tier": "medium"
       }
     },
     {
-      "eval_id": "case_8_medium",
+      "eval_id": "case_16_medium_expense",
+      "conversation": [
+        {
+          "user_content": {
+            "parts": [
+              {
+                "text": "Submit a $500 entertainment expense for team event, user ID EMP002"
+              }
+            ],
+            "role": "user"
+          },
+          "final_response": {
+            "parts": [
+              {
+                "text": "A $500 entertainment expense exceeds the $150 limit. Requires manager approval."
+              }
+            ],
+            "role": "model"
+          },
+          "intermediate_data": {
+            "tool_uses": [
+              {
+                "name": "wrangler_expense_mcp_check_expense_policy",
+                "args": {
+                  "category": "entertainment",
+                  "amount": 500
+                }
+              }
+            ]
+          }
+        }
+      ],
+      "session_input": {
+        "app_name": "sonnet_opt",
+        "user_id": "eval_user",
+        "category": "expense",
+        "tier": "medium"
+      }
+    },
+    {
+      "eval_id": "case_17_medium_planning",
+      "conversation": [
+        {
+          "user_content": {
+            "parts": [
+              {
+                "text": "Find flights to JFK and compare the cheapest options by airline"
+              }
+            ],
+            "role": "user"
+          },
+          "final_response": {
+            "parts": [
+              {
+                "text": "United FL001 at $450 vs Delta FL002 at $520. United is $70 cheaper (13.5% savings)."
+              }
+            ],
+            "role": "model"
+          },
+          "intermediate_data": {
+            "tool_uses": [
+              {
+                "name": "wrangler_search_mcp_search_flights",
+                "args": {
+                  "destination": "JFK"
+                }
+              }
+            ]
+          }
+        }
+      ],
+      "session_input": {
+        "app_name": "sonnet_opt",
+        "user_id": "eval_user",
+        "category": "planning",
+        "tier": "medium"
+      }
+    },
+    {
+      "eval_id": "case_18_medium_planning",
+      "conversation": [
+        {
+          "user_content": {
+            "parts": [
+              {
+                "text": "Search hotels in New York, then check if the nightly rate fits our lodging policy"
+              }
+            ],
+            "role": "user"
+          },
+          "final_response": {
+            "parts": [
+              {
+                "text": "Grand Hyatt $320/night within $400 policy. Budget Inn $120/night within policy."
+              }
+            ],
+            "role": "model"
+          },
+          "intermediate_data": {
+            "tool_uses": [
+              {
+                "name": "wrangler_search_mcp_search_hotels",
+                "args": {
+                  "city": "New York"
+                }
+              },
+              {
+                "name": "wrangler_expense_mcp_check_expense_policy",
+                "args": {
+                  "category": "lodging",
+                  "amount": 400
+                }
+              }
+            ]
+          }
+        }
+      ],
+      "session_input": {
+        "app_name": "sonnet_opt",
+        "user_id": "eval_user",
+        "category": "planning",
+        "tier": "medium"
+      }
+    },
+    {
+      "eval_id": "case_19_medium_policy",
+      "conversation": [
+        {
+          "user_content": {
+            "parts": [
+              {
+                "text": "Check if a $100 meal and a $250 entertainment expense are both within policy"
+              }
+            ],
+            "role": "user"
+          },
+          "final_response": {
+            "parts": [
+              {
+                "text": "Meals $100 exceeds $75 limit. Entertainment $250 exceeds $150 limit. Both need manager review."
+              }
+            ],
+            "role": "model"
+          },
+          "intermediate_data": {
+            "tool_uses": [
+              {
+                "name": "wrangler_expense_mcp_check_expense_policy",
+                "args": {
+                  "category": "meals",
+                  "amount": 100
+                }
+              },
+              {
+                "name": "wrangler_expense_mcp_check_expense_policy",
+                "args": {
+                  "category": "entertainment",
+                  "amount": 250
+                }
+              }
+            ]
+          }
+        }
+      ],
+      "session_input": {
+        "app_name": "sonnet_opt",
+        "user_id": "eval_user",
+        "category": "policy",
+        "tier": "medium"
+      }
+    },
+    {
+      "eval_id": "case_20_medium_expense",
+      "conversation": [
+        {
+          "user_content": {
+            "parts": [
+              {
+                "text": "Show expense history for EMP001 and flag any items that exceeded policy limits"
+              }
+            ],
+            "role": "user"
+          },
+          "final_response": {
+            "parts": [
+              {
+                "text": "Here are the expenses for EMP001. I've reviewed each against the corporate policy limits and flagged any items that exceed the allowed amounts."
+              }
+            ],
+            "role": "model"
+          },
+          "intermediate_data": {
+            "tool_uses": [
+              {
+                "name": "wrangler_expense_mcp_get_user_expenses",
+                "args": {
+                  "user_id": "EMP001"
+                }
+              }
+            ]
+          }
+        }
+      ],
+      "session_input": {
+        "app_name": "sonnet_opt",
+        "user_id": "eval_user",
+        "category": "expense",
+        "tier": "medium"
+      }
+    },
+    {
+      "eval_id": "case_21_medium_planning",
+      "conversation": [
+        {
+          "user_content": {
+            "parts": [
+              {
+                "text": "Find the cheapest flight from SFO to JFK and tell me how much I'd save vs the most expensive"
+              }
+            ],
+            "role": "user"
+          },
+          "final_response": {
+            "parts": [
+              {
+                "text": "Cheapest: United FL001 at $450. Most expensive: Delta FL002 at $520. Savings: $70 (13.5%)."
+              }
+            ],
+            "role": "model"
+          },
+          "intermediate_data": {
+            "tool_uses": [
+              {
+                "name": "wrangler_search_mcp_search_flights",
+                "args": {
+                  "origin": "SFO",
+                  "destination": "JFK"
+                }
+              }
+            ]
+          }
+        }
+      ],
+      "session_input": {
+        "app_name": "sonnet_opt",
+        "user_id": "eval_user",
+        "category": "planning",
+        "tier": "medium"
+      }
+    },
+    {
+      "eval_id": "case_22_medium_booking",
+      "conversation": [
+        {
+          "user_content": {
+            "parts": [
+              {
+                "text": "Book hotel HT002 for Bob Smith June 15-18, and check if the rate is within lodging policy"
+              }
+            ],
+            "role": "user"
+          },
+          "final_response": {
+            "parts": [
+              {
+                "text": "Hotel HT002 (Palmer House, $250/night) booked for Bob Smith. Rate within $400 lodging policy."
+              }
+            ],
+            "role": "model"
+          },
+          "intermediate_data": {
+            "tool_uses": [
+              {
+                "name": "wrangler_booking_mcp_book_hotel",
+                "args": {
+                  "hotel_id": "HT002",
+                  "guest_name": "Bob Smith",
+                  "checkin": "2026-06-15",
+                  "checkout": "2026-06-18"
+                }
+              },
+              {
+                "name": "wrangler_expense_mcp_check_expense_policy",
+                "args": {
+                  "category": "lodging",
+                  "amount": 250
+                }
+              }
+            ]
+          }
+        }
+      ],
+      "session_input": {
+        "app_name": "sonnet_opt",
+        "user_id": "eval_user",
+        "category": "booking",
+        "tier": "medium"
+      }
+    },
+    {
+      "eval_id": "case_23_medium_expense",
       "conversation": [
         {
           "user_content": {
@@ -317,99 +950,13 @@
       ],
       "session_input": {
         "app_name": "sonnet_opt",
-        "user_id": "eval_user"
+        "user_id": "eval_user",
+        "category": "expense",
+        "tier": "medium"
       }
     },
     {
-      "eval_id": "case_9_medium",
-      "conversation": [
-        {
-          "user_content": {
-            "parts": [
-              {
-                "text": "Check if a $100 meal and a $250 entertainment expense are both within policy"
-              }
-            ],
-            "role": "user"
-          },
-          "final_response": {
-            "parts": [
-              {
-                "text": "Meals $100 exceeds $75 limit. Entertainment $250 exceeds $150 limit. Both need manager review."
-              }
-            ],
-            "role": "model"
-          },
-          "intermediate_data": {
-            "tool_uses": [
-              {
-                "name": "wrangler_expense_mcp_check_expense_policy",
-                "args": {
-                  "category": "meals",
-                  "amount": 100
-                }
-              },
-              {
-                "name": "wrangler_expense_mcp_check_expense_policy",
-                "args": {
-                  "category": "entertainment",
-                  "amount": 250
-                }
-              }
-            ]
-          }
-        }
-      ],
-      "session_input": {
-        "app_name": "sonnet_opt",
-        "user_id": "eval_user"
-      }
-    },
-    {
-      "eval_id": "case_10_medium",
-      "conversation": [
-        {
-          "user_content": {
-            "parts": [
-              {
-                "text": "Pull expense histories for EMP001 and EMP002, flag any policy violations, and summarize total overspend"
-              }
-            ],
-            "role": "user"
-          },
-          "final_response": {
-            "parts": [
-              {
-                "text": "I've pulled expense histories for both EMP001 and EMP002. After reviewing against policy limits, I've identified any violations and summarized the total overspend by category."
-              }
-            ],
-            "role": "model"
-          },
-          "intermediate_data": {
-            "tool_uses": [
-              {
-                "name": "wrangler_expense_mcp_get_user_expenses",
-                "args": {
-                  "user_id": "EMP001"
-                }
-              },
-              {
-                "name": "wrangler_expense_mcp_get_user_expenses",
-                "args": {
-                  "user_id": "EMP002"
-                }
-              }
-            ]
-          }
-        }
-      ],
-      "session_input": {
-        "app_name": "sonnet_opt",
-        "user_id": "eval_user"
-      }
-    },
-    {
-      "eval_id": "case_11_high",
+      "eval_id": "case_24_high_planning",
       "conversation": [
         {
           "user_content": {
@@ -465,17 +1012,19 @@
       ],
       "session_input": {
         "app_name": "sonnet_opt",
-        "user_id": "eval_user"
+        "user_id": "eval_user",
+        "category": "planning",
+        "tier": "high"
       }
     },
     {
-      "eval_id": "case_12_high",
+      "eval_id": "case_25_high_planning",
       "conversation": [
         {
           "user_content": {
             "parts": [
               {
-                "text": "Find the cheapest SFO-JFK flight, book it for Bob Smith, find a hotel within lodging policy, and submit a pre-trip expense estimate"
+                "text": "Compare flights from SFO to JFK vs LAX to ORD, and find hotels in each destination city"
               }
             ],
             "role": "user"
@@ -483,7 +1032,7 @@
           "final_response": {
             "parts": [
               {
-                "text": "Cheapest: FL001 $450. Booked for Bob Smith. Grand Hyatt $320 within $400 policy. Pre-trip estimate submitted."
+                "text": "SFO-JFK: FL001 $450, FL002 $520. NYC hotels: Grand Hyatt $320, Budget Inn $120. LAX-ORD: FL003 $380. Chicago hotels: Palmer House $250."
               }
             ],
             "role": "model"
@@ -498,10 +1047,10 @@
                 }
               },
               {
-                "name": "wrangler_booking_mcp_book_flight",
+                "name": "wrangler_search_mcp_search_flights",
                 "args": {
-                  "flight_id": "FL001",
-                  "passenger_name": "Bob Smith"
+                  "origin": "LAX",
+                  "destination": "ORD"
                 }
               },
               {
@@ -511,10 +1060,9 @@
                 }
               },
               {
-                "name": "wrangler_expense_mcp_check_expense_policy",
+                "name": "wrangler_search_mcp_search_hotels",
                 "args": {
-                  "category": "lodging",
-                  "amount": 320
+                  "city": "Chicago"
                 }
               }
             ]
@@ -523,63 +1071,13 @@
       ],
       "session_input": {
         "app_name": "sonnet_opt",
-        "user_id": "eval_user"
+        "user_id": "eval_user",
+        "category": "planning",
+        "tier": "high"
       }
     },
     {
-      "eval_id": "case_13_high",
-      "conversation": [
-        {
-          "user_content": {
-            "parts": [
-              {
-                "text": "Review EMP002's expense history, check all policy categories, and submit a $80 supplies expense for EMP002"
-              }
-            ],
-            "role": "user"
-          },
-          "final_response": {
-            "parts": [
-              {
-                "text": "EMP002 history reviewed. Policy limits: meals $75, transport $200, lodging $400, supplies $100, entertainment $150. Supplies $80 submitted, approved."
-              }
-            ],
-            "role": "model"
-          },
-          "intermediate_data": {
-            "tool_uses": [
-              {
-                "name": "wrangler_expense_mcp_get_user_expenses",
-                "args": {
-                  "user_id": "EMP002"
-                }
-              },
-              {
-                "name": "wrangler_expense_mcp_check_expense_policy",
-                "args": {
-                  "category": "supplies",
-                  "amount": 80
-                }
-              },
-              {
-                "name": "wrangler_expense_mcp_submit_expense",
-                "args": {
-                  "user_id": "EMP002",
-                  "category": "supplies",
-                  "amount": 80
-                }
-              }
-            ]
-          }
-        }
-      ],
-      "session_input": {
-        "app_name": "sonnet_opt",
-        "user_id": "eval_user"
-      }
-    },
-    {
-      "eval_id": "case_14_high",
+      "eval_id": "case_26_high_planning",
       "conversation": [
         {
           "user_content": {
@@ -633,17 +1131,19 @@
       ],
       "session_input": {
         "app_name": "sonnet_opt",
-        "user_id": "eval_user"
+        "user_id": "eval_user",
+        "category": "planning",
+        "tier": "high"
       }
     },
     {
-      "eval_id": "case_15_high",
+      "eval_id": "case_27_high_expense",
       "conversation": [
         {
           "user_content": {
             "parts": [
               {
-                "text": "Compare flights from SFO to JFK vs LAX to ORD, and find hotels in each destination city"
+                "text": "Review EMP002's expense history, check all policy categories, and submit a $80 supplies expense for EMP002"
               }
             ],
             "role": "user"
@@ -651,7 +1151,61 @@
           "final_response": {
             "parts": [
               {
-                "text": "SFO-JFK: FL001 $450, FL002 $520. NYC hotels: Grand Hyatt $320, Budget Inn $120. LAX-ORD: FL003 $380. Chicago hotels: Palmer House $250."
+                "text": "EMP002 history reviewed. Policy limits: meals $75, transport $200, lodging $400, supplies $100, entertainment $150. Supplies $80 submitted, approved."
+              }
+            ],
+            "role": "model"
+          },
+          "intermediate_data": {
+            "tool_uses": [
+              {
+                "name": "wrangler_expense_mcp_get_user_expenses",
+                "args": {
+                  "user_id": "EMP002"
+                }
+              },
+              {
+                "name": "wrangler_expense_mcp_check_expense_policy",
+                "args": {
+                  "category": "supplies",
+                  "amount": 80
+                }
+              },
+              {
+                "name": "wrangler_expense_mcp_submit_expense",
+                "args": {
+                  "user_id": "EMP002",
+                  "category": "supplies",
+                  "amount": 80
+                }
+              }
+            ]
+          }
+        }
+      ],
+      "session_input": {
+        "app_name": "sonnet_opt",
+        "user_id": "eval_user",
+        "category": "expense",
+        "tier": "high"
+      }
+    },
+    {
+      "eval_id": "case_28_high_planning",
+      "conversation": [
+        {
+          "user_content": {
+            "parts": [
+              {
+                "text": "Find the cheapest SFO-JFK flight, book it for Bob Smith, find a hotel within lodging policy, and submit a pre-trip expense estimate"
+              }
+            ],
+            "role": "user"
+          },
+          "final_response": {
+            "parts": [
+              {
+                "text": "Cheapest: FL001 $450. Booked for Bob Smith. Grand Hyatt $320 within $400 policy. Pre-trip estimate submitted."
               }
             ],
             "role": "model"
@@ -666,10 +1220,10 @@
                 }
               },
               {
-                "name": "wrangler_search_mcp_search_flights",
+                "name": "wrangler_booking_mcp_book_flight",
                 "args": {
-                  "origin": "LAX",
-                  "destination": "ORD"
+                  "flight_id": "FL001",
+                  "passenger_name": "Bob Smith"
                 }
               },
               {
@@ -679,9 +1233,10 @@
                 }
               },
               {
-                "name": "wrangler_search_mcp_search_hotels",
+                "name": "wrangler_expense_mcp_check_expense_policy",
                 "args": {
-                  "city": "Chicago"
+                  "category": "lodging",
+                  "amount": 320
                 }
               }
             ]
@@ -690,7 +1245,1611 @@
       ],
       "session_input": {
         "app_name": "sonnet_opt",
-        "user_id": "eval_user"
+        "user_id": "eval_user",
+        "category": "planning",
+        "tier": "high"
+      }
+    },
+    {
+      "eval_id": "case_29_high_expense",
+      "conversation": [
+        {
+          "user_content": {
+            "parts": [
+              {
+                "text": "Pull expense histories for EMP001 and EMP002, flag any policy violations, and summarize total overspend"
+              }
+            ],
+            "role": "user"
+          },
+          "final_response": {
+            "parts": [
+              {
+                "text": "I've pulled expense histories for both EMP001 and EMP002. After reviewing against policy limits, I've identified any violations and summarized the total overspend by category."
+              }
+            ],
+            "role": "model"
+          },
+          "intermediate_data": {
+            "tool_uses": [
+              {
+                "name": "wrangler_expense_mcp_get_user_expenses",
+                "args": {
+                  "user_id": "EMP001"
+                }
+              },
+              {
+                "name": "wrangler_expense_mcp_get_user_expenses",
+                "args": {
+                  "user_id": "EMP002"
+                }
+              }
+            ]
+          }
+        }
+      ],
+      "session_input": {
+        "app_name": "sonnet_opt",
+        "user_id": "eval_user",
+        "category": "expense",
+        "tier": "high"
+      }
+    },
+    {
+      "eval_id": "case_30_low_search",
+      "conversation": [
+        {
+          "user_content": {
+            "parts": [
+              {
+                "text": "Find flights from SFO to Denver"
+              }
+            ],
+            "role": "user"
+          },
+          "final_response": {
+            "parts": [
+              {
+                "text": "United FL008 from SFO to DEN at $320, departing 09:00."
+              }
+            ],
+            "role": "model"
+          },
+          "intermediate_data": {
+            "tool_uses": [
+              {
+                "name": "wrangler_search_mcp_search_flights",
+                "args": {
+                  "origin": "SFO",
+                  "destination": "DEN"
+                }
+              }
+            ]
+          }
+        }
+      ],
+      "session_input": {
+        "app_name": "sonnet_opt",
+        "user_id": "eval_user",
+        "category": "search",
+        "tier": "low"
+      }
+    },
+    {
+      "eval_id": "case_31_low_search",
+      "conversation": [
+        {
+          "user_content": {
+            "parts": [
+              {
+                "text": "Search for hotels in Boston"
+              }
+            ],
+            "role": "user"
+          },
+          "final_response": {
+            "parts": [
+              {
+                "text": "The Liberty Boston at $350/night (4.6 rating)."
+              }
+            ],
+            "role": "model"
+          },
+          "intermediate_data": {
+            "tool_uses": [
+              {
+                "name": "wrangler_search_mcp_search_hotels",
+                "args": {
+                  "city": "Boston"
+                }
+              }
+            ]
+          }
+        }
+      ],
+      "session_input": {
+        "app_name": "sonnet_opt",
+        "user_id": "eval_user",
+        "category": "search",
+        "tier": "low"
+      }
+    },
+    {
+      "eval_id": "case_32_medium_cancellation",
+      "conversation": [
+        {
+          "user_content": {
+            "parts": [
+              {
+                "text": "Book flight FL003 for Carol Davis, then immediately cancel the booking"
+              }
+            ],
+            "role": "user"
+          },
+          "final_response": {
+            "parts": [
+              {
+                "text": "Flight FL003 booked for Carol Davis. Booking has been cancelled successfully."
+              }
+            ],
+            "role": "model"
+          },
+          "intermediate_data": {
+            "tool_uses": [
+              {
+                "name": "wrangler_booking_mcp_book_flight",
+                "args": {
+                  "flight_id": "FL003",
+                  "passenger_name": "Carol Davis"
+                }
+              },
+              {
+                "name": "wrangler_booking_mcp_cancel_booking",
+                "args": {}
+              }
+            ]
+          }
+        }
+      ],
+      "session_input": {
+        "app_name": "sonnet_opt",
+        "user_id": "eval_user",
+        "category": "cancellation",
+        "tier": "medium"
+      }
+    },
+    {
+      "eval_id": "case_33_medium_cancellation",
+      "conversation": [
+        {
+          "user_content": {
+            "parts": [
+              {
+                "text": "Book hotel HT001 for Dave Wilson June 15-17, then show me the booking details"
+              }
+            ],
+            "role": "user"
+          },
+          "final_response": {
+            "parts": [
+              {
+                "text": "Hotel HT001 booked for Dave Wilson (June 15-17). Booking details: Grand Hyatt New York, status confirmed."
+              }
+            ],
+            "role": "model"
+          },
+          "intermediate_data": {
+            "tool_uses": [
+              {
+                "name": "wrangler_booking_mcp_book_hotel",
+                "args": {
+                  "hotel_id": "HT001",
+                  "guest_name": "Dave Wilson",
+                  "checkin": "2026-06-15",
+                  "checkout": "2026-06-17"
+                }
+              },
+              {
+                "name": "wrangler_booking_mcp_get_booking_details",
+                "args": {}
+              }
+            ]
+          }
+        }
+      ],
+      "session_input": {
+        "app_name": "sonnet_opt",
+        "user_id": "eval_user",
+        "category": "cancellation",
+        "tier": "medium"
+      }
+    },
+    {
+      "eval_id": "case_34_low_boundary",
+      "conversation": [
+        {
+          "user_content": {
+            "parts": [
+              {
+                "text": "Is a $75 meal expense within policy?"
+              }
+            ],
+            "role": "user"
+          },
+          "final_response": {
+            "parts": [
+              {
+                "text": "A $75 meal expense is exactly at the corporate policy limit of $75 and is within policy."
+              }
+            ],
+            "role": "model"
+          },
+          "intermediate_data": {
+            "tool_uses": [
+              {
+                "name": "wrangler_expense_mcp_check_expense_policy",
+                "args": {
+                  "category": "meals",
+                  "amount": 75
+                }
+              }
+            ]
+          }
+        }
+      ],
+      "session_input": {
+        "app_name": "sonnet_opt",
+        "user_id": "eval_user",
+        "category": "boundary",
+        "tier": "low"
+      }
+    },
+    {
+      "eval_id": "case_35_low_boundary",
+      "conversation": [
+        {
+          "user_content": {
+            "parts": [
+              {
+                "text": "Is a $75.01 meal expense within policy?"
+              }
+            ],
+            "role": "user"
+          },
+          "final_response": {
+            "parts": [
+              {
+                "text": "A $75.01 meal expense exceeds the corporate policy limit of $75 by $0.01. This requires manager review."
+              }
+            ],
+            "role": "model"
+          },
+          "intermediate_data": {
+            "tool_uses": [
+              {
+                "name": "wrangler_expense_mcp_check_expense_policy",
+                "args": {
+                  "category": "meals",
+                  "amount": 75.01
+                }
+              }
+            ]
+          }
+        }
+      ],
+      "session_input": {
+        "app_name": "sonnet_opt",
+        "user_id": "eval_user",
+        "category": "boundary",
+        "tier": "low"
+      }
+    },
+    {
+      "eval_id": "case_36_medium_boundary",
+      "conversation": [
+        {
+          "user_content": {
+            "parts": [
+              {
+                "text": "Check if these expenses are within policy: $200 transport, $400 lodging, and $150 entertainment"
+              }
+            ],
+            "role": "user"
+          },
+          "final_response": {
+            "parts": [
+              {
+                "text": "Transport $200: within $200 limit. Lodging $400: within $400 limit. Entertainment $150: within $150 limit. All exactly at policy limits."
+              }
+            ],
+            "role": "model"
+          },
+          "intermediate_data": {
+            "tool_uses": [
+              {
+                "name": "wrangler_expense_mcp_check_expense_policy",
+                "args": {
+                  "category": "transport",
+                  "amount": 200
+                }
+              },
+              {
+                "name": "wrangler_expense_mcp_check_expense_policy",
+                "args": {
+                  "category": "lodging",
+                  "amount": 400
+                }
+              },
+              {
+                "name": "wrangler_expense_mcp_check_expense_policy",
+                "args": {
+                  "category": "entertainment",
+                  "amount": 150
+                }
+              }
+            ]
+          }
+        }
+      ],
+      "session_input": {
+        "app_name": "sonnet_opt",
+        "user_id": "eval_user",
+        "category": "boundary",
+        "tier": "medium"
+      }
+    },
+    {
+      "eval_id": "case_37_low_error_handling",
+      "conversation": [
+        {
+          "user_content": {
+            "parts": [
+              {
+                "text": "Cancel booking BK-DOESNOTEXIST"
+              }
+            ],
+            "role": "user"
+          },
+          "final_response": {
+            "parts": [
+              {
+                "text": "Booking BK-DOESNOTEXIST was not found. Please verify the booking ID and try again."
+              }
+            ],
+            "role": "model"
+          },
+          "intermediate_data": {
+            "tool_uses": [
+              {
+                "name": "wrangler_booking_mcp_cancel_booking",
+                "args": {
+                  "booking_id": "BK-DOESNOTEXIST"
+                }
+              }
+            ]
+          }
+        }
+      ],
+      "session_input": {
+        "app_name": "sonnet_opt",
+        "user_id": "eval_user",
+        "category": "error_handling",
+        "tier": "low"
+      }
+    },
+    {
+      "eval_id": "case_38_low_error_handling",
+      "conversation": [
+        {
+          "user_content": {
+            "parts": [
+              {
+                "text": "Show me the details for booking BK-INVALID123"
+              }
+            ],
+            "role": "user"
+          },
+          "final_response": {
+            "parts": [
+              {
+                "text": "Booking BK-INVALID123 was not found. Please check the booking ID."
+              }
+            ],
+            "role": "model"
+          },
+          "intermediate_data": {
+            "tool_uses": [
+              {
+                "name": "wrangler_booking_mcp_get_booking_details",
+                "args": {
+                  "booking_id": "BK-INVALID123"
+                }
+              }
+            ]
+          }
+        }
+      ],
+      "session_input": {
+        "app_name": "sonnet_opt",
+        "user_id": "eval_user",
+        "category": "error_handling",
+        "tier": "low"
+      }
+    },
+    {
+      "eval_id": "case_39_medium_error_handling",
+      "conversation": [
+        {
+          "user_content": {
+            "parts": [
+              {
+                "text": "Find flights from Denver to Tokyo and book the cheapest one for Sam Chen"
+              }
+            ],
+            "role": "user"
+          },
+          "final_response": {
+            "parts": [
+              {
+                "text": "No flights found from Denver (DEN) to Tokyo (NRT). Unable to proceed with booking."
+              }
+            ],
+            "role": "model"
+          },
+          "intermediate_data": {
+            "tool_uses": [
+              {
+                "name": "wrangler_search_mcp_search_flights",
+                "args": {
+                  "origin": "DEN",
+                  "destination": "NRT"
+                }
+              }
+            ]
+          }
+        }
+      ],
+      "session_input": {
+        "app_name": "sonnet_opt",
+        "user_id": "eval_user",
+        "category": "error_handling",
+        "tier": "medium"
+      }
+    },
+    {
+      "eval_id": "case_40_medium_booking",
+      "conversation": [
+        {
+          "user_content": {
+            "parts": [
+              {
+                "text": "Book flight FL002 for Emily Garcia and FL001 for her colleague James Park"
+              }
+            ],
+            "role": "user"
+          },
+          "final_response": {
+            "parts": [
+              {
+                "text": "Flight FL002 booked for Emily Garcia. Flight FL001 booked for James Park. Both bookings confirmed."
+              }
+            ],
+            "role": "model"
+          },
+          "intermediate_data": {
+            "tool_uses": [
+              {
+                "name": "wrangler_booking_mcp_book_flight",
+                "args": {
+                  "flight_id": "FL002",
+                  "passenger_name": "Emily Garcia"
+                }
+              },
+              {
+                "name": "wrangler_booking_mcp_book_flight",
+                "args": {
+                  "flight_id": "FL001",
+                  "passenger_name": "James Park"
+                }
+              }
+            ]
+          }
+        }
+      ],
+      "session_input": {
+        "app_name": "sonnet_opt",
+        "user_id": "eval_user",
+        "category": "booking",
+        "tier": "medium"
+      }
+    },
+    {
+      "eval_id": "case_41_low_booking",
+      "conversation": [
+        {
+          "user_content": {
+            "parts": [
+              {
+                "text": "Book hotel HT001 for Sarah Lee from June 20 to June 25"
+              }
+            ],
+            "role": "user"
+          },
+          "final_response": {
+            "parts": [
+              {
+                "text": "Hotel HT001 (Grand Hyatt New York) booked for Sarah Lee, June 20-25. 5-night stay confirmed."
+              }
+            ],
+            "role": "model"
+          },
+          "intermediate_data": {
+            "tool_uses": [
+              {
+                "name": "wrangler_booking_mcp_book_hotel",
+                "args": {
+                  "hotel_id": "HT001",
+                  "guest_name": "Sarah Lee",
+                  "checkin": "2026-06-20",
+                  "checkout": "2026-06-25"
+                }
+              }
+            ]
+          }
+        }
+      ],
+      "session_input": {
+        "app_name": "sonnet_opt",
+        "user_id": "eval_user",
+        "category": "booking",
+        "tier": "low"
+      }
+    },
+    {
+      "eval_id": "case_42_medium_booking",
+      "conversation": [
+        {
+          "user_content": {
+            "parts": [
+              {
+                "text": "Search for flights from LAX to JFK, then book the cheapest one for me \u2014 my name is Tom Reyes"
+              }
+            ],
+            "role": "user"
+          },
+          "final_response": {
+            "parts": [
+              {
+                "text": "Found LAX to JFK flights. Cheapest option booked for Tom Reyes."
+              }
+            ],
+            "role": "model"
+          },
+          "intermediate_data": {
+            "tool_uses": [
+              {
+                "name": "wrangler_search_mcp_search_flights",
+                "args": {
+                  "origin": "LAX",
+                  "destination": "JFK"
+                }
+              },
+              {
+                "name": "wrangler_booking_mcp_book_flight",
+                "args": {
+                  "passenger_name": "Tom Reyes"
+                }
+              }
+            ]
+          }
+        }
+      ],
+      "session_input": {
+        "app_name": "sonnet_opt",
+        "user_id": "eval_user",
+        "category": "booking",
+        "tier": "medium"
+      }
+    },
+    {
+      "eval_id": "case_43_low_booking",
+      "conversation": [
+        {
+          "user_content": {
+            "parts": [
+              {
+                "text": "List all bookings for user EMP001"
+              }
+            ],
+            "role": "user"
+          },
+          "final_response": {
+            "parts": [
+              {
+                "text": "Here are the bookings for user EMP001."
+              }
+            ],
+            "role": "model"
+          },
+          "intermediate_data": {
+            "tool_uses": [
+              {
+                "name": "wrangler_booking_mcp_list_all_bookings",
+                "args": {
+                  "user_id": "EMP001"
+                }
+              }
+            ]
+          }
+        }
+      ],
+      "session_input": {
+        "app_name": "sonnet_opt",
+        "user_id": "eval_user",
+        "category": "booking",
+        "tier": "low"
+      }
+    },
+    {
+      "eval_id": "case_44_high_booking",
+      "conversation": [
+        {
+          "user_content": {
+            "parts": [
+              {
+                "text": "Book hotel HT002 for Mark Chen June 10-12 and submit a $250 lodging expense for EMP003"
+              }
+            ],
+            "role": "user"
+          },
+          "final_response": {
+            "parts": [
+              {
+                "text": "Hotel HT002 booked for Mark Chen (June 10-12). Lodging expense of $250 submitted for EMP003, within $400 policy."
+              }
+            ],
+            "role": "model"
+          },
+          "intermediate_data": {
+            "tool_uses": [
+              {
+                "name": "wrangler_booking_mcp_book_hotel",
+                "args": {
+                  "hotel_id": "HT002",
+                  "guest_name": "Mark Chen",
+                  "checkin": "2026-06-10",
+                  "checkout": "2026-06-12"
+                }
+              },
+              {
+                "name": "wrangler_expense_mcp_check_expense_policy",
+                "args": {
+                  "category": "lodging",
+                  "amount": 250
+                }
+              },
+              {
+                "name": "wrangler_expense_mcp_submit_expense",
+                "args": {
+                  "user_id": "EMP003",
+                  "category": "lodging",
+                  "amount": 250,
+                  "description": "hotel stay"
+                }
+              }
+            ]
+          }
+        }
+      ],
+      "session_input": {
+        "app_name": "sonnet_opt",
+        "user_id": "eval_user",
+        "category": "booking",
+        "tier": "high"
+      }
+    },
+    {
+      "eval_id": "case_45_low_booking",
+      "conversation": [
+        {
+          "user_content": {
+            "parts": [
+              {
+                "text": "Get the details for my booking \u2014 the ID is BK-001"
+              }
+            ],
+            "role": "user"
+          },
+          "final_response": {
+            "parts": [
+              {
+                "text": "Booking BK-001 details retrieved."
+              }
+            ],
+            "role": "model"
+          },
+          "intermediate_data": {
+            "tool_uses": [
+              {
+                "name": "wrangler_booking_mcp_get_booking_details",
+                "args": {
+                  "booking_id": "BK-001"
+                }
+              }
+            ]
+          }
+        }
+      ],
+      "session_input": {
+        "app_name": "sonnet_opt",
+        "user_id": "eval_user",
+        "category": "booking",
+        "tier": "low"
+      }
+    },
+    {
+      "eval_id": "case_46_low_cancellation",
+      "conversation": [
+        {
+          "user_content": {
+            "parts": [
+              {
+                "text": "Cancel booking BK-002"
+              }
+            ],
+            "role": "user"
+          },
+          "final_response": {
+            "parts": [
+              {
+                "text": "Booking BK-002 has been cancelled successfully."
+              }
+            ],
+            "role": "model"
+          },
+          "intermediate_data": {
+            "tool_uses": [
+              {
+                "name": "wrangler_booking_mcp_cancel_booking",
+                "args": {
+                  "booking_id": "BK-002"
+                }
+              }
+            ]
+          }
+        }
+      ],
+      "session_input": {
+        "app_name": "sonnet_opt",
+        "user_id": "eval_user",
+        "category": "cancellation",
+        "tier": "low"
+      }
+    },
+    {
+      "eval_id": "case_47_medium_cancellation",
+      "conversation": [
+        {
+          "user_content": {
+            "parts": [
+              {
+                "text": "Cancel booking BK-003 and then rebook flight FL001 for the same passenger"
+              }
+            ],
+            "role": "user"
+          },
+          "final_response": {
+            "parts": [
+              {
+                "text": "Booking BK-003 cancelled. Flight FL001 rebooked for Bob Smith."
+              }
+            ],
+            "role": "model"
+          },
+          "intermediate_data": {
+            "tool_uses": [
+              {
+                "name": "wrangler_booking_mcp_get_booking_details",
+                "args": {
+                  "booking_id": "BK-003"
+                }
+              },
+              {
+                "name": "wrangler_booking_mcp_cancel_booking",
+                "args": {
+                  "booking_id": "BK-003"
+                }
+              },
+              {
+                "name": "wrangler_booking_mcp_book_flight",
+                "args": {
+                  "flight_id": "FL001",
+                  "passenger_name": "Bob Smith"
+                }
+              }
+            ]
+          }
+        }
+      ],
+      "session_input": {
+        "app_name": "sonnet_opt",
+        "user_id": "eval_user",
+        "category": "cancellation",
+        "tier": "medium"
+      }
+    },
+    {
+      "eval_id": "case_48_medium_cancellation",
+      "conversation": [
+        {
+          "user_content": {
+            "parts": [
+              {
+                "text": "I need to cancel my hotel booking BK-005 and find a cheaper hotel in New York instead"
+              }
+            ],
+            "role": "user"
+          },
+          "final_response": {
+            "parts": [
+              {
+                "text": "Hotel booking BK-005 cancelled. Here are cheaper hotel options in New York."
+              }
+            ],
+            "role": "model"
+          },
+          "intermediate_data": {
+            "tool_uses": [
+              {
+                "name": "wrangler_booking_mcp_cancel_booking",
+                "args": {
+                  "booking_id": "BK-005"
+                }
+              },
+              {
+                "name": "wrangler_search_mcp_search_hotels",
+                "args": {
+                  "city": "New York"
+                }
+              }
+            ]
+          }
+        }
+      ],
+      "session_input": {
+        "app_name": "sonnet_opt",
+        "user_id": "eval_user",
+        "category": "cancellation",
+        "tier": "medium"
+      }
+    },
+    {
+      "eval_id": "case_49_medium_cancellation",
+      "conversation": [
+        {
+          "user_content": {
+            "parts": [
+              {
+                "text": "List all bookings for EMP002 and cancel any hotel bookings"
+              }
+            ],
+            "role": "user"
+          },
+          "final_response": {
+            "parts": [
+              {
+                "text": "Retrieved bookings for EMP002. Hotel bookings identified and cancelled."
+              }
+            ],
+            "role": "model"
+          },
+          "intermediate_data": {
+            "tool_uses": [
+              {
+                "name": "wrangler_booking_mcp_list_all_bookings",
+                "args": {
+                  "user_id": "EMP002"
+                }
+              },
+              {
+                "name": "wrangler_booking_mcp_cancel_booking",
+                "args": {
+                  "booking_id": "BK-005"
+                }
+              }
+            ]
+          }
+        }
+      ],
+      "session_input": {
+        "app_name": "sonnet_opt",
+        "user_id": "eval_user",
+        "category": "cancellation",
+        "tier": "medium"
+      }
+    },
+    {
+      "eval_id": "case_50_high_cancellation",
+      "conversation": [
+        {
+          "user_content": {
+            "parts": [
+              {
+                "text": "Cancel booking BK-004, find flights from SFO to LAX, and book the replacement flight for Lisa Wang"
+              }
+            ],
+            "role": "user"
+          },
+          "final_response": {
+            "parts": [
+              {
+                "text": "BK-004 cancelled. SFO-LAX flights found. Replacement flight booked for Lisa Wang."
+              }
+            ],
+            "role": "model"
+          },
+          "intermediate_data": {
+            "tool_uses": [
+              {
+                "name": "wrangler_booking_mcp_cancel_booking",
+                "args": {
+                  "booking_id": "BK-004"
+                }
+              },
+              {
+                "name": "wrangler_search_mcp_search_flights",
+                "args": {
+                  "origin": "SFO",
+                  "destination": "LAX"
+                }
+              },
+              {
+                "name": "wrangler_booking_mcp_book_flight",
+                "args": {
+                  "passenger_name": "Lisa Wang"
+                }
+              }
+            ]
+          }
+        }
+      ],
+      "session_input": {
+        "app_name": "sonnet_opt",
+        "user_id": "eval_user",
+        "category": "cancellation",
+        "tier": "high"
+      }
+    },
+    {
+      "eval_id": "case_51_low_cancellation",
+      "conversation": [
+        {
+          "user_content": {
+            "parts": [
+              {
+                "text": "Show me the details for booking BK-006 so I can decide whether to cancel it"
+              }
+            ],
+            "role": "user"
+          },
+          "final_response": {
+            "parts": [
+              {
+                "text": "Here are the details for booking BK-006."
+              }
+            ],
+            "role": "model"
+          },
+          "intermediate_data": {
+            "tool_uses": [
+              {
+                "name": "wrangler_booking_mcp_get_booking_details",
+                "args": {
+                  "booking_id": "BK-006"
+                }
+              }
+            ]
+          }
+        }
+      ],
+      "session_input": {
+        "app_name": "sonnet_opt",
+        "user_id": "eval_user",
+        "category": "cancellation",
+        "tier": "low"
+      }
+    },
+    {
+      "eval_id": "case_52_low_boundary",
+      "conversation": [
+        {
+          "user_content": {
+            "parts": [
+              {
+                "text": "Submit a $0 meals expense for water at meeting, user ID EMP001"
+              }
+            ],
+            "role": "user"
+          },
+          "final_response": {
+            "parts": [
+              {
+                "text": "A $0 expense is within the meals policy. Expense submitted for EMP001."
+              }
+            ],
+            "role": "model"
+          },
+          "intermediate_data": {
+            "tool_uses": [
+              {
+                "name": "wrangler_expense_mcp_check_expense_policy",
+                "args": {
+                  "category": "meals",
+                  "amount": 0
+                }
+              },
+              {
+                "name": "wrangler_expense_mcp_submit_expense",
+                "args": {
+                  "user_id": "EMP001",
+                  "category": "meals",
+                  "amount": 0,
+                  "description": "water at meeting"
+                }
+              }
+            ]
+          }
+        }
+      ],
+      "session_input": {
+        "app_name": "sonnet_opt",
+        "user_id": "eval_user",
+        "category": "boundary",
+        "tier": "low"
+      }
+    },
+    {
+      "eval_id": "case_53_low_boundary",
+      "conversation": [
+        {
+          "user_content": {
+            "parts": [
+              {
+                "text": "Check if a $9999 lodging expense is within policy"
+              }
+            ],
+            "role": "user"
+          },
+          "final_response": {
+            "parts": [
+              {
+                "text": "A $9,999 lodging expense greatly exceeds the $400 policy limit. Requires manager approval."
+              }
+            ],
+            "role": "model"
+          },
+          "intermediate_data": {
+            "tool_uses": [
+              {
+                "name": "wrangler_expense_mcp_check_expense_policy",
+                "args": {
+                  "category": "lodging",
+                  "amount": 9999
+                }
+              }
+            ]
+          }
+        }
+      ],
+      "session_input": {
+        "app_name": "sonnet_opt",
+        "user_id": "eval_user",
+        "category": "boundary",
+        "tier": "low"
+      }
+    },
+    {
+      "eval_id": "case_54_medium_boundary",
+      "conversation": [
+        {
+          "user_content": {
+            "parts": [
+              {
+                "text": "Submit a $200.00 transport expense for airport shuttle, user EMP002, and a $200.01 transport expense for return shuttle"
+              }
+            ],
+            "role": "user"
+          },
+          "final_response": {
+            "parts": [
+              {
+                "text": "$200 transport is at policy limit, approved. $200.01 exceeds the $200 limit by $0.01, requires review."
+              }
+            ],
+            "role": "model"
+          },
+          "intermediate_data": {
+            "tool_uses": [
+              {
+                "name": "wrangler_expense_mcp_check_expense_policy",
+                "args": {
+                  "category": "transport",
+                  "amount": 200
+                }
+              },
+              {
+                "name": "wrangler_expense_mcp_submit_expense",
+                "args": {
+                  "user_id": "EMP002",
+                  "category": "transport",
+                  "amount": 200,
+                  "description": "airport shuttle"
+                }
+              },
+              {
+                "name": "wrangler_expense_mcp_check_expense_policy",
+                "args": {
+                  "category": "transport",
+                  "amount": 200.01
+                }
+              }
+            ]
+          }
+        }
+      ],
+      "session_input": {
+        "app_name": "sonnet_opt",
+        "user_id": "eval_user",
+        "category": "boundary",
+        "tier": "medium"
+      }
+    },
+    {
+      "eval_id": "case_55_low_boundary",
+      "conversation": [
+        {
+          "user_content": {
+            "parts": [
+              {
+                "text": "Is a $149.99 entertainment expense within policy?"
+              }
+            ],
+            "role": "user"
+          },
+          "final_response": {
+            "parts": [
+              {
+                "text": "A $149.99 entertainment expense is within the $150 corporate policy limit."
+              }
+            ],
+            "role": "model"
+          },
+          "intermediate_data": {
+            "tool_uses": [
+              {
+                "name": "wrangler_expense_mcp_check_expense_policy",
+                "args": {
+                  "category": "entertainment",
+                  "amount": 149.99
+                }
+              }
+            ]
+          }
+        }
+      ],
+      "session_input": {
+        "app_name": "sonnet_opt",
+        "user_id": "eval_user",
+        "category": "boundary",
+        "tier": "low"
+      }
+    },
+    {
+      "eval_id": "case_56_medium_boundary",
+      "conversation": [
+        {
+          "user_content": {
+            "parts": [
+              {
+                "text": "Check policy for $100 supplies, then submit it for EMP003. Also check $100.01 supplies."
+              }
+            ],
+            "role": "user"
+          },
+          "final_response": {
+            "parts": [
+              {
+                "text": "$100 supplies is at the limit, approved. $100.01 exceeds the $100 supplies limit by $0.01."
+              }
+            ],
+            "role": "model"
+          },
+          "intermediate_data": {
+            "tool_uses": [
+              {
+                "name": "wrangler_expense_mcp_check_expense_policy",
+                "args": {
+                  "category": "supplies",
+                  "amount": 100
+                }
+              },
+              {
+                "name": "wrangler_expense_mcp_submit_expense",
+                "args": {
+                  "user_id": "EMP003",
+                  "category": "supplies",
+                  "amount": 100
+                }
+              },
+              {
+                "name": "wrangler_expense_mcp_check_expense_policy",
+                "args": {
+                  "category": "supplies",
+                  "amount": 100.01
+                }
+              }
+            ]
+          }
+        }
+      ],
+      "session_input": {
+        "app_name": "sonnet_opt",
+        "user_id": "eval_user",
+        "category": "boundary",
+        "tier": "medium"
+      }
+    },
+    {
+      "eval_id": "case_57_low_search",
+      "conversation": [
+        {
+          "user_content": {
+            "parts": [
+              {
+                "text": "Find flights from JFK to LAX on June 15"
+              }
+            ],
+            "role": "user"
+          },
+          "final_response": {
+            "parts": [
+              {
+                "text": "Flights from JFK to LAX on June 15 found."
+              }
+            ],
+            "role": "model"
+          },
+          "intermediate_data": {
+            "tool_uses": [
+              {
+                "name": "wrangler_search_mcp_search_flights",
+                "args": {
+                  "origin": "JFK",
+                  "destination": "LAX",
+                  "date": "2026-06-15"
+                }
+              }
+            ]
+          }
+        }
+      ],
+      "session_input": {
+        "app_name": "sonnet_opt",
+        "user_id": "eval_user",
+        "category": "search",
+        "tier": "low"
+      }
+    },
+    {
+      "eval_id": "case_58_low_search",
+      "conversation": [
+        {
+          "user_content": {
+            "parts": [
+              {
+                "text": "Search for hotels in Chicago under $300 per night"
+              }
+            ],
+            "role": "user"
+          },
+          "final_response": {
+            "parts": [
+              {
+                "text": "The Palmer House in Chicago at $250/night (4.3 rating)."
+              }
+            ],
+            "role": "model"
+          },
+          "intermediate_data": {
+            "tool_uses": [
+              {
+                "name": "wrangler_search_mcp_search_hotels",
+                "args": {
+                  "city": "Chicago",
+                  "max_price": 300
+                }
+              }
+            ]
+          }
+        }
+      ],
+      "session_input": {
+        "app_name": "sonnet_opt",
+        "user_id": "eval_user",
+        "category": "search",
+        "tier": "low"
+      }
+    },
+    {
+      "eval_id": "case_59_medium_policy",
+      "conversation": [
+        {
+          "user_content": {
+            "parts": [
+              {
+                "text": "What are the policy limits for all expense categories?"
+              }
+            ],
+            "role": "user"
+          },
+          "final_response": {
+            "parts": [
+              {
+                "text": "Meals: $75. Transport: $200. Lodging: $400. Supplies: $100. Entertainment: $150."
+              }
+            ],
+            "role": "model"
+          },
+          "intermediate_data": {
+            "tool_uses": [
+              {
+                "name": "wrangler_expense_mcp_check_expense_policy",
+                "args": {
+                  "category": "meals",
+                  "amount": 0
+                }
+              },
+              {
+                "name": "wrangler_expense_mcp_check_expense_policy",
+                "args": {
+                  "category": "transport",
+                  "amount": 0
+                }
+              },
+              {
+                "name": "wrangler_expense_mcp_check_expense_policy",
+                "args": {
+                  "category": "lodging",
+                  "amount": 0
+                }
+              },
+              {
+                "name": "wrangler_expense_mcp_check_expense_policy",
+                "args": {
+                  "category": "supplies",
+                  "amount": 0
+                }
+              },
+              {
+                "name": "wrangler_expense_mcp_check_expense_policy",
+                "args": {
+                  "category": "entertainment",
+                  "amount": 0
+                }
+              }
+            ]
+          }
+        }
+      ],
+      "session_input": {
+        "app_name": "sonnet_opt",
+        "user_id": "eval_user",
+        "category": "policy",
+        "tier": "medium"
+      }
+    },
+    {
+      "eval_id": "case_60_low_policy",
+      "conversation": [
+        {
+          "user_content": {
+            "parts": [
+              {
+                "text": "Is a $300 lodging expense within policy?"
+              }
+            ],
+            "role": "user"
+          },
+          "final_response": {
+            "parts": [
+              {
+                "text": "A $300 lodging expense is within the $400 policy limit."
+              }
+            ],
+            "role": "model"
+          },
+          "intermediate_data": {
+            "tool_uses": [
+              {
+                "name": "wrangler_expense_mcp_check_expense_policy",
+                "args": {
+                  "category": "lodging",
+                  "amount": 300
+                }
+              }
+            ]
+          }
+        }
+      ],
+      "session_input": {
+        "app_name": "sonnet_opt",
+        "user_id": "eval_user",
+        "category": "policy",
+        "tier": "low"
+      }
+    },
+    {
+      "eval_id": "case_61_low_error_handling",
+      "conversation": [
+        {
+          "user_content": {
+            "parts": [
+              {
+                "text": "Submit an expense but I forgot to mention the amount"
+              }
+            ],
+            "role": "user"
+          },
+          "final_response": {
+            "parts": [
+              {
+                "text": "I need additional information to submit an expense. Please provide the amount, category, and your user ID."
+              }
+            ],
+            "role": "model"
+          },
+          "intermediate_data": {
+            "tool_uses": []
+          }
+        }
+      ],
+      "session_input": {
+        "app_name": "sonnet_opt",
+        "user_id": "eval_user",
+        "category": "error_handling",
+        "tier": "low"
+      }
+    },
+    {
+      "eval_id": "case_62_high_planning",
+      "conversation": [
+        {
+          "user_content": {
+            "parts": [
+              {
+                "text": "Find the cheapest flight to New York, book it for me, check lodging policy, and find a budget hotel"
+              }
+            ],
+            "role": "user"
+          },
+          "final_response": {
+            "parts": [
+              {
+                "text": "Cheapest flight to JFK found and booked. Lodging policy checked. Budget hotel options in New York listed."
+              }
+            ],
+            "role": "model"
+          },
+          "intermediate_data": {
+            "tool_uses": [
+              {
+                "name": "wrangler_search_mcp_search_flights",
+                "args": {
+                  "destination": "JFK"
+                }
+              },
+              {
+                "name": "wrangler_expense_mcp_check_expense_policy",
+                "args": {
+                  "category": "lodging"
+                }
+              },
+              {
+                "name": "wrangler_search_mcp_search_hotels",
+                "args": {
+                  "city": "New York"
+                }
+              }
+            ]
+          }
+        }
+      ],
+      "session_input": {
+        "app_name": "sonnet_opt",
+        "user_id": "eval_user",
+        "category": "planning",
+        "tier": "high"
+      }
+    },
+    {
+      "eval_id": "case_63_medium_expense",
+      "conversation": [
+        {
+          "user_content": {
+            "parts": [
+              {
+                "text": "Submit a $30 transport expense for taxi to airport, user ID EMP001"
+              }
+            ],
+            "role": "user"
+          },
+          "final_response": {
+            "parts": [
+              {
+                "text": "Transport expense of $30 submitted for EMP001. Within $200 policy limit, approved."
+              }
+            ],
+            "role": "model"
+          },
+          "intermediate_data": {
+            "tool_uses": [
+              {
+                "name": "wrangler_expense_mcp_check_expense_policy",
+                "args": {
+                  "category": "transport",
+                  "amount": 30
+                }
+              },
+              {
+                "name": "wrangler_expense_mcp_submit_expense",
+                "args": {
+                  "user_id": "EMP001",
+                  "category": "transport",
+                  "amount": 30,
+                  "description": "taxi to airport"
+                }
+              }
+            ]
+          }
+        }
+      ],
+      "session_input": {
+        "app_name": "sonnet_opt",
+        "user_id": "eval_user",
+        "category": "expense",
+        "tier": "medium"
+      }
+    },
+    {
+      "eval_id": "case_64_low_error_handling",
+      "conversation": [
+        {
+          "user_content": {
+            "parts": [
+              {
+                "text": "Can you help me write a Python script to process CSV files?"
+              }
+            ],
+            "role": "user"
+          },
+          "final_response": {
+            "parts": [
+              {
+                "text": "I can only help with travel bookings and expense management. For coding assistance, please use a different tool."
+              }
+            ],
+            "role": "model"
+          },
+          "intermediate_data": {
+            "tool_uses": []
+          }
+        }
+      ],
+      "session_input": {
+        "app_name": "sonnet_opt",
+        "user_id": "eval_user",
+        "category": "error_handling",
+        "tier": "low"
       }
     }
   ]

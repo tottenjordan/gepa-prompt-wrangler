@@ -13,7 +13,7 @@ from pathlib import Path
 import sys
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from wrangler.config import PAPERBANANA_PROJECT, PAPERBANANA_LOCATION, DIAGRAMS_DIR
+from wrangler.core.config import PAPERBANANA_PROJECT, PAPERBANANA_LOCATION, DIAGRAMS_DIR
 
 DIAGRAM_SOURCES_DIR = Path("docs/diagram_sources")
 
@@ -42,6 +42,7 @@ def generate_diagram(source_path: str, caption: str, output_dir: str = None):
         "-o", str(dest),
         "--vlm-provider", "gemini",
         "--image-provider", "google_imagen",
+        "--image-model", "gemini-3-pro-image",
         "-n", "2",
     ]
 

@@ -1,9 +1,6 @@
 """Example travel agent with mock function tools for wrangler evaluation."""
 
 from google.adk.agents import Agent
-from google.adk.tools import FunctionTool
-
-from wrangler.config import resolve_model
 
 
 # ---------------------------------------------------------------------------
@@ -148,20 +145,39 @@ def generate_expense_report(booking_ref: str, trip_dates: str) -> dict:
     }
 
 
-# ---------------------------------------------------------------------------
-# Agent
-# ---------------------------------------------------------------------------
+TOOLS = [
+    search_flights,
+    search_hotels,
+    check_policy,
+    create_booking,
+    generate_expense_report,
+]
 
-agent = Agent(
-    model=resolve_model("gemini-3.5-flash"),
-    name="travel_agent",
-    description="Corporate travel assistant that searches flights and hotels, checks policies, books travel, and generates expense reports.",
-    instruction="You are a helpful corporate travel assistant. Use the available tools to help employees with travel planning, booking, and expense management.",
-    tools=[
-        search_flights,
-        search_hotels,
-        check_policy,
-        create_booking,
-        generate_expense_report,
-    ],
+DEFAULT_MODEL = "gemini-3.5-flash"
+DEFAULT_INSTRUCTION = (
+    "You are a helpful corporate travel assistant. Use the available tools "
+    "to help employees with travel planning, booking, and expense management."
 )
+
+
+def create_agent(model: str = DEFAULT_MODEL, instruction: str = DEFAULT_INSTRUCTION) -> Agent:
+    """Factory function for wrangler integration.
+
+    Args:
+        model: Model string (e.g. "gemini-3.5-flash", "claude-sonnet-4-6").
+            Wrangler resolves this to the appropriate backend.
+        instruction: System instruction to use for this agent.
+    """
+    from wrangler.core.config import resolve_model
+    return Agent(
+        model=resolve_model(model),
+        name="travel_agent",
+        description="Corporate travel assistant that searches flights and hotels, checks policies, books travel, and generates expense reports.",
+        instruction=instruction,
+        tools=TOOLS,
+    )
+
+
+# Backward-compatible default instance
+agent = create_agent()
+root_agent = agent

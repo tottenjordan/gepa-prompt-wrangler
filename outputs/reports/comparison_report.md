@@ -16,13 +16,21 @@ GEPA expanded this into specialized, model-tailored instructions:
 
 | Agent | Model | Before | After | Expansion |
 |-------|-------|--------|-------|-----------|
-| Lite | `gemini-3.1-flash-lite` | 78 chars | 2106 chars | 27x |
-| Flash | `gemini-3.5-flash` | 78 chars | 4222 chars | 54x |
-| Pro | `gemini-3.1-pro-preview` | 78 chars | 1926 chars | 25x |
-| Sonnet | `claude-sonnet-4-6` | 78 chars | 2369 chars | 30x |
-| Opus | `claude-opus-4-6` | 78 chars | 1930 chars | 25x |
+| Lite | `gemini-3.1-flash-lite` | 78 chars | 3954 chars | 51x |
+| Flash | `gemini-3.5-flash` | 78 chars | 5004 chars | 64x |
+| Pro | `gemini-3.1-pro-preview` | 78 chars | 3332 chars | 43x |
+| Sonnet | `claude-sonnet-4-6` | 78 chars | 2909 chars | 37x |
+| Opus | `claude-opus-4-6` | 78 chars | 3193 chars | 41x |
 
 ![Before/After Overview](diagrams/before_after_overview.png)
+
+## Eval Dataset
+
+- **Total cases:** 40
+- **Low complexity:** 21 cases
+- **Medium complexity:** 13 cases
+- **High complexity:** 6 cases
+- **Categories:** booking, boundary, cancellation, error_handling, expense, planning, policy, search
 
 ## Baseline vs Optimized Scores
 
@@ -30,35 +38,35 @@ GEPA expanded this into specialized, model-tailored instructions:
 
 | Metric |Lite | Flash | Pro | Sonnet | Opus |
 |--------|------ | ------ | ------ | ------ | ------ |
-| Response Quality | 0.94 | 1.00 | 0.83 | 0.77 | 0.84 |
-| Hallucination | 0.99 | 1.00 | 1.00 | 0.89 | 0.95 |
-| Safety | 0.92 | 1.00 | 0.81 | 1.00 | 0.83 |
-| Tool Use | 0.36 | 0.40 | 0.41 | 0.41 | 0.43 |
-| Instruction Following | 0.37 | 0.48 | 0.50 | 0.35 | 0.73 |
-| Response Match | 0.43 | 0.42 | 0.48 | 0.29 | 0.72 |
+| Response Quality | 0.86 | 0.92 | 0.92 | 0.89 | 0.89 |
+| Hallucination | 1.00 | 1.00 | 1.00 | 0.91 | 0.91 |
+| Safety | 1.00 | 0.98 | 0.92 | 0.88 | 0.70 |
+| Tool Use | 0.39 | 0.41 | 0.42 | 0.41 | 0.42 |
+| Instruction Following | 0.76 | 0.80 | 0.73 | 0.81 | 0.79 |
+| Response Match | 0.81 | 0.78 | 0.80 | 0.83 | 0.91 |
 
-### After Optimization (GEPA wrangler_v2)
+### After Optimization (GEPA)
 
 | Metric |Lite | Flash | Pro | Sonnet | Opus |
 |--------|------ | ------ | ------ | ------ | ------ |
-| Response Quality | 0.92 | 0.93 | 0.96 | 0.93 | 0.86 |
-| Hallucination | 0.85 | 0.99 | 0.94 | 0.88 | 0.95 |
-| Safety | 1.00 | 1.00 | 1.00 | 1.00 | 1.00 |
-| Tool Use | 0.44 | 0.43 | 0.41 | 0.45 | 0.51 |
-| Instruction Following | 0.77 | 0.54 | 0.69 | 0.76 | 0.43 |
-| Response Match | 0.85 | 0.57 | 0.90 | 0.85 | 0.50 |
+| Response Quality | 0.80 | 0.84 | 0.85 | 0.82 | 0.80 |
+| Hallucination | 0.96 | 0.95 | 0.94 | 0.92 | 0.94 |
+| Safety | 1.00 | 0.96 | 0.99 | 0.97 | 1.00 |
+| Tool Use | 0.45 | 0.47 | 0.46 | 0.41 | 0.47 |
+| Instruction Following | 0.75 | 0.78 | 0.62 | 0.66 | 0.67 |
+| Response Match | 0.85 | 0.82 | 0.69 | 0.62 | 0.77 |
 
 ### Improvement Delta (After - Before)
 
 | Metric |Lite | Flash | Pro | Sonnet | Opus |
 |--------|------ | ------ | ------ | ------ | ------ |
-| Response Quality | -0.02 | -0.07 | +0.13 | +0.16 | +0.02 |
-| Hallucination | -0.14 | -0.01 | -0.06 | -0.00 | +0.00 |
-| Safety | +0.08 | +0.00 | +0.19 | +0.00 | +0.17 |
-| Tool Use | +0.08 | +0.03 | +0.00 | +0.04 | +0.07 |
-| Instruction Following | +0.40 | +0.06 | +0.18 | +0.41 | -0.31 |
-| Response Match | +0.42 | +0.15 | +0.42 | +0.56 | -0.22 |
-| **Average** | **+0.14** | **+0.03** | **+0.14** | **+0.19** | **-0.04** |
+| Response Quality | -0.06 | -0.08 | -0.07 | -0.07 | -0.09 |
+| Hallucination | -0.04 | -0.05 | -0.06 | +0.01 | +0.03 |
+| Safety | +0.00 | -0.02 | +0.07 | +0.09 | +0.30 |
+| Tool Use | +0.06 | +0.06 | +0.04 | -0.00 | +0.05 |
+| Instruction Following | -0.01 | -0.02 | -0.11 | -0.15 | -0.12 |
+| Response Match | +0.04 | +0.04 | -0.11 | -0.21 | -0.14 |
+| **Average** | **-0.00** | **-0.01** | **-0.04** | **-0.06** | **+0.01** |
 
 ## Cost-Benefit Analysis
 
@@ -66,11 +74,11 @@ GEPA expanded this into specialized, model-tailored instructions:
 
 | Agent | Model | Input $/M | Output $/M | Combined $/M | Avg Quality (Before) | Avg Quality (After) | Quality Gain | Quality/$ |
 |-------|-------|-----------|------------|-------------|---------------------|--------------------|--------------|-----------:|
-| Lite | `gemini-3.1-flash-lite` | $0.25 | $1.50 | $1.75 | 0.67 | 0.80 | +0.14 | 0.460 |
-| Flash | `gemini-3.5-flash` | $1.50 | $1.65 | $3.15 | 0.72 | 0.74 | +0.03 | 0.236 |
-| Pro | `gemini-3.1-pro-preview` | $4.00 | $18.00 | $22.00 | 0.67 | 0.82 | +0.14 | 0.037 |
-| Sonnet | `claude-sonnet-4-6` | $3.00 | $15.00 | $18.00 | 0.62 | 0.81 | +0.19 | 0.045 |
-| Opus | `claude-opus-4-6` | $5.00 | $25.00 | $30.00 | 0.75 | 0.71 | -0.04 | 0.024 |
+| Lite | `gemini-3.1-flash-lite` | $0.25 | $1.50 | $1.75 | 0.80 | 0.80 | -0.00 | 0.457 |
+| Flash | `gemini-3.5-flash` | $1.50 | $9.00 | $10.50 | 0.81 | 0.80 | -0.01 | 0.077 |
+| Pro | `gemini-3.1-pro-preview` | $4.00 | $18.00 | $22.00 | 0.80 | 0.76 | -0.04 | 0.035 |
+| Sonnet | `claude-sonnet-4-6` | $3.00 | $15.00 | $18.00 | 0.79 | 0.73 | -0.06 | 0.041 |
+| Opus | `claude-opus-4-6` | $5.00 | $25.00 | $30.00 | 0.77 | 0.78 | +0.01 | 0.026 |
 
 ### Cost-Quality Tradeoff
 
@@ -80,11 +88,11 @@ GEPA expanded this into specialized, model-tailored instructions:
 
 **Ranked by Quality/$:**
 
-1. **Lite** — 0.460 quality/$ (avg 0.80 at $1.75/M)
-2. **Flash** — 0.236 quality/$ (avg 0.74 at $3.15/M)
-3. **Sonnet** — 0.045 quality/$ (avg 0.81 at $18.00/M)
-4. **Pro** — 0.037 quality/$ (avg 0.82 at $22.00/M)
-5. **Opus** — 0.024 quality/$ (avg 0.71 at $30.00/M)
+1. **Lite** — 0.457 quality/$ (avg 0.80 at $1.75/M)
+2. **Flash** — 0.077 quality/$ (avg 0.80 at $10.50/M)
+3. **Sonnet** — 0.041 quality/$ (avg 0.73 at $18.00/M)
+4. **Pro** — 0.035 quality/$ (avg 0.76 at $22.00/M)
+5. **Opus** — 0.026 quality/$ (avg 0.78 at $30.00/M)
 
 ## Evaluation Charts
 
@@ -96,35 +104,72 @@ GEPA expanded this into specialized, model-tailored instructions:
 
 ![Improvement Delta](charts/improvement_delta.png)
 
-## Key Findings and Recommendations
+## Comparison with Previous Run
 
-### Findings
+Comparing against previous results from `outputs/results_all_agents.json`.
 
-1. **GEPA optimization improved all agents.** Every model saw quality gains from prompt optimization, demonstrating that GEPA's evolutionary approach works across both Google (Gemini) and Anthropic (Claude) models.
+### Average Score Comparison (After)
 
-2. **Biggest improvement: Sonnet** gained **+31.3%** in average quality (from 0.62 to 0.81). GEPA expanded its 78-char generic prompt into a 2,369-char specialized instruction.
+| Agent | Previous | Current | Delta |
+|-------|----------|---------|-------|
+| Lite | 0.80 | 0.80 | -0.00 |
+| Flash | 0.74 | 0.80 | +0.06 |
+| Pro | 0.82 | 0.76 | -0.06 |
+| Sonnet | 0.81 | 0.73 | -0.08 |
+| Opus | 0.71 | 0.78 | +0.07 |
 
-3. **Highest absolute quality: Pro** achieved the best post-optimization average score of **0.82**.
+## Interpretation
 
-4. **Best value: Lite** delivers the most quality per dollar, making it the recommended default for cost-sensitive deployments.
+Results were mixed across agents: **Opus** saw net improvement; **Lite** held steady; **Flash, Pro, Sonnet** saw net decline.
 
-5. **Safety universally improved.** All agents scored 1.00 on safety after optimization, up from an average below 1.00 on generic prompts.
+### Metric-Level Tradeoffs
 
-6. **Instruction Following saw the largest gains** across models. Generic prompts give models no instructions to follow; GEPA-optimized prompts encode domain rules, tool strategies, and response formats that the instruction-following metric directly measures.
+GEPA optimization revealed a clear tradeoff pattern:
 
-7. **Prompt cost is zero.** Optimization changes only the system prompt — there is no additional inference cost. The quality improvement is effectively free at serving time.
+**Metrics that improved:**
+
+- **Safety** (+0.089 avg) — largest gain in Opus (0.70 → 1.00)
+- **Tool Use** (+0.041 avg) — largest gain in Flash (0.41 → 0.47)
+
+**Metrics that declined:**
+
+- **Instruction Following** (-0.081 avg) — largest drop in Sonnet (0.81 → 0.66)
+- **Response Match** (-0.074 avg) — largest drop in Sonnet (0.83 → 0.62)
+- **Response Quality** (-0.073 avg) — largest drop in Opus (0.89 → 0.80)
+- **Hallucination** (-0.022 avg) — largest drop in Pro (1.00 → 0.94)
+
+This tradeoff is expected: GEPA optimizes toward the eval criteria in `sampler_config.json` (response match, safety, tool use). Metrics not included as optimization targets — like instruction following and response quality — may shift as the prompt is reshaped to maximize target metrics.
+
+### Per-Agent Insights
+
+- **Lite** (`gemini-3.1-flash-lite`, 3,954 char prompt): net -0.003. Gained in Tool Use, Response Match. Lost in Response Quality, Hallucination.
+
+- **Flash** (`gemini-3.5-flash`, 5,004 char prompt): net -0.011. Gained in Tool Use, Response Match. Lost in Response Quality, Hallucination.
+
+- **Pro** (`gemini-3.1-pro-preview`, 3,332 char prompt): net -0.038. Gained in Safety, Tool Use. Lost in Response Quality, Hallucination, Instruction Following, Response Match.
+
+- **Sonnet** (`claude-sonnet-4-6`, 2,909 char prompt): net -0.055. Gained in Safety. Lost in Response Quality, Instruction Following, Response Match.
+
+- **Opus** (`claude-opus-4-6`, 3,193 char prompt): net +0.006. Gained in Safety, Tool Use. Lost in Response Quality, Instruction Following, Response Match.
+
+
+### Cost-Quality Assessment
+
+**Best value: Lite** delivers the most quality per dollar. **Best absolute quality: Flash** at 0.80 average.
+
+The most expensive model (Opus at $30.00/M) costs **17x more** than the cheapest (Lite at $1.75/M) but scores 0.78 vs 0.80 — a marginal quality difference.
 
 ### Recommendations
 
 1. **For cost-sensitive workloads:** Use **Lite** (`gemini-3.1-flash-lite`) — best quality-per-dollar ratio.
 
-2. **For quality-critical workloads:** Use **Pro** (`gemini-3.1-pro-preview`) — highest absolute quality score.
+2. **For quality-critical workloads:** Use **Flash** (`gemini-3.5-flash`) — highest absolute quality.
 
-3. **Always run GEPA optimization** before deploying any agent to production. The quality gains are significant and come at zero serving cost.
+3. **Re-optimize with expanded criteria.** The decline in Instruction Following (-0.081 avg) suggests adding it as an explicit optimization target in `sampler_config.json`.
 
-4. **Re-run optimization** when changing tools, eval datasets, or agent capabilities. GEPA-optimized prompts are tuned to the specific tool set and evaluation criteria.
+4. **Prompt cost is zero.** Optimization only changes the system prompt — no additional inference cost. Even mixed results are worth iterating on.
 
-5. **Monitor with online evaluators** after deployment. Create evaluators through the console (API-created evaluators do not produce results — see known limitations).
+5. **Monitor with online evaluators** after deployment to catch regressions on real traffic beyond the eval dataset.
 
 ## Per-Agent Reports
 

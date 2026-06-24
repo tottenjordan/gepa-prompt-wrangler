@@ -1,0 +1,32 @@
+{
+  "lite-gemini-3.1-flash-lite": {
+    "engine_id": "4981388556929859584",
+    "model": "gemini-3.1-flash-lite",
+    "original_prompt": "You are a helpful assistant. Use the available tools to answer user questions.",
+    "source": "config"
+  },
+  "flash-gemini-3.5-flash": {
+    "engine_id": "6589173623901126656",
+    "model": "gemini-3.5-flash",
+    "original_prompt": "You are a helpful assistant. Use the available tools to answer user questions.",
+    "source": "config"
+  },
+  "pro-gemini-3.1-pro": {
+    "engine_id": "8730635246715797504",
+    "model": "gemini-3.1-pro-preview",
+    "original_prompt": "You are a helpful assistant. Use the available tools to answer user questions.",
+    "source": "config"
+  },
+  "sonnet-claude-4": {
+    "engine_id": "7615994338941599744",
+    "model": "claude-sonnet-4-6",
+    "original_prompt": "You are a helpful assistant. Use the available tools to answer user questions.",
+    "source": "config"
+  },
+  "opus-claude-4": {
+    "engine_id": "7807397323104845824",
+    "model": "claude-opus-4-6",
+    "original_prompt": "You are a helpful assistant. Use the available tools to answer user questions.",
+    "source": "config"
+  }
+}

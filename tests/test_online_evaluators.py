@@ -3,7 +3,7 @@
 import pytest
 from unittest.mock import patch
 
-from wrangler.online_evaluators import (
+from wrangler.eval.online_evaluators import (
     PREDEFINED_METRICS,
     CUSTOM_METRICS,
     _agent_resource,
@@ -25,16 +25,16 @@ class TestConstants:
 
 
 class TestAgentResource:
-    @patch("wrangler.online_evaluators.PROJECT_NUMBER", "123456")
-    @patch("wrangler.online_evaluators.GCP_REGION", "us-central1")
+    @patch("wrangler.eval.online_evaluators.PROJECT_NUMBER", "123456")
+    @patch("wrangler.eval.online_evaluators.GCP_REGION", "us-central1")
     def test_format(self):
         result = _agent_resource("12345")
         assert result == "projects/123456/locations/us-central1/reasoningEngines/12345"
 
 
 class TestBuildEvaluatorConfig:
-    @patch("wrangler.online_evaluators.PROJECT_NUMBER", "123456")
-    @patch("wrangler.online_evaluators.GCP_REGION", "us-central1")
+    @patch("wrangler.eval.online_evaluators.PROJECT_NUMBER", "123456")
+    @patch("wrangler.eval.online_evaluators.GCP_REGION", "us-central1")
     def test_config_structure(self):
         config = _build_evaluator_config("flash", "engine123", ["custom_metric_1"])
         assert "displayName" in config
@@ -42,8 +42,8 @@ class TestBuildEvaluatorConfig:
         assert "agentResource" in config
         assert "metricSources" in config
 
-    @patch("wrangler.online_evaluators.PROJECT_NUMBER", "123456")
-    @patch("wrangler.online_evaluators.GCP_REGION", "us-central1")
+    @patch("wrangler.eval.online_evaluators.PROJECT_NUMBER", "123456")
+    @patch("wrangler.eval.online_evaluators.GCP_REGION", "us-central1")
     def test_metric_sources_count(self):
         config = _build_evaluator_config("test", "engine123", ["m1", "m2"])
         sources = config["metricSources"]

@@ -1,8 +1,10 @@
 """Global configuration — GCP project settings, MCP server URLs, model configs, and eval params."""
 
 import os
+import warnings
 from dotenv import load_dotenv
-from google.adk.models.lite_llm import LiteLlm
+
+warnings.filterwarnings("ignore", message=".*EXPERIMENTAL.*")
 
 load_dotenv()
 load_dotenv(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env"))
@@ -43,14 +45,16 @@ def resolve_model(model_str: str):
     """Resolve model string to an ADK-compatible model.
 
     Gemini 2.x models work in regional endpoints — pass as plain strings.
-    Gemini 3.x and Claude models require location=global, so they are
-    wrapped with LiteLLM which supports per-model location.
+    Gemini 3.x uses the native Gemini class, Claude uses the native Claude
+    class. Both read GOOGLE_CLOUD_LOCATION from env (set to "global").
     """
     if model_str.startswith(("gemini-2", "models/")):
         return model_str
-    if not model_str.startswith("vertex_ai/"):
-        model_str = f"vertex_ai/{model_str}"
-    return LiteLlm(model=model_str, vertex_location="global")
+    if model_str.startswith("claude"):
+        from google.adk.models.anthropic_llm import Claude
+        return Claude(model=model_str)
+    from google.adk.models.google_llm import Gemini
+    return Gemini(model=model_str)
 
 # Multi-model router (5-tier: lite → flash → pro → sonnet → opus)
 LITE_MODEL = os.environ.get("LITE_MODEL", "gemini-3.1-flash-lite")

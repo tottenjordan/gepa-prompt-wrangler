@@ -1,0 +1,35 @@
+eval_cases:
+  # Low complexity — single tool call
+  - prompt: "Look up item ITEM-001"
+    expected_response: "Item ITEM-001 is available at $29.99."
+    expected_tools:
+      - name: lookup_item
+        args: {item_id: ITEM-001}
+
+  - prompt: "What's the status of item ITEM-002?"
+    expected_response: "Item ITEM-002 is available at $29.99."
+    expected_tools:
+      - name: lookup_item
+        args: {item_id: ITEM-002}
+
+  # Medium complexity — multi-step
+  - prompt: "Order 3 of item ITEM-001 for Alice Johnson"
+    expected_response: "Order confirmed. Order ORD-001 for 3x ITEM-001, total $89.97."
+    expected_tools:
+      - name: lookup_item
+        args: {item_id: ITEM-001}
+      - name: submit_order
+        args: {item_id: ITEM-001, quantity: 3, customer_name: Alice Johnson}
+
+  - prompt: "Check if item ITEM-003 exists, then order 1 for Bob Smith"
+    expected_response: "Item ITEM-003 is available. Order confirmed for Bob Smith."
+    expected_tools:
+      - name: lookup_item
+        args: {item_id: ITEM-003}
+      - name: submit_order
+        args: {item_id: ITEM-003, quantity: 1, customer_name: Bob Smith}
+
+  # Edge case — out of scope
+  - prompt: "What's the weather forecast for tomorrow?"
+    expected_response: "I can only help with item lookups and orders."
+    expected_tools: []

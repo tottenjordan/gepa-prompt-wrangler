@@ -1,0 +1,53 @@
+name: multi-model-v7
+description: >
+  Re-run of v6 with fixed _merge_thresholds() (rubric_based_ prefix handling)
+  and fixed _extract_per_case_scores() (correct SDK field path).
+  Reuses v6 deploy (same engine IDs) and eval_before (same generic prompt baseline).
+  Optimizes the generic prompt from scratch.
+agent_module: examples/multi_model_agents/agents/flash_agent
+eval_data: examples/multi_model_agents/eval_data/eval_cases.yaml
+defaults:
+  num_runs: 3
+  judge_model: gemini-2.5-flash
+pairs:
+- id: lite-gemini-3.1-flash-lite
+  model: gemini-3.1-flash-lite
+  description: "Tier 1 — trivial lookups ($0.30/M output tokens)"
+  agent_module: examples/multi_model_agents/agents/lite_agent.py
+  engine_id: '4981388556929859584'
+  system_prompt: You are a helpful assistant. Use the available tools to answer user questions.
+- id: flash-gemini-3.5-flash
+  model: gemini-3.5-flash
+  description: "Tier 2 — simple tasks with light reasoning ($0.60/M output tokens)"
+  agent_module: examples/multi_model_agents/agents/flash_agent.py
+  engine_id: '6589173623901126656'
+  system_prompt: You are a helpful assistant. Use the available tools to answer user questions.
+- id: pro-gemini-3.1-pro
+  model: gemini-3.1-pro-preview
+  description: "Tier 3 — moderate reasoning ($10/M output tokens)"
+  agent_module: examples/multi_model_agents/agents/pro_agent.py
+  engine_id: '8730635246715797504'
+  system_prompt: You are a helpful assistant. Use the available tools to answer user questions.
+- id: sonnet-claude-4
+  model: claude-sonnet-4-6
+  description: "Tier 4 — complex multi-intent analysis ($15/M output tokens)"
+  agent_module: examples/multi_model_agents/agents/sonnet_agent.py
+  engine_id: '7615994338941599744'
+  system_prompt: You are a helpful assistant. Use the available tools to answer user questions.
+- id: opus-claude-4
+  model: claude-opus-4-6
+  description: "Tier 5 — expert-level planning ($75/M output tokens)"
+  agent_module: examples/multi_model_agents/agents/opus_agent.py
+  engine_id: '7807397323104845824'
+  system_prompt: You are a helpful assistant. Use the available tools to answer user questions.
+eval_config:
+  judge_model: gemini-2.5-flash
+  response_match_threshold: 0.5
+  safety_threshold: 0.8
+  thresholds:
+    final_response_match_v2: 0.5
+    instruction_following_v1: 0.5
+    tool_use_quality_v1: 0.3
+    final_response_quality_v1: 0.7
+    hallucination_v1: 0.8
+    safety_v1: 0.8

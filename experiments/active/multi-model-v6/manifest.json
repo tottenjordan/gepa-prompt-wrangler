@@ -1,0 +1,148 @@
+{
+  "experiment": "multi-model-v6",
+  "created_at": "2026-06-05T22:45:00",
+  "version": "wrangler_v6",
+  "stages": {
+    "deploy": {
+      "status": "complete",
+      "pairs": {
+        "lite-gemini-3.1-flash-lite": {
+          "status": "complete",
+          "completed_at": "2026-06-05T22:55:00"
+        },
+        "flash-gemini-3.5-flash": {
+          "status": "complete",
+          "completed_at": "2026-06-05T22:55:00"
+        },
+        "pro-gemini-3.1-pro": {
+          "status": "complete",
+          "completed_at": "2026-06-05T22:55:00"
+        },
+        "sonnet-claude-4": {
+          "status": "complete",
+          "completed_at": "2026-06-05T22:55:00"
+        },
+        "opus-claude-4": {
+          "status": "complete",
+          "completed_at": "2026-06-05T22:55:00"
+        }
+      },
+      "completed_at": "2026-06-05T22:55:00",
+      "note": "Reused v5 engine IDs \u2014 agents already deployed"
+    },
+    "eval_before": {
+      "status": "complete",
+      "pairs": {
+        "lite-gemini-3.1-flash-lite": {
+          "status": "complete",
+          "completed_at": "2026-06-05T22:55:00"
+        },
+        "flash-gemini-3.5-flash": {
+          "status": "complete",
+          "completed_at": "2026-06-05T22:55:00"
+        },
+        "pro-gemini-3.1-pro": {
+          "status": "complete",
+          "completed_at": "2026-06-05T22:55:00"
+        },
+        "sonnet-claude-4": {
+          "status": "complete",
+          "completed_at": "2026-06-05T22:55:00"
+        },
+        "opus-claude-4": {
+          "status": "complete",
+          "completed_at": "2026-06-05T22:55:00"
+        }
+      },
+      "completed_at": "2026-06-05T22:55:00",
+      "note": "Reused v5 baseline scores \u2014 same generic prompt, same engines"
+    },
+    "optimize": {
+      "status": "complete",
+      "pairs": {
+        "lite-gemini-3.1-flash-lite": {
+          "status": "complete",
+          "completed_at": "2026-06-05T23:23:55"
+        },
+        "flash-gemini-3.5-flash": {
+          "status": "complete",
+          "completed_at": "2026-06-05T23:32:46"
+        },
+        "pro-gemini-3.1-pro": {
+          "status": "complete",
+          "completed_at": "2026-06-05T23:43:18"
+        },
+        "sonnet-claude-4": {
+          "status": "complete",
+          "completed_at": "2026-06-05T23:53:16"
+        },
+        "opus-claude-4": {
+          "status": "complete",
+          "completed_at": "2026-06-06T00:02:25"
+        }
+      },
+      "completed_at": "2026-06-06T00:02:25"
+    },
+    "redeploy": {
+      "status": "complete",
+      "pairs": {
+        "lite-gemini-3.1-flash-lite": {
+          "status": "complete",
+          "completed_at": "2026-06-06T00:16:03"
+        },
+        "flash-gemini-3.5-flash": {
+          "status": "complete",
+          "completed_at": "2026-06-06T00:23:17"
+        },
+        "pro-gemini-3.1-pro": {
+          "status": "complete",
+          "completed_at": "2026-06-06T00:45:21"
+        },
+        "sonnet-claude-4": {
+          "status": "complete",
+          "completed_at": "2026-06-06T00:55:18"
+        },
+        "opus-claude-4": {
+          "status": "complete",
+          "completed_at": "2026-06-06T01:01:11"
+        }
+      },
+      "completed_at": "2026-06-06T01:01:11"
+    },
+    "eval_after": {
+      "status": "complete",
+      "pairs": {
+        "lite-gemini-3.1-flash-lite": {
+          "status": "complete",
+          "completed_at": "2026-06-06T02:59:17"
+        },
+        "flash-gemini-3.5-flash": {
+          "status": "complete",
+          "completed_at": "2026-06-06T03:21:18"
+        },
+        "pro-gemini-3.1-pro": {
+          "status": "complete",
+          "completed_at": "2026-06-06T03:49:45"
+        },
+        "sonnet-claude-4": {
+          "status": "complete",
+          "completed_at": "2026-06-06T04:05:23"
+        },
+        "opus-claude-4": {
+          "status": "complete",
+          "completed_at": "2026-06-06T04:23:25"
+        }
+      },
+      "completed_at": "2026-06-06T04:23:25"
+    },
+    "report": {
+      "status": "partial",
+      "pairs": {
+        "_all": {
+          "status": "complete",
+          "completed_at": "2026-06-06T11:43:52"
+        }
+      }
+    }
+  }
+}

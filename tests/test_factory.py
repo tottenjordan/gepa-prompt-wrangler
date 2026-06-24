@@ -9,7 +9,7 @@ import yaml
 
 class TestPairFactory:
     def test_load_valid_manifest(self, tmp_path):
-        from wrangler.factory import PairFactory
+        from wrangler.core.factory import PairFactory
 
         manifest = {
             "name": "test",
@@ -29,7 +29,7 @@ class TestPairFactory:
         assert result.pairs[0].model == "gemini-3.5-flash"
 
     def test_missing_required_field_raises(self, tmp_path):
-        from wrangler.factory import PairFactory
+        from wrangler.core.factory import PairFactory
 
         manifest = {"name": "test", "pairs": []}
         path = tmp_path / "manifest.yaml"
@@ -39,7 +39,7 @@ class TestPairFactory:
             PairFactory.load(str(path))
 
     def test_pair_missing_model_raises(self, tmp_path):
-        from wrangler.factory import PairFactory
+        from wrangler.core.factory import PairFactory
 
         manifest = {
             "name": "test",
@@ -53,7 +53,7 @@ class TestPairFactory:
             PairFactory.load(str(path))
 
     def test_auto_generated_pair_ids(self, tmp_path):
-        from wrangler.factory import PairFactory
+        from wrangler.core.factory import PairFactory
 
         manifest = {
             "name": "test",
@@ -71,7 +71,7 @@ class TestPairFactory:
         assert result.pairs[1].id == "pair-2"
 
     def test_get_pair_by_id(self, tmp_path):
-        from wrangler.factory import PairFactory
+        from wrangler.core.factory import PairFactory
 
         manifest = {
             "name": "test",
@@ -88,7 +88,7 @@ class TestPairFactory:
         assert result.get_pair("sonnet").model == "claude-sonnet-4-6"
 
     def test_get_nonexistent_pair_raises(self, tmp_path):
-        from wrangler.factory import PairFactory
+        from wrangler.core.factory import PairFactory
 
         manifest = {
             "name": "test",
@@ -103,6 +103,6 @@ class TestPairFactory:
             result.get_pair("nonexistent")
 
     def test_file_not_found_raises(self, tmp_path):
-        from wrangler.factory import PairFactory
+        from wrangler.core.factory import PairFactory
         with pytest.raises((FileNotFoundError, OSError)):
             PairFactory.load(str(tmp_path / "nonexistent.yaml"))

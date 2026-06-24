@@ -8,6 +8,10 @@ FLIGHTS = [
     {"id": "FL005", "airline": "Southwest", "origin": "SFO", "destination": "LAX", "date": "2026-06-15", "price": 150.00, "departure": "06:00", "arrival": "07:30"},
     {"id": "FL006", "airline": "Delta", "origin": "JFK", "destination": "LHR", "date": "2026-06-18", "price": 890.00, "departure": "20:00", "arrival": "08:00"},
     {"id": "FL007", "airline": "United", "origin": "SFO", "destination": "NRT", "date": "2026-06-20", "price": 1250.00, "departure": "11:00", "arrival": "15:00"},
+    {"id": "FL008", "airline": "United", "origin": "SFO", "destination": "DEN", "date": "2026-06-18", "price": 320.00, "departure": "09:00", "arrival": "12:30"},
+    {"id": "FL009", "airline": "Frontier", "origin": "DEN", "destination": "SFO", "date": "2026-06-22", "price": 275.00, "departure": "14:00", "arrival": "16:00"},
+    {"id": "FL010", "airline": "JetBlue", "origin": "JFK", "destination": "BOS", "date": "2026-06-16", "price": 180.00, "departure": "07:30", "arrival": "09:00"},
+    {"id": "FL011", "airline": "Delta", "origin": "BOS", "destination": "JFK", "date": "2026-06-20", "price": 195.00, "departure": "17:00", "arrival": "18:30"},
 ]
 
 HOTELS = [
@@ -17,4 +21,7 @@ HOTELS = [
     {"id": "HT004", "name": "The Ritz-Carlton SF", "city": "San Francisco", "price_per_night": 550.00, "rating": 4.8, "available_from": "2026-06-01", "available_to": "2026-12-31"},
     {"id": "HT005", "name": "Budget Inn Downtown", "city": "New York", "price_per_night": 120.00, "rating": 3.2, "available_from": "2026-06-01", "available_to": "2026-12-31"},
     {"id": "HT006", "name": "Claridge's", "city": "London", "price_per_night": 680.00, "rating": 4.9, "available_from": "2026-06-01", "available_to": "2026-12-31"},
+    {"id": "HT007", "name": "Park Hotel Tokyo", "city": "Tokyo", "price_per_night": 280.00, "rating": 4.4, "available_from": "2026-06-01", "available_to": "2026-12-31"},
+    {"id": "HT008", "name": "The Crawford Denver", "city": "Denver", "price_per_night": 210.00, "rating": 4.1, "available_from": "2026-06-01", "available_to": "2026-12-31"},
+    {"id": "HT009", "name": "The Liberty Boston", "city": "Boston", "price_per_night": 350.00, "rating": 4.6, "available_from": "2026-06-01", "available_to": "2026-12-31"},
 ]

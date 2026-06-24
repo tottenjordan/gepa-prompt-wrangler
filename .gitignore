@@ -38,3 +38,8 @@ uv.lock
 
 # Jupyter
 .ipynb_checkpoints/
+
+# Claude Code
+.claude/
+
+MagicMock/

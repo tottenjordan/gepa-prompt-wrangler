@@ -21,6 +21,9 @@
 # =============================================================================
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+EXAMPLE_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+
 PROJECT_ID="${GCP_PROJECT_ID:-hybrid-vertex}"
 REGION="${GCP_REGION:-us-central1}"
 PROJECT_NUM=$(gcloud projects describe "$PROJECT_ID" --format="value(projectNumber)" 2>/dev/null || echo "unknown")
@@ -69,32 +72,33 @@ gcloud storage buckets create "gs://${STAGING_BUCKET}" \
 step "3/11" "Deploying MCP servers to Cloud Run (min-instances=1)"
 
 deploy_mcp() {
-    local name=$1 port=$2
-    echo "  Deploying $name (port $port)..."
-    gcloud run deploy "$name" \
-        --source "src/mcp_servers/${name//-mcp/}" \
+    local service_name=$1 source_dir=$2 port=$3
+    echo "  Deploying $service_name from $source_dir (port $port)..."
+    gcloud run deploy "$service_name" \
+        --source "${EXAMPLE_DIR}/mcp_servers/${source_dir}" \
         --region "$REGION" \
         --project "$PROJECT_ID" \
         --port "$port" \
         --min-instances 1 \
+        --session-affinity \
         --allow-unauthenticated \
         --quiet 2>&1 | tail -2
 }
 
-deploy_mcp "search-mcp" 8001 &
+deploy_mcp "wrangler-search-mcp" "search" 8001 &
 PID1=$!
-deploy_mcp "booking-mcp" 8002 &
+deploy_mcp "wrangler-booking-mcp" "booking" 8002 &
 PID2=$!
-deploy_mcp "expense-mcp" 8003 &
+deploy_mcp "wrangler-expense-mcp" "expense" 8003 &
 PID3=$!
-wait $PID1 && ok "search-mcp deployed" || fail "search-mcp failed"
-wait $PID2 && ok "booking-mcp deployed" || fail "booking-mcp failed"
-wait $PID3 && ok "expense-mcp deployed" || fail "expense-mcp failed"
+wait $PID1 && ok "wrangler-search-mcp deployed" || fail "wrangler-search-mcp failed"
+wait $PID2 && ok "wrangler-booking-mcp deployed" || fail "wrangler-booking-mcp failed"
+wait $PID3 && ok "wrangler-expense-mcp deployed" || fail "wrangler-expense-mcp failed"
 
 # Get deployed URLs dynamically from Cloud Run
-SEARCH_URL=$(gcloud run services describe search-mcp --project "$PROJECT_ID" --region "$REGION" --format "value(status.url)" 2>/dev/null)
-BOOKING_URL=$(gcloud run services describe booking-mcp --project "$PROJECT_ID" --region "$REGION" --format "value(status.url)" 2>/dev/null)
-EXPENSE_URL=$(gcloud run services describe expense-mcp --project "$PROJECT_ID" --region "$REGION" --format "value(status.url)" 2>/dev/null)
+SEARCH_URL=$(gcloud run services describe wrangler-search-mcp --project "$PROJECT_ID" --region "$REGION" --format "value(status.url)" 2>/dev/null)
+BOOKING_URL=$(gcloud run services describe wrangler-booking-mcp --project "$PROJECT_ID" --region "$REGION" --format "value(status.url)" 2>/dev/null)
+EXPENSE_URL=$(gcloud run services describe wrangler-expense-mcp --project "$PROJECT_ID" --region "$REGION" --format "value(status.url)" 2>/dev/null)
 
 # Smoke test MCP servers
 echo "  Smoke testing MCP servers..."
@@ -159,25 +163,25 @@ BOOKING_TOOLSPEC='{"tools":[{"name":"book_flight","description":"Book a flight f
 
 EXPENSE_TOOLSPEC='{"tools":[{"name":"check_expense_policy","description":"Check if an expense amount is within corporate policy for a category","inputSchema":{"type":"object","properties":{"category":{"type":"string"},"amount":{"type":"number"}},"required":["category","amount"]},"annotations":{"readOnlyHint":true}},{"name":"submit_expense","description":"Submit an expense report for a user","inputSchema":{"type":"object","properties":{"user_id":{"type":"string"},"category":{"type":"string"},"amount":{"type":"number"},"description":{"type":"string"}},"required":["user_id","category","amount","description"]}},{"name":"get_user_expenses","description":"Get all expenses for a user","inputSchema":{"type":"object","properties":{"user_id":{"type":"string"}},"required":["user_id"]},"annotations":{"readOnlyHint":true}}]}'
 
-register_mcp_in_registry "search-mcp" "${SEARCH_URL}/mcp" "$SEARCH_TOOLSPEC"
-register_mcp_in_registry "booking-mcp" "${BOOKING_URL}/mcp" "$BOOKING_TOOLSPEC"
-register_mcp_in_registry "expense-mcp" "${EXPENSE_URL}/mcp" "$EXPENSE_TOOLSPEC"
+register_mcp_in_registry "wrangler-search-mcp" "${SEARCH_URL}/mcp" "$SEARCH_TOOLSPEC"
+register_mcp_in_registry "wrangler-booking-mcp" "${BOOKING_URL}/mcp" "$BOOKING_TOOLSPEC"
+register_mcp_in_registry "wrangler-expense-mcp" "${EXPENSE_URL}/mcp" "$EXPENSE_TOOLSPEC"
 
 # Look up the registered MCP server resource names from Agent Registry
 echo "  Looking up registered MCP server resource names..."
 SEARCH_MCP_SERVER=$(curl -s -H "Authorization: Bearer $(gcloud auth print-access-token)" \
     "https://agentregistry.googleapis.com/v1alpha/projects/${PROJECT_ID}/locations/${REGION}/mcpServers" \
-    | python3 -c "import json,sys; [print(s['name']) for s in json.load(sys.stdin).get('mcpServers',[]) if s.get('displayName')=='search-mcp']" 2>/dev/null | head -1)
+    | python3 -c "import json,sys; [print(s['name']) for s in json.load(sys.stdin).get('mcpServers',[]) if s.get('displayName')=='wrangler-search-mcp']" 2>/dev/null | head -1)
 BOOKING_MCP_SERVER=$(curl -s -H "Authorization: Bearer $(gcloud auth print-access-token)" \
     "https://agentregistry.googleapis.com/v1alpha/projects/${PROJECT_ID}/locations/${REGION}/mcpServers" \
-    | python3 -c "import json,sys; [print(s['name']) for s in json.load(sys.stdin).get('mcpServers',[]) if s.get('displayName')=='booking-mcp']" 2>/dev/null | head -1)
+    | python3 -c "import json,sys; [print(s['name']) for s in json.load(sys.stdin).get('mcpServers',[]) if s.get('displayName')=='wrangler-booking-mcp']" 2>/dev/null | head -1)
 EXPENSE_MCP_SERVER=$(curl -s -H "Authorization: Bearer $(gcloud auth print-access-token)" \
     "https://agentregistry.googleapis.com/v1alpha/projects/${PROJECT_ID}/locations/${REGION}/mcpServers" \
-    | python3 -c "import json,sys; [print(s['name']) for s in json.load(sys.stdin).get('mcpServers',[]) if s.get('displayName')=='expense-mcp']" 2>/dev/null | head -1)
+    | python3 -c "import json,sys; [print(s['name']) for s in json.load(sys.stdin).get('mcpServers',[]) if s.get('displayName')=='wrangler-expense-mcp']" 2>/dev/null | head -1)
 
-ok "search-mcp:  ${SEARCH_MCP_SERVER}"
-ok "booking-mcp: ${BOOKING_MCP_SERVER}"
-ok "expense-mcp: ${EXPENSE_MCP_SERVER}"
+ok "wrangler-search-mcp:  ${SEARCH_MCP_SERVER}"
+ok "wrangler-booking-mcp: ${BOOKING_MCP_SERVER}"
+ok "wrangler-expense-mcp: ${EXPENSE_MCP_SERVER}"
 
 # ─── Step 8: Write .env and deploy agents ───────────────────────────
 step "8/11" "Configuring environment and deploying agents"
@@ -259,14 +263,14 @@ echo -e "${GREEN}║                 Deployment Complete!                       
 echo -e "${GREEN}╚══════════════════════════════════════════════════════════════╝${NC}"
 echo ""
 echo "MCP Server URLs:"
-echo "  search-mcp:  ${SEARCH_URL}/mcp"
-echo "  booking-mcp: ${BOOKING_URL}/mcp"
-echo "  expense-mcp: ${EXPENSE_URL}/mcp"
+echo "  wrangler-search-mcp:  ${SEARCH_URL}/mcp"
+echo "  wrangler-booking-mcp: ${BOOKING_URL}/mcp"
+echo "  wrangler-expense-mcp: ${EXPENSE_URL}/mcp"
 echo ""
 echo "Agent Registry MCP Servers:"
-echo "  search-mcp:  ${SEARCH_MCP_SERVER}"
-echo "  booking-mcp: ${BOOKING_MCP_SERVER}"
-echo "  expense-mcp: ${EXPENSE_MCP_SERVER}"
+echo "  wrangler-search-mcp:  ${SEARCH_MCP_SERVER}"
+echo "  wrangler-booking-mcp: ${BOOKING_MCP_SERVER}"
+echo "  wrangler-expense-mcp: ${EXPENSE_MCP_SERVER}"
 echo ""
 echo "Agent Resource: $AGENT_RESOURCE"
 echo "Agent Engine ID: $AGENT_ENGINE_ID"

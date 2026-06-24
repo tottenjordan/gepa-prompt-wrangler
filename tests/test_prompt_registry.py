@@ -5,7 +5,7 @@ import sys
 import pytest
 from pathlib import Path
 
-from wrangler.prompt_registry import save_optimized_prompt, list_versions
+from wrangler.tools.prompt_registry import save_optimized_prompt, list_versions
 
 
 def _cleanup_prompt_modules():

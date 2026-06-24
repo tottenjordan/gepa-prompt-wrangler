@@ -45,7 +45,7 @@ def update_env(key: str, value: str):
         f.writelines(lines)
 
 
-def deploy_single(name: str, generic: bool = False, update: bool = False):
+def deploy_single(name: str, generic: bool = False, update: bool = False, version: str = "v4"):
     module_name, agent_attr = AGENTS[name]
     mod = __import__(module_name, fromlist=[agent_attr])
     agent = getattr(mod, agent_attr)
@@ -55,18 +55,20 @@ def deploy_single(name: str, generic: bool = False, update: bool = False):
         agent.instruction = GENERIC_PROMPT
         print(f"  Using generic prompt")
 
+    display_name = f"wrangler-{name}-agent-{version}"
+
     if update:
         engine_id = os.environ.get(f"{name.upper()}_ENGINE_ID", "")
         if not engine_id:
             print(f"  No ENGINE_ID for {name}, deploying new instead")
-            from wrangler.deploy import deploy_agent
-            engine_id = deploy_agent(agent, display_name=f"wrangler-{name}-agent")
+            from wrangler.core.deploy import deploy_agent
+            engine_id = deploy_agent(agent, display_name=display_name)
         else:
-            from wrangler.deploy import update_agent
-            update_agent(agent, engine_id, display_name=f"wrangler-{name}-agent")
+            from wrangler.core.deploy import update_agent
+            update_agent(agent, engine_id, display_name=display_name)
     else:
-        from wrangler.deploy import deploy_agent
-        engine_id = deploy_agent(agent, display_name=f"wrangler-{name}-agent")
+        from wrangler.core.deploy import deploy_agent
+        engine_id = deploy_agent(agent, display_name=display_name)
 
     env_key = f"{name.upper()}_ENGINE_ID"
     update_env(env_key, engine_id)
@@ -80,6 +82,7 @@ if __name__ == "__main__":
     parser.add_argument("agents", nargs="*", default=list(AGENTS.keys()))
     parser.add_argument("--generic", action="store_true", help="Use generic prompts instead of optimized")
     parser.add_argument("--update", action="store_true", help="Update existing agents instead of creating new")
+    parser.add_argument("--version", default="v4", help="Version tag for display name (default: v4)")
     args = parser.parse_args()
 
     print(f"Project: {GCP_PROJECT_ID}")
@@ -93,6 +96,6 @@ if __name__ == "__main__":
             continue
         action = "Updating" if args.update else "Deploying"
         print(f"\n--- {action} {name} {'(generic prompt)' if args.generic else ''} ---")
-        deploy_single(name, generic=args.generic, update=args.update)
+        deploy_single(name, generic=args.generic, update=args.update, version=args.version)
 
     print("\nDone.")
