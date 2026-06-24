@@ -146,13 +146,13 @@ eval_cases:
         args: {category: entertainment, amount: 500}
 
   # Flight comparison
-  - prompt: "Find flights to JFK and compare the cheapest options by airline"
+  - prompt: "Find flights from SFO to JFK and compare the cheapest options by airline"
     expected_response: "United FL001 at $450 vs Delta FL002 at $520. United is $70 cheaper (13.5% savings)."
     tier: medium
     category: planning
     expected_tools:
       - name: wrangler_search_mcp_search_flights
-        args: {destination: JFK}
+        args: {origin: SFO, destination: JFK}
 
   # Search + policy cross-check
   - prompt: "Search hotels in New York, then check if the nightly rate fits our lodging policy"
@@ -233,7 +233,7 @@ eval_cases:
       - name: wrangler_expense_mcp_check_expense_policy
         args: {category: meals, amount: 75}
       - name: wrangler_expense_mcp_submit_expense
-        args: {user_id: EMP001, category: meals, amount: 75}
+        args: {user_id: EMP001, category: meals, amount: 75, description: business meal}
 
   # Multi-route comparison with hotels
   - prompt: "Compare flights from SFO to JFK vs LAX to ORD, and find hotels in each destination city"
@@ -276,7 +276,7 @@ eval_cases:
       - name: wrangler_expense_mcp_check_expense_policy
         args: {category: supplies, amount: 80}
       - name: wrangler_expense_mcp_submit_expense
-        args: {user_id: EMP002, category: supplies, amount: 80}
+        args: {user_id: EMP002, category: supplies, amount: 80, description: office supplies}
 
   # End-to-end trip booking
   - prompt: "Find the cheapest SFO-JFK flight, book it for Bob Smith, find a hotel within lodging policy, and submit a pre-trip expense estimate"
@@ -336,7 +336,7 @@ eval_cases:
       - name: wrangler_booking_mcp_book_flight
         args: {flight_id: FL003, passenger_name: Carol Davis}
       - name: wrangler_booking_mcp_cancel_booking
-        args: {}
+        args: {booking_id: "<runtime>"}
 
   - prompt: "Book hotel HT001 for Dave Wilson June 15-17, then show me the booking details"
     expected_response: "Hotel HT001 booked for Dave Wilson (June 15-17). Booking details: Grand Hyatt New York, status confirmed."
@@ -346,7 +346,7 @@ eval_cases:
       - name: wrangler_booking_mcp_book_hotel
         args: {hotel_id: HT001, guest_name: Dave Wilson, checkin: "2026-06-15", checkout: "2026-06-17"}
       - name: wrangler_booking_mcp_get_booking_details
-        args: {}
+        args: {booking_id: "<runtime>"}
 
   # ============================================================
   # BOUNDARY-VALUE POLICY — exact limits and one-cent-over
@@ -430,15 +430,15 @@ eval_cases:
       - name: wrangler_booking_mcp_book_hotel
         args: {hotel_id: HT001, guest_name: Sarah Lee, checkin: "2026-06-20", checkout: "2026-06-25"}
 
-  - prompt: "Search for flights from LAX to JFK, then book the cheapest one for me — my name is Tom Reyes"
-    expected_response: "Found LAX to JFK flights. Cheapest option booked for Tom Reyes."
+  - prompt: "Search for flights from SFO to JFK, then book the cheapest one for me — my name is Tom Reyes"
+    expected_response: "Found SFO to JFK flights. Cheapest option FL001 ($450) booked for Tom Reyes."
     tier: medium
     category: booking
     expected_tools:
       - name: wrangler_search_mcp_search_flights
-        args: {origin: LAX, destination: JFK}
+        args: {origin: SFO, destination: JFK}
       - name: wrangler_booking_mcp_book_flight
-        args: {passenger_name: Tom Reyes}
+        args: {flight_id: FL001, passenger_name: Tom Reyes}
 
   - prompt: "List all bookings for user EMP001"
     expected_response: "Here are the bookings for user EMP001."
@@ -446,7 +446,7 @@ eval_cases:
     category: booking
     expected_tools:
       - name: wrangler_booking_mcp_list_all_bookings
-        args: {user_id: EMP001}
+        args: {}
 
   - prompt: "Book hotel HT002 for Mark Chen June 10-12 and submit a $250 lodging expense for EMP003"
     expected_response: "Hotel HT002 booked for Mark Chen (June 10-12). Lodging expense of $250 submitted for EMP003, within $400 policy."
@@ -508,7 +508,7 @@ eval_cases:
     category: cancellation
     expected_tools:
       - name: wrangler_booking_mcp_list_all_bookings
-        args: {user_id: EMP002}
+        args: {}
       - name: wrangler_booking_mcp_cancel_booking
         args: {booking_id: BK-005}
 
@@ -522,7 +522,7 @@ eval_cases:
       - name: wrangler_search_mcp_search_flights
         args: {origin: SFO, destination: LAX}
       - name: wrangler_booking_mcp_book_flight
-        args: {passenger_name: Lisa Wang}
+        args: {flight_id: FL005, passenger_name: Lisa Wang}
 
   - prompt: "Show me the details for booking BK-006 so I can decide whether to cancel it"
     expected_response: "Here are the details for booking BK-006."
@@ -582,7 +582,7 @@ eval_cases:
       - name: wrangler_expense_mcp_check_expense_policy
         args: {category: supplies, amount: 100}
       - name: wrangler_expense_mcp_submit_expense
-        args: {user_id: EMP003, category: supplies, amount: 100}
+        args: {user_id: EMP003, category: supplies, amount: 100, description: office supplies}
       - name: wrangler_expense_mcp_check_expense_policy
         args: {category: supplies, amount: 100.01}
 
@@ -650,9 +650,9 @@ eval_cases:
     category: planning
     expected_tools:
       - name: wrangler_search_mcp_search_flights
-        args: {destination: JFK}
+        args: {origin: SFO, destination: JFK}
       - name: wrangler_expense_mcp_check_expense_policy
-        args: {category: lodging}
+        args: {category: lodging, amount: 0}
       - name: wrangler_search_mcp_search_hotels
         args: {city: New York}
 

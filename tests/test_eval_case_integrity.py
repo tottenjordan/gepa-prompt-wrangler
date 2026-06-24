@@ -228,7 +228,7 @@ def test_eval_cases_structural_integrity():
                     "wrangler_expense_mcp_submit_expense",
                     "wrangler_expense_mcp_check_expense_policy",
                 ):
-                    if arg_value not in EXPENSE_CATEGORIES:
+                    if str(arg_value).lower() not in EXPENSE_CATEGORIES:
                         violations.append(
                             f"{label}: tool {name!r} arg category={arg_value!r} "
                             f"is not a valid expense category {sorted(EXPENSE_CATEGORIES)}"
