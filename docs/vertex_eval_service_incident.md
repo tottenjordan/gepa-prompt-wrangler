@@ -15,9 +15,28 @@ The version was held constant across the 5/5→2/5 boundary within the sweep (sa
 
 ---
 
+## ⚠️ UPDATE 2026-07-01 (PM) — refined diagnosis supersedes "service-wide" claim below
+
+Controlled re-probing on 2026-07-01 ~16:20–16:35 UTC (client 1.158.0 **and** 1.159.0, same 3 cases, same 4 predefined metrics, only the engine varies) shows the drop is **NOT a blanket service-wide outage** and is **NOT time-uniform**:
+
+| engine | cohort | model | metrics now |
+|---|---|---|---|
+| lite-core (`5407968282181369856`) | core | flash-lite | **4/4 ✅ recovered** |
+| lite-bare (`7757466301064282112`) | bare | flash-lite | **2/4 ❌** |
+| pro-bare (`1946107543617011712`) | bare | pro | **2/4 ❌** |
+| flash-bare (`1690528264763736064`) | bare | flash | **2/4 ❌** |
+
+**Decisive controlled pair — lite-core vs lite-bare:** same model, same client, same cases, same instant → opposite result. This isolates the cause to the **agent's deployed prompt and therefore its response content**, not time, model, or SDK version. The `final_response_quality` + `hallucination` autoraters **error on certain agents' responses** (→ `error_message`, `score=None` → dropped), while `safety` + `instruction_following` score fine.
+
+**Time component is real but per-engine:** this morning (07-01 AM) lite-core was *also* 2/5; by 16:20 UTC it returned 4/4. So affected engines are **recovering individually** — the core cohort has cleared, the bare cohort had not yet as of 16:35 UTC.
+
+**Two prior claims corrected:** (1) the SDK **upgrade is not a fix** — 1.158.0 and 1.159.0 give identical results per engine (lite-core 4/4 on both). (2) the "every engine regardless of model or prompt" statement below was an artifact of the 07-01 AM snapshot when all probed engines happened to be broken. **Still true:** it is server-side (autorater), not a wrangler bug and not client-version-dependent. The sharper ask for Google: *why do the FRQ/hallucination autoraters error on specific agent response content, and what changed ~06-26?*
+
+---
+
 ## Summary
 
-The Vertex AI Gen AI Evaluation Service (`client.evals.create_evaluation_run`) has, since ~15:18 UTC on 2026-06-26, been returning only a **subset** of the requested metrics while the evaluation run still reports terminal state `EvaluationRunState.SUCCEEDED`. There is no error, no `FAILED` state, and no top-level warning — the dropped metrics are simply absent from the aggregate results and appear per-case as `EvalCaseMetricResult` entries carrying an `error_message` with `score=None`.
+The Vertex AI Gen AI Evaluation Service (`client.evals.create_evaluation_run`) has, since ~15:18 UTC on 2026-06-26, been returning only a **subset** of the requested metrics while the evaluation run still reports terminal state `EvaluationRunState.SUCCEEDED`. There is no error, no `FAILED` state, and no top-level warning — the dropped metrics are simply absent from the aggregate results and appear per-case as `EvalCaseMetricResult` entries carrying an `error_message` with `score=None`. *(See the UPDATE block above — the drop is content/agent-dependent and recovering per-engine, not a uniform service-wide outage.)*
 
 We request confirmation of a service-side incident (likely an autorater/judge-model availability or sunset in `us-central1`) and an ETA for recovery.
 
