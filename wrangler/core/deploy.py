@@ -584,10 +584,19 @@ def build_source_package(
 
     # Copy .env as fallback for MCP server env vars — config.py's
     # load_dotenv() will read it if env_vars from the deployment config
-    # are missing or incomplete.
+    # are missing or incomplete.  Strip GOOGLE_API_KEY / GEMINI_API_KEY: a live
+    # API key in the deployed env overrides Vertex ADC, so google.genai attempts
+    # key-auth and GEAP session creation fails with
+    # "401 UNAUTHENTICATED: API keys are not supported by this API"
+    # ("Failed to create session"), and every request returns an error payload.
     env_file = agent_parent / ".env"
     if env_file.exists():
-        shutil.copy2(env_file, build_path / ".env")
+        _API_KEY_RE = re.compile(r"^\s*(export\s+)?(GOOGLE_API_KEY|GEMINI_API_KEY)\s*=")
+        filtered = [
+            line for line in env_file.read_text().splitlines(keepends=True)
+            if not _API_KEY_RE.match(line)
+        ]
+        (build_path / ".env").write_text("".join(filtered))
 
     # Write instruction file (replaced during redeploy)
     (build_path / "instruction.txt").write_text(instruction)

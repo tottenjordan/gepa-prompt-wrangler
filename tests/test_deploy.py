@@ -218,6 +218,34 @@ class TestBuildSourcePackage:
 
         assert not (Path(build_dir) / ".env").exists()
 
+    def test_env_api_keys_stripped(self, tmp_path):
+        """.env is copied for MCP fallback, but GOOGLE_API_KEY/GEMINI_API_KEY
+        must be stripped — an API key in the deployed env overrides Vertex ADC
+        and breaks session creation with 401 UNAUTHENTICATED."""
+        from wrangler.core.deploy import build_source_package
+
+        agent_module = _make_agent_tree(tmp_path)
+        # Drop a .env alongside config.py (the agent_parent dir) with a
+        # leaking API key plus a benign MCP var that must survive.
+        project_dir = Path(agent_module).parent.parent
+        (project_dir / ".env").write_text(
+            "GOOGLE_GENAI_USE_VERTEXAI=1\n"
+            "GOOGLE_API_KEY=AIzaLEAKED\n"
+            "GEMINI_API_KEY=AIzaALSOLEAKED\n"
+            "SEARCH_MCP_SERVER=wrangler-search-mcp\n"
+        )
+        build_dir = str(tmp_path / "build")
+        build_source_package(agent_module, "Prompt", "gemini-3.5-flash", build_dir)
+
+        shipped = Path(build_dir) / ".env"
+        assert shipped.exists(), "MCP-fallback .env should still be shipped"
+        text = shipped.read_text()
+        assert "GOOGLE_API_KEY=AIzaLEAKED" not in text
+        assert "GEMINI_API_KEY=AIzaALSOLEAKED" not in text
+        # benign vars retained
+        assert "SEARCH_MCP_SERVER=wrangler-search-mcp" in text
+        assert "GOOGLE_GENAI_USE_VERTEXAI=1" in text
+
     def test_config_mcp_vars_use_get(self, tmp_path):
         from wrangler.core.deploy import build_source_package
 
