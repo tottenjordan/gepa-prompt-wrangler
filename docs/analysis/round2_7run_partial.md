@@ -40,6 +40,10 @@ A composite Δ must clear **~0.022** to mean anything at N=1. *(2-point estimate
 
 *(bare output-token deltas are `is_estimate:True` — a char-derived proxy for response length, not exact API tokens; read directionally only.)*
 
+![Core vs bare composite crossover](round2_seed_crossover.png)
+
+*The crossover: opus48's after-bar drops from core→bare while sonnet's rises — the rich seed helps one model and hurts the other. (Chart labels sonnet-bare +0.057 from rounded bar values; precise Δ = +0.056.)*
+
 **Pending (blocked on Vertex service recovery):** pro-bare, flash-bare, lite-bare. GEPA evolved pro-bare 119→4172, flash-bare 119→5428; lite-bare returned the seed (119→119, variant 0). Backfill their evals when the service heals (~5–9 min each, eval-only).
 
 ---
