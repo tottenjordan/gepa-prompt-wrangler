@@ -1,6 +1,41 @@
 # Vertex AI Gen AI Evaluation Service — Silent Partial-Metric Degradation (Escalation)
 
-**Status:** OPEN — service-side incident, not client-fixable
+---
+
+## 🛑 RETRACTED 2026-07-01 (PM) — NOT a Vertex incident. This was our own deploy bug.
+
+**Do not file this with Google.** Root-caused and fixed on 2026-07-01. The partial-metric
+"drop" was a **downstream symptom of degenerate agent responses**, not an Evaluation Service fault.
+
+**Actual root cause:** `wrangler/core/deploy.py:build_source_package()` copied the agent's `.env`
+verbatim into the GEAP build package. That `.env` contained a live `GOOGLE_API_KEY` (added for
+PaperBanana). The packaged `config.py`'s `load_dotenv()` re-read it at runtime, so `GOOGLE_API_KEY`
+overrode Vertex ADC → `google.genai` attempted key-auth → Vertex returned
+**`401 UNAUTHENTICATED: API keys are not supported by this API`** → ADK raised
+`RuntimeError("Failed to create session.")`. Every inference then returned an error payload
+(`{"error": "Failed to create a new session: 400 FAILED_PRECONDITION ..."}`). Feeding that error
+string to the autoraters: `safety_v1` + `instruction_following_v1` still scored it (→ survive),
+while `final_response_quality_v1` + `hallucination_v1` + custom `tool_use` errored (score=None →
+dropped) → the "2/5" result. **The Eval Service behaved correctly on garbage input.**
+
+**Decisive evidence:** same model / cases / inference path, only the engine differs —
+`lite-core` (`5407968282181369856`) returned real prose and 5/5; `lite-bare`
+(`7757466301064282112`) returned the error payload every case and 2/5. GEAP ReasoningEngine logs
+for the broken engine show the literal `401 UNAUTHENTICATED ... API keys are not supported ...
+raise RuntimeError("Failed to create session.")`. This also explains the earlier confounds: the
+"clean→broken cutover at 06-26" tracked when the key entered the deployed env (not a service
+event); the "8768 identical output_tokens" was the identical error payload; the "per-engine
+recovery" was engines redeployed/warmed without the key.
+
+**Fix (shipped, commit `5d34aa0`):** `build_source_package()` now strips
+`GOOGLE_API_KEY`/`GEMINI_API_KEY` from the copied `.env`. Verified live: a lite-bare agent
+redeployed with the fix returns real responses and full 5/5 metrics.
+
+**Everything below is the original (incorrect) escalation, kept for the record only.**
+
+---
+
+**Status:** RETRACTED — was misdiagnosed as a service-side incident; actually a client deploy bug (see banner above)
 **Filed by:** prompt-wrangler team
 **Project:** `hybrid-vertex`
 **Region:** `us-central1`
