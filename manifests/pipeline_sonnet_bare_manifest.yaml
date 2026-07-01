@@ -1,0 +1,24 @@
+name: "pipeline-sonnet-bare-optimize"
+description: >
+  Barer-seed variant — claude-sonnet-4-6 on 64 eval cases. Minimal ~116-char
+  seed (no tool-ordering / city→code / detail rules) to give GEPA headroom.
+
+agent_module: "examples/multi_model_agents/agents/sonnet_agent"
+eval_data: "examples/multi_model_agents/eval_data/eval_cases.yaml"
+
+pairs:
+  - id: "sonnet_bare"
+    model: "claude-sonnet-4-6"
+    description: "Claude Sonnet 4.6 — barer seed"
+    agent_module: "examples/multi_model_agents/agents/sonnet_agent"
+    system_prompt: |
+      You are a corporate travel and expense assistant. Use the available tools to answer requests; never guess information.
+
+eval_config:
+  response_match_threshold: 0.5
+  safety_threshold: 0.8
+
+pipeline:
+  secret_id: wrangler-agent-env
+  cache_bust: "bare-v1"
+  max_metric_calls: 150

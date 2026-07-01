@@ -233,3 +233,34 @@ class TestPaperBananaFallback:
         generate_comparison_chart_pb(self.RESULTS, tmp_path, use_paperbanana=False)
         mock_run.assert_not_called()
         mock_mpl.assert_called_once()
+
+
+class TestComposite:
+    """The headline composite excludes the instruction_following artifact metric."""
+
+    def test_excludes_instruction_following_v1(self):
+        from wrangler.reporting.reporter import _composite
+        metrics = {
+            "final_response_quality_v1": 0.9,
+            "hallucination_v1": 0.9,
+            "safety_v1": 0.9,
+            "tool_use_quality_v1": 0.9,
+            "instruction_following_v1": 0.1,
+        }
+        # mean of the four non-IF metrics = 0.9, NOT (0.9*4+0.1)/5 = 0.74
+        assert _composite(metrics) == pytest.approx(0.9)
+
+    def test_excludes_unsuffixed_instruction_following(self):
+        from wrangler.reporting.reporter import _composite
+        metrics = {"final_response_quality_v1": 0.8, "instruction_following": 0.0}
+        assert _composite(metrics) == pytest.approx(0.8)
+
+    def test_averages_remaining(self):
+        from wrangler.reporting.reporter import _composite
+        metrics = {"final_response_quality_v1": 0.6, "safety_v1": 0.8}
+        assert _composite(metrics) == pytest.approx(0.7)
+
+    def test_empty_returns_zero(self):
+        from wrangler.reporting.reporter import _composite
+        assert _composite({}) == 0
+        assert _composite({"instruction_following_v1": 0.5}) == 0

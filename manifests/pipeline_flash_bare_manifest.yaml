@@ -1,0 +1,24 @@
+name: "pipeline-flash-bare-optimize"
+description: >
+  Barer-seed variant — gemini-3.5-flash on 64 eval cases. Minimal ~116-char
+  seed (no tool-ordering / city→code / detail rules) to give GEPA headroom.
+
+agent_module: "examples/multi_model_agents/agents/flash_agent"
+eval_data: "examples/multi_model_agents/eval_data/eval_cases.yaml"
+
+pairs:
+  - id: "flash_bare"
+    model: "gemini-3.5-flash"
+    description: "Gemini 3.5 Flash — barer seed"
+    agent_module: "examples/multi_model_agents/agents/flash_agent"
+    system_prompt: |
+      You are a corporate travel and expense assistant. Use the available tools to answer requests; never guess information.
+
+eval_config:
+  response_match_threshold: 0.5
+  safety_threshold: 0.8
+
+pipeline:
+  secret_id: wrangler-agent-env
+  cache_bust: "bare-v1"
+  max_metric_calls: 150

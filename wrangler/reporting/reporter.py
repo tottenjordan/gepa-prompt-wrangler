@@ -27,6 +27,20 @@ from ..core.config import MODEL_COSTS, blended_cost
 REPORTS_DIR = Path("outputs/reports")
 CHARTS_DIR = REPORTS_DIR / "charts"
 
+# Metrics excluded from the headline composite average. instruction_following_v1
+# is the predefined, reference-free metric that depresses terse agents as a known
+# artifact (see CLAUDE.md + docs/analysis/round1_budget_sweep.md). It is still
+# reported per-metric, but is kept out of the aggregate so the headline number
+# isn't distorted by it.
+_COMPOSITE_EXCLUDE = {"instruction_following_v1", "instruction_following"}
+
+
+def _composite(metrics: dict) -> float:
+    """Equal-weight mean over scored metrics, excluding artifact metrics
+    (instruction_following) from the headline number. Returns 0 when empty."""
+    vals = [v for k, v in metrics.items() if k not in _COMPOSITE_EXCLUDE]
+    return sum(vals) / len(vals) if vals else 0
+
 
 def _ensure_dirs():
     REPORTS_DIR.mkdir(parents=True, exist_ok=True)
@@ -63,8 +77,8 @@ def _executive_summary(results: dict, ordered: list[str]) -> list[str]:
     for name in ordered:
         before = results[name].get("before", {})
         after = results[name].get("after", {})
-        avg_b = sum(before.values()) / max(len(before), 1) if before else 0
-        avg_a = sum(after.values()) / max(len(after), 1) if after else 0
+        avg_b = _composite(before)
+        avg_a = _composite(after)
         agent_deltas[name] = avg_a - avg_b
 
     improved = [n for n in ordered if agent_deltas[n] > 0.005]
@@ -126,7 +140,8 @@ def _methodology_section(results: dict, ordered: list[str], experiment_name: str
 
     lines.append("**Metrics evaluated:**\n")
     for key, label in METRIC_LABELS.items():
-        lines.append(f"- {label} (`{key}`)")
+        note = " — *reported only; excluded from the headline composite (reference-free artifact)*" if key in _COMPOSITE_EXCLUDE else ""
+        lines.append(f"- {label} (`{key}`){note}")
     lines.append("")
 
     return lines
@@ -166,7 +181,7 @@ def _scores_section(results: dict, ordered: list[str]) -> list[str]:
             for key, label in METRIC_LABELS.items():
                 s = before.get(key, 0)
                 lines.append(f"| {label} | {s:.2f} |")
-            avg = sum(before.values()) / max(len(before), 1) if before else 0
+            avg = _composite(before)
             lines.append(f"| **Average** | **{avg:.2f}** |")
 
         lines.append("")
@@ -288,7 +303,7 @@ def _per_case_winners_losers(results: dict, ordered: list[str], case_metadata: l
         for i in range(n_cases):
             bc = before_cases[i]
             ac = after_cases[i]
-            common = set(bc) & set(ac)
+            common = (set(bc) & set(ac)) - _COMPOSITE_EXCLUDE
             if not common:
                 continue
             avg_delta = sum(ac.get(m, 0) - bc.get(m, 0) for m in common) / len(common)
@@ -365,8 +380,8 @@ def _per_model_section(results: dict, ordered: list[str]) -> list[str]:
         cost = MODEL_COSTS.get(model, {"input": 0, "output": 0})
         blend = blended_cost(model)
 
-        avg_b = sum(before.values()) / max(len(before), 1) if before else 0
-        avg_a = sum(after.values()) / max(len(after), 1) if after else 0
+        avg_b = _composite(before)
+        avg_a = _composite(after)
         delta = avg_a - avg_b
 
         improved = [k for k in METRIC_LABELS if after.get(k, 0) - before.get(k, 0) > 0.01]
@@ -405,8 +420,8 @@ def _cost_benefit_section(results: dict, ordered: list[str]) -> list[str]:
         blend = blended_cost(model)
         before = results[name].get("before", {})
         after = results[name].get("after", before)
-        avg_b = sum(before.values()) / max(len(before), 1) if before else 0
-        avg_a = sum(after.values()) / max(len(after), 1) if after else 0
+        avg_b = _composite(before)
+        avg_a = _composite(after)
         delta = avg_a - avg_b
         qpd = avg_a / max(blend, 0.01)
         lines.append(f"| {name.title()} | `{model}` | ${cost['input']:.2f} | ${cost['output']:.2f} | ${blend:.2f} | {avg_b:.2f} | {avg_a:.2f} | {delta:+.02f} | {qpd:.3f} |")
@@ -454,8 +469,8 @@ def _conclusions_section(results: dict, ordered: list[str]) -> list[str]:
     for name in ordered:
         before = results[name].get("before", {})
         after = results[name].get("after", {})
-        avg_b = sum(before.values()) / max(len(before), 1) if before else 0
-        avg_a = sum(after.values()) / max(len(after), 1) if after else 0
+        avg_b = _composite(before)
+        avg_a = _composite(after)
         agent_deltas[name] = avg_a - avg_b
 
     improved = [n for n in ordered if agent_deltas[n] > 0.005]
