@@ -206,6 +206,32 @@ class TestMetricCompleteness:
         _check_metric_completeness(scores, requested_count=2)
 
 
+class TestDisablePyopensslCalled:
+    """run_batch_eval must neutralize pyopenssl's context-reuse guard first.
+
+    pyopenssl 26.x raises ValueError ("Context has already been used...") when
+    eval inference reuses an SSL context. disable_pyopenssl() must be called
+    before any network setup on every eval path (CLI standalone, experiment
+    stage, pipeline component) — not just the pipeline submission path.
+    """
+
+    def test_run_batch_eval_calls_disable_pyopenssl_first(self):
+        from wrangler.eval import evaluator
+
+        sentinel = RuntimeError("disable_pyopenssl-was-called-first")
+
+        def _boom():
+            raise sentinel
+
+        # If disable_pyopenssl is the first thing run_batch_eval does, our
+        # sentinel propagates before any vertexai/network call is attempted.
+        with patch.object(evaluator, "disable_pyopenssl", side_effect=_boom):
+            with patch.object(evaluator, "vertexai") as mock_vertexai:
+                with pytest.raises(RuntimeError, match="disable_pyopenssl-was-called-first"):
+                    evaluator.run_batch_eval("engine-123", [{"prompt": "hi"}])
+                mock_vertexai.init.assert_not_called()
+
+
 class TestRetryFailedCases:
     def _make_inference_result(self, responses):
         df = pd.DataFrame({"prompt": [f"q{i}" for i in range(len(responses))],

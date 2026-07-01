@@ -16,7 +16,13 @@ import vertexai
 from vertexai import Client, types
 from vertexai._genai import _evals_common
 
-from ..core.config import GCP_PROJECT_ID, GCP_REGION, GCP_STAGING_BUCKET, get_batch_config
+from ..core.config import (
+    GCP_PROJECT_ID,
+    GCP_REGION,
+    GCP_STAGING_BUCKET,
+    disable_pyopenssl,
+    get_batch_config,
+)
 
 GCS_EVAL_DEST = f"gs://{GCP_STAGING_BUCKET}/eval-results"
 MAX_POLL_SECONDS = 2400
@@ -440,6 +446,12 @@ def run_batch_eval(
 ) -> EvalResult:
     """Run batch eval against a deployed agent. Returns EvalResult with aggregate and per-case scores."""
     tag = f"[{agent_name}] " if agent_name else ""
+
+    # Neutralize pyopenssl 26.x's context-reuse guard before any network setup.
+    # Without this, eval inference raises "Context has already been used...".
+    # Covers every eval entry point (CLI standalone, experiment stage, pipeline
+    # component), not just the pipeline submission path. Idempotent.
+    disable_pyopenssl()
 
     vertexai.init(
         project=GCP_PROJECT_ID,
