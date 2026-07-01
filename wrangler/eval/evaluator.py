@@ -123,6 +123,41 @@ DEFAULT_METRICS = [
 ]
 
 
+class IncompleteMetricsError(RuntimeError):
+    """Raised when the eval service returns fewer metrics than were requested.
+
+    The Vertex Gen AI Evaluation Service can report ``SUCCEEDED`` while
+    silently dropping a subset of the requested metrics (observed in the
+    Round 2 bare cohort: 5 requested, only ``safety_v1`` + ``instruction_
+    following_v1`` returned). Computing a composite over the surviving metrics
+    yields a plausible-but-wrong number that flows into every downstream
+    report, so we fail loud instead of emitting a partial result.
+    See memory reference_eval_partial_metric_silent_failure.
+    """
+
+
+def _check_metric_completeness(scores: dict, requested_count: int, tag: str = "") -> None:
+    """Fail loud if fewer aggregate scores came back than metrics requested.
+
+    A SUCCEEDED eval run must return exactly one aggregate ``<metric>/AVERAGE``
+    per requested metric. When the service drops some (a partial autorater
+    failure), ``scores`` has fewer keys than ``requested_count`` — a silent
+    data-integrity failure that would otherwise emit a wrong composite. Raises
+    ``IncompleteMetricsError`` in that case; returns normally otherwise.
+    """
+    returned = len(scores)
+    if returned >= requested_count:
+        return
+    present = ", ".join(sorted(scores)) or "(none)"
+    raise IncompleteMetricsError(
+        f"{tag}Eval run reported SUCCEEDED but returned only "
+        f"{returned}/{requested_count} metrics (present: {present}). The Vertex "
+        f"Eval Service dropped {requested_count - returned} metric(s); a composite "
+        f"over the survivors would be wrong. Re-run this pair "
+        f"(see reference_eval_partial_metric_silent_failure)."
+    )
+
+
 @dataclass
 class EvalResult:
     """Evaluation result with aggregate and per-case scores."""
@@ -495,6 +530,9 @@ def run_batch_eval(
     )
 
     scores = _extract_aggregate_scores(evaluation_run)
+    # Fail loud on a partial autorater result: a SUCCEEDED run that returns
+    # fewer metrics than requested would otherwise emit a wrong composite.
+    _check_metric_completeness(scores, len(metrics), tag)
 
     per_case = _extract_per_case_scores(evaluation_run)
     for case_scores in per_case:

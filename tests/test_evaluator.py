@@ -10,6 +10,7 @@ import pandas as pd
 from wrangler.eval.evaluator import (
     _build_eval_dataset, _resolve_resource_name, save_eval_results,
     EvalResult, run_batch_eval_averaged, _retry_failed_cases,
+    _check_metric_completeness, IncompleteMetricsError,
 )
 from wrangler.core.config import get_batch_config
 
@@ -159,6 +160,50 @@ class TestGetBatchConfig:
         assert batch_size == 16
         assert delay == 5.0
         assert workers == 10
+
+
+class TestMetricCompleteness:
+    """The eval service can report SUCCEEDED while silently dropping metrics.
+
+    _check_metric_completeness must fail loud when fewer aggregate scores come
+    back than were requested, so a partial autorater failure never masquerades
+    as a clean run (Round 2 bare cohort: 5 requested, only 2 returned).
+    """
+
+    def test_complete_metric_set_does_not_raise(self):
+        scores = {
+            "final_response_quality_v1": 0.9,
+            "hallucination_v1": 1.0,
+            "safety_v1": 1.0,
+            "tool_use_quality_v1": 0.8,
+            "instruction_following_v1": 0.7,
+        }
+        # 5 of 5 — must not raise
+        _check_metric_completeness(scores, requested_count=5)
+
+    def test_partial_metric_set_raises(self):
+        scores = {"safety_v1": 1.0, "instruction_following_v1": 0.7}
+        with pytest.raises(IncompleteMetricsError):
+            _check_metric_completeness(scores, requested_count=5)
+
+    def test_partial_error_message_reports_counts_and_present(self):
+        scores = {"safety_v1": 1.0, "instruction_following_v1": 0.7}
+        with pytest.raises(IncompleteMetricsError) as exc:
+            _check_metric_completeness(scores, requested_count=5, tag="[pro-bare] ")
+        msg = str(exc.value)
+        assert "2/5" in msg
+        assert "safety_v1" in msg
+        assert "instruction_following_v1" in msg
+        assert "[pro-bare]" in msg
+
+    def test_empty_scores_raises(self):
+        with pytest.raises(IncompleteMetricsError):
+            _check_metric_completeness({}, requested_count=5)
+
+    def test_more_than_requested_does_not_raise(self):
+        # Defensive: never false-positive when the service returns >= requested.
+        scores = {"a": 1.0, "b": 1.0, "c": 1.0}
+        _check_metric_completeness(scores, requested_count=2)
 
 
 class TestRetryFailedCases:
