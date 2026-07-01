@@ -7,6 +7,12 @@
 **First observed:** ~15:18 UTC 2026-06-26 · **Still reproducing:** 2026-07-01 (≥5 days)
 **Severity:** High — the service reports `SUCCEEDED` while silently dropping 3 of 5 requested metrics, so downstream consumers compute plausible-but-wrong aggregates unless they add their own completeness check.
 
+**Client versions (regression reproduces across both — confirming it is server-side):**
+- Sweep pipeline evals: `google-cloud-aiplatform 1.157.0`, `google-genai 2.8.0`, `google-adk 2.2.0` (single cached Docker image `cf89b888d680`, built 2026-06-10, reused unchanged for all 10 runs).
+- Independent 2026-07-01 probe: `google-cloud-aiplatform 1.158.0`, `google-genai 2.9.0`. Same 2/5 result on engines that returned 5/5 before the cutover.
+
+The version was held constant across the 5/5→2/5 boundary within the sweep (same image), and the failure then reproduced on a *newer* client version — so no client SDK version explains the regression.
+
 ---
 
 ## Summary
