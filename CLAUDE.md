@@ -247,3 +247,23 @@ gcloud logging read 'resource.type="aiplatform.googleapis.com/ReasoningEngine" A
 ```
 
 Known failure patterns are cataloged in `~/.claude/skills/inspect-vai-pipes/references/known-failures.md`.
+
+## Current Status — Pick Up Here (updated 2026-07-16)
+
+**Where things stand:** The **Round 2 GEPA model sweep is COMPLETE (10/10 runs, all clean 5/5 evals).** Working branch is `chore/prep-model-sweep-manifests` (pushed). The sweep optimized agent prompts across 5 models (opus48, sonnet, pro, flash, lite) × 2 seed cohorts (**core** = rich 579-char seed, **bare** = ~119-char minimal seed), all at `max_metric_calls: 150`, N=1.
+
+**Primary artifact:** `docs/analysis/round2_10run_matrix.md` — the complete before/after matrix and findings (supersedes `round2_7run_partial.md` and `round2_core_cohort.md`). Composite = equal-weight mean of the 4 quality metrics **excluding `instruction_following_v1`** (change F).
+
+**Headline findings:**
+- **Seed value is model-specific and its sign flips:** the hand-written rich seed HELPS opus48 (+0.043 core-after advantage; −60% tokens, seed-compression-specific) and flash (its win is core-only); HURTS sonnet (bare evolved to 0.910 = biggest clean win +0.056, beats core by +0.037); is IRRELEVANT to pro (flat both ways) and lite (returns the seed byte-identical in *both* cohorts = search difficulty, not seed proximity).
+- **N=1 noise floor is ≲0.029** (three seed-return controls: sonnet-core, lite-core, lite-bare). Only **sonnet-bare (+0.056)** and **opus48-core (+0.034)** robustly clear it; flash-core (+0.027) is borderline; everything else is flat at N=1.
+
+**The "2/5 metric drop" is CLOSED — it was our bug, not a Vertex incident.** Runs #8–10 (pro/flash/lite-bare) originally returned only 2 of 5 metrics. Root cause: `build_source_package()` copied the agent `.env` (which held a live `GOOGLE_API_KEY`) into the GEAP build package → runtime `load_dotenv()` overrode Vertex ADC → `401 UNAUTHENTICATED → Failed to create session` → error-payload responses broke the FRQ/hallucination/tool_use autoraters. **Fixed** in `wrangler/core/deploy.py` (commit `5d34aa0`, strips API keys from the copied `.env`; test `tests/test_deploy.py::TestBuildSourcePackage::test_env_api_keys_stripped`). The 3 runs were then **backfilled clean** via `outputs/eval_recovery/backfill/run_backfill.py` (idempotent/resumable; results in `outputs/eval_recovery/backfill/{pair}_result.json`). The escalation `docs/vertex_eval_service_incident.md` is **RETRACTED** (do not file with Google).
+
+**Guard that stays:** `wrangler/eval/evaluator.py` raises `IncompleteMetricsError` when a SUCCEEDED eval run returns fewer aggregate scores than requested — it correctly caught the degenerate agents and should remain.
+
+**Recent commits on the branch:** `7764f1e` (10-run matrix doc) · `7fb960f` (retract escalation) · `5d34aa0` (the .env fix).
+
+**Note:** `outputs/` is gitignored (transient — cleaned periodically). Durable results/analysis live in `docs/`. The sweep queue state is `outputs/round2_launch_state.json` (local only).
+
+**Likely next steps (not started — confirm before acting):** Round 3 design informed by the seed findings (e.g. drop the core seed for sonnet; keep it for opus48/flash; investigate why pro/lite don't move at 150 — a budget bump or a different search config), or the separate "legit testing" plan in `.claude/plans/shimmying-dreaming-locket.md` (expense mock-DB seed, eval-golden integrity test, city→airport-code prompt, opus48 validation re-run).

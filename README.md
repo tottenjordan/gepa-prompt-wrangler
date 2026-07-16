@@ -735,6 +735,14 @@ These appear in `Output[Metrics]` per pipeline step and in the final analysis re
 
 ---
 
+## Project Status
+
+**Round 2 model sweep: complete (10/10 runs).** A full paired sweep across 5 models (opus48, sonnet, pro, flash, lite) × 2 seed cohorts (a rich hand-written seed vs. a minimal bare seed), each optimized with GEPA at a 150-call budget. Full before/after matrix, per-model verdicts, and methodology are in **[`docs/analysis/round2_10run_matrix.md`](docs/analysis/round2_10run_matrix.md)**.
+
+Headline result: **the value of a hand-written seed prompt is model-specific, and its sign flips** — it helped some models (opus48, flash), actively hurt one (sonnet, which optimized best from the bare seed), and was irrelevant to others (pro, lite). There is no universal "invest in the seed" rule.
+
+Reliability note: a deploy bug that leaked `GOOGLE_API_KEY` from the agent `.env` into the GEAP build package (breaking agent sessions and silently degrading eval metrics) has been **fixed** — `build_source_package()` now strips API keys from the copied `.env`, and `evaluator.py` raises `IncompleteMetricsError` if a "succeeded" eval returns fewer metrics than requested, so partial results can no longer pass silently.
+
 ## Contributing
 
 1. Fork the repository and create a feature branch.
