@@ -57,7 +57,7 @@ def deploy_single(name: str, generic: bool = False, update: bool = False, versio
         from generic_prompts import GENERIC_PROMPT
 
         agent.instruction = GENERIC_PROMPT
-        print(f"  Using generic prompt")
+        print("  Using generic prompt")
 
     display_name = f"wrangler-{name}-agent-{version}"
 

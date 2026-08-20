@@ -14,8 +14,7 @@ grep for "Code injection" and update ALL copies.
 """
 
 from kfp import dsl
-from kfp.dsl import Output, Metrics, Markdown
-
+from kfp.dsl import Markdown, Metrics, Output
 
 # ── Component 1: Archive agent code ──────────────────────────────
 
@@ -62,7 +61,7 @@ def archive_agent_code(
     manifest = json.loads(manifest_json)
     n_pairs = len(manifest.get("pairs", []))
     with open(summary.path, "w") as f:
-        f.write(f"## Archive\n\n")
+        f.write("## Archive\n\n")
         f.write(f"- **Code URI**: `{code_uri}`\n")
         f.write(f"- **Size**: {tarball_size:.0f} KB\n")
         f.write(f"- **Pairs**: {n_pairs}\n")
@@ -122,9 +121,10 @@ def deploy_single_agent(
 
     # -- Load agent env vars from Secret Manager --
     if secret_id:
-        from google.cloud import secretmanager
-        from dotenv import load_dotenv
         import io
+
+        from dotenv import load_dotenv
+        from google.cloud import secretmanager
 
         logging.info(f"Loading secrets from {secret_id}")
         sm = secretmanager.SecretManagerServiceClient()
@@ -252,9 +252,9 @@ def eval_single_agent(
     os.environ["GOOGLE_CLOUD_LOCATION"] = "global"
     os.environ["GOOGLE_GENAI_USE_VERTEXAI"] = "1"
 
-    from wrangler.eval.evaluator import run_batch_eval_averaged
-    from wrangler.core.converter import load_eval_file
     from wrangler.core.config import MODEL_COSTS
+    from wrangler.core.converter import load_eval_file
+    from wrangler.eval.evaluator import run_batch_eval_averaged
 
     # Read deploy result from GCS
     deploy_blob = gcs.bucket(bucket_name).blob(
@@ -396,8 +396,8 @@ def optimize_single_agent(
 
     # -- Load agent env vars from Secret Manager --
     if secret_id:
-        from google.cloud import secretmanager
         from dotenv import load_dotenv
+        from google.cloud import secretmanager
 
         logging.info(f"Loading secrets from {secret_id}")
         sm = secretmanager.SecretManagerServiceClient()
@@ -409,10 +409,9 @@ def optimize_single_agent(
         os.environ.pop("GOOGLE_API_KEY", None)
         os.environ.pop("GEMINI_API_KEY", None)
 
-    from pathlib import Path
-
     # -- Start local MCP servers for reliable tool connections --
     import subprocess
+    from pathlib import Path
 
     mcp_servers_dir = Path("/app/examples/multi_model_agents/mcp_servers")
     mcp_procs = []
@@ -441,8 +440,8 @@ def optimize_single_agent(
     else:
         logging.warning("MCP servers dir not found — using remote URLs from secrets")
 
-    from wrangler.optimize.optimizer import optimize
     from wrangler.core.config import MODEL_COSTS
+    from wrangler.optimize.optimizer import optimize
 
     opt_module = pair.get("agent_module") or agent_module
     agent_path = Path(f"/app/{opt_module}")
@@ -531,6 +530,7 @@ def optimize_single_agent(
 
     # Clean up MCP sessions
     import asyncio
+
     from google.adk.tools.base_toolset import BaseToolset
 
     async def _cleanup_sessions():
@@ -683,8 +683,8 @@ def redeploy_single_agent(
 
     # -- Load agent env vars from Secret Manager --
     if secret_id:
-        from google.cloud import secretmanager
         from dotenv import load_dotenv
+        from google.cloud import secretmanager
 
         logging.info(f"Loading secrets from {secret_id}")
         sm = secretmanager.SecretManagerServiceClient()
@@ -786,7 +786,6 @@ def generate_analysis(
     import os
     import sys
     import tarfile
-    import time
     from pathlib import Path
 
     from google.cloud import storage as gcs_storage
@@ -815,9 +814,8 @@ def generate_analysis(
 
     matplotlib.use("Agg")
 
-    from wrangler.reporting.reporter import generate_report
     from wrangler.core.converter import load_eval_file
-    from wrangler.core.config import MODEL_COSTS
+    from wrangler.reporting.reporter import generate_report
 
     def _read_stage(stage, pair_id):
         blob = gcs.bucket(bucket_name).blob(f"pipeline-runs/{run_id}/stages/{stage}/{pair_id}.json")

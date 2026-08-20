@@ -1,29 +1,21 @@
 """Experiment report generation — charts + markdown for prompt optimization experiments."""
 
-import csv
 import math
 import re
-import subprocess
-import shutil
-import tempfile
 from pathlib import Path
 
 import matplotlib
 
 matplotlib.use("Agg")
-import matplotlib.pyplot as plt
-import numpy as np
 
-from ..core.factory import AgentPromptPair
-from .analysis import (
-    normalize_agent_keys,
-    generate_all_charts,
-    METRIC_LABELS,
-    AGENT_ORDER,
-    MODEL_MAP,
-    PROVIDERS,
-)
 from ..core.config import MODEL_COSTS, blended_cost
+from .analysis import (
+    AGENT_ORDER,
+    METRIC_LABELS,
+    PROVIDERS,
+    generate_all_charts,
+    normalize_agent_keys,
+)
 
 REPORTS_DIR = Path("outputs/reports")
 CHARTS_DIR = REPORTS_DIR / "charts"
@@ -555,13 +547,13 @@ def _conclusions_section(results: dict, ordered: list[str]) -> list[str]:
         )
 
     lines.append(
-        f"2. **Re-run with tighter thresholds** — higher thresholds force GEPA to discover domain-specific content"
+        "2. **Re-run with tighter thresholds** — higher thresholds force GEPA to discover domain-specific content"
     )
     lines.append(
-        f"3. **Verify per-case scores** are being extracted correctly for tier/category analysis"
+        "3. **Verify per-case scores** are being extracted correctly for tier/category analysis"
     )
     lines.append(
-        f"4. **Monitor deployed agents** with online evaluators to catch drift on real traffic"
+        "4. **Monitor deployed agents** with online evaluators to catch drift on real traffic"
     )
     lines.append("")
 

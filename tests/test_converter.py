@@ -1,9 +1,8 @@
 """Tests for eval data format conversion."""
 
 import json
-import pytest
-from pathlib import Path
 
+import pytest
 import yaml
 
 

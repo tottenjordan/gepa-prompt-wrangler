@@ -8,13 +8,12 @@ Usage:
 import argparse
 import os
 import subprocess
-from pathlib import Path
-
 import sys
+from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from wrangler.core.config import PAPERBANANA_PROJECT, PAPERBANANA_LOCATION, DIAGRAMS_DIR
+from wrangler.core.config import DIAGRAMS_DIR, PAPERBANANA_LOCATION, PAPERBANANA_PROJECT
 
 DIAGRAM_SOURCES_DIR = Path("docs/diagram_sources")
 

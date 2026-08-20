@@ -1,6 +1,5 @@
 """Tests for wrangler.online_monitors — constants and pure helpers."""
 
-import pytest
 from unittest.mock import patch
 
 from wrangler.eval.online_monitors import QUICK_EVAL_CASES, _resolve_agent_resource

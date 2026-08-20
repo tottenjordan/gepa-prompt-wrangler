@@ -14,12 +14,12 @@ os.environ.setdefault("ADK_SUPPRESS_GEMINI_LITELLM_WARNINGS", "true")
 warnings.filterwarnings("ignore", message=".*EXPERIMENTAL.*")
 warnings.filterwarnings("ignore", message=".*GEMINI_VIA_LITELLM.*")
 
-from ..core.factory import PairFactory, AgentPromptPair, Manifest
+from ..core import deploy as deployer
 from ..core.converter import load_eval_file
-from ..eval.evaluator import run_batch_eval_averaged, EvalResult
+from ..core.factory import AgentPromptPair, PairFactory
+from ..eval.evaluator import EvalResult, run_batch_eval_averaged
 from ..optimize.optimizer import optimize
 from ..reporting.reporter import generate_report
-from ..core import deploy as deployer
 
 
 def _fmt_duration(seconds: float) -> str:
@@ -101,7 +101,6 @@ class WranglerPipeline:
     def _load_agent(self, pair: AgentPromptPair):
         """Import and instantiate the agent with the pair's model and prompt."""
         import importlib.util
-        import sys
 
         module_ref = pair.agent_module or self.manifest.agent_module
         agent_path = self.manifest_dir / module_ref
@@ -161,7 +160,7 @@ class WranglerPipeline:
         stem = agent_path.stem.replace("_agent", "")
         opt_dir = agent_path.parent / f"{stem}_opt"
 
-        for base in [self.manifest_dir, Path(".")]:
+        for base in [self.manifest_dir, Path()]:
             candidate = base / opt_dir
             if candidate.is_dir() and (candidate / "__init__.py").exists():
                 return candidate
@@ -327,7 +326,7 @@ class WranglerPipeline:
         if missing_cat:
             raise ValueError(f"Cases missing 'category' field at indices: {missing_cat[:5]}")
 
-        print(f"  Pre-flight: PASSED")
+        print("  Pre-flight: PASSED")
 
     def run(self, from_phase: int = 0) -> dict:
         """Execute the full pipeline with progress tracking.
@@ -338,7 +337,7 @@ class WranglerPipeline:
         self._pipeline_start = time.time()
 
         print(f"{'=' * 60}")
-        print(f"GEPA PROMPT WRANGLER")
+        print("GEPA PROMPT WRANGLER")
         print(f"{'=' * 60}")
         print(f"  Experiment: {self.manifest.name}")
         print(f"  Pairs:      {len(self.manifest.pairs)}")

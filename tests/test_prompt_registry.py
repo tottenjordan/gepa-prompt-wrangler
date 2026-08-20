@@ -1,11 +1,11 @@
 """Tests for wrangler.prompt_registry — saving and loading optimized prompts."""
 
-import importlib
 import sys
-import pytest
 from pathlib import Path
 
-from wrangler.tools.prompt_registry import save_optimized_prompt, list_versions
+import pytest
+
+from wrangler.tools.prompt_registry import list_versions, save_optimized_prompt
 
 
 def _cleanup_prompt_modules():

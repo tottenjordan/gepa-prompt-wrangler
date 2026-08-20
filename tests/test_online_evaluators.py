@@ -1,11 +1,10 @@
 """Tests for wrangler.online_evaluators — constants and pure helpers."""
 
-import pytest
 from unittest.mock import patch
 
 from wrangler.eval.online_evaluators import (
-    PREDEFINED_METRICS,
     CUSTOM_METRICS,
+    PREDEFINED_METRICS,
     _agent_resource,
     _build_evaluator_config,
 )

@@ -1,11 +1,9 @@
 """Tests for wrangler.inspector — agent introspection and tool discovery."""
 
-import inspect
 import pytest
 import yaml
-from types import SimpleNamespace
 
-from wrangler.tools.inspector import ToolSpec, AgentSpec, _inspect_function_tool, AgentInspector
+from wrangler.tools.inspector import AgentInspector, AgentSpec, ToolSpec, _inspect_function_tool
 
 
 class TestToolSpec:
@@ -25,7 +23,6 @@ class TestInspectFunctionTool:
     def test_basic_function_extraction(self):
         def search_flights(origin: str, destination: str):
             """Search for available flights."""
-            pass
 
         spec = _inspect_function_tool(search_flights)
         assert spec.name == "search_flights"
@@ -36,7 +33,6 @@ class TestInspectFunctionTool:
     def test_typed_parameters(self):
         def func(count: int, price: float, active: bool):
             """Test."""
-            pass
 
         spec = _inspect_function_tool(func)
         assert spec.parameters["count"]["type"] == "integer"
@@ -46,7 +42,6 @@ class TestInspectFunctionTool:
     def test_unannotated_defaults_to_string(self):
         def func(name):
             """Test."""
-            pass
 
         spec = _inspect_function_tool(func)
         assert spec.parameters["name"]["type"] == "string"
@@ -54,7 +49,6 @@ class TestInspectFunctionTool:
     def test_required_vs_optional(self):
         def func(required_param: str, optional_param: str = "default"):
             """Test."""
-            pass
 
         spec = _inspect_function_tool(func)
         assert spec.parameters["required_param"]["required"] is True
@@ -63,7 +57,6 @@ class TestInspectFunctionTool:
     def test_self_param_excluded(self):
         def method(self, name: str):
             """Test."""
-            pass
 
         spec = _inspect_function_tool(method)
         assert "self" not in spec.parameters

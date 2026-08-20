@@ -4,7 +4,6 @@ Automatically appends new optimization results to the agent's prompt file.
 """
 
 import importlib
-import json
 import os
 import sys
 from datetime import datetime
@@ -87,16 +86,16 @@ def save_optimized_prompt(
     for vname, meta in existing_optimized.items():
         prompt_text = meta["prompt"].replace('"""', "'''")
         lines.append(f'    "{vname}": {{')
-        lines.append(f'        "prompt": """')
+        lines.append('        "prompt": """')
         lines.append(f"{prompt_text}")
-        lines.append(f'""",')
+        lines.append('""",')
         lines.append(f'        "source": "{meta.get("source", "")}",')
         lines.append(f'        "eval_cases": {meta.get("eval_cases", 15)},')
         lines.append(f'        "judge_model": "{meta.get("judge_model", "")}",')
         lines.append(f'        "notes": "{meta.get("notes", "")}",')
         if "timestamp" in meta:
             lines.append(f'        "timestamp": "{meta["timestamp"]}",')
-        lines.append(f"    }},")
+        lines.append("    },")
 
     lines.append("}")
     lines.append("")

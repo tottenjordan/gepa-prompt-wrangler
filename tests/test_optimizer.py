@@ -1,16 +1,14 @@
 """Tests for wrangler.optimizer — wrapper module creation, patch helpers, and config handling."""
 
 import asyncio
-import json
-import os
 import re
 import unicodedata
-import pytest
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
-from wrangler.optimize.optimizer import _create_wrapper_module, _prewarm_mcp_toolsets
+import pytest
 
+from wrangler.optimize.optimizer import _create_wrapper_module, _prewarm_mcp_toolsets
 
 # --- Reproduce _fuzzy_normalize for direct unit testing ---
 # Mirrors the implementation inside _patch_adk() in optimizer.py.

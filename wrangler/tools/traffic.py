@@ -20,9 +20,6 @@ Usage:
 """
 
 import argparse
-import os
-import random
-import sys
 import time
 import uuid
 from pathlib import Path
@@ -105,12 +102,12 @@ def generate_traffic(
         agents[agent_id] = agent_engines.get(resource)
 
     print(f"{'=' * 60}")
-    print(f"TRAFFIC GENERATOR")
+    print("TRAFFIC GENERATOR")
     print(f"{'=' * 60}")
     print(f"  Agents:    {len(agent_ids)} (round-robin)")
     print(f"  Queries:   {total} total")
     print(f"  Interval:  {interval}s between queries")
-    print(f"  Sessions:  new session + unique user per query")
+    print("  Sessions:  new session + unique user per query")
     print()
 
     for i, (query, complexity) in enumerate(queries):
@@ -147,7 +144,7 @@ def generate_traffic(
             time.sleep(interval)
 
     print(f"\n{'=' * 60}")
-    print(f"TRAFFIC COMPLETE")
+    print("TRAFFIC COMPLETE")
     print(f"{'=' * 60}")
     print(f"  Total queries: {query_num}")
     print(f"  Errors:        {errors}")
@@ -155,8 +152,9 @@ def generate_traffic(
 
 
 if __name__ == "__main__":
-    from dotenv import load_dotenv
     from pathlib import Path
+
+    from dotenv import load_dotenv
 
     load_dotenv()
     example_env = Path(__file__).parent.parent / "examples" / "multi_model_agents" / ".env"

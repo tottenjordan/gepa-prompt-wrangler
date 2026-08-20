@@ -370,14 +370,14 @@ def _retry_failed_cases(
     for idx, row in result_df.iterrows():
         response = row.get("response")
         if (
-            response is None
-            or (not isinstance(response, dict) and pd.isna(response))
-            or response == ""
+            (
+                response is None
+                or (not isinstance(response, dict) and pd.isna(response))
+                or response == ""
+            )
+            or (isinstance(response, dict) and "error" in response)
+            or (isinstance(response, str) and response.strip() == "")
         ):
-            failed_indices.append(idx)
-        elif isinstance(response, dict) and "error" in response:
-            failed_indices.append(idx)
-        elif isinstance(response, str) and response.strip() == "":
             failed_indices.append(idx)
 
     if not failed_indices:

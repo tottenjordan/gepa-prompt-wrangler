@@ -10,7 +10,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 
-from ..core.config import MODEL_COSTS, REPORTS_DIR, blended_cost
+from ..core.config import REPORTS_DIR, blended_cost
 
 METRIC_LABELS = {
     "final_response_quality_v1": "Response Quality",
@@ -111,7 +111,7 @@ def generate_comparison_chart(results: dict, charts_dir: Path | None = None):
     plt.tight_layout()
     plt.savefig(charts_dir / "comparison.png", dpi=150)
     plt.close()
-    print(f"  Generated: comparison.png")
+    print("  Generated: comparison.png")
 
 
 def generate_cost_quality_chart(results: dict, charts_dir: Path | None = None):
@@ -270,7 +270,7 @@ def generate_cost_quality_chart(results: dict, charts_dir: Path | None = None):
     plt.tight_layout()
     plt.savefig(charts_dir / "cost_quality.png", dpi=150)
     plt.close()
-    print(f"  Generated: cost_quality.png")
+    print("  Generated: cost_quality.png")
 
 
 def generate_improvement_chart(results: dict, charts_dir: Path | None = None):
@@ -317,7 +317,7 @@ def generate_improvement_chart(results: dict, charts_dir: Path | None = None):
     plt.tight_layout()
     plt.savefig(charts_dir / "improvement_delta.png", dpi=150)
     plt.close()
-    print(f"  Generated: improvement_delta.png")
+    print("  Generated: improvement_delta.png")
 
 
 def generate_tier_breakdown_chart(
@@ -352,7 +352,7 @@ def generate_tier_breakdown_chart(
                 scores = tier_scores.get(tier, {})
                 tier_avgs[name][tier] = sum(scores.values()) / max(len(scores), 1) if scores else 0
         else:
-            tier_avgs[name] = {t: 0 for t in tiers_present}
+            tier_avgs[name] = dict.fromkeys(tiers_present, 0)
 
     fig, ax = plt.subplots(figsize=(12, 7))
     x = np.arange(len(tiers_present))
@@ -388,7 +388,7 @@ def generate_tier_breakdown_chart(
     plt.tight_layout()
     plt.savefig(charts_dir / "tier_breakdown.png", dpi=150)
     plt.close()
-    print(f"  Generated: tier_breakdown.png")
+    print("  Generated: tier_breakdown.png")
 
 
 def generate_category_heatmap(
@@ -441,7 +441,7 @@ def generate_category_heatmap(
     plt.tight_layout()
     plt.savefig(charts_dir / "category_heatmap.png", dpi=150)
     plt.close()
-    print(f"  Generated: category_heatmap.png")
+    print("  Generated: category_heatmap.png")
 
 
 def generate_run_comparison_chart(
@@ -507,7 +507,7 @@ def generate_run_comparison_chart(
     plt.tight_layout()
     plt.savefig(charts_dir / "run_comparison.png", dpi=150)
     plt.close()
-    print(f"  Generated: run_comparison.png")
+    print("  Generated: run_comparison.png")
 
 
 def generate_radar_chart(results: dict, charts_dir: Path | None = None):
@@ -554,7 +554,7 @@ def generate_radar_chart(results: dict, charts_dir: Path | None = None):
     plt.tight_layout()
     plt.savefig(charts_dir / "radar.png", dpi=150, bbox_inches="tight")
     plt.close()
-    print(f"  Generated: radar.png")
+    print("  Generated: radar.png")
 
 
 def generate_tier_improvement_heatmap(
@@ -626,7 +626,7 @@ def generate_tier_improvement_heatmap(
     plt.tight_layout()
     plt.savefig(charts_dir / "tier_improvement_heatmap.png", dpi=150)
     plt.close()
-    print(f"  Generated: tier_improvement_heatmap.png")
+    print("  Generated: tier_improvement_heatmap.png")
 
 
 def generate_all_charts(

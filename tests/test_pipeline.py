@@ -2,7 +2,6 @@
 
 import json
 
-import pytest
 import yaml
 
 
@@ -23,6 +22,7 @@ class TestPipelineDAGCompilation:
 
     def test_compile_single_pair(self, tmp_path):
         from kfp import compiler
+
         from wrangler.pipeline.dag import gepa_pipeline
 
         output_path = str(tmp_path / "pipeline.yaml")
@@ -36,6 +36,7 @@ class TestPipelineDAGCompilation:
 
     def test_compiled_yaml_has_all_components(self, tmp_path):
         from kfp import compiler
+
         from wrangler.pipeline.dag import gepa_pipeline
 
         output_path = str(tmp_path / "pipeline.yaml")
@@ -119,7 +120,7 @@ class TestBlendedCostWithCustom:
         assert abs(result - expected) < 0.001
 
     def test_fallback_to_model_costs(self):
-        from wrangler.core.config import blended_cost, MODEL_COSTS
+        from wrangler.core.config import MODEL_COSTS, blended_cost
 
         result = blended_cost("gemini-3.5-flash")
         cost = MODEL_COSTS["gemini-3.5-flash"]
@@ -137,8 +138,6 @@ class TestParetoFrontier:
     """Verify the Pareto frontier uses proper non-dominated sort."""
 
     def test_dominated_point_excluded(self):
-        import numpy as np
-        from unittest.mock import patch
 
         results = {
             "cheap-good": {"model": "gemini-3.1-flash-lite", "after": {"q": 0.9}},
@@ -146,9 +145,10 @@ class TestParetoFrontier:
             "expensive-best": {"model": "claude-sonnet-4-6", "after": {"q": 0.95}},
         }
 
-        from wrangler.reporting.analysis import generate_cost_quality_chart
         import tempfile
         from pathlib import Path
+
+        from wrangler.reporting.analysis import generate_cost_quality_chart
 
         with tempfile.TemporaryDirectory() as td:
             generate_cost_quality_chart(results, charts_dir=Path(td))

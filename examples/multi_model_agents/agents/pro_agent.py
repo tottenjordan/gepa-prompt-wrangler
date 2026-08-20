@@ -5,18 +5,17 @@ import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from google.adk.agents import LlmAgent
-from google.adk.tools.preload_memory_tool import PreloadMemoryTool
-
 from config import (
-    PRO_MODEL,
-    SEARCH_MCP_SERVER,
     BOOKING_MCP_SERVER,
     EXPENSE_MCP_SERVER,
+    PRO_MODEL,
+    SEARCH_MCP_SERVER,
     resolve_model,
 )
-from registry import get_mcp_tools
+from google.adk.agents import LlmAgent
+from google.adk.tools.preload_memory_tool import PreloadMemoryTool
 from prompts.pro_prompts import OPTIMIZED
+from registry import get_mcp_tools
 
 INSTRUCTION = OPTIMIZED["wrangler_v4"]["prompt"]
 

@@ -6,7 +6,6 @@ import json
 import logging
 import os
 import sys
-import tempfile
 import time
 from pathlib import Path
 
@@ -23,7 +22,8 @@ def _fmt_elapsed(t0: float) -> str:
 
 def _patch_adk():
     """Apply ADK patches for GEPA compatibility."""
-    from google.adk.evaluation import eval_case as _ec, eval_set as _es
+    from google.adk.evaluation import eval_case as _ec
+    from google.adk.evaluation import eval_set as _es
 
     for _mod in (_ec, _es):
         for _name in dir(_mod):
@@ -109,9 +109,9 @@ def _patch_adk():
     # causes exact match failures.  We also override
     # convert_auto_rater_response_to_score with a substring fallback.
     import re as _re
-    from google.adk.evaluation import rubric_based_evaluator as _rbe
-
     import unicodedata as _ud
+
+    from google.adk.evaluation import rubric_based_evaluator as _rbe
 
     _SMART_CHARS = {
         0x2018: "'",
@@ -139,10 +139,10 @@ def _patch_adk():
 
     def _patched_convert(self, auto_rater_response):
         from google.adk.evaluation.rubric_based_evaluator import (
-            get_text_from_content,
-            RubricScore,
             AutoRaterScore,
+            RubricScore,
             get_average_rubric_score,
+            get_text_from_content,
         )
 
         response_text = get_text_from_content(auto_rater_response.content)
@@ -287,6 +287,7 @@ def optimize(
     _patch_adk()
 
     import vertexai
+
     from ..core.config import GCP_PROJECT_ID, GCP_REGION, GCP_STAGING_BUCKET
 
     vertexai.init(
@@ -370,8 +371,7 @@ def optimize(
         from ..core.converter import build_gepa_criteria
 
         evalset_stem = Path(evalset_path).stem if evalset_path else "eval_set"
-        if evalset_stem.endswith(".evalset"):
-            evalset_stem = evalset_stem[: -len(".evalset")]
+        evalset_stem = evalset_stem.removesuffix(".evalset")
         sampler_config = {
             "eval_config": {
                 "criteria": build_gepa_criteria(eval_thresholds, judge_model),
@@ -403,7 +403,7 @@ def optimize(
             f"{tag}  No evalset files in {evalset_dir} — auto-generating from {eval_data_path}",
             flush=True,
         )
-        from ..core.converter import load_eval_file, generate_gepa_evalset, generate_sampler_config
+        from ..core.converter import generate_gepa_evalset, generate_sampler_config, load_eval_file
 
         cases = load_eval_file(eval_data_path)
         eval_set_id = f"{app_name}_eval_set"

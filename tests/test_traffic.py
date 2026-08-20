@@ -1,6 +1,5 @@
 """Tests for wrangler.traffic — pure helpers and constants."""
 
-import pytest
 from unittest.mock import patch
 
 from wrangler.tools.traffic import DEFAULT_QUERIES, _resolve_resource

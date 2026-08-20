@@ -2,7 +2,6 @@
 
 from google.adk.agents import Agent
 
-
 # ---------------------------------------------------------------------------
 # Mock function tools (return synthetic data for eval purposes)
 # ---------------------------------------------------------------------------

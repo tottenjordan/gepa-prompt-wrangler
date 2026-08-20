@@ -71,7 +71,7 @@ def test_mcp_connectivity():
     """Test 1: Can we load MCP toolsets from all 3 servers via Agent Registry?"""
     _header("Test 1: MCP Server Connectivity")
 
-    from config import SEARCH_MCP_SERVER, BOOKING_MCP_SERVER, EXPENSE_MCP_SERVER
+    from config import BOOKING_MCP_SERVER, EXPENSE_MCP_SERVER, SEARCH_MCP_SERVER
     from registry import get_mcp_tools
 
     servers = {
@@ -100,6 +100,7 @@ def test_sampler_config():
     _header("Test 2: Sampler Config Validation")
 
     import json
+
     from wrangler.optimize.optimizer import _patch_adk
 
     _patch_adk()
@@ -211,7 +212,9 @@ def test_gepa_optimize():
     _header("Test 5: GEPA Optimization (minimal)")
 
     import json
+
     import vertexai
+
     from wrangler.core.config import GCP_PROJECT_ID, GCP_REGION, GCP_STAGING_BUCKET
 
     vertexai.init(
@@ -224,6 +227,9 @@ def test_gepa_optimize():
 
     _patch_adk()
 
+    import asyncio
+    import importlib.util
+
     from google.adk.evaluation.local_eval_sets_manager import LocalEvalSetsManager
     from google.adk.optimization.gepa_root_agent_prompt_optimizer import (
         GEPARootAgentPromptOptimizer,
@@ -233,8 +239,6 @@ def test_gepa_optimize():
         LocalEvalSampler,
         LocalEvalSamplerConfig,
     )
-    import asyncio
-    import importlib.util
 
     agent_path = os.path.abspath(LITE_OPT_DIR)
     agents_dir = os.path.dirname(agent_path)
@@ -333,9 +337,9 @@ def main():
         print(f"  {status}: {name}")
 
     if all_pass:
-        print(f"\n  All tests passed. Safe to run the full pipeline.")
+        print("\n  All tests passed. Safe to run the full pipeline.")
     else:
-        print(f"\n  Some tests FAILED. Fix issues before running the pipeline.")
+        print("\n  Some tests FAILED. Fix issues before running the pipeline.")
 
     return 0 if all_pass else 1
 

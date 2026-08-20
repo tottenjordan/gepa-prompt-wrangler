@@ -1,6 +1,7 @@
 """Global configuration — GCP project settings, model resolution, and environment setup."""
 
 import os
+
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -69,10 +70,9 @@ def get_batch_config(model: str) -> tuple[int, float, int]:
             break
     if rpm <= 10:
         return 4, 15.0, 4
-    elif rpm <= 100:
+    if rpm <= 100:
         return 16, 5.0, 10
-    else:
-        return 64, 0.0, 20
+    return 64, 0.0, 20
 
 
 def resolve_model(model_str: str):

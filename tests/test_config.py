@@ -1,9 +1,8 @@
 """Tests for wrangler.config — model resolution, constants, and utilities."""
 
-import pytest
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
 
-from wrangler.core.config import resolve_model, MODEL_COSTS
+from wrangler.core.config import MODEL_COSTS, resolve_model
 
 
 class TestResolveModel:

@@ -12,7 +12,6 @@ Usage:
     uv run python -m wrangler.online_evaluators cleanup
 """
 
-import json
 import os
 import sys
 import textwrap
@@ -245,7 +244,7 @@ def verify_evaluators():
     print(f"\n  {'PASS' if all_active else 'WARN'}: {len(matching)} evaluator(s)")
 
     # Check Cloud Logging for eval results
-    print(f"\n=== Evaluation Results in Cloud Logging ===")
+    print("\n=== Evaluation Results in Cloud Logging ===")
     for label, engine_id in agents.items():
         body = {
             "resourceNames": [f"projects/{GCP_PROJECT_ID}"],
@@ -318,8 +317,9 @@ COMMANDS = {
 }
 
 if __name__ == "__main__":
-    from dotenv import load_dotenv
     from pathlib import Path
+
+    from dotenv import load_dotenv
 
     # Load .env from repo root, then example dir (example overrides root)
     load_dotenv()
@@ -328,7 +328,7 @@ if __name__ == "__main__":
         load_dotenv(str(example_env), override=True)
 
     if len(sys.argv) < 2 or sys.argv[1] not in COMMANDS:
-        print(f"Usage: python -m wrangler.online_evaluators <command>")
+        print("Usage: python -m wrangler.online_evaluators <command>")
         print(f"Commands: {', '.join(COMMANDS)}")
         sys.exit(1)
     COMMANDS[sys.argv[1]](sys.argv[2:])

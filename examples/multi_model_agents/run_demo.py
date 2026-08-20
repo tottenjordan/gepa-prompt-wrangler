@@ -22,8 +22,8 @@ from dotenv import load_dotenv
 
 load_dotenv(os.path.join(SCRIPT_DIR, ".env"))
 
-from generic_prompts import GENERIC_PROMPT, AGENT_GENERIC_PROMPTS
 from config import GCP_PROJECT_ID, GCP_REGION, GCP_STAGING_BUCKET, resolve_model
+from generic_prompts import GENERIC_PROMPT
 
 AGENTS = {
     "lite": {
@@ -94,10 +94,11 @@ def run_demo(agent_names: list[str], skip_deploy: bool = False):
 
     # Add wrangler lib to path
     sys.path.insert(0, os.path.join(SCRIPT_DIR, "..", ".."))
-    from wrangler.eval.evaluator import run_batch_eval
-    from wrangler.core.deploy import deploy_agent, update_agent
     from wrangler.converter import load_eval_file
+
     from wrangler.core.config import disable_pyopenssl
+    from wrangler.core.deploy import deploy_agent
+    from wrangler.eval.evaluator import run_batch_eval
 
     disable_pyopenssl()
 
@@ -108,7 +109,7 @@ def run_demo(agent_names: list[str], skip_deploy: bool = False):
     engine_ids = {}
 
     print(f"\n{'=' * 60}")
-    print(f"GEPA PROMPT WRANGLER — E2E DEMO")
+    print("GEPA PROMPT WRANGLER — E2E DEMO")
     print(f"{'=' * 60}")
     print(f"  Project:  {GCP_PROJECT_ID}")
     print(f"  Agents:   {agent_names}")
@@ -117,7 +118,7 @@ def run_demo(agent_names: list[str], skip_deploy: bool = False):
 
     # --- Phase 1: Deploy with generic prompts ---
     if not skip_deploy:
-        print(f"\n--- Phase 1: Deploy with Generic Prompts ---")
+        print("\n--- Phase 1: Deploy with Generic Prompts ---")
         for name in agent_names:
             print(f"\n  [{name}]")
             agent = load_agent(name, GENERIC_PROMPT)
@@ -125,7 +126,7 @@ def run_demo(agent_names: list[str], skip_deploy: bool = False):
             engine_ids[name] = eid
             update_env(f"{name.upper()}_ENGINE_ID", eid)
     else:
-        print(f"\n--- Phase 1: Skipping deploy (using existing) ---")
+        print("\n--- Phase 1: Skipping deploy (using existing) ---")
         for name in agent_names:
             eid = os.environ.get(f"{name.upper()}_ENGINE_ID", "")
             if not eid:
@@ -135,7 +136,7 @@ def run_demo(agent_names: list[str], skip_deploy: bool = False):
             print(f"  {name}: {eid}")
 
     # --- Phase 2: Baseline eval ---
-    print(f"\n--- Phase 2: Baseline Evaluation ---")
+    print("\n--- Phase 2: Baseline Evaluation ---")
     for name in agent_names:
         if name not in engine_ids:
             continue
@@ -158,18 +159,18 @@ def run_demo(agent_names: list[str], skip_deploy: bool = False):
     print(f"\n  Baseline saved: {baseline_path}")
 
     # --- Phase 3: GEPA optimize (placeholder) ---
-    print(f"\n--- Phase 3: GEPA Optimization ---")
-    print(f"  (Run optimizer separately for each agent)")
-    print(f"  Command: wrangler optimize manifest.yaml --pair <name>")
+    print("\n--- Phase 3: GEPA Optimization ---")
+    print("  (Run optimizer separately for each agent)")
+    print("  Command: wrangler optimize manifest.yaml --pair <name>")
 
     # --- Phase 4-6 would continue after optimization ---
-    print(f"\n--- Phases 4-6: Redeploy → Re-eval → Report ---")
-    print(f"  After optimization, run:")
+    print("\n--- Phases 4-6: Redeploy → Re-eval → Report ---")
+    print("  After optimization, run:")
     print(f"    uv run python run_demo.py --skip-deploy --agents {' '.join(agent_names)}")
-    print(f"  This will eval the optimized agents and generate the final report.")
+    print("  This will eval the optimized agents and generate the final report.")
 
     print(f"\n{'=' * 60}")
-    print(f"BASELINE COMPLETE")
+    print("BASELINE COMPLETE")
     print(f"{'=' * 60}")
 
     return results

@@ -1,9 +1,7 @@
 """Tests for wrangler.core.deploy — agent deployment/update on GEAP."""
 
-import os
-import pytest
 from pathlib import Path
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
 
 
 class TestDeployAgent:
@@ -41,7 +39,7 @@ class TestDeployAgent:
     @patch("wrangler.core.deploy.vertexai")
     @patch("wrangler.core.deploy._get_client")
     def test_config_includes_requirements(self, mock_client, mock_vertexai):
-        from wrangler.core.deploy import deploy_agent, REQUIREMENTS
+        from wrangler.core.deploy import REQUIREMENTS, deploy_agent
 
         mock_remote = MagicMock()
         mock_remote.resource_name = "projects/p/locations/l/reasoningEngines/99"
@@ -286,7 +284,7 @@ class TestBuildSourcePackage:
         assert not (Path(build_dir) / "stale.txt").exists()
 
     def test_requirements_content(self, tmp_path):
-        from wrangler.core.deploy import build_source_package, _SOURCE_REQUIREMENTS
+        from wrangler.core.deploy import _SOURCE_REQUIREMENTS, build_source_package
 
         agent_module = _make_agent_tree(tmp_path)
         build_dir = str(tmp_path / "build")
@@ -352,7 +350,7 @@ class TestDeployAgentFromSource:
     @patch("wrangler.core.deploy.vertexai")
     @patch("wrangler.core.deploy._get_client")
     def test_config_includes_class_methods(self, mock_client, mock_vertexai, tmp_path):
-        from wrangler.core.deploy import deploy_agent_from_source, _ADK_CLASS_METHODS
+        from wrangler.core.deploy import _ADK_CLASS_METHODS, deploy_agent_from_source
 
         mock_remote = MagicMock()
         mock_remote.resource_name = "projects/p/locations/l/reasoningEngines/99"

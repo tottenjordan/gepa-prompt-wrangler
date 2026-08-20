@@ -6,7 +6,6 @@ The create_agent() factory is used by wrangler to inject different models and pr
 
 from google.adk.agents import Agent
 
-
 # ---------------------------------------------------------------------------
 # Your tools — replace these with your actual business logic
 # ---------------------------------------------------------------------------

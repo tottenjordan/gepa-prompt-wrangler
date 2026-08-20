@@ -15,7 +15,6 @@ AGENTS_DIR = EXAMPLE_ROOT / "agents"
 
 sys.path.insert(0, str(EXAMPLE_ROOT))
 from mcp_servers.search.mock_db import FLIGHTS, HOTELS
-from mcp_servers.expense.mock_db import POLICY_LIMITS
 
 YAML_PATH = EVAL_DATA_DIR / "eval_cases.yaml"
 MODELS = ["lite", "flash", "pro", "sonnet", "opus"]
@@ -41,11 +40,16 @@ def _load_yaml_cases():
 # of the YAML→JSON conversion. EXAMPLE_ROOT is already on sys.path above.
 from scripts.generate_evalsets import (  # noqa: E402
     EVALSET_TARGETS as GEN_EVALSET_TARGETS,
+)
+from scripts.generate_evalsets import (
     build_eval_case as _gen_build_eval_case,
+)
+from scripts.generate_evalsets import (
     load_yaml_cases as _gen_load_yaml_cases,
+)
+from scripts.generate_evalsets import (
     select_cases as _gen_select_cases,
 )
-
 
 FLIGHT_ID_RE = re.compile(r"^FL\d{3}$")
 HOTEL_ID_RE = re.compile(r"^HT\d{3}$")
@@ -118,9 +122,9 @@ class TestTierEvalCases:
     @pytest.fixture(autouse=True)
     def _load(self):
         from eval_data.tier_eval_cases import (
+            HIGH_COMPLEXITY_CASES,
             LOW_COMPLEXITY_CASES,
             MEDIUM_COMPLEXITY_CASES,
-            HIGH_COMPLEXITY_CASES,
             TIER_EVAL_CASES,
         )
 
@@ -166,10 +170,10 @@ class TestAgentEvalConfigs:
     @pytest.fixture(autouse=True)
     def _load(self):
         from eval_data.agent_eval_configs import (
-            TRAVEL_EVAL_CASES,
             EXPENSE_EVAL_CASES,
             ROUTER_EVAL_CASES,
             STANDALONE_EVAL_CASES,
+            TRAVEL_EVAL_CASES,
             get_eval_cases,
             get_metrics,
         )

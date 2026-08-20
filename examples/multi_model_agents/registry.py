@@ -5,13 +5,11 @@ Falls back to Agent Registry lookup when direct URLs aren't configured.
 """
 
 import logging
-import os
 
 import httpx
+from config import AGENT_REGISTRY_LOCATION, GCP_PROJECT_ID, MCP_SERVER_URLS
 from google.adk.tools.mcp_tool import McpToolset
 from google.adk.tools.mcp_tool.mcp_session_manager import StreamableHTTPConnectionParams
-
-from config import GCP_PROJECT_ID, AGENT_REGISTRY_LOCATION, MCP_SERVER_URLS
 
 log = logging.getLogger(__name__)
 

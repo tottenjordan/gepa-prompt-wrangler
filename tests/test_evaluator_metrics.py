@@ -13,9 +13,9 @@ from vertexai import types
 
 from wrangler.eval import evaluator
 from wrangler.eval.evaluator import (
-    DEFAULT_METRICS,
     _TOOL_USE_METRIC_NAME,
     _TOOL_USE_REPORT_KEY,
+    DEFAULT_METRICS,
     _tool_use_metric,
 )
 

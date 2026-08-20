@@ -2,8 +2,6 @@
 
 import importlib.util
 import inspect
-import os
-import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -120,9 +118,9 @@ class AgentInspector:
         tools = []
         for tool in agent.tools or []:
             try:
-                if callable(tool) and not hasattr(tool, "func") and not hasattr(tool, "agent"):
-                    tools.append(_inspect_function_tool(tool))
-                elif hasattr(tool, "func"):
+                if (
+                    callable(tool) and not hasattr(tool, "func") and not hasattr(tool, "agent")
+                ) or hasattr(tool, "func"):
                     tools.append(_inspect_function_tool(tool))
                 elif hasattr(tool, "agent"):
                     tools.append(
@@ -224,7 +222,7 @@ class AgentInspector:
                     "prompt": f"TODO: Write a query that triggers {tool.name}({param_example})",
                     "expected_response": "TODO: Expected agent response",
                     "expected_tools": [
-                        {"name": tool.eval_name, "args": {p: "TODO" for p in param_names[:2]}},
+                        {"name": tool.eval_name, "args": dict.fromkeys(param_names[:2], "TODO")},
                     ],
                 }
             )

@@ -125,7 +125,7 @@ def prompt_module_dir(tmp_path):
         prompts_dir.mkdir(exist_ok=True)
         (prompts_dir / "__init__.py").write_text("")
         (prompts_dir / f"{agent_name}_prompts.py").write_text(
-            f'GENERIC = "You are a helpful assistant."\nOPTIMIZED = {{}}\nACTIVE = GENERIC\n'
+            'GENERIC = "You are a helpful assistant."\nOPTIMIZED = {}\nACTIVE = GENERIC\n'
         )
         return str(prompts_dir)
 

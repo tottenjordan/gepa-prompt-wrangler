@@ -1,21 +1,20 @@
 """Tests for wrangler.evaluator — pure helpers and data building."""
 
 import json
-import pytest
 from pathlib import Path
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
 
 import pandas as pd
 
+from wrangler.core.config import get_batch_config
 from wrangler.eval.evaluator import (
+    EvalResult,
     _build_eval_dataset,
     _resolve_resource_name,
-    save_eval_results,
-    EvalResult,
-    run_batch_eval_averaged,
     _retry_failed_cases,
+    run_batch_eval_averaged,
+    save_eval_results,
 )
-from wrangler.core.config import get_batch_config
 
 
 class TestBuildEvalDataset:

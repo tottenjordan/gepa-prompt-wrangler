@@ -1,9 +1,7 @@
 """Tests for wrangler.reporter — report generation, and wrangler.analysis — chart generation."""
 
 import subprocess
-import pytest
-from pathlib import Path
-from unittest.mock import patch, MagicMock, call
+from unittest.mock import MagicMock, patch
 
 
 class TestGenerateComparisonChart:

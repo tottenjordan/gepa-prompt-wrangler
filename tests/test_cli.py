@@ -1,11 +1,11 @@
 """Tests for wrangler.cli — Click CLI commands."""
 
-import pytest
-import yaml
 from pathlib import Path
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
 
+import yaml
 from click.testing import CliRunner
+
 from wrangler.cli import main
 
 

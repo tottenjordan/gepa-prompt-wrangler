@@ -1,18 +1,13 @@
 """Tests for wrangler.analysis — report generation and analysis functions."""
 
-import pytest
 from pathlib import Path
 
 from wrangler.reporting.analysis import (
     compute_tier_scores,
-    METRIC_LABELS,
-    PROVIDERS,
-    AGENT_ORDER,
-    MODEL_MAP,
 )
 from wrangler.reporting.report_sections import (
-    _prompt_evolution_summary,
     _cost_benefit_section,
+    _prompt_evolution_summary,
     generate_agent_report,
     generate_comparison_report,
 )
@@ -312,14 +307,14 @@ class TestGenerateComparisonReport:
 
 # ── Chart function tests ──────────────────────────────────────────
 
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
 
 from wrangler.reporting.analysis import (
-    normalize_agent_keys,
-    generate_tier_breakdown_chart,
     generate_category_heatmap,
     generate_radar_chart,
+    generate_tier_breakdown_chart,
     generate_tier_improvement_heatmap,
+    normalize_agent_keys,
 )
 
 

@@ -7,21 +7,20 @@ Usage:
 
 import argparse
 import json
-from pathlib import Path
-
 import sys
+from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from wrangler.core.config import REPORTS_DIR, OUTPUTS_DIR
 from wrangler.analysis import (
+    AGENT_ORDER,
     generate_agent_report,
+    generate_all_charts,
     generate_comparison_report,
     normalize_agent_keys,
-    generate_all_charts,
-    METRIC_LABELS,
-    AGENT_ORDER,
 )
+
+from wrangler.core.config import OUTPUTS_DIR, REPORTS_DIR
 
 CHARTS_DIR = Path(REPORTS_DIR) / "charts"
 AGENTS_DIR = Path(REPORTS_DIR) / "agents"

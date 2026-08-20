@@ -1,13 +1,12 @@
 """Tests for experiment management and stage functions."""
 
 import json
-from pathlib import Path
 
 import pytest
 import yaml
 
-from wrangler.orchestration.experiment import Experiment, STAGES, STAGE_GATES
-from wrangler.core.factory import Manifest, AgentPromptPair
+from wrangler.core.factory import Manifest
+from wrangler.orchestration.experiment import STAGE_GATES, STAGES, Experiment
 
 
 @pytest.fixture
@@ -243,6 +242,7 @@ class TestPhaseGates:
 class TestCLIExperiment:
     def test_experiment_create(self, manifest_yaml, tmp_path):
         from click.testing import CliRunner
+
         from wrangler.cli import main
 
         runner = CliRunner()
@@ -264,6 +264,7 @@ class TestCLIExperiment:
 
     def test_status_command(self, experiment):
         from click.testing import CliRunner
+
         from wrangler.cli import main
 
         runner = CliRunner()

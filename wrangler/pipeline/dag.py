@@ -15,9 +15,9 @@ from .components import (
     archive_agent_code,
     deploy_single_agent,
     eval_single_agent,
+    generate_analysis,
     optimize_single_agent,
     redeploy_single_agent,
-    generate_analysis,
 )
 
 
@@ -85,7 +85,7 @@ def build_pipeline(image_uri: str):
             )
             deploy_task.set_caching_options(enable_caching=True)
             deploy_task.after(archive_task)
-            deploy_task.set_display_name(f"Deploy Agents")
+            deploy_task.set_display_name("Deploy Agents")
 
         with dsl.ParallelFor(pairs_json, parallelism=1) as pair_config:
             eval_before_task = comps["eval"](
@@ -173,7 +173,7 @@ def build_pipeline(image_uri: str):
         )
         analysis_task.set_caching_options(enable_caching=True)
         analysis_task.after(eval_after_task)
-        analysis_task.set_display_name(f"Generate Analysis")
+        analysis_task.set_display_name("Generate Analysis")
 
     return _pipeline
 

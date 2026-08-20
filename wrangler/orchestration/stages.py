@@ -7,13 +7,13 @@ import time
 from datetime import datetime
 from pathlib import Path
 
-from .experiment import Experiment
-from ..core.factory import AgentPromptPair, Manifest
+from ..core import deploy as deployer
 from ..core.converter import load_eval_file
-from ..eval.evaluator import run_batch_eval_averaged, EvalResult
+from ..core.factory import AgentPromptPair, Manifest
+from ..eval.evaluator import run_batch_eval_averaged
 from ..optimize.optimizer import optimize
 from ..reporting.reporter import generate_report as _generate_report
-from ..core import deploy as deployer
+from .experiment import Experiment
 
 
 def _fmt_duration(seconds: float) -> str:
@@ -98,7 +98,7 @@ def _post_eval_sanity_check(
     if all_per_case_empty and stage_data:
         print(f"\n  WARNING: All per_case arrays are empty in {stage_name}.")
         print(
-            f"  Tier/category analysis will be unavailable. Check _extract_per_case_scores() field mapping."
+            "  Tier/category analysis will be unavailable. Check _extract_per_case_scores() field mapping."
         )
 
     for p in pairs:
@@ -117,7 +117,7 @@ def _load_agent(manifest: Manifest, pair: AgentPromptPair, manifest_dir: Path | 
     need to instantiate the agent locally.
     """
     module_ref = pair.agent_module or manifest.agent_module
-    search_bases = [Path(".")] if manifest_dir is None else [manifest_dir, Path(".")]
+    search_bases = [Path()] if manifest_dir is None else [manifest_dir, Path()]
 
     agent_path = None
     for base in search_bases:
@@ -176,7 +176,7 @@ def _resolve_optimize_module(
     stem = agent_path.stem.replace("_agent", "")
     opt_dir = agent_path.parent / f"{stem}_opt"
 
-    search_bases = [Path(".")] if manifest_dir is None else [manifest_dir, Path(".")]
+    search_bases = [Path()] if manifest_dir is None else [manifest_dir, Path()]
     for base in search_bases:
         candidate = base / opt_dir
         if candidate.is_dir() and (candidate / "__init__.py").exists():
@@ -192,7 +192,7 @@ def _resolve_optimize_module(
 
 def _resolve_eval_path(manifest: Manifest, manifest_dir: Path | None = None) -> Path:
     """Resolve eval data file, checking manifest_dir first."""
-    search_bases = [Path(".")] if manifest_dir is None else [manifest_dir, Path(".")]
+    search_bases = [Path()] if manifest_dir is None else [manifest_dir, Path()]
     for base in search_bases:
         candidate = base / manifest.eval_data
         if candidate.exists():
@@ -214,10 +214,10 @@ def _manifest_dir(exp: Experiment) -> Path:
     the project root that contains these paths.
     """
     agent_module = exp.config.get("agent_module", "")
-    for base in [Path("."), exp.dir, exp.dir.parent, exp.dir.parent.parent]:
+    for base in [Path(), exp.dir, exp.dir.parent, exp.dir.parent.parent]:
         if (base / agent_module).exists():
             return base
-    return Path(".")
+    return Path()
 
 
 # ── Stage functions ────────────────────────────────────────────
@@ -550,7 +550,7 @@ def stage_report(exp: Experiment, use_paperbanana: bool = True) -> None:
 
     matplotlib.use("Agg")
 
-    from ..reporting.reporter import REPORTS_DIR, CHARTS_DIR
+    from ..reporting.reporter import CHARTS_DIR, REPORTS_DIR
 
     original_reports = REPORTS_DIR
     original_charts = CHARTS_DIR

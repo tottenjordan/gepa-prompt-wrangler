@@ -1,17 +1,14 @@
 """Tests for wrangler.reporting.analyzer — experiment analysis and report generation."""
 
-import pytest
-
 from wrangler.reporting.analyzer import (
-    PairAnalysis,
     ExperimentAnalysis,
-    _prompt_diff_summary,
-    _find_removed_content,
-    _analyze_tool_keywords,
-    format_analysis_report,
     GepaRunStats,
+    PairAnalysis,
+    _analyze_tool_keywords,
+    _find_removed_content,
     _format_tool_audit,
-    METRIC_LABELS,
+    _prompt_diff_summary,
+    format_analysis_report,
 )
 
 

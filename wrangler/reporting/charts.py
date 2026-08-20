@@ -8,17 +8,17 @@ import subprocess
 import tempfile
 from pathlib import Path
 
+from ..core.config import MODEL_COSTS, blended_cost
 from .analysis import (
+    AGENT_ORDER,
+    METRIC_LABELS,
+    MODEL_MAP,
+    PROVIDERS,
     generate_comparison_chart,
     generate_cost_quality_chart,
     generate_improvement_chart,
     generate_radar_chart,
-    METRIC_LABELS,
-    AGENT_ORDER,
-    MODEL_MAP,
-    PROVIDERS,
 )
-from ..core.config import MODEL_COSTS, blended_cost
 
 
 def _try_paperbanana(
@@ -36,7 +36,7 @@ def _try_paperbanana(
     """
     env = os.environ.copy()
     if not env.get("GOOGLE_API_KEY"):
-        print(f"  PaperBanana skipped (no GOOGLE_API_KEY), using matplotlib")
+        print("  PaperBanana skipped (no GOOGLE_API_KEY), using matplotlib")
         fallback_fn(**fallback_kwargs)
         return False
 

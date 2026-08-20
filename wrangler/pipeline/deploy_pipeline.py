@@ -64,7 +64,11 @@ def build_pipeline_image(
     in Artifact Registry. Returns the full image URI.
     """
     deps_hash = _compute_deps_hash()
-    region = location.split("-")[0] + "-" + location.split("-")[1] if "-" in location else "us"
+    region = (
+        location.split("-", maxsplit=1)[0] + "-" + location.split("-")[1]
+        if "-" in location
+        else "us"
+    )
     ar_host = f"{region}-docker.pkg.dev"
     image_uri = f"{ar_host}/{project_id}/{IMAGE_REPO}/{IMAGE_NAME}:{deps_hash}"
 
@@ -221,8 +225,8 @@ def deploy_pipeline(
 
     Returns dict with dashboard_uri, job_id, run_name.
     """
-    from kfp import compiler
     from google.cloud import aiplatform
+    from kfp import compiler
 
     from ..core.factory import PairFactory
 

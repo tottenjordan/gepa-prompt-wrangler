@@ -1,9 +1,6 @@
 """Tests for manifest parsing and agent-prompt pair factory."""
 
 import pytest
-import tempfile
-from pathlib import Path
-
 import yaml
 
 

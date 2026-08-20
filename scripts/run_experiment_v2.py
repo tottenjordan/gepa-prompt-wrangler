@@ -62,7 +62,7 @@ def main():
     step_times: list[tuple[str, float]] = []
 
     print(f"{'=' * 60}")
-    print(f"GEPA EXPERIMENT v2 — Enhanced Pipeline")
+    print("GEPA EXPERIMENT v2 — Enhanced Pipeline")
     print(f"{'=' * 60}")
     print(f"  Manifest: {args.manifest}")
     print(f"  Time:     {time.strftime('%Y-%m-%d %H:%M:%S')}")
@@ -123,11 +123,11 @@ def main():
             step_times,
         )
     else:
-        print(f"\n  Step 5: Skipping diagrams (--skip-diagrams)")
+        print("\n  Step 5: Skipping diagrams (--skip-diagrams)")
 
     # Step 6: Assemble full report
     print(f"\n{'=' * 60}")
-    print(f"  Step 6: Assemble Full Report")
+    print("  Step 6: Assemble Full Report")
     print(f"{'=' * 60}")
     t0 = time.time()
 

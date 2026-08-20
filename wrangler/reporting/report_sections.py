@@ -6,13 +6,12 @@ from pathlib import Path
 
 from ..core.config import MODEL_COSTS, REPORTS_DIR, blended_cost
 from .analysis import (
+    AGENT_ORDER,
     METRIC_LABELS,
     PROVIDERS,
-    AGENT_ORDER,
-    MODEL_MAP,
     TIER_ORDER,
-    normalize_agent_keys,
     compute_tier_scores,
+    normalize_agent_keys,
 )
 
 
@@ -179,8 +178,8 @@ def _cost_benefit_section(model: str, before_scores: dict, after_scores: dict) -
     avg_after = sum(after_scores.values()) / max(len(after_scores), 1)
     improvement = avg_after - avg_before
 
-    lines.append(f"| Metric | Value |")
-    lines.append(f"|--------|-------|")
+    lines.append("| Metric | Value |")
+    lines.append("|--------|-------|")
     lines.append(f"| Input cost | ${cost['input']:.2f}/M tokens |")
     lines.append(f"| Output cost | ${cost['output']:.2f}/M tokens |")
     lines.append(f"| Blended cost (4:1 in:out) | ${blend:.2f}/M tokens |")
@@ -641,12 +640,12 @@ def _interpretation_section(
         )
 
     lines.append(
-        f"4. **Prompt cost is zero.** Optimization only changes the system prompt — "
-        f"no additional inference cost. Even mixed results are worth iterating on.\n"
+        "4. **Prompt cost is zero.** Optimization only changes the system prompt — "
+        "no additional inference cost. Even mixed results are worth iterating on.\n"
     )
     lines.append(
-        f"5. **Monitor with online evaluators** after deployment to catch regressions "
-        f"on real traffic beyond the eval dataset.\n"
+        "5. **Monitor with online evaluators** after deployment to catch regressions "
+        "on real traffic beyond the eval dataset.\n"
     )
 
     return lines

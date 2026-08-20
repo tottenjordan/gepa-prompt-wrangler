@@ -9,7 +9,6 @@ build the container from source — no cloudpickle serialization, no module
 path issues.
 """
 
-import os
 import re
 import shutil
 from pathlib import Path

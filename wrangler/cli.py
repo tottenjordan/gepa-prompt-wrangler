@@ -74,8 +74,8 @@ def deploy(target: str, pair: str):
         click.echo(f"Deploying — experiment: {exp.name}")
         stage_deploy(exp, pair_id=pair)
     else:
-        from .orchestration.runner import WranglerPipeline
         from .core import deploy as deployer
+        from .orchestration.runner import WranglerPipeline
 
         pipeline = WranglerPipeline(target)
         pairs = [pipeline.manifest.get_pair(pair)] if pair else pipeline.manifest.pairs
@@ -395,7 +395,7 @@ def init(output: str, agent_dir: str):
             click.echo(f"  Generated eval skeleton: {eval_path} ({len(eval_cases)} cases)")
 
         if spec.tools:
-            click.echo(f"\n  Tool names for eval cases:")
+            click.echo("\n  Tool names for eval cases:")
             for t in spec.tools:
                 prefix = f" (eval: {t.eval_name})" if t.eval_name != t.name else ""
                 click.echo(f"    - {t.name} [{t.tool_type}]{prefix}")
@@ -447,7 +447,7 @@ def inspect(agent_path: str, output: str):
     click.echo(f"\nDiscovered {len(spec.tools)} tools for agent '{spec.name}'")
 
     if spec.tools:
-        click.echo(f"\nTool names for eval cases:")
+        click.echo("\nTool names for eval cases:")
         for t in spec.tools:
             prefix = (
                 f" -> use '{t.eval_name}_<function>' in eval cases"
@@ -465,7 +465,7 @@ def inspect(agent_path: str, output: str):
 @click.option("--app-name", default=None, help="App name (defaults to output directory name).")
 def generate_evalset(from_path: str, output: str, count: int, balanced: bool, app_name: str):
     """Generate a GEPA-compatible evalset from simplified eval cases."""
-    from .core.converter import load_eval_file, generate_gepa_evalset, generate_sampler_config
+    from .core.converter import generate_gepa_evalset, generate_sampler_config, load_eval_file
 
     cases = load_eval_file(from_path)
     click.echo(f"Loaded {len(cases)} eval cases from {from_path}")
@@ -515,7 +515,7 @@ def pipeline_run(manifest: str, run_id: str | None, num_runs: int, quick_test: b
         num_runs=num_runs,
         quick_test=quick_test,
     )
-    click.echo(f"\nPipeline submitted:")
+    click.echo("\nPipeline submitted:")
     click.echo(f"  Run ID:    {result['run_id']}")
     click.echo(f"  Job ID:    {result['job_id']}")
     click.echo(f"  Dashboard: {result['dashboard_uri']}")

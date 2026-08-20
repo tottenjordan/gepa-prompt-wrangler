@@ -45,7 +45,7 @@ def main(skip_diagrams: bool = False):
 
     # Step 3: Assemble full report
     print(f"\n{'=' * 60}")
-    print(f"  Step 3: Assemble Full Report")
+    print("  Step 3: Assemble Full Report")
     print(f"{'=' * 60}")
 
     reports_dir = Path(REPORTS_DIR)
@@ -89,7 +89,7 @@ def main(skip_diagrams: bool = False):
     print(f"\n  Full report: {full_report}")
 
     print(f"\n{'=' * 60}")
-    print(f"  ANALYSIS COMPLETE")
+    print("  ANALYSIS COMPLETE")
     print(f"{'=' * 60}")
     print(f"\n  Reports:  {reports_dir}")
     print(f"  Charts:   {charts_dir}")

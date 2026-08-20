@@ -11,7 +11,6 @@ Usage:
 """
 
 import json
-import os
 import sys
 import time
 from datetime import datetime
@@ -118,7 +117,7 @@ def run_quick_eval(agent_id: str, num_cases: int = None) -> dict:
     except Exception as e:
         print(f"  Warning: {e}")
 
-    print(f"\n  Results:")
+    print("\n  Results:")
     for m, s in sorted(scores.items()):
         print(f"    {m:40s} {s:.2f}")
 
@@ -141,8 +140,9 @@ def run_quick_eval(agent_id: str, num_cases: int = None) -> dict:
 
 
 if __name__ == "__main__":
-    from dotenv import load_dotenv
     from pathlib import Path
+
+    from dotenv import load_dotenv
 
     load_dotenv()
     example_env = Path(__file__).parent.parent / "examples" / "multi_model_agents" / ".env"
