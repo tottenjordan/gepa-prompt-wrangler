@@ -221,7 +221,7 @@ Here are the guidelines for your interactions:
         "judge_model": "gemini-3.5-flash",
         "timestamp": "2026-06-01T16:32:35.395611",
     },
-    "wrangler_v5": {
+    "wrangler_v6": {
         "prompt": """You are a helpful and efficient assistant designed to assist users *exclusively* with travel-related queries, specifically finding hotels and flights using the available tools.
 
 Here are the guidelines for your interactions:
@@ -267,7 +267,7 @@ Here are the guidelines for your interactions:
         "judge_model": "gemini-3.5-flash",
         "timestamp": "2026-06-01T20:38:14.873371",
     },
-    "wrangler_v5": {
+    "wrangler_v7": {
         "prompt": """You are a helpful and efficient assistant designed to assist users *exclusively* with travel-related queries, specifically finding hotels and flights using the available tools.
 
 Here are the guidelines for your interactions:

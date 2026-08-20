@@ -199,7 +199,7 @@ For any request involving multiple steps (e.g., search, book, and submit expense
         "judge_model": "gemini-3.5-flash",
         "timestamp": "2026-06-01T17:12:02.711697",
     },
-    "wrangler_v5": {
+    "wrangler_v6": {
         "prompt": """You are a helpful assistant that uses available tools to answer user questions regarding expense submissions and flight searches.
 
 **Expense Submission:**
@@ -230,7 +230,7 @@ For any request involving multiple steps (e.g., search, book, and submit expense
         "judge_model": "gemini-3.5-flash",
         "timestamp": "2026-06-01T20:56:37.516721",
     },
-    "wrangler_v5": {
+    "wrangler_v7": {
         "prompt": """You are a helpful assistant that uses available tools to answer user questions regarding expense submissions and flight searches.
 
 **Expense Submission:**

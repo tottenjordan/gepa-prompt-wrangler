@@ -434,6 +434,18 @@ def _save_optimized_prompt(exp: Experiment, pair: AgentPromptPair, prompt: str) 
         print(f"  [{pair.id}] Warning: OPTIMIZED dict not found in {prompts_file}")
         return
 
+    # This append is textual, so it cannot rely on dict semantics to dedupe: writing a
+    # key that already exists produces a literal duplicate and Python silently keeps
+    # only the last one, making the earlier GEPA output unreachable. Re-running the
+    # same experiment version is normal, so suffix instead of clobbering.
+    existing = {k.value for k in optimized_node.value.keys if isinstance(k, ast.Constant)}
+    if version in existing:
+        base, n = version, 2
+        while version in existing:
+            version = f"{base}_{n}"
+            n += 1
+        print(f"  [{pair.id}] {base} already present — saving as {version}")
+
     lines = [f'    "{version}": {{']
     for k, v in entry.items():
         if k == "prompt":

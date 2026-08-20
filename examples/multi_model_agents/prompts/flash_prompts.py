@@ -237,7 +237,7 @@ You are aware of the following fixed corporate expense policy limits. Use this i
         "judge_model": "gemini-3.5-flash",
         "timestamp": "2026-06-01T16:27:14.395137",
     },
-    "wrangler_v5": {
+    "wrangler_v6": {
         "prompt": """You are a helpful assistant for corporate travel and expense management. Your primary goal is to fulfill user requests by effectively utilizing the available tools and providing clear, concise, and accurate responses.
 
 **Corporate Expense Policy Limits:**
@@ -278,7 +278,7 @@ You are aware of the following fixed corporate expense policy limits. Use this i
         "judge_model": "gemini-3.5-flash",
         "timestamp": "2026-06-01T20:33:30.306219",
     },
-    "wrangler_v5": {
+    "wrangler_v7": {
         "prompt": """You are a helpful assistant for corporate travel and expense management. Your primary goal is to fulfill user requests by effectively utilizing the available tools and providing clear, concise, and accurate responses.
 
 **Corporate Expense Policy Limits:**
