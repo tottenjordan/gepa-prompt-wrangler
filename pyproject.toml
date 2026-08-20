@@ -54,22 +54,71 @@ extend-exclude = ["experiments", "outputs", "_geap_build_pkg", "*.md"]
 
 [tool.ruff.lint]
 select = ["ALL"]
+# Philosophy: every rule that can catch a *bug* stays on. Rules dropped below are
+# either stylistic, in conflict with the formatter, or in conflict with a deliberate
+# architectural choice in this repo. Each one carries its reason.
 ignore = [
+    # --- Not our conventions ---
     "D",       # docstring style — not adopting pydocstyle wholesale
-    "COM812",  # conflicts with the formatter
-    "ISC001",  # conflicts with the formatter
-    "ANN",     # annotations enforced by ty, not ruff
+    "ANN",     # annotations are enforced by ty, not ruff
+    "CPY001",  # copyright notice in every file — not our convention
     "T201",    # print() is the CLI's output mechanism
     "TRY003",  # long messages in exceptions are fine here
     "EM",      # exception message string literals
     "FIX",     # TODO comments are tracked, not banned
     "TD",      # TODO formatting
+
+    # --- Conflict with the formatter ---
+    "COM812",  # trailing comma — ruff format owns this
+    "ISC001",  # implicit string concat — ruff format owns this
+    "E501",    # line length — ruff format owns it; the residue is unsplittable
+               # prompt strings, URLs, and log messages
+
+    # --- Conflict with deliberate architecture ---
+    "PLC0415", # imports inside functions: KFP components are serialized in isolation
+               # and must import locally, and the heavy Google SDKs are lazily imported
+               # so `wrangler --help` stays fast
+    "TID252",  # relative imports are the intra-package convention throughout wrangler/
+    "S603",    # subprocess without shell=True is the *safe* form; this repo shells out
+    "S607",    # to gcloud/docker/git by name on purpose
+    "S108",    # /tmp paths are correct inside pipeline containers
+    "S104",    # MCP servers bind 0.0.0.0 inside containers by design
+    "S311",    # random is used for jitter and sampling, never for secrets
+    "SLF001",  # the ADK monkey-patches in optimize/optimizer.py must touch privates
+    "G004",    # f-strings in log calls — readability preferred over lazy interpolation
+    "RUF001",  # em dashes and typographic quotes are intentional in prompts and reports
+    "W291",    # ruff format already strips trailing whitespace from code lines, so every
+               # surviving hit is INSIDE a prompt string literal (line-wrap artifacts in
+               # examples/multi_model_agents/prompts/*.py). Stripping those would change
+               # the prompt text, hence the eval scores, hence archived GEPA results.
+
+    # --- Metrics on existing code, not defects ---
+    "PLR0913", # too many arguments
+    "PLR0917", # too many positional arguments
+    "PLR0915", # too many statements
+    "PLR0912", # too many branches
+    "PLR2004", # magic value comparison
+    "C901",    # complexity
+    "FBT001",  # boolean positional args are baked into the existing public signatures;
+    "FBT002",  # changing them is an API break, not a lint fix
+    "FBT003",
+    "ARG001",  # unused arguments are normal in callbacks and interface implementations
+    "ARG002",
+    "ARG005",
+
+    # --- Deferred, tracked as follow-up (see docs/plans/2026-08-20-repo-modernization.md) ---
+    "PTH",     # os.path -> pathlib migration: ~170 sites, mechanical but large. Worth
+               # doing as its own PR, not smuggled into the toolchain commit.
 ]
 
 [tool.ruff.lint.per-file-ignores]
 "tests/*" = ["S101", "PLR2004", "SLF001"]        # asserts, magic values, private access
-"wrangler/pipeline/components.py" = ["PLC0415"]  # KFP requires function-local imports
 "scripts/*" = ["INP001"]                         # standalone scripts, not a package
+# The example agents manipulate sys.path and call load_dotenv() before importing, which
+# E402 forbids. That ordering is required for GEAP deployment compatibility.
+"examples/*" = ["E402", "INP001"]
+"templates/*" = ["INP001"]
+"agents/*" = ["INP001"]
 
 [tool.ty.environment]
 python-version = "3.11"
