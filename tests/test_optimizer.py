@@ -1,13 +1,18 @@
 """Tests for wrangler.optimizer — wrapper module creation, patch helpers, and config handling."""
 
 import asyncio
+import logging
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from google.adk.evaluation.rubric_based_evaluator import _normalize_text
 
-from wrangler.optimize.optimizer import _create_wrapper_module, _prewarm_mcp_toolsets
+from wrangler.optimize.optimizer import (
+    _create_wrapper_module,
+    _prewarm_mcp_toolsets,
+    _ToolsetFailureCounter,
+)
 
 
 def test_patch_adk_preserves_upstream_rubric_id_matching():
@@ -31,6 +36,50 @@ def test_patch_adk_preserves_upstream_rubric_id_matching():
         "convert_auto_rater_response_to_score was replaced by an override that "
         "lacks rubric_id matching"
     )
+
+
+class TestToolsetFailureCounter:
+    """A lost toolset is a warning in ADK and a wrong score in GEPA."""
+
+    def _record(self, msg, *args, level=logging.WARNING):
+        return logging.LogRecord("google_adk.x", level, __file__, 1, msg, args, None)
+
+    def test_counts_the_adk_give_up_warning(self):
+        counter = _ToolsetFailureCounter()
+        counter.emit(
+            self._record(
+                "Failed to get tools from toolset %s: %s", "McpToolset", "BrokenResourceError"
+            )
+        )
+        assert counter.count == 1
+
+    def test_ignores_unrelated_warnings(self):
+        counter = _ToolsetFailureCounter()
+        counter.emit(self._record("Something else went wrong"))
+        assert counter.count == 0
+
+    def test_does_not_count_the_per_attempt_message(self):
+        """ADK retries get_tools() once; only the final give-up costs the agent its tools.
+
+        Counting `_execute_with_session`'s per-attempt log instead would have
+        reported 12 lost toolsets on a run that actually lost 2.
+        """
+        counter = _ToolsetFailureCounter()
+        counter.emit(
+            self._record("Exception during MCP session execution: Failed to get tools: %s", "boom")
+        )
+        assert counter.count == 0
+
+    def test_attached_to_the_adk_logger_it_sees_a_real_warning(self):
+        """Guards the logger name and the fact that WARNING gets through."""
+        counter = _ToolsetFailureCounter()
+        log = logging.getLogger("google_adk.google.adk.agents.llm_agent")
+        log.addHandler(counter)
+        try:
+            log.warning("Failed to get tools from toolset %s: %s", "McpToolset", "boom")
+        finally:
+            log.removeHandler(counter)
+        assert counter.count == 1
 
 
 class TestSafetyMetricPin:

@@ -256,7 +256,9 @@ os.environ.pop("GEMINI_API_KEY", None)
 ```
 
 ### MCP Tools in Pipeline Containers
-Cloud Run MCP servers drop idle HTTP connections within ~2 minutes — too short for GEPA's inter-generation gaps. The optimize component starts **local FastMCP servers** on localhost (ports 8001-8003) from the code in `examples/multi_model_agents/mcp_servers/`. MCP URLs are overridden to `http://localhost:{port}/mcp`. Per-generation session refresh closes and re-warms sessions between GEPA generations (~0.1s overhead).
+Cloud Run MCP servers were found to drop idle HTTP connections within ~2 minutes — too short for GEPA's inter-generation gaps. The optimize component starts **local FastMCP servers** on localhost (ports 8001-8003) from the code in `examples/multi_model_agents/mcp_servers/`. MCP URLs are overridden to `http://localhost:{port}/mcp`. Per-generation session refresh closes and re-warms sessions between GEPA generations (~0.1s overhead).
+
+**Caveat (2026-08-20):** the ~2 minute idle drop did **not** reproduce from a local CLI run — a session sat idle 150s against all three services and then listed tools fine. The services now run `minScale=3` with session affinity on, which may be why. Treat the number as "observed once from inside the pipeline container", not as a measured property. The failure that *does* reproduce is a session teardown race under concurrent `get_tools()`; see [docs/notes/silent-failures.md](docs/notes/silent-failures.md) §1b and the `tool_list_cache_ttl_seconds` fix in both `registry.py` files.
 
 ### Pipeline Caching
 KFP caches each component independently based on: **(1) component function body hash** and **(2) input parameter values**. Both must match for a cache hit.

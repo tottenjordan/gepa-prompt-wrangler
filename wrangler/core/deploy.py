@@ -421,13 +421,23 @@ def get_mcp_tools(server_name):
     url = _MCP_URLS.get(server_name, "")
     if not url:
         raise ValueError(f"No MCP URL configured for {server_name}")
-    return McpToolset(connection_params=StreamableHTTPConnectionParams(
-        url=url,
-        timeout=60.0,
-        sse_read_timeout=180.0,
-        terminate_on_close=False,
-        httpx_client_factory=_create_authed_client,
-    ))
+    return McpToolset(
+        connection_params=StreamableHTTPConnectionParams(
+            url=url,
+            timeout=60.0,
+            sse_read_timeout=180.0,
+            terminate_on_close=False,
+            httpx_client_factory=_create_authed_client,
+        ),
+        # Serve tools/list from cache rather than re-listing every invocation.
+        # A transient session failure otherwise costs that invocation its whole
+        # toolset: ADK retries once, then hands the agent zero tools without
+        # raising, and the agent answers as if it had none. Staleness is the
+        # trade — ADK ignores notifications/tools/list_changed — but these
+        # servers have a fixed tool set. Keep in sync with
+        # examples/multi_model_agents/registry.py.
+        tool_list_cache_ttl_seconds=300.0,
+    )
 '''
 
 

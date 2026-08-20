@@ -23,6 +23,29 @@ def _fmt_elapsed(t0: float) -> str:
     return f"{m}m {s:02d}s"
 
 
+class _ToolsetFailureCounter(logging.Handler):
+    """Counts the one ADK warning that means "this case ran with no tools".
+
+    `llm_agent._convert_tool_union_to_tools` catches *every* exception from
+    `toolset.get_tools()`, logs this warning, and returns `[]`. The agent then
+    answers without its tools and GEPA scores the result as a bad prompt — a
+    network blip becomes evidence about the instruction. Nothing raises and the
+    run does not slow down, so watching the log is the only way to know.
+
+    Counted rather than escalated: one lost toolset in a 100-call budget is
+    noise worth reporting, not a reason to throw away the run. The judgement of
+    how much is too much belongs to whoever reads the summary.
+    """
+
+    def __init__(self):
+        super().__init__(level=logging.WARNING)
+        self.count = 0
+
+    def emit(self, record):
+        if record.getMessage().startswith("Failed to get tools from toolset"):
+            self.count += 1
+
+
 def _patch_adk():
     """Apply ADK patches for GEPA compatibility.
 
@@ -436,6 +459,11 @@ def optimize(
     print(f"{tag}  Run dir: {run_dir}", flush=True)
 
     t0 = time.time()
+    # ADK downgrades "the agent lost its toolset" to a warning and carries on,
+    # so hook the logger it warns through for the duration of the run.
+    toolset_failures = _ToolsetFailureCounter()
+    adk_agent_log = logging.getLogger("google_adk.google.adk.agents.llm_agent")
+    adk_agent_log.addHandler(toolset_failures)
     try:
 
         async def _run_with_warmup():
@@ -496,6 +524,16 @@ def optimize(
                 f"    - Run: wrangler inspect <agent_dir> to see correct tool names"
             ) from e
         raise
+    finally:
+        adk_agent_log.removeHandler(toolset_failures)
+
+    if toolset_failures.count:
+        print(
+            f"{tag}  WARNING: {toolset_failures.count} agent invocation(s) ran with a "
+            f"missing toolset and were scored anyway — those cases judged a toolless "
+            f"agent, not the prompt",
+            flush=True,
+        )
 
     best_idx = optimization_result.gepa_result["best_idx"]
     best_agent = optimization_result.optimized_agents[best_idx]

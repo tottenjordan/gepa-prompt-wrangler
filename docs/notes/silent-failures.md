@@ -34,6 +34,42 @@ Fixed in `_build_source_config` rather than at the two `stages.py` call sites, s
 redeploy, `run_demo.py` and `deploy_agents.py` are all covered — and layered *under*
 explicit `env_vars` so the pipeline's localhost MCP overrides still win.
 
+### 1b. The same swallow, mid-optimization
+
+Fixing the env vars did not close this off, because the swallow is structural.
+`llm_agent._convert_tool_union_to_tools` catches **every** exception from
+`toolset.get_tools()`, logs `Failed to get tools from toolset ...` at WARNING, and returns
+`[]`. Any transient MCP failure therefore costs that single invocation its entire toolset,
+and the agent answers toolless — which under GEPA is scored as **a bad prompt**. A network
+blip is laundered into evidence about the instruction.
+
+Measured on one optimize run against the Cloud Run MCP servers: a burst of 12 failed
+`tools/list` attempts as generation 1 fanned out, 10 rescued by ADK's own one-shot retry
+(`retry_on_errors` on `McpToolset.get_tools`), **2 invocations left toolless**. All 12 were
+`tools/list` — never a tool *call*.
+
+Ruled out along the way, so nobody re-checks them: the Cloud Run services have session
+affinity on with `minScale=3`; an idle session survived 150s of nothing with no failure, so
+the "Cloud Run drops idle connections in ~2 minutes" note in CLAUDE.md did not reproduce;
+and there is no `header_provider` or auth credential, so prewarm and runtime resolve to the
+same session key. What is left is a teardown/recreate race inside ADK's session pool —
+`create_session()` hands back a session that a concurrent task then replaces.
+
+**Fixed by removing the round trip rather than by racing it better.** `McpToolset`'s
+`tool_list_cache_ttl_seconds` (set to 300s in both `registry.py` files) serves `tools/list`
+from cache, so an invocation cannot lose its tools to a session blip it never touched. ADK
+ignores `notifications/tools/list_changed`, so the cost is staleness up to the TTL — fine
+for a fixed tool set. The cache lives on the toolset *instance*, which works here only
+because GEPA's `agent.clone()` is a shallow copy and every candidate shares the object.
+
+`_ToolsetFailureCounter` in `wrangler/optimize/optimizer.py` counts the give-up warning for
+the length of the run and prints a summary, so a degraded optimization says so.
+
+**The lesson:** ADK's one-shot retry meant the loud signal (12 log lines) and the real
+damage (2 cases) differed by 6×. When a library retries internally, count the *give-up*
+message, not the *attempt* message, or you will report a catastrophe and fix the wrong
+thing.
+
 ## 2. The startup checks had never run, once, in production
 
 The build package's `app.py` ended with:
