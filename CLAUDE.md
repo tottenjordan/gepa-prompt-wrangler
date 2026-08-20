@@ -2,11 +2,21 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Code Standards — Read First
+
+**Always refer to [CODE_STANDARDS.md](CODE_STANDARDS.md) before writing code or making
+environment changes.** It is the authoritative source for tooling (`uv`, `ruff`, `ty`,
+`pytest`), commit conventions, dependency management, and secret handling. This file
+(CLAUDE.md) covers architecture and domain specifics; CODE_STANDARDS.md covers *how* we
+write and ship the code.
+
+Session notes and known traps live in [docs/notes/README.md](docs/notes/README.md).
+
 ## Build & Test Commands
 
 ```bash
 uv sync                          # Install dependencies
-uv run pytest tests/ -v           # Run all 316 tests
+uv run pytest tests/ -v           # Run all 356 tests
 uv run pytest tests/test_config.py -v  # Run single test file
 uv run pytest tests/test_config.py::TestResolveModel -v  # Run single test class
 uv run wrangler --help            # CLI entry point
