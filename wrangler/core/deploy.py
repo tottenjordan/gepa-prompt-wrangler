@@ -561,7 +561,11 @@ def build_source_package(
     (build_path / "registry.py").write_text(_REGISTRY_PY_TEMPLATE)
 
     # Patch config.py for GEAP compatibility:
-    # 1. Rewrite hard os.environ["KEY"] to os.environ.get() for MCP vars
+    # 1. Rewrite hard os.environ["KEY"] to os.environ.get() for MCP vars.
+    #    As of 2026-08-20 the example config already uses .get(), so this is a
+    #    no-op there. It stays as a safety net for third-party agent configs,
+    #    which we do not control and which crash the GEAP container on import
+    #    if they subscript an env var the server does not set.
     # 2. Patch resolve_model() so Claude models use full resource name with
     #    locations/global — GEAP sets GOOGLE_CLOUD_LOCATION=us-central1
     #    (restricted env var) but Claude requires global.

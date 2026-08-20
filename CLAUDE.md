@@ -143,7 +143,7 @@ For redeploy: `update_agent_from_source()` rebuilds the package with the new ins
 
 5. **Deployed agents use direct Cloud Run URLs with GoogleAuth** — the build package gets a generated `registry.py` that uses `McpToolset` with `httpx.AsyncClient(auth=GoogleAuth())`. The GEAP service account provides ADC credentials for Cloud Run invoker auth. Timeouts set to 60s connect / 180s read for cold starts. Requires both `*_MCP_SERVER` and `*_MCP_URL` env vars.
 
-6. **`config.py` MCP vars rewritten to safe defaults** — the original has `os.environ["SEARCH_MCP_SERVER"]` (crashes if unset). `build_source_package()` rewrites these to `os.environ.get("SEARCH_MCP_SERVER", "")` so the module loads cleanly. Actual values come via the `env_vars` config dict.
+6. **`config.py` MCP vars rewritten to safe defaults** — `build_source_package()` rewrites `os.environ["SEARCH_MCP_SERVER"]` to `os.environ.get("SEARCH_MCP_SERVER", "")` so the module loads cleanly when the var is unset. Actual values come via the `env_vars` config dict. As of 2026-08-20 the example config uses `.get()` at the source, so the rewrite is a no-op there; it remains as a safety net for third-party agent configs, which crash the GEAP container on import if they subscript a var the server does not set.
 
 7. **Cloud Run MCP services need IAM invoker + session affinity** — the GEAP service account (`service-{PROJECT_NUMBER}@gcp-sa-aiplatform-re.iam.gserviceaccount.com`) must have `roles/run.invoker` on each Cloud Run MCP service. Session affinity must be enabled so MCP sessions stick to the same instance (without it, follow-up tool calls get 404). Grant and configure with:
    ```bash

@@ -23,9 +23,11 @@ EXPENSE_MCP_URL = os.environ.get("EXPENSE_MCP_URL", "http://localhost:8003/mcp")
 
 # Agent Registry — MCP server resource names (global location)
 AGENT_REGISTRY_LOCATION = os.environ.get("AGENT_REGISTRY_LOCATION", "us-central1")
-SEARCH_MCP_SERVER = os.environ["SEARCH_MCP_SERVER"]
-BOOKING_MCP_SERVER = os.environ["BOOKING_MCP_SERVER"]
-EXPENSE_MCP_SERVER = os.environ["EXPENSE_MCP_SERVER"]
+# Default to "" rather than subscripting: importing this module must not require
+# the MCP env, or tests and any local `import config` fail where deployment works.
+SEARCH_MCP_SERVER = os.environ.get("SEARCH_MCP_SERVER", "")
+BOOKING_MCP_SERVER = os.environ.get("BOOKING_MCP_SERVER", "")
+EXPENSE_MCP_SERVER = os.environ.get("EXPENSE_MCP_SERVER", "")
 
 # Fallback: map Agent Registry server names → Cloud Run URLs
 MCP_SERVER_URLS = {

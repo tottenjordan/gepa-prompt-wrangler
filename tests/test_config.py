@@ -69,3 +69,29 @@ class TestConstants:
             assert "output" in MODEL_COSTS[model]
             assert isinstance(MODEL_COSTS[model]["input"], (int, float))
             assert isinstance(MODEL_COSTS[model]["output"], (int, float))
+
+
+def test_examples_config_imports_without_mcp_env(monkeypatch):
+    """The examples config must import cleanly with no MCP env set.
+
+    build_source_package() rewrites these subscripts to .get() for
+    deployment; the source itself should not need that rewrite.
+    """
+    import importlib
+    import sys
+
+    # config.py calls load_dotenv() at import time, which would repopulate the
+    # very variables this test deletes. Without this stub the test passes on any
+    # machine that has a populated .env and fails only in CI -- exactly backwards.
+    monkeypatch.setattr("dotenv.load_dotenv", lambda *_args, **_kwargs: False)
+
+    for var in ("SEARCH_MCP_SERVER", "BOOKING_MCP_SERVER", "EXPENSE_MCP_SERVER"):
+        monkeypatch.delenv(var, raising=False)
+
+    sys.path.insert(0, "examples/multi_model_agents")
+    sys.modules.pop("config", None)
+    try:
+        importlib.import_module("config")  # must not raise
+    finally:
+        sys.path.pop(0)
+        sys.modules.pop("config", None)
