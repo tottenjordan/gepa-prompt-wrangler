@@ -9,6 +9,8 @@ import sys
 from datetime import UTC, datetime
 from pathlib import Path
 
+from ..core.models import DEFAULT_SCAFFOLD_JUDGE_MODEL
+
 
 def save_optimized_prompt(
     agent_name: str,
@@ -16,7 +18,7 @@ def save_optimized_prompt(
     version_name: str | None = None,
     source: str = "wrangler",
     eval_cases: int = 15,
-    judge_model: str = "gemini-2.5-pro",
+    judge_model: str = DEFAULT_SCAFFOLD_JUDGE_MODEL,
     notes: str = "",
     prompts_dir: str | None = None,
 ) -> str:

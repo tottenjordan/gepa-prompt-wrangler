@@ -20,6 +20,7 @@ warnings.filterwarnings("ignore", message=".*GEMINI_VIA_LITELLM.*")
 from ..core import deploy as deployer  # noqa: E402
 from ..core.converter import load_eval_file  # noqa: E402
 from ..core.factory import AgentPromptPair, PairFactory  # noqa: E402
+from ..core.models import DEFAULT_MANIFEST_JUDGE_MODEL  # noqa: E402
 from ..eval.evaluator import EvalResult, run_batch_eval_averaged  # noqa: E402
 from ..optimize.optimizer import optimize  # noqa: E402
 from ..reporting.reporter import generate_report  # noqa: E402
@@ -187,7 +188,7 @@ class WranglerPipeline:
             return
 
         version = version or self._next_version()
-        judge = self.manifest.eval_config.get("judge_model", "gemini-3.5-flash")
+        judge = self.manifest.eval_config.get("judge_model", DEFAULT_MANIFEST_JUDGE_MODEL)
         case_count = self.results.get("_eval_metadata", {}).get("case_count", 0)
         entry = {
             "prompt": prompt,

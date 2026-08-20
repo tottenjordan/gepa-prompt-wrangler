@@ -121,3 +121,105 @@ def test_model_spec_is_immutable():
     assert isinstance(spec, ModelSpec)
     with pytest.raises(AttributeError):
         spec.input_cost = 0.0
+
+
+# Sites that intentionally keep a literal model id, with the reason. Anything
+# not listed here must import from the registry instead.
+LITERAL_EXCEPTIONS = {
+    (
+        "wrangler/pipeline/components.py",
+        "gemini-3.5-flash",
+    ): "KFP serializes each @dsl.component body in isolation, so the component "
+    "cannot import the registry at runtime.",
+    (
+        "wrangler/pipeline/components.py",
+        "gemini-3.1-flash-image",
+    ): "Same KFP isolation rule; also a PaperBanana image model rather than an "
+    "agent or judge model, so it has no cost or RPM to register.",
+}
+
+# Ids allowed to be absent from MODELS. Only for models the framework never
+# runs an agent or a judge on, so they have no cost or rate limit to record.
+UNREGISTERED_MODEL_IDS = {
+    "gemini-3.1-flash-image": "PaperBanana chart renderer, not an agent or judge model.",
+}
+
+
+def _model_id_literals() -> list[tuple[str, str, int]]:
+    """Yield (relative path, model id, line) for every model id string in wrangler/.
+
+    Walks the AST rather than grepping so comments (absent from the AST) and
+    docstrings are exempt: prose is allowed to name a model, code is not.
+
+    A version component is required, which is what separates a model id from a
+    manifest pair id — `wrangler init` writes pairs called "gemini-flash" and
+    "claude-sonnet", and those are labels the user picks, not models.
+    """
+    import ast
+    import re
+    from pathlib import Path
+
+    pattern = re.compile(r"^(gemini|claude)-[\w.\-]*\d[\w.\-]*$")
+    found = []
+
+    for path in sorted(Path("wrangler").rglob("*.py")):
+        rel = path.as_posix()
+        if rel == "wrangler/core/models.py":
+            continue
+        tree = ast.parse(path.read_text(), filename=rel)
+        docstrings = {
+            id(node.body[0].value)
+            for node in ast.walk(tree)
+            if isinstance(node, ast.Module | ast.ClassDef | ast.FunctionDef | ast.AsyncFunctionDef)
+            and node.body
+            and isinstance(node.body[0], ast.Expr)
+            and isinstance(node.body[0].value, ast.Constant)
+            and isinstance(node.body[0].value.value, str)
+        }
+        found.extend(
+            (rel, node.value, node.lineno)
+            for node in ast.walk(tree)
+            if isinstance(node, ast.Constant)
+            and isinstance(node.value, str)
+            and id(node) not in docstrings
+            and pattern.match(node.value)
+        )
+
+    return found
+
+
+def test_every_model_id_literal_is_registered():
+    """Tier 1: wherever a literal survives, it must name a model we know about.
+
+    An unregistered id has no cost, no rate limit, and no retirement date, so it
+    silently prices at zero and throttles at the default.
+    """
+    offenders = [
+        f"{path}:{line}: {model}"
+        for path, model, line in _model_id_literals()
+        if model not in MODELS and model not in UNREGISTERED_MODEL_IDS
+    ]
+    assert not offenders, (
+        "Unregistered model ids found — add them to wrangler/core/models.py:\n"
+        + "\n".join(offenders)
+    )
+
+
+def test_no_model_id_literals_outside_the_registry():
+    """Tier 2: even a registered id should not be hardcoded outside the registry.
+
+    This is the test that makes a model migration a one-file edit. When it
+    fails, the fix is to import a named role constant from wrangler.core.models
+    — or, if the site genuinely cannot import (see the KFP components), to add
+    it to LITERAL_EXCEPTIONS with the reason.
+    """
+    offenders = [
+        f"{path}:{line}: {model}"
+        for path, model, line in _model_id_literals()
+        if (path, model) not in LITERAL_EXCEPTIONS
+    ]
+    assert not offenders, (
+        "Hardcoded model ids found. Import a constant from wrangler.core.models, "
+        "or add an entry to LITERAL_EXCEPTIONS explaining why this one cannot:\n"
+        + "\n".join(offenders)
+    )

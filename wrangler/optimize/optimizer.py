@@ -10,6 +10,8 @@ import sys
 import time
 from pathlib import Path
 
+from ..core.models import DEFAULT_JUDGE_MODEL
+
 log = logging.getLogger(__name__)
 
 
@@ -195,7 +197,7 @@ def optimize(
     eval_data_path: str | None = None,
     agent_name: str = "",
     eval_thresholds: dict[str, float] | None = None,
-    judge_model: str = "gemini-2.5-flash",
+    judge_model: str = DEFAULT_JUDGE_MODEL,
     max_metric_calls: int | None = None,
     initial_instruction: str | None = None,
 ) -> str:

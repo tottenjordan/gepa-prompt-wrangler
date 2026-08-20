@@ -11,6 +11,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 from ..core.config import REPORTS_DIR
+from ..core.models import AGENT_ORDER, MODEL_MAP
 from ..core.models import blended_cost_for_report as blended_cost
 
 METRIC_LABELS = {
@@ -21,29 +22,10 @@ METRIC_LABELS = {
     "instruction_following_v1": "Instruction Following",
 }
 
-PROVIDERS = {
-    "gemini-3.1-flash-lite": "Google",
-    "gemini-3.5-flash": "Google",
-    "gemini-3.1-pro-preview": "Google",
-    "claude-sonnet-4-6": "Anthropic",
-    "claude-opus-4-6": "Anthropic",
-    "claude-opus-4-7": "Anthropic",
-    "claude-opus-4-8": "Anthropic",
-    "claude-fable-5": "Anthropic",
-}
-
-AGENT_ORDER = ["lite", "flash", "pro", "sonnet", "opus", "opus47", "opus48", "fable"]
-
-MODEL_MAP = {
-    "lite": "gemini-3.1-flash-lite",
-    "flash": "gemini-3.5-flash",
-    "pro": "gemini-3.1-pro-preview",
-    "sonnet": "claude-sonnet-4-6",
-    "opus": "claude-opus-4-6",
-    "opus47": "claude-opus-4-7",
-    "opus48": "claude-opus-4-8",
-    "fable": "claude-fable-5",
-}
+# PROVIDERS, MODEL_MAP, and AGENT_ORDER used to be hand-written here. They now
+# live in wrangler/core/models.py, derived from the registry; the consumers in
+# this package import them from there directly. Keeping a second copy next to
+# the registry is exactly how the two drifted apart.
 
 
 def normalize_agent_keys(results: dict) -> dict:

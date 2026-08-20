@@ -9,6 +9,8 @@ from typing import Any
 
 import yaml
 
+from ..core.models import DEFAULT_SCAFFOLD_JUDGE_MODEL
+
 
 @dataclass
 class ToolSpec:
@@ -204,7 +206,7 @@ class AgentInspector:
                 },
             ],
             "eval_config": {
-                "judge_model": "gemini-2.5-pro",
+                "judge_model": DEFAULT_SCAFFOLD_JUDGE_MODEL,
                 "response_match_threshold": 0.5,
                 "safety_threshold": 0.8,
             },

@@ -38,6 +38,15 @@ class ModelSpec:
     retirement_date: dt.date | None = None
     retired: bool = False
     notes: str = ""
+    # Short key used for this model in manifests, agent dirs, and reports
+    # (e.g. "opus47"). Empty means the model is not offered as an agent pair,
+    # which is why it is absent from MODEL_MAP and AGENT_ORDER.
+    alias: str = ""
+
+    @property
+    def provider(self) -> str:
+        """Display name of the vendor, for report grouping."""
+        return {"gemini": "Google", "claude": "Anthropic"}[self.family]
 
 
 # Costs source:
@@ -63,18 +72,21 @@ MODELS: dict[str, ModelSpec] = {
         notes="Successor: gemini-3.1-pro-preview",
     ),
     # --- Gemini 3.x — global endpoint ---
-    "gemini-3.1-flash-lite": ModelSpec("gemini-3.1-flash-lite", "gemini", 0.25, 1.5, 5),
-    "gemini-3.5-flash": ModelSpec("gemini-3.5-flash", "gemini", 1.50, 9.0, 5),
+    "gemini-3.1-flash-lite": ModelSpec(
+        "gemini-3.1-flash-lite", "gemini", 0.25, 1.5, 5, alias="lite"
+    ),
+    "gemini-3.5-flash": ModelSpec("gemini-3.5-flash", "gemini", 1.50, 9.0, 5, alias="flash"),
     "gemini-3.1-pro-preview": ModelSpec(
         "gemini-3.1-pro-preview",
         "gemini",
         4.0,
         18.0,
         5,
+        alias="pro",
         notes="Preview id — expect churn; may be repointed after GA",
     ),
     # --- Claude — global/multi-region endpoints ---
-    "claude-sonnet-4-6": ModelSpec("claude-sonnet-4-6", "claude", 3.0, 15.0, 2000),
+    "claude-sonnet-4-6": ModelSpec("claude-sonnet-4-6", "claude", 3.0, 15.0, 2000, alias="sonnet"),
     "claude-opus-4-6": ModelSpec(
         "claude-opus-4-6",
         "claude",
@@ -82,11 +94,51 @@ MODELS: dict[str, ModelSpec] = {
         25.0,
         800,
         retirement_date=dt.date(2027, 2, 5),
+        alias="opus",
     ),
-    "claude-opus-4-7": ModelSpec("claude-opus-4-7", "claude", 5.0, 25.0, 800),
-    "claude-opus-4-8": ModelSpec("claude-opus-4-8", "claude", 5.0, 25.0, 800),
-    "claude-fable-5": ModelSpec("claude-fable-5", "claude", 10.0, 50.0, 800),
+    "claude-opus-4-7": ModelSpec("claude-opus-4-7", "claude", 5.0, 25.0, 800, alias="opus47"),
+    "claude-opus-4-8": ModelSpec("claude-opus-4-8", "claude", 5.0, 25.0, 800, alias="opus48"),
+    "claude-fable-5": ModelSpec("claude-fable-5", "claude", 10.0, 50.0, 800, alias="fable"),
 }
+
+
+# --- Named roles ---------------------------------------------------------
+#
+# Change these to change the framework's defaults. Every default in wrangler/
+# points at one of them, so a model migration is an edit to this block.
+#
+# The three judge constants have three different values because that is what
+# the code actually did before they were named. Collapsing them is a behavior
+# change and belongs to the Phase 3 migration, not here. Naming them first is
+# what makes the inconsistency visible at all — it was spread over 12 literals
+# in 10 files.
+
+# Judge for GEPA optimization, batch eval, and eval-set conversion.
+DEFAULT_JUDGE_MODEL = "gemini-2.5-flash"
+
+# Judge used when a manifest's eval_config omits judge_model, and in the
+# manifest scaffold `wrangler init` writes.
+DEFAULT_MANIFEST_JUDGE_MODEL = "gemini-3.5-flash"
+
+# Judge for generated scaffolding (wrangler inspect, prompt registry).
+DEFAULT_SCAFFOLD_JUDGE_MODEL = "gemini-2.5-pro"
+
+# Multi-judge ensemble. Order matters: the first is the tie-breaker.
+DEFAULT_JUDGE_ENSEMBLE = ["gemini-2.5-pro", "gemini-2.5-flash"]
+
+# Agent model for the manifest scaffold's example pairs.
+DEFAULT_AGENT_MODEL = "gemini-3.5-flash"
+DEFAULT_AGENT_MODEL_ALT = "claude-sonnet-4-6"
+
+# --- Derived views -------------------------------------------------------
+
+# Vendor per model id, for grouping in reports.
+PROVIDERS: dict[str, str] = {name: spec.provider for name, spec in MODELS.items()}
+
+# Short agent key -> model id, and the display order reports iterate in.
+# Only models offered as agent pairs carry an alias.
+MODEL_MAP: dict[str, str] = {spec.alias: name for name, spec in MODELS.items() if spec.alias}
+AGENT_ORDER: list[str] = list(MODEL_MAP)
 
 
 def get_spec(model: str) -> ModelSpec:

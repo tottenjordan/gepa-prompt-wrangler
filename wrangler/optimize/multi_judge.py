@@ -11,9 +11,11 @@ import logging
 import os
 from typing import Any
 
+from ..core.models import DEFAULT_JUDGE_ENSEMBLE
+
 log = logging.getLogger(__name__)
 
-DEFAULT_JUDGE_MODELS = ["gemini-2.5-pro", "gemini-2.5-flash"]
+DEFAULT_JUDGE_MODELS = list(DEFAULT_JUDGE_ENSEMBLE)
 
 _QUALITY_PROMPT = """Evaluate the agent's response to the user's query.
 

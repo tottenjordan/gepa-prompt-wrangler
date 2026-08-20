@@ -11,6 +11,7 @@ tests and compilation checks only.
 
 from kfp import dsl
 
+from ..core.models import DEFAULT_JUDGE_MODEL
 from .components import (
     archive_agent_code,
     deploy_single_agent,
@@ -59,7 +60,7 @@ def build_pipeline(image_uri: str):
         agent_module: str,
         eval_data_path: str,
         num_runs: int = 1,
-        judge_model: str = "gemini-2.5-flash",
+        judge_model: str = DEFAULT_JUDGE_MODEL,
         secret_id: str = "",
         max_metric_calls: int = 50,
         cache_bust: str = "",

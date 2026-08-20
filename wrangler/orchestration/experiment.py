@@ -11,6 +11,7 @@ from typing import Any
 import yaml
 
 from ..core.factory import AgentPromptPair, Manifest, PairFactory
+from ..core.models import DEFAULT_MANIFEST_JUDGE_MODEL
 
 STAGES = ("deploy", "eval_before", "optimize", "redeploy", "eval_after", "report", "analyze")
 
@@ -71,7 +72,9 @@ class Experiment:
             "eval_data": manifest.eval_data,
             "defaults": {
                 "num_runs": 3,
-                "judge_model": manifest.eval_config.get("judge_model", "gemini-3.5-flash"),
+                "judge_model": manifest.eval_config.get(
+                    "judge_model", DEFAULT_MANIFEST_JUDGE_MODEL
+                ),
             },
             "pairs": [],
             "eval_config": manifest.eval_config,

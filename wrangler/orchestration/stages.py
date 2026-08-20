@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING
 
 from ..core import deploy as deployer
 from ..core.converter import load_eval_file
+from ..core.models import DEFAULT_JUDGE_MODEL, DEFAULT_MANIFEST_JUDGE_MODEL
 from ..eval.evaluator import run_batch_eval_averaged
 from ..optimize.optimizer import optimize
 from ..reporting.reporter import generate_report as _generate_report
@@ -360,7 +361,7 @@ def stage_optimize(exp: Experiment, pair_id: str | None = None) -> None:
 
     eval_path = _resolve_eval_path(manifest, mdir)
 
-    judge = exp.config.get("eval_config", {}).get("judge_model", "gemini-2.5-flash")
+    judge = exp.config.get("eval_config", {}).get("judge_model", DEFAULT_JUDGE_MODEL)
 
     for i, pair in enumerate(pairs, 1):
         print(f"\n  [{pair.id}] ({i}/{len(pairs)}) Optimizing...", flush=True)
@@ -410,7 +411,7 @@ def _save_optimized_prompt(exp: Experiment, pair: AgentPromptPair, prompt: str) 
     import ast
 
     version = exp.version
-    judge = exp.manifest.eval_config.get("judge_model", "gemini-3.5-flash")
+    judge = exp.manifest.eval_config.get("judge_model", DEFAULT_MANIFEST_JUDGE_MODEL)
 
     eval_before = exp.read_stage("eval_before")
     case_count = len(eval_before.get(pair.id, {}).get("per_case", []))
