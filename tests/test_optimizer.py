@@ -33,6 +33,70 @@ def test_patch_adk_preserves_upstream_rubric_id_matching():
     )
 
 
+class TestSafetyMetricPin:
+    """Patch 6 — ADK asks for a safety metric version us-central1 will not serve."""
+
+    def test_upstream_still_requests_the_unversioned_metric(self):
+        """The premise of patch 6. Delete the patch when this stops holding.
+
+        `PrebuiltMetric.SAFETY` carries no version, so the SDK resolves it
+        client-side through METRIC_LATEST_SPEC_NAME. If upstream ever pins the
+        version itself, this assertion fails and patch 6 becomes dead weight —
+        which is the failure mode that made patch 5 harmful.
+        """
+        import inspect
+
+        from google.adk.evaluation import safety_evaluator as safety_mod
+
+        # The module source, not the bound method: another test in this file
+        # calls _patch_adk(), which replaces the method for the whole session.
+        src = inspect.getsource(safety_mod)
+        assert "PrebuiltMetric.SAFETY," in src, (
+            "ADK no longer passes the unversioned safety metric — re-run the "
+            "probe in docs/notes/adk-patch-status.md and consider removing patch 6"
+        )
+
+    def test_unversioned_safety_resolves_to_a_version_us_central1_rejects(self):
+        """The other half of the premise: the SDK's 'latest' is ahead of the region.
+
+        This is what produced `400 INVALID_ARGUMENT: Unsupported predefined
+        metric: safety_v3` on every GEPA case.
+        """
+        from google.adk.dependencies.vertexai import vertexai
+
+        unversioned = vertexai.types.PrebuiltMetric.SAFETY
+        assert unversioned._get_api_metric_spec_name() != "safety_v1"
+
+    def test_patch_pins_the_evaluator_to_safety_v1(self, monkeypatch):
+        from google.adk.evaluation import safety_evaluator as safety_mod
+        from google.adk.evaluation import vertex_ai_eval_facade as facade_mod
+
+        from wrangler.optimize.optimizer import _patch_adk
+
+        _patch_adk()
+
+        captured = {}
+
+        class RecordingFacade:
+            def __init__(self, threshold, metric_name):
+                captured["threshold"] = threshold
+                captured["metric_name"] = metric_name
+
+            def evaluate_invocations(self, *args):
+                captured["args"] = args
+                return "result"
+
+        monkeypatch.setattr(facade_mod, "_SingleTurnVertexAiEvalFacade", RecordingFacade)
+
+        evaluator = object.__new__(safety_mod.SafetyEvaluatorV1)
+        evaluator._threshold = 0.95
+
+        assert evaluator.evaluate_invocations(["actual"]) == "result"
+        assert captured["threshold"] == 0.95
+        assert captured["metric_name"]._get_api_metric_spec_name() == "safety_v1"
+        assert captured["args"] == (["actual"], None, None)
+
+
 class TestCreateWrapperModule:
     def test_creates_init_file(self, tmp_path):
         wrapper_dir = _create_wrapper_module("/some/agent/path", str(tmp_path))

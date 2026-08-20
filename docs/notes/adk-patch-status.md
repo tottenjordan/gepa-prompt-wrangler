@@ -3,9 +3,10 @@
 **Verified on:** 2026-08-20 against `google-adk==2.7.1` (the latest release on PyPI at
 that date).
 
-`wrangler/optimize/optimizer.py:_patch_adk()` applies four patches to ADK internals.
-CLAUDE.md said all five were required at ADK 2.2.0. That stopped being true at 2.7.1,
-and **Patch 5 was deleted on 2026-08-20** (Phase 1 Task 1.1) — see below.
+`wrangler/optimize/optimizer.py:_patch_adk()` applies five patches to ADK internals.
+CLAUDE.md said all five of the *original* patches were required at ADK 2.2.0. That stopped
+being true at 2.7.1: **Patch 5 was deleted on 2026-08-20** (Phase 1 Task 1.1) and
+**Patch 6 was added the same day** — see below.
 
 **Re-run the probe below on every ADK bump.** A redundant patch is not harmless — it can
 overwrite newer upstream behavior, which is exactly what happened to Patch 5.
@@ -24,6 +25,7 @@ Related: [toolchain-baseline.md](toolchain-baseline.md),
 | 3 | `LocalEvalService._evaluate_single_inference_result` null guard | [#6071](https://github.com/google/adk-python/issues/6071) | **Closed** 2026-08-06 | **Yes** |
 | 4 | `LocalEvalSampler._extract_eval_data` — score-None coercion + logging | — (local instrumentation) | — | Yes, but it is diagnostics, not a bug workaround |
 | 5 | `rubric_based_evaluator._normalize_text` + `convert_auto_rater_response_to_score` | [#6072](https://github.com/google/adk-python/issues/6072) | **Closed** 2026-07-31 | **No — was actively harmful; DELETED 2026-08-20** |
+| 6 | `SafetyEvaluatorV1.evaluate_invocations` — pin the metric to `safety_v1` | not filed | — | **Yes** (added 2026-08-20) |
 
 ### Patch 1 / 2 — still required despite the issue being closed
 
@@ -71,6 +73,40 @@ breaks those tests, upstream has regressed and the override becomes necessary ag
 `test_patch_adk_preserves_upstream_rubric_id_matching` guards the other direction: it
 fails if anyone reinstates a `convert_auto_rater_response_to_score` override.
 
+### Patch 6 — ADK asks for a safety metric version us-central1 does not serve
+
+`SafetyEvaluatorV1.evaluate_invocations()` hands the eval facade
+`vertexai.types.PrebuiltMetric.SAFETY` — **unversioned**. The Vertex eval SDK resolves an
+unversioned name client-side through `_evals_constant.METRIC_LATEST_SPEC_NAME`, which maps
+`"safety" → "safety_v3"`. us-central1 does not serve v3, so every GEPA case came back:
+
+```
+400 INVALID_ARGUMENT: Unsupported predefined metric: safety_v3.
+```
+
+The score then arrives as `None` and patch 4 coerces it to `0.0`, so **GEPA does not fail —
+it optimizes against a criterion nailed to zero.** This is silent failure #3
+([silent-failures.md](silent-failures.md)) resurfacing in the optimize path: batch eval was
+pinned to explicit versions when that was found, GEPA's criteria were not. Nothing in
+`sampler_config.json` is wrong — it says `safety_v1`; the version is chosen *inside ADK*
+and never appears in our config.
+
+The patch swaps in `PrebuiltMetric.SAFETY_V1`, which falls through
+`PrebuiltMetricLoader.__getattr__` to a bare-name lookup in
+`SUPPORTED_PREDEFINED_METRICS` and resolves to `safety_v1` — no private SDK import. If that
+resolution ever stops working the patch logs a warning and leaves ADK alone, because
+pinning to a name the SDK cannot resolve would be worse than the bug.
+
+`tests/test_optimizer.py::TestSafetyMetricPin` asserts both halves of the premise (ADK
+still passes the unversioned metric; unversioned still resolves to something other than
+`safety_v1`) plus the pin itself. When upstream pins the version, the first assertion fails
+and the patch should be deleted.
+
+Only `safety_evaluator.py` is affected. The other ADK evaluators reaching for a prebuilt
+name (`response_evaluator` → `COHERENCE`, the three `multi_turn_*` evaluators) use names
+absent from `METRIC_LATEST_SPEC_NAME`, so they load as GCS autorater recipes instead of
+API predefined metrics and never hit the version negotiation.
+
 ---
 
 ## Probe script
@@ -105,6 +141,14 @@ from google.adk.evaluation import rubric_based_evaluator as rbe
 up = inspect.getsource(rbe.RubricBasedEvaluator.convert_auto_rater_response_to_score)
 print("P5 upstream has rubric_id matching:", "rubric_by_id" in up)
 print("P5 upstream normalize is fuzzy:", "NFKC" in inspect.getsource(rbe._normalize_text))
+
+from google.adk.dependencies.vertexai import vertexai
+from google.adk.evaluation import safety_evaluator as se
+unversioned = vertexai.types.PrebuiltMetric.SAFETY._get_api_metric_spec_name()
+pinned = vertexai.types.PrebuiltMetric.SAFETY_V1._get_api_metric_spec_name()
+print("P6 adk still asks unversioned:", "PrebuiltMetric.SAFETY," in inspect.getsource(se))
+print("P6 unversioned resolves to:", unversioned, "(needed only if != safety_v1)")
+print("P6 pin resolves to:", pinned, "(must be safety_v1 or the patch self-disables)")
 PY
 ```
 

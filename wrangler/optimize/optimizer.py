@@ -38,6 +38,9 @@ def _patch_adk():
         instrumentation, not an upstream workaround.
     Patch 5 — REMOVED. Upstream fixed #6072 in 2.7.1 and went further
         (rubric_id matching). Keeping it was a regression.
+    Patch 6 — SafetyEvaluatorV1 metric version pin. ADK asks for the
+        *unversioned* safety metric; the SDK resolves that client-side to
+        safety_v3, which us-central1 does not serve. Still required.
 
     Re-run the probe in docs/notes/adk-patch-status.md on every ADK bump.
     """
@@ -123,7 +126,58 @@ def _patch_adk():
 
     sampler_mod.LocalEvalSampler._extract_eval_data = _patched_extract
 
-    log.info("ADK patches applied (1-4; patch 5 removed — upstream #6072 fixed in ADK 2.7.1)")
+    # Patch 6 — pin GEPA's safety metric to v1.
+    #
+    # SafetyEvaluatorV1.evaluate_invocations() asks the Vertex eval SDK for the
+    # *unversioned* PrebuiltMetric.SAFETY. The SDK resolves that client-side
+    # through METRIC_LATEST_SPEC_NAME, which maps "safety" -> "safety_v3" — a
+    # version us-central1 does not serve. Every case then comes back
+    # `400 INVALID_ARGUMENT: Unsupported predefined metric: safety_v3`, the
+    # score lands as None, and patch 4 coerces it to 0.0. GEPA does not fail;
+    # it optimizes against a criterion that is pinned at zero.
+    #
+    # Same client-ahead-of-server mismatch as silent failure #3 in
+    # docs/notes/silent-failures.md. Batch eval was pinned to v1 when that was
+    # found; GEPA's criteria were not, because the version is chosen inside ADK
+    # and never appears in sampler_config.json (which correctly says
+    # "safety_v1"). `PrebuiltMetric.SAFETY_V1` falls through the loader's
+    # __getattr__ to a bare-name lookup and resolves to "safety_v1", so no
+    # private SDK import is needed.
+    from google.adk.dependencies.vertexai import vertexai as _vertexai
+    from google.adk.evaluation import safety_evaluator as safety_mod
+    from google.adk.evaluation import vertex_ai_eval_facade as facade_mod
+
+    _pinned_safety = _vertexai.types.PrebuiltMetric.SAFETY_V1
+    try:
+        _resolved = _pinned_safety._get_api_metric_spec_name()
+    except AttributeError:  # the SDK reorganised its metric loader
+        _resolved = None
+
+    if _resolved == "safety_v1":
+
+        def _patched_safety(
+            self, actual_invocations, expected_invocations=None, conversation_scenario=None
+        ):
+            # Resolved off the module, not captured at patch time, so the
+            # facade stays substitutable (and follows ADK if it swaps the
+            # class out).
+            return facade_mod._SingleTurnVertexAiEvalFacade(
+                threshold=self._threshold,
+                metric_name=_pinned_safety,
+            ).evaluate_invocations(actual_invocations, expected_invocations, conversation_scenario)
+
+        safety_mod.SafetyEvaluatorV1.evaluate_invocations = _patched_safety
+    else:
+        # Pinning to a name the SDK cannot resolve would be worse than leaving
+        # ADK alone, so bail out loudly instead.
+        log.warning(
+            "Patch 6 skipped: PrebuiltMetric.SAFETY_V1 resolves to %r, not 'safety_v1'. "
+            "safety_v1 criteria may fail with 'Unsupported predefined metric'. "
+            "Re-run the probe in docs/notes/adk-patch-status.md.",
+            _resolved,
+        )
+
+    log.info("ADK patches applied (1-4, 6; patch 5 removed — upstream #6072 fixed in ADK 2.7.1)")
 
 
 def _create_wrapper_module(agent_module_path: str, temp_dir: str) -> str:

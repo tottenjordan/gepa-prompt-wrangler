@@ -2,7 +2,7 @@
 
 **Verified on:** 2026-08-20, during the Task 3.4 smoke test.
 
-Five defects found in one sitting. None of them raised. Every one reported success while
+Six defects found in one sitting. None of them raised. Every one reported success while
 producing worthless output — which is why they had survived so long. Grouped here because
 the *shape* is the transferable part, not the individual bugs (those are fixed).
 
@@ -151,3 +151,26 @@ recovered), and the pre-scoring row cleaner.
 **The lesson:** an error that has been serialised into a data field stops looking like an
 error. `"error" in response` is a type-dependent test, and the type changed somewhere up
 the stack without anyone deciding it should.
+
+## 6. GEPA optimized against a criterion nailed to zero
+
+Defect 3 again, in the path nobody re-checked. Batch eval was pinned to explicit metric
+versions when defect 3 was fixed; **GEPA's criteria were not**, because GEPA does not pick
+the version — ADK does, inside `SafetyEvaluatorV1`, which asks for the *unversioned*
+`PrebuiltMetric.SAFETY`. The SDK resolves that to `safety_v3`, us-central1 rejects it, and
+every case returns `400 Unsupported predefined metric: safety_v3`.
+
+The part that makes it a *silent* failure rather than a loud one is the interaction with
+our own patch 4, which coerces a `None` score to `0.0` so a missing metric cannot crash the
+run. Combined, GEPA saw a perfectly well-formed `safety_v1 = 0.00` on every candidate. It
+never errors, never stalls, and spends its whole budget trying to move a number that is not
+connected to anything.
+
+Fixed as patch 6 — see [adk-patch-status.md](adk-patch-status.md).
+
+**Two lessons.** First: *a fix scoped to "the eval path" does not cover the other eval
+path.* Grep for the pattern, not the file you were debugging. Second, and more general:
+**a defensive coercion and a broken input compose into a plausible number.** Patch 4 was
+right to stop a `None` from crashing the run, but `0.0` is indistinguishable from a real
+score. A sentinel that cannot be mistaken for data — or at minimum a counter of how often
+the coercion fired — would have surfaced this in the first generation.

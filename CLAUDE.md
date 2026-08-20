@@ -123,7 +123,9 @@ package — read it from config or the registry, not off a constructed agent.
 
 ### ADK Patches
 
-`optimize/optimizer.py:_patch_adk()` applies 4 monkey-patches to ADK internals required for GEPA to work. Patches 1–3 compensate for ADK bugs (github.com/google/adk-python issues #5906, #6071); patch 4 is local instrumentation. All three bug workarounds are still required at ADK 2.7.1 even though their issues are closed — the fixes are not in the release.
+`optimize/optimizer.py:_patch_adk()` applies 5 monkey-patches to ADK internals required for GEPA to work. Patches 1–3 compensate for ADK bugs (github.com/google/adk-python issues #5906, #6071); patch 4 is local instrumentation; patch 6 pins the safety metric version. All the bug workarounds are still required at ADK 2.7.1 even though their issues are closed — the fixes are not in the release.
+
+**Patch 6 (added 2026-08-20)** — `SafetyEvaluatorV1` hands the eval facade the *unversioned* `PrebuiltMetric.SAFETY`, which the Vertex SDK resolves client-side to `safety_v3`; us-central1 does not serve v3, so every GEPA case returned `400 Unsupported predefined metric: safety_v3`, the score came back `None`, and patch 4 coerced it to `0.0`. GEPA kept running and optimized against a criterion pinned at zero. The version is chosen inside ADK — `sampler_config.json` correctly says `safety_v1` and cannot influence it.
 
 **Patch 5 was removed on 2026-08-20.** It overrode `rubric_based_evaluator._normalize_text` and `convert_auto_rater_response_to_score`. ADK 2.7.1 fixed issue #6072 and went further, adding `rubric_id`-based verdict matching and an empty-response guard; the override, written against ADK 2.2, did text-only matching and silently discarded both, corrupting the rubric scores GEPA optimizes against. A redundant patch is not harmless.
 
