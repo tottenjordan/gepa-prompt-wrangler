@@ -43,3 +43,38 @@ dev = [
     "ruff>=0.16.3",
     "ty>=0.0.73",
 ]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+extend-exclude = ["experiments", "outputs", "_geap_build_pkg"]
+
+[tool.ruff.lint]
+select = ["ALL"]
+ignore = [
+    "D",       # docstring style — not adopting pydocstyle wholesale
+    "COM812",  # conflicts with the formatter
+    "ISC001",  # conflicts with the formatter
+    "ANN",     # annotations enforced by ty, not ruff
+    "T201",    # print() is the CLI's output mechanism
+    "TRY003",  # long messages in exceptions are fine here
+    "EM",      # exception message string literals
+    "FIX",     # TODO comments are tracked, not banned
+    "TD",      # TODO formatting
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["S101", "PLR2004", "SLF001"]        # asserts, magic values, private access
+"wrangler/pipeline/components.py" = ["PLC0415"]  # KFP requires function-local imports
+"scripts/*" = ["INP001"]                         # standalone scripts, not a package
+
+[tool.ty.environment]
+python-version = "3.11"
+
+[tool.ty.rules]
+possibly-unresolved-reference = "error"
+unused-ignore-comment = "warn"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "--cov=wrangler --cov-report=term-missing"
