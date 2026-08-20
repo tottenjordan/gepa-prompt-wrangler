@@ -9,11 +9,14 @@ from pathlib import Path
 
 from ..core import deploy as deployer
 from ..core.converter import load_eval_file
-from ..core.factory import AgentPromptPair, Manifest
 from ..eval.evaluator import run_batch_eval_averaged
 from ..optimize.optimizer import optimize
 from ..reporting.reporter import generate_report as _generate_report
-from .experiment import Experiment
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from .experiment import Experiment
+    from ..core.factory import AgentPromptPair, Manifest
 
 
 def _fmt_duration(seconds: float) -> str:
@@ -546,9 +549,9 @@ def stage_report(exp: Experiment, use_paperbanana: bool = True) -> None:
         ]
     }
 
-    import matplotlib
+    import matplotlib as mpl
 
-    matplotlib.use("Agg")
+    mpl.use("Agg")
 
     from ..reporting.reporter import CHARTS_DIR, REPORTS_DIR
 

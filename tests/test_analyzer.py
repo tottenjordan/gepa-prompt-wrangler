@@ -101,7 +101,8 @@ class TestPromptDiffSummary:
         orig = "line1\nline2\nline3"
         opt = "line1\nmodified\nline3\nnew line"
         result = _prompt_diff_summary(orig, opt)
-        assert "+" in result and "-" in result
+        assert "+" in result
+        assert "-" in result
 
 
 class TestFindRemovedContent:

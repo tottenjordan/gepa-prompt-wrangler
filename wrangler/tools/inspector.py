@@ -214,7 +214,7 @@ class AgentInspector:
         function_tools = [t for t in spec.tools if t.tool_type == "function"]
         mcp_tools = [t for t in spec.tools if t.tool_type == "mcp_toolset"]
 
-        for i, tool in enumerate(function_tools[:count]):
+        for _i, tool in enumerate(function_tools[:count]):
             param_names = list(tool.parameters.keys())
             param_example = ", ".join(f"{p}=..." for p in param_names[:2])
             cases.append(

@@ -4,9 +4,9 @@ import math
 import re
 from pathlib import Path
 
-import matplotlib
+import matplotlib as mpl
 
-matplotlib.use("Agg")
+mpl.use("Agg")
 
 from ..core.config import MODEL_COSTS, blended_cost
 from .analysis import (

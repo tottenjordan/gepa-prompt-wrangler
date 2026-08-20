@@ -28,10 +28,10 @@ def _make_heavy_components(image_uri: str):
     To swap the image, we rebuild the component specs from the existing
     function bodies using ``dsl.component()`` as a function call.
     """
-    common = dict(
-        base_image=image_uri,
-        packages_to_install=[],
-    )
+    common = {
+        "base_image": image_uri,
+        "packages_to_install": [],
+    }
 
     return {
         "deploy": dsl.component(**common)(deploy_single_agent.python_func),

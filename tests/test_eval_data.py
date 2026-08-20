@@ -418,7 +418,7 @@ class TestYamlEvalsetParity:
                 f"YAML derives {len(expected_cases)} — regenerate evalsets"
             )
 
-            for exp, got in zip(expected_cases, committed_cases):
+            for exp, got in zip(expected_cases, committed_cases, strict=False):
                 assert got["eval_id"] == exp["eval_id"], (
                     f"{target['dir_name']}: eval_id drift "
                     f"{got['eval_id']!r} != {exp['eval_id']!r} — regenerate evalsets"

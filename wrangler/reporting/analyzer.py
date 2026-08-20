@@ -8,7 +8,10 @@ from datetime import datetime
 from pathlib import Path
 
 from ..core.config import blended_cost
-from ..orchestration.experiment import Experiment
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from ..orchestration.experiment import Experiment
 
 METRIC_LABELS = {
     "final_response_quality_v1": "Quality",

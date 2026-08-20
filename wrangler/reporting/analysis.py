@@ -4,9 +4,9 @@ import json
 from collections import defaultdict
 from pathlib import Path
 
-import matplotlib
+import matplotlib as mpl
 
-matplotlib.use("Agg")
+mpl.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 
@@ -179,7 +179,7 @@ def generate_cost_quality_chart(results: dict, charts_dir: Path | None = None):
                 "",
                 xy=(cost, avg_after),
                 xytext=(cost, avg_before),
-                arrowprops=dict(arrowstyle="->", color="gray", lw=1.2, ls="--"),
+                arrowprops={"arrowstyle": "->", "color": "gray", "lw": 1.2, "ls": "--"},
             )
             pareto_points.append((cost, avg_after, agent_name))
         else:
@@ -188,7 +188,7 @@ def generate_cost_quality_chart(results: dict, charts_dir: Path | None = None):
     if pareto_points:
         pareto_points.sort(key=lambda p: p[0])
         frontier = []
-        for cost_val, quality, name in pareto_points:
+        for cost_val, quality, _name in pareto_points:
             dominated = any(
                 fc <= cost_val and fq >= quality and (fc < cost_val or fq > quality)
                 for fc, fq, _ in pareto_points
@@ -197,7 +197,7 @@ def generate_cost_quality_chart(results: dict, charts_dir: Path | None = None):
                 frontier.append((cost_val, quality))
         frontier.sort(key=lambda p: p[0])
         if frontier:
-            fx, fy = zip(*frontier)
+            fx, fy = zip(*frontier, strict=False)
             if len(frontier) >= 2:
                 ax.plot(fx, fy, color="#10B981", ls="-", lw=2.5, alpha=0.7, zorder=3)
             ax.scatter(
@@ -409,7 +409,7 @@ def generate_category_heatmap(
         print("  Skipping category heatmap (no per-case scores)")
         return
 
-    categories = sorted(set(m.get("category", "") for m in case_metadata if m.get("category")))
+    categories = sorted({m.get("category", "") for m in case_metadata if m.get("category")})
     if not categories:
         return
 
@@ -523,14 +523,14 @@ def generate_radar_chart(results: dict, charts_dir: Path | None = None):
     angles = np.linspace(0, 2 * np.pi, n_metrics, endpoint=False).tolist()
     angles += angles[:1]
 
-    fig, ax = plt.subplots(figsize=(10, 10), subplot_kw=dict(polar=True))
+    fig, ax = plt.subplots(figsize=(10, 10), subplot_kw={"polar": True})
     gemini_cmap = plt.cm.Blues
     claude_cmap = plt.cm.Oranges
 
     gemini_agents = [a for a in agents if "gemini" in results[a].get("model", "")]
     claude_agents = [a for a in agents if a not in gemini_agents]
 
-    for idx, name in enumerate(agents):
+    for _idx, name in enumerate(agents):
         scores = results[name].get(phase, results[name].get("before", {}))
         values = [scores.get(m, 0) for m in metrics]
         values += values[:1]

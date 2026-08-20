@@ -280,10 +280,7 @@ def generate_gepa_evalset(
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    if balanced and len(cases) > count:
-        selected = _sample_balanced(cases, count)
-    else:
-        selected = cases[:count]
+    selected = _sample_balanced(cases, count) if balanced and len(cases) > count else cases[:count]
 
     eval_cases = []
     for i, case in enumerate(selected):

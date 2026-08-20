@@ -810,9 +810,9 @@ def generate_analysis(
     os.environ["VLM_MODEL"] = os.getenv("VLM_MODEL", "gemini-3.5-flash")
     os.environ["IMAGE_MODEL"] = os.getenv("IMAGE_MODEL", "gemini-3.1-flash-image")
 
-    import matplotlib
+    import matplotlib as mpl
 
-    matplotlib.use("Agg")
+    mpl.use("Agg")
 
     from wrangler.core.converter import load_eval_file
     from wrangler.reporting.reporter import generate_report

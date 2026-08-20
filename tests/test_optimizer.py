@@ -136,7 +136,7 @@ class TestThresholdInjection:
             }
         }
         criteria = config["eval_config"]["criteria"]
-        for k, v in criteria.items():
+        for v in criteria.values():
             if isinstance(v, dict) and "threshold" not in v:
                 v["threshold"] = 0.0
 
@@ -153,7 +153,7 @@ class TestThresholdInjection:
             }
         }
         criteria = config["eval_config"]["criteria"]
-        for k, v in criteria.items():
+        for v in criteria.values():
             if isinstance(v, dict) and "threshold" not in v:
                 v["threshold"] = 0.0
 
@@ -166,7 +166,7 @@ class TestFuzzyNormalize:
     RUBRIC = "the response correctly uses tools"
 
     @pytest.mark.parametrize(
-        "label,input_text",
+        ("label", "input_text"),
         [
             ("exact", "The response correctly uses tools"),
             ("markdown_bullet", "- The response correctly uses tools"),

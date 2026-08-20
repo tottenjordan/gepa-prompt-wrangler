@@ -389,7 +389,7 @@ def _category_heatmap_section(
     if not has_per_case:
         return []
 
-    all_cats = sorted(set(m.get("category", "") for m in case_metadata if m.get("category")))
+    all_cats = sorted({m.get("category", "") for m in case_metadata if m.get("category")})
     if not all_cats:
         return []
 
