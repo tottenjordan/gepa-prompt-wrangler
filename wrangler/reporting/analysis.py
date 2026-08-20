@@ -90,7 +90,7 @@ def generate_comparison_chart(results: dict, charts_dir: Path | None = None):
     metrics = list(METRIC_LABELS.keys())
     n = len(agents)
 
-    fig, ax = plt.subplots(figsize=(14, 7))
+    _fig, ax = plt.subplots(figsize=(14, 7))
     x = np.arange(n)
     width = 0.12
     colors = plt.cm.Set2(np.linspace(0, 1, len(metrics)))
@@ -119,7 +119,7 @@ def generate_cost_quality_chart(results: dict, charts_dir: Path | None = None):
     charts_dir = Path(charts_dir or CHARTS_DIR)
     charts_dir.mkdir(parents=True, exist_ok=True)
     has_after = any(results[a].get("after") for a in results if not a.startswith("_"))
-    fig, ax = plt.subplots(figsize=(12, 7))
+    _fig, ax = plt.subplots(figsize=(12, 7))
 
     pareto_points = []
 
@@ -284,7 +284,7 @@ def generate_improvement_chart(results: dict, charts_dir: Path | None = None):
 
     metrics = list(METRIC_LABELS.keys())
     n = len(agents)
-    fig, ax = plt.subplots(figsize=(14, 7))
+    _fig, ax = plt.subplots(figsize=(14, 7))
     x = np.arange(n)
     width = 0.12
     colors = plt.cm.Set2(np.linspace(0, 1, len(metrics)))
@@ -354,7 +354,7 @@ def generate_tier_breakdown_chart(
         else:
             tier_avgs[name] = dict.fromkeys(tiers_present, 0)
 
-    fig, ax = plt.subplots(figsize=(12, 7))
+    _fig, ax = plt.subplots(figsize=(12, 7))
     x = np.arange(len(tiers_present))
     n_agents = len(agents)
     width = 0.15
@@ -473,7 +473,7 @@ def generate_run_comparison_chart(
         prev_avgs.append(sum(ps.values()) / max(len(ps), 1) if ps else 0)
         curr_avgs.append(sum(cs.values()) / max(len(cs), 1) if cs else 0)
 
-    fig, ax = plt.subplots(figsize=(12, 7))
+    _fig, ax = plt.subplots(figsize=(12, 7))
     x = np.arange(len(agents))
     width = 0.35
 
@@ -523,7 +523,7 @@ def generate_radar_chart(results: dict, charts_dir: Path | None = None):
     angles = np.linspace(0, 2 * np.pi, n_metrics, endpoint=False).tolist()
     angles += angles[:1]
 
-    fig, ax = plt.subplots(figsize=(10, 10), subplot_kw={"polar": True})
+    _fig, ax = plt.subplots(figsize=(10, 10), subplot_kw={"polar": True})
     gemini_cmap = plt.cm.Blues
     claude_cmap = plt.cm.Oranges
 

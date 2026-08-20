@@ -377,7 +377,6 @@ def _per_model_section(results: dict, ordered: list[str]) -> list[str]:
         after = results[name].get("after", {})
         model = results[name].get("model", "unknown")
         cost = MODEL_COSTS.get(model, {"input": 0, "output": 0})
-        blend = blended_cost(model)
 
         avg_b = sum(before.values()) / max(len(before), 1) if before else 0
         avg_a = sum(after.values()) / max(len(after), 1) if after else 0

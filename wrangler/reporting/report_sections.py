@@ -545,7 +545,6 @@ def _interpretation_section(
             lines.append("**Metrics that improved:**\n")
             for k, avg in sorted(metrics_up.items(), key=lambda x: -x[1]):
                 best_agent = max(ordered, key=lambda n: metric_deltas[k][ordered.index(n)])
-                best_val = metric_deltas[k][ordered.index(best_agent)]
                 before_val = all_results[best_agent].get("before", {}).get(k, 0)
                 after_val = all_results[best_agent].get("after", {}).get(k, 0)
                 lines.append(
@@ -558,7 +557,6 @@ def _interpretation_section(
             lines.append("**Metrics that declined:**\n")
             for k, avg in sorted(metrics_down.items(), key=lambda x: x[1]):
                 worst_agent = min(ordered, key=lambda n: metric_deltas[k][ordered.index(n)])
-                worst_val = metric_deltas[k][ordered.index(worst_agent)]
                 before_val = all_results[worst_agent].get("before", {}).get(k, 0)
                 after_val = all_results[worst_agent].get("after", {}).get(k, 0)
                 lines.append(

@@ -507,7 +507,6 @@ def optimize(
             ) from e
         raise
 
-    elapsed = time.time() - t0
     best_idx = optimization_result.gepa_result["best_idx"]
     best_agent = optimization_result.optimized_agents[best_idx]
     optimized_instruction = best_agent.optimized_agent.instruction

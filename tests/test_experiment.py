@@ -198,7 +198,7 @@ class TestStatus:
 
 class TestPhaseGates:
     def test_deploy_has_no_gate(self, experiment):
-        ok, msg = experiment.check_gate("deploy")
+        ok, _msg = experiment.check_gate("deploy")
         assert ok
 
     def test_eval_before_needs_deploy(self, experiment):
@@ -209,7 +209,7 @@ class TestPhaseGates:
     def test_eval_before_passes_after_deploy(self, experiment):
         experiment.merge_pair("deploy", "pair-a", {"engine_id": "123"})
         experiment.merge_pair("deploy", "pair-b", {"engine_id": "456"})
-        ok, msg = experiment.check_gate("eval_before")
+        ok, _msg = experiment.check_gate("eval_before")
         assert ok
 
     def test_gate_partial_deploy_fails(self, experiment):
@@ -220,10 +220,10 @@ class TestPhaseGates:
 
     def test_gate_with_pair_id(self, experiment):
         experiment.merge_pair("deploy", "pair-a", {"engine_id": "123"})
-        ok, msg = experiment.check_gate("eval_before", pair_id="pair-a")
+        ok, _msg = experiment.check_gate("eval_before", pair_id="pair-a")
         assert ok
 
-        ok, msg = experiment.check_gate("eval_before", pair_id="pair-b")
+        ok, _msg = experiment.check_gate("eval_before", pair_id="pair-b")
         assert not ok
 
     def test_optimize_needs_eval_before(self, experiment):

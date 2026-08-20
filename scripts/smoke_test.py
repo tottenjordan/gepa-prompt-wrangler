@@ -84,7 +84,7 @@ def test_mcp_connectivity():
     for name, server in servers.items():
         t0 = time.time()
         try:
-            toolset = get_mcp_tools(server)
+            _toolset = get_mcp_tools(server)
             elapsed = time.time() - t0
             _pass(f"{name} MCP server loaded ({elapsed:.1f}s) — {server}")
         except Exception as e:

@@ -80,6 +80,7 @@ class TestInspectCommand:
         mock_to_yaml.return_value = "agent:\n  name: test\n"
         runner = CliRunner()
         result = runner.invoke(main, ["inspect", "some/path"])
+        assert result.exit_code == 0
         mock_inspect.assert_called_once_with("some/path")
 
 

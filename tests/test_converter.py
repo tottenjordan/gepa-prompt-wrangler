@@ -269,7 +269,7 @@ class TestSamplerConfig:
     def test_writes_to_disk(self, tmp_path):
         from wrangler.core.converter import generate_sampler_config
 
-        config = generate_sampler_config("test_opt", output_dir=str(tmp_path))
+        generate_sampler_config("test_opt", output_dir=str(tmp_path))
         config_path = tmp_path / "sampler_config.json"
         assert config_path.exists()
 

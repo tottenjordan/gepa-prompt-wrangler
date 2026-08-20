@@ -217,7 +217,7 @@ class TestRetryFailedCases:
         retry_df = pd.DataFrame({"prompt": ["q1"], "response": ["recovered"]})
         mock_batched.return_value = MagicMock(eval_dataset_df=retry_df)
 
-        result = _retry_failed_cases(
+        _result = _retry_failed_cases(
             MagicMock(),
             "agent",
             eval_df,
