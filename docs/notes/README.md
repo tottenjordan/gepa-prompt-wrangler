@@ -13,13 +13,14 @@ One topic per file. Keep this index under 200 lines — put detail in the topic 
 | [model-lifecycle.md](model-lifecycle.md) | Retirement dates, the Claude sampling-parameter cutoff, what the registry does *not* cover, and the **2026-08-20 judge A/B** that moved GEPA scoring to `gemini-3.5-flash`. |
 | [adk-judge-model.md](adk-judge-model.md) | Why only the GEPA path reads `judge_model` at all — batch eval cannot send one. Predicted the risks the judge A/B then measured. |
 | [toolchain-baseline.md](toolchain-baseline.md) | Measured lint/type/test baseline as of 2026-08-20, and what infrastructure does not exist yet. |
-| [repo-traps.md](repo-traps.md) | Non-obvious footguns: gitignored lockfile, duplicated config, `TODO` goldens, and the patterns behind the ones already fixed. |
+| [repo-traps.md](repo-traps.md) | Non-obvious footguns: gitignored lockfile, duplicated config, why `GOOGLE_CLOUD_LOCATION` can't express the per-model location rule, Agent Registry services invisible to `gcloud run services list`, `TODO` goldens. |
+| [silent-failures.md](silent-failures.md) | Four failures that reported success: MCP tools missing at deploy, startup checks that never ran, batch eval scoring 0 cases, and a tool-use metric floored at ~0.42. |
 
 ## Active Plans
 
 | Plan | Status |
 |------|--------|
-| [../plans/2026-08-20-repo-modernization.md](../plans/2026-08-20-repo-modernization.md) | Phases 0–2 done; Phase 3 done except 3.2b/3.3/3.4, which need live GCP runs |
+| [../plans/2026-08-20-repo-modernization.md](../plans/2026-08-20-repo-modernization.md) | Phases 0–2 done. Phase 3: 3.1–3.3 done; **3.4 in progress** — the smoke test surfaced four silent failures ([silent-failures.md](silent-failures.md)), all fixed; deploy + eval-before now pass, remaining stages not yet run. |
 
 ## Conventions for These Notes
 

@@ -79,24 +79,65 @@ The trap that generalizes: the deploy-time rewrite in `build_source_package()` m
 subscript bug invisible, because the only path anyone exercised was deployment. A bug
 that a build step silently papers over is one nobody reports.
 
-## `.env.example` contradicted CLAUDE.md on `GOOGLE_CLOUD_LOCATION` (fixed 2026-08-20)
+## `GOOGLE_CLOUD_LOCATION` could never have expressed the location rule
 
-**Fixed** — `.env.example` now sets `global` and carries the six MCP variables. Kept
-here because the failure mode is worth recognizing: it is silent at import and only
-surfaces as a model-not-found at the first inference call.
+**Recurred and then fixed properly on 2026-08-20.** It was first "fixed" by correcting
+`.env.example` from `${GCP_REGION}` to `global`. Within the same day the working `.env`
+was back to `${GCP_REGION}`, and Claude broke again with
 
-`.env.example:10` used to set `GOOGLE_CLOUD_LOCATION=${GCP_REGION}` → `us-central1`.
+```
+Publisher Model .../locations/us-central1/publishers/anthropic/models/claude-sonnet-4-6
+is not servable in region us-central1
+```
 
-CLAUDE.md:49 and :86, README.md:613, `wrangler/core/config.py:86`, and
-`wrangler/core/deploy.py:420` all say it must be **`global`** for Gemini 3.x and Claude.
+That recurrence is the finding. **A single process-wide env var cannot encode a
+per-model fact.** This repo routes five tiers in one process — lite/flash/pro are Gemini
+3.x (global-only), sonnet/opus are Claude (global-only), and Gemini 2.x wants a region.
+No one value of `GOOGLE_CLOUD_LOCATION` is right for all of them, so any correct setting
+is one edit away from being wrong, and nothing catches the edit. Worse, GEAP treats the
+variable as **restricted** and can serve it back regionally regardless of what the
+deployment config asked for — so even a correct `.env` did not survive deployment.
 
-Following `.env.example` verbatim gives a broken setup for every non-Gemini-2.x model —
-which is most of them, and all of them after 2026-10-16.
+The durable form is `wrangler/core/models.py:model_location()`, which pins the location
+*into each model object* (Claude: a full `locations/global` resource path, which ADK
+parses in preference to the env var; Gemini 3.x: `client_kwargs={"location": ...}`,
+forwarded to `google.genai.Client`). The env var remains only as a fallback for paths
+that bypass `resolve_model()`.
 
-It was also missing `SEARCH_MCP_SERVER`, `BOOKING_MCP_SERVER`, `EXPENSE_MCP_SERVER`
-and their `_URL` variants, which CLAUDE.md lists as required for the multi-model
-agents — the same vars whose absence used to make
-`examples/multi_model_agents/config.py` raise on import.
+Two things worth carrying forward:
+
+- The failure is **silent at import**. Nothing complains until the first inference call,
+  which in a pipeline can be twenty minutes in.
+- `deploy.py` had already worked around this for Claude by rewriting bare ids to a global
+  resource path on the way into the build package. A workaround at one call site is a
+  signal the rule belongs in the resolver, not evidence the problem is handled — Gemini
+  3.x had no equivalent cover and was quietly exposed the whole time.
+
+`.env.example` was also missing `SEARCH_MCP_SERVER`, `BOOKING_MCP_SERVER`,
+`EXPENSE_MCP_SERVER` and their `_URL` variants (fixed 2026-08-20).
+
+## Agent Registry–managed Cloud Run services do not appear in `gcloud run services list`
+
+The `wrangler-search-mcp` / `-booking-mcp` / `-expense-mcp` services back the multi-model
+agents' MCP tools. They are managed by **Agent Registry**, and `gcloud run services list`
+does not show them. I read that empty list as "the services were deleted", concluded the
+`.env` URLs were stale, and rewrote both `.env` files to point at hosts that did not
+exist — turning a working setup into a broken one.
+
+They were live the whole time. **Absence from `gcloud run services list` is not evidence
+of deletion.** Probe the host instead:
+
+```bash
+curl -s -o /dev/null -w '%{http_code}\n' https://wrangler-search-mcp-...run.app/mcp
+```
+
+A bare `GET` returns **406**, not 404 — that is a healthy MCP endpoint refusing a
+non-MCP request, and it is the cheapest positive signal available. For a real check,
+POST an MCP `initialize`; a live server answers with `serverInfo`.
+
+The generalizable version: before concluding a resource is gone, find a probe that
+returns a *positive* signal. A tool that lists nothing may simply not be the tool that
+lists that kind of thing.
 
 ## Test count in CLAUDE.md was stale (fixed 2026-08-20)
 
