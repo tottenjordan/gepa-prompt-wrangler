@@ -4,7 +4,8 @@ import json
 from collections import defaultdict
 from pathlib import Path
 
-from ..core.config import MODEL_COSTS, REPORTS_DIR, blended_cost
+from ..core.config import MODEL_COSTS, REPORTS_DIR
+from ..core.models import blended_cost_for_report as blended_cost
 from .analysis import (
     AGENT_ORDER,
     METRIC_LABELS,

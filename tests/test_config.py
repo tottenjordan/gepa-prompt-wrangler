@@ -126,3 +126,12 @@ def test_no_hardcoded_project_identifiers():
         and any(b in Path(f).read_text(errors="ignore") for b in banned)
     ]
     assert not offenders, f"hardcoded project identifiers in: {offenders}"
+
+
+def test_config_reexports_registry_not_its_own_tables():
+    """config.py must delegate to the registry, not keep a parallel table."""
+    import wrangler.core.config as cfg
+    from wrangler.core.models import MODELS
+
+    assert set(cfg.MODEL_COSTS) == set(MODELS), "MODEL_COSTS has drifted from the registry"
+    assert set(cfg.RATE_LIMITS) == set(MODELS), "RATE_LIMITS has drifted from the registry"

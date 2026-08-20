@@ -4,6 +4,15 @@ import os
 
 from dotenv import load_dotenv
 
+from .models import (
+    BLENDED_INPUT_WEIGHT,
+    BLENDED_OUTPUT_WEIGHT,
+    MODELS,
+    blended_cost,
+    get_batch_config,
+    resolve_model,
+)
+
 load_dotenv()
 
 # --- GCP Settings ---
@@ -17,83 +26,36 @@ REPORTS_DIR = os.path.join(OUTPUTS_DIR, "reports")
 DIAGRAMS_DIR = os.path.join(REPORTS_DIR, "diagrams")
 EVAL_OUTPUT_DIR = os.environ.get("EVAL_OUTPUT_DIR", "eval_outputs")
 
-# --- Model costs per 1M tokens ---
-# Source: https://cloud.google.com/gemini-enterprise-agent-platform/generative-ai/pricing
+# --- Model metadata ---
+# wrangler/core/models.py is the single source of truth. The two dicts below are
+# derived views kept for the existing importers of config.MODEL_COSTS /
+# config.RATE_LIMITS; new code should import from .models directly.
 MODEL_COSTS = {
-    "gemini-2.5-flash": {"input": 0.15, "output": 0.60},
-    "gemini-2.5-pro": {"input": 1.25, "output": 10.0},
-    "gemini-3.1-flash-lite": {"input": 0.25, "output": 1.5},
-    "gemini-3.5-flash": {"input": 1.50, "output": 9.0},
-    "gemini-3.1-pro-preview": {
-        "input": 4.0,
-        "output": 18.0,
-    },  # gemini-3.1-pro-preview | gemini-3.1-pro
-    "claude-sonnet-4-6": {"input": 3.0, "output": 15.0},
-    "claude-opus-4-6": {"input": 5.0, "output": 25.0},
-    "claude-opus-4-7": {"input": 5.0, "output": 25.0},
-    "claude-opus-4-8": {"input": 5.0, "output": 25.0},
-    "claude-fable-5": {"input": 10.0, "output": 50.0},
+    name: {"input": spec.input_cost, "output": spec.output_cost} for name, spec in MODELS.items()
 }
+RATE_LIMITS = {name: spec.rpm for name, spec in MODELS.items()}
 
-BLENDED_INPUT_WEIGHT = 4
-BLENDED_OUTPUT_WEIGHT = 1
-
-
-def blended_cost(model: str, custom_costs: dict[str, float] | None = None) -> float:
-    """Estimated cost per 1M tokens assuming 4:1 input:output token ratio."""
-    cost = custom_costs or MODEL_COSTS.get(model, {"input": 0, "output": 0})
-    w = BLENDED_INPUT_WEIGHT + BLENDED_OUTPUT_WEIGHT
-    return (BLENDED_INPUT_WEIGHT * cost["input"] + BLENDED_OUTPUT_WEIGHT * cost["output"]) / w
-
-
-# --- Rate limits (RPM) per model for inference throttling ---
-RATE_LIMITS = {
-    "gemini-3.1-flash-lite": 5,
-    "gemini-3.5-flash": 5,
-    "gemini-3.1-pro-preview": 5,  # gemini-3.1-pro-preview | gemini-3.1-pro
-    "gemini-2.5-flash": 100,
-    "gemini-2.5-pro": 80,
-    "claude-sonnet-4-6": 2000,
-    "claude-opus-4-6": 800,
-    "claude-opus-4-7": 800,
-    "claude-opus-4-8": 800,
-    "claude-fable-5": 800,
-}
-
-
-def get_batch_config(model: str) -> tuple[int, float, int]:
-    """Return (batch_size, delay_seconds, max_workers) based on model RPM."""
-    rpm = 90
-    for prefix, limit in RATE_LIMITS.items():
-        if prefix in model.lower():
-            rpm = limit
-            break
-    if rpm <= 10:
-        return 4, 15.0, 4
-    if rpm <= 100:
-        return 16, 5.0, 10
-    return 64, 0.0, 20
-
-
-def resolve_model(model_str: str):
-    """Resolve model string to an ADK-compatible model.
-
-    Gemini 2.x models work in regional endpoints — pass as plain strings.
-    Gemini 3.x models use the native Gemini class (global endpoint via env).
-    Claude models use the native Claude class (Vertex AI via env).
-
-    Both Gemini and Claude read GOOGLE_CLOUD_LOCATION from the environment,
-    which should be set to "global" for 3.x models.
-    """
-    if model_str.startswith(("gemini-2", "models/")):
-        return model_str
-    if model_str.startswith("claude"):
-        from google.adk.models.anthropic_llm import Claude
-
-        return Claude(model=model_str)
-    from google.adk.models.google_llm import Gemini
-
-    return Gemini(model=model_str)
+# blended_cost / get_batch_config / resolve_model are imported above purely so
+# that `from wrangler.core.config import resolve_model` keeps working; __all__ is
+# what tells ruff these re-exports are deliberate rather than dead imports.
+__all__ = [
+    "BLENDED_INPUT_WEIGHT",
+    "BLENDED_OUTPUT_WEIGHT",
+    "DIAGRAMS_DIR",
+    "EVAL_OUTPUT_DIR",
+    "GCP_PROJECT_ID",
+    "GCP_REGION",
+    "GCP_STAGING_BUCKET",
+    "MODELS",
+    "MODEL_COSTS",
+    "OUTPUTS_DIR",
+    "RATE_LIMITS",
+    "REPORTS_DIR",
+    "blended_cost",
+    "disable_pyopenssl",
+    "get_batch_config",
+    "resolve_model",
+]
 
 
 def disable_pyopenssl():

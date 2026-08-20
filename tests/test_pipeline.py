@@ -127,11 +127,27 @@ class TestBlendedCostWithCustom:
         expected = (4 * cost["input"] + 1 * cost["output"]) / 5
         assert abs(result - expected) < 0.001
 
-    def test_unknown_model_returns_zero(self):
+    def test_unknown_model_raises(self):
+        """Unregistered ids used to price at $0.00, which reads as "free".
+
+        The registry makes that an error. Reporting opts out explicitly via
+        blended_cost_for_report; nothing else should.
+        """
+        import pytest
+
         from wrangler.core.config import blended_cost
 
-        result = blended_cost("totally-unknown-model")
-        assert result == 0.0
+        with pytest.raises(KeyError, match="totally-unknown-model"):
+            blended_cost("totally-unknown-model")
+
+    def test_report_variant_returns_zero_and_warns(self, caplog):
+        """A report must not abort because one pair used an ad-hoc model id."""
+        from wrangler.core.models import blended_cost_for_report
+
+        with caplog.at_level("WARNING"):
+            assert blended_cost_for_report("totally-unknown-model") == 0.0
+
+        assert "totally-unknown-model" in caplog.text
 
 
 class TestParetoFrontier:

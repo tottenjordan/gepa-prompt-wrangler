@@ -8,7 +8,8 @@ import matplotlib as mpl
 
 mpl.use("Agg")
 
-from ..core.config import MODEL_COSTS, blended_cost
+from ..core.config import MODEL_COSTS
+from ..core.models import blended_cost_for_report as blended_cost
 from .analysis import (
     AGENT_ORDER,
     METRIC_LABELS,

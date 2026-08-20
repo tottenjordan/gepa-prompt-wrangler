@@ -8,7 +8,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from ..core.config import blended_cost
+from ..core.models import blended_cost_for_report as blended_cost
 
 if TYPE_CHECKING:
     from ..orchestration.experiment import Experiment

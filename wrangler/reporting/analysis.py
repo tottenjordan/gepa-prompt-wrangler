@@ -10,7 +10,8 @@ mpl.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 
-from ..core.config import REPORTS_DIR, blended_cost
+from ..core.config import REPORTS_DIR
+from ..core.models import blended_cost_for_report as blended_cost
 
 METRIC_LABELS = {
     "final_response_quality_v1": "Response Quality",

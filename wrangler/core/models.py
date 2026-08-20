@@ -8,7 +8,10 @@ string. See CODE_STANDARDS.md section 8.
 from __future__ import annotations
 
 import datetime as dt
+import logging
 from dataclasses import dataclass
+
+log = logging.getLogger(__name__)
 
 BLENDED_INPUT_WEIGHT = 4
 BLENDED_OUTPUT_WEIGHT = 1
@@ -106,6 +109,27 @@ def blended_cost(model: str, custom_costs: dict[str, float] | None = None) -> fl
         inp, out = spec.input_cost, spec.output_cost
     weight = BLENDED_INPUT_WEIGHT + BLENDED_OUTPUT_WEIGHT
     return (BLENDED_INPUT_WEIGHT * inp + BLENDED_OUTPUT_WEIGHT * out) / weight
+
+
+def blended_cost_for_report(model: str) -> float:
+    """`blended_cost` for report rendering, where an unregistered id must not abort.
+
+    A report spanning ten model pairs should not fail outright because one of
+    them used an ad-hoc id, so this returns 0.0 instead of raising. It logs a
+    warning naming the model, which is the part that matters: a $0.00 row with
+    no explanation is how an unpriced model gets mistaken for a free one.
+
+    Cost-critical paths should call `blended_cost` and let the KeyError through.
+    """
+    try:
+        return blended_cost(model)
+    except KeyError:
+        log.warning(
+            "Model %r is not in the registry; reporting its cost as $0.00. "
+            "Add it to wrangler/core/models.py to price it correctly.",
+            model,
+        )
+        return 0.0
 
 
 def get_batch_config(model: str) -> tuple[int, float, int]:
