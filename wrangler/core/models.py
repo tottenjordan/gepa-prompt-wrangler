@@ -212,29 +212,31 @@ MODELS: dict[str, ModelSpec] = {
 # Change these to change the framework's defaults. Every default in wrangler/
 # points at one of them, so a model migration is an edit to this block.
 #
-# The judge constants do not all hold the same value, because that is what the
-# code did before they were named. Naming them is what made the inconsistency
-# visible at all — it was spread over 12 literals in 10 files.
+# The judge constants used to hold three different values, because that is what
+# the code did before they were named. Naming them is what made the
+# inconsistency visible at all — it was spread over 12 literals in 10 files. The
+# two *scoring* judges now agree; the scaffold judge is a different tier on
+# purpose.
 #
 # A judge change silently re-scores every metric, so old and new reports stop
-# being comparable. That is why the scoring judges below are NOT being migrated
-# opportunistically: see docs/notes/model-lifecycle.md and Task 3.2b of
-# docs/plans/2026-08-20-repo-modernization.md, which requires an A/B run against
-# the smoke evalset before any of them moves.
+# being comparable. The migration below was therefore measured, not assumed —
+# see the A/B table in docs/notes/model-lifecycle.md.
 
-# Judge for GEPA optimization, batch eval, and eval-set conversion. This is the
-# main scoring path.
+# Judge for GEPA optimization and eval-set conversion. This is the main scoring
+# path. (Batch eval does NOT read this: it must send a full autorater resource
+# name, so it always uses the service default — see docs/notes/adk-judge-model.md.)
 #
-# DEADLINE: gemini-2.5-flash retires 2026-10-16. When it 404s, GEPA optimization
-# AND batch eval both stop, not just inference. The guard test
-# test_default_models_are_not_near_retirement turns this into a red build 30
-# days out.
-DEFAULT_JUDGE_MODEL = "gemini-2.5-flash"
+# Migrated gemini-2.5-flash -> gemini-3.5-flash on 2026-08-20, ahead of the
+# 2026-10-16 retirement, after A/B-ing both against the lite_opt rubrics.
+# 3.5-flash and not the plan's suggested 3.6-flash: 3.6 is on the short-term
+# availability track (45 days' notice, no date in advance), and a judge whose
+# job is to keep runs comparable is the worst place to take that. Same reasoning
+# as DEFAULT_AGENT_MODEL below.
+DEFAULT_JUDGE_MODEL = "gemini-3.5-flash"
 
 # Judge used when a manifest's eval_config omits judge_model, and in the
-# manifest scaffold `wrangler init` writes. Already on 3.x — so the claim that a
-# 3.x judge is unproven here is not quite true; one scoring path has been using
-# one. Worth weighing in Task 3.2b.
+# manifest scaffold `wrangler init` writes. This one was already on 3.x before
+# the migration, which is why a 3.x judge was never actually unproven here.
 DEFAULT_MANIFEST_JUDGE_MODEL = "gemini-3.5-flash"
 
 # Judge written into generated scaffolding (wrangler inspect, prompt registry).
@@ -244,9 +246,12 @@ DEFAULT_MANIFEST_JUDGE_MODEL = "gemini-3.5-flash"
 # defect on its own. Same pro tier as before; see the churn note on the spec.
 DEFAULT_SCAFFOLD_JUDGE_MODEL = "gemini-3.1-pro-preview"
 
-# Multi-judge ensemble. Order matters: the first is the tie-breaker. Scoring
-# path — holds at 2.5 with DEFAULT_JUDGE_MODEL, and moves with it.
-DEFAULT_JUDGE_ENSEMBLE = ["gemini-2.5-pro", "gemini-2.5-flash"]
+# Multi-judge ensemble. Order matters: the first is the tie-breaker. Moved with
+# DEFAULT_JUDGE_MODEL on 2026-08-20, keeping the pro-tiebreaker + flash shape.
+# Not A/B-tested like the others, because nothing outside tests/ imports
+# wrangler.optimize.multi_judge — the ensemble is dormant. It is migrated anyway
+# because it retires on the same date as everything else.
+DEFAULT_JUDGE_ENSEMBLE = ["gemini-3.1-pro-preview", "gemini-3.5-flash"]
 
 # Agent model for the manifest scaffold's example pairs. Deliberately
 # gemini-3.5-flash and not the cheaper, newer gemini-3.6-flash: 3.6 is on the

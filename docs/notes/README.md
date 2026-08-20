@@ -10,8 +10,8 @@ One topic per file. Keep this index under 200 lines — put detail in the topic 
 | Note | What it covers |
 |------|----------------|
 | [adk-patch-status.md](adk-patch-status.md) | Per-patch status of the ADK monkey-patches against the installed ADK, with upstream issue outcomes. **Read before any ADK bump.** |
-| [model-lifecycle.md](model-lifecycle.md) | Retirement dates, the Claude sampling-parameter cutoff, and what the registry does *not* cover. **The judge is still Gemini 2.5, which retires 2026-10-16.** |
-| [adk-judge-model.md](adk-judge-model.md) | Whether the LLM-as-judge model can move off Gemini 2.5 (yes), and the two non-obvious reasons to validate before doing it. |
+| [model-lifecycle.md](model-lifecycle.md) | Retirement dates, the Claude sampling-parameter cutoff, what the registry does *not* cover, and the **2026-08-20 judge A/B** that moved GEPA scoring to `gemini-3.5-flash`. |
+| [adk-judge-model.md](adk-judge-model.md) | Why only the GEPA path reads `judge_model` at all — batch eval cannot send one. Predicted the risks the judge A/B then measured. |
 | [toolchain-baseline.md](toolchain-baseline.md) | Measured lint/type/test baseline as of 2026-08-20, and what infrastructure does not exist yet. |
 | [repo-traps.md](repo-traps.md) | Non-obvious footguns: gitignored lockfile, duplicated config, `TODO` goldens, and the patterns behind the ones already fixed. |
 

@@ -226,14 +226,23 @@ class TestSamplerConfig:
         assert criteria["hallucinations_v1"] == 0.95
 
     def test_default_judge_model(self):
+        """The converter's default judge comes from the registry, not a literal.
+
+        Asserting the id itself is what made this test fail the 2026-08-20 judge
+        migration for no good reason. What is worth pinning is that the value
+        tracks DEFAULT_JUDGE_MODEL and names a model the registry knows about —
+        a re-hardcoded literal in converter.py would drift from both.
+        """
         from wrangler.core.converter import generate_sampler_config
+        from wrangler.core.models import DEFAULT_JUDGE_MODEL, MODELS
 
         config = generate_sampler_config("test_opt")
         criteria = config["eval_config"]["criteria"]
-        assert (
-            criteria["rubric_based_final_response_quality_v1"]["judge_model_options"]["judge_model"]
-            == "gemini-2.5-flash"
-        )
+        judge = criteria["rubric_based_final_response_quality_v1"]["judge_model_options"][
+            "judge_model"
+        ]
+        assert judge == DEFAULT_JUDGE_MODEL
+        assert judge in MODELS, f"{judge} is not in the model registry"
 
     def test_judge_model_propagated(self):
         from wrangler.core.converter import generate_sampler_config

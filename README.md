@@ -521,7 +521,7 @@ print(result)
 "
 ```
 
-**When to use:** After baseline eval shows room for improvement. Uses all 64 eval cases (49 train / 15 val) with rubric-based metrics. The judge comes from the `sampler_config.json` you point at — currently `gemini-2.5-flash`, which [retires 2026-10-16](docs/notes/model-lifecycle.md).
+**When to use:** After baseline eval shows room for improvement. Uses all 64 eval cases (49 train / 15 val) with rubric-based metrics. The judge comes from the `sampler_config.json` you point at — `gemini-3.5-flash` since the [2026-08-20 judge migration](docs/notes/model-lifecycle.md).
 
 ### Generating Traffic
 

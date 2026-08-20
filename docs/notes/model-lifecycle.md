@@ -18,18 +18,32 @@ date, sampling-parameter support, and alias per model, plus the named-role defau
 `wrangler/` outside it, if a default names an unregistered model, or if a default comes
 within 30 days of retiring.
 
-This note no longer needs to list where ids are hardcoded — the guard does that. What is
-**not** covered by the guard, and still holds literal ids:
+This note no longer needs to list where ids are hardcoded — the guard does that. The
+guard only walks `wrangler/`, so everything below was migrated by hand on 2026-08-20 and
+nothing enforces it staying migrated:
 
-- `manifests/*.yaml`, `templates/*/manifest.yaml`, `experiments/active/**`
-- `examples/multi_model_agents/agents/*_opt/sampler_config.json` — 6 files, 2 judge
-  values each
-- `examples/multi_model_agents/config.py` — the near-duplicate of `wrangler/core/config.py`
+- `manifests/*.yaml` (3 judge values), `templates/*/manifest.yaml` (2)
+- `examples/multi_model_agents/agents/*_opt/sampler_config.json` — 6 files, **2 judge
+  values each**, so 12. A one-per-file sweep silently does half the job.
+- `examples/multi_model_agents/config.py` (`SIMULATOR_MODEL`) and `.env.example`
 
-Those are data, not code, and a migration there re-scores experiments. As of 2026-08-20
-they still name `gemini-2.5-flash` (13 sites) and `gemini-2.5-pro` (4 sites).
+### Two places deliberately left on Gemini 2.5
 
-## ⚠️ Gemini 2.5 retires 2026-10-16 — and it is still the judge
+Both are **historical records**, and migrating them would falsify the record rather than
+fix anything:
+
+- `examples/multi_model_agents/prompts/*_prompts.py` — 30 `"judge_model"` entries. These
+  are provenance written by `wrangler/tools/prompt_registry.py:70`: each saved prompt
+  version records *the judge that produced it*. Rewriting them would claim `wrangler_v1`
+  was optimized under a judge that did not exist when it ran.
+- `experiments/active/multi-model-v6/`, `-v7/`, `manifest-v7.yaml` — 6 values. All five
+  stages (`deploy`, `eval_before`, `optimize`, `redeploy`, `eval_after`) are complete with
+  reports and charts committed. The config is the record of what produced them.
+
+The consequence to accept: **re-running either will 404 after 2026-10-16.** That is the
+correct trade — a stale archive is honest, a rewritten one is not.
+
+## Gemini 2.5 retires 2026-10-16 — judge migrated 2026-08-20
 
 `gemini-2.5-flash`, `gemini-2.5-pro`, and `gemini-2.5-flash-lite` retire on
 **2026-10-16** on Vertex AI / Agent Platform. Retired Vertex model IDs return **404** —
@@ -41,31 +55,102 @@ a hard failure, not a soft degrade.
   date tracks Gemini 3 GA. Re-verify on the
   [lifecycle page](https://docs.cloud.google.com/vertex-ai/generative-ai/docs/learn/model-versions).
 
-**Blast radius.** `DEFAULT_JUDGE_MODEL` is still `gemini-2.5-flash` and
-`DEFAULT_JUDGE_ENSEMBLE` is still `["gemini-2.5-pro", "gemini-2.5-flash"]`. When they
-404, GEPA optimization and the multi-judge ensemble stop — not just agent inference.
-(Batch eval is the exception: it never sends a judge id, see
-[adk-judge-model.md](adk-judge-model.md).) 2.5-flash is also ADK 2.7.1's *own* built-in
-default for `JudgeModelOptions` and `GEPARootAgentPromptOptimizerConfig.optimizer_model`,
-so after the date anything that does not set the judge explicitly breaks.
+**Blast radius, before the migration.** `DEFAULT_JUDGE_MODEL` was `gemini-2.5-flash` and
+`DEFAULT_JUDGE_ENSEMBLE` was `["gemini-2.5-pro", "gemini-2.5-flash"]`. When those 404,
+GEPA optimization stops — not just agent inference. 2.5-flash is also ADK 2.7.1's *own*
+built-in default for `JudgeModelOptions` and
+`GEPARootAgentPromptOptimizerConfig.optimizer_model`, so after the date anything that
+does not set the judge explicitly breaks.
 
-`test_default_models_are_not_near_retirement` turns this into a red build on
-**2026-09-16**, 30 days ahead of the shutdown.
+`test_default_models_are_not_near_retirement` would have turned this into a red build on
+**2026-09-16**, 30 days ahead of the shutdown. The migration below landed first.
 
-### Why the judge has not moved yet
+## Judge A/B, 2026-08-20 — the re-baseline
 
-Swapping the judge re-scores every experiment; reports from before and after are not
-comparable. That is a measurement decision, not a refactor, so it is deliberately
-deferred to an A/B run against a deployed agent (Task 3.2b in the plan) rather than done
-blind. Two things worth knowing before that run:
+**Chosen: `gemini-3.5-flash`,** replacing `gemini-2.5-flash` as `DEFAULT_JUDGE_MODEL`.
 
-- **A 3.x judge is not actually unproven here.** `DEFAULT_MANIFEST_JUDGE_MODEL` — the
-  judge used when a manifest's `eval_config` omits one, and what `wrangler init` writes —
-  is already `gemini-3.5-flash`. One scoring path has been running on 3.x.
-- **The scaffold judge already moved.** `DEFAULT_SCAFFOLD_JUDGE_MODEL` went
-  `gemini-2.5-pro` → `gemini-3.1-pro-preview` on 2026-08-20. It is emitted into config
-  files that do not exist yet, so there was no baseline to keep comparable and no reason
-  to wait.
+### The plan's measurement method could not have worked
+
+Task 3.2b proposed A/B-ing by running `wrangler eval` twice with different judges in the
+sampler config. That measures nothing: `wrangler/eval/evaluator.py` **deliberately omits
+`judge_model`** because `create_evaluation_run()` wants a full autorater *resource name*
+and rejects a bare model id with `INVALID_ARGUMENT`. Batch eval always uses the service
+default autorater. **The sampler config's `judge_model` only affects the GEPA path** —
+so both runs would have produced identical scores and "proved" the judges equivalent.
+
+What was run instead: the two GEPA-side evaluators
+(`RubricBasedFinalResponseQualityV1Evaluator`, `RubricBasedToolUseV1Evaluator`) driven
+directly with `lite_opt`'s real rubrics, `num_samples=5` (the production default), over 6
+eval cases spanning search/booking/expense/planning/error-handling/policy. Each case was
+scored in two variants — the golden trajectory, and a *degraded* one (no tool calls, "I'm
+not sure" answer) — because a judge that scores good answers well is worthless if it also
+scores bad answers well. Inputs were byte-identical across judges.
+
+| Judge | FRQ good | FRQ degraded | TUQ good | TUQ degraded | rubric-match failures | `None` scores | errors |
+|---|---|---|---|---|---|---|---|
+| `gemini-2.5-flash` | 0.917 | 0.333 | 1.000 | 0.500 | 0 | 0 | 0 |
+| `gemini-3.6-flash` | 1.000 | 0.500 | 1.000 | 0.417 | 0 | 0 | 0 |
+| `gemini-3.5-flash` | 1.000 | 0.500 | 0.917 | 0.500 | 0 | 0 | 0 |
+
+**The thought-leakage risk did not materialize.** Zero rubric-match failures, zero `None`
+scores, zero errors on either Gemini 3 judge. The concern from
+[adk-judge-model.md](adk-judge-model.md) — that `llm_as_judge_utils.py:88` does not filter
+thought parts — stays theoretical because the judge builds a bare
+`GenerateContentConfig()` and never asks for thoughts. Re-measure if that changes.
+
+**2.5-flash was the *least* reliable of the three**, which was not the expected result.
+It produced both a false negative (`case_11_low_expense`, golden response scored
+`completeness: 0.0`) and a false positive (`case_7_low_policy`, the deliberately useless
+"Sorry, I'm not sure" answer scored a full 1.0/1.0). Both Gemini 3 judges were perfectly
+consistent across all 6 cases in each variant.
+
+### Why 3.5-flash and not the plan's recommended 3.6-flash
+
+The plan said pin `gemini-3.6-flash`, reasoning that "this repo's whole purpose is
+comparing prompt variants across runs, and a self-updating judge undermines that." That
+reasoning is right and it disqualifies 3.6 too — the plan just did not know yet that 3.6
+is on the **short-term availability track**: it retires 45 days after a replacement ships,
+with no date published in advance. That is `gemini-flash-latest`'s defect on a slower
+fuse. `gemini-3.5-flash` does not shut down before **2027-05-19**.
+
+Two things fall out for free:
+
+- **The two scoring judges now agree.** `DEFAULT_MANIFEST_JUDGE_MODEL` was already
+  `gemini-3.5-flash`, so the repo had been judging the GEPA path with 2.5-flash and the
+  manifest path with 3.5-flash — an inconsistency nobody chose, only visible once the
+  constants were named.
+- The measured discrimination gap (good minus degraded, summed over both metrics) is
+  1.00 for 3.5-flash, 1.08 for 3.6, 1.08 for 2.5 — statistically indistinguishable at
+  n=6, and 2.5's edge comes from noise in both directions rather than sharper judgement.
+
+Cost is the trade: 3.5-flash is $1.50/$9.00 against 3.6's $0.75/$3.75. From 2027-01-01
+3.6 rises to $1.50/$7.50 and the input-side gap disappears entirely.
+
+### Two findings that outlived the A/B
+
+- **The registry's 5 RPM for Gemini 3.x is far too conservative for this project.** The
+  probe sustained ~40 req/min against `gemini-3.5-flash` at concurrency 6 with zero 429s
+  (120 judge calls in 177s). This matters because `get_batch_config()` keys off `rpm`, and
+  at the recorded 5 it drops every Gemini 3 judge from `(16, 5.0s, 10)` to
+  `(4, 15.0s, 4)` — roughly 4x slower judging. The plan pinned this warning on
+  `gemini-3.1-flash-lite` specifically, but **every** Gemini 3.x entry in the registry is
+  at 5 RPM, so it applied to any migration off 2.5. Worth re-measuring against real
+  project quota and correcting the registry.
+- **`correct_parameters` is vacuously true when the agent calls no tools.** Both judges,
+  independently, score it 1.0 for a trajectory with zero tool calls — no parameters means
+  no wrong parameters. That floors `tool_use_quality` at 0.5 for a completely
+  non-functional agent, and it is a rubric-design flaw in every `sampler_config.json`, not
+  a judge artifact. Fixing it changes what GEPA optimizes against, so it is left alone
+  here and noted for a deliberate decision.
+
+### The scaffold judge and the ensemble
+
+- `DEFAULT_SCAFFOLD_JUDGE_MODEL` went `gemini-2.5-pro` → `gemini-3.1-pro-preview`. Emitted
+  into config files that do not exist yet, so there was no baseline to keep comparable.
+- `DEFAULT_JUDGE_ENSEMBLE` went to `["gemini-3.1-pro-preview", "gemini-3.5-flash"]`,
+  keeping the pro-tiebreaker + flash shape. Not A/B-tested: nothing outside `tests/`
+  imports `wrangler.optimize.multi_judge`, so the ensemble is dormant. Migrated anyway,
+  because it retires on the same date as everything else.
 
 ### Successors
 
@@ -93,8 +178,10 @@ price also rises $0.75/$3.75 → $1.50/$7.50 on 2027-01-01, which erases the adv
 - **Pricing.** Gemini 3 is more token-efficient but costs more per token. Net cost change
   depends on workload — the registry's cost figures need real re-measurement, not
   arithmetic.
-- **Score re-baselining.** Changing the judge changes every GEPA and batch-eval score.
-  Archive the before-state or keep a pinned 2.5 lane if old experiments must reproduce.
+- **Score re-baselining.** Changing the judge changes every GEPA score. It does **not**
+  change batch-eval scores — batch eval cannot send a judge id at all, so `eval_before` /
+  `eval_after` numbers stay comparable across the migration. Only the optimization signal
+  moved.
 - **Alias hot-swapping.** Unversioned/`-latest` IDs get repointed silently, and Google has
   repointed a dated-looking preview ID after shutdown. Prefer a pinned successor over
   `gemini-flash-latest` for reproducibility.
@@ -152,9 +239,13 @@ as fabricated. Fetch `ai.google.dev` directly instead.
 
 ## Not yet done
 
-- **Judge A/B** (plan Task 3.2b) — needs two live `wrangler eval` runs against deployed
-  agents. Watch for `RUBRIC MATCH FAILURE`, `None` scores, and drift that flips pass/fail.
-- **Manifest / sampler-config migration** (Task 3.3) — blocked on the A/B picking a value.
-- **Smoke-test re-baseline** (Task 3.4) — `uv run wrangler run manifests/pipeline_smoke_manifest.yaml`,
-  5 cases, ~25-30 min, real spend. Record the post-migration scores here when it runs;
-  there is no post-migration baseline in this note yet.
+- **End-to-end smoke test** (plan Task 3.4) — `uv run wrangler run
+  manifests/pipeline_smoke_manifest.yaml`, 5 cases, ~25-30 min, deploys to GEAP and spends
+  real money. The A/B above validated the judge in isolation; it did **not** exercise
+  deploy → eval → GEPA → redeploy → eval. Until it runs, the migration is verified at the
+  unit of the judge, not of the pipeline.
+- **Re-measure Gemini 3.x RPM against real project quota** and correct the registry's `5`.
+  See the finding above — it currently makes `get_batch_config()` throttle 4x harder than
+  necessary for every Gemini 3 judge.
+- **Decide on the vacuous `correct_parameters` rubric.** Changing it changes GEPA's
+  optimization target, so it wants an explicit decision rather than a drive-by fix.
