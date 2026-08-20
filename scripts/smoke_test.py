@@ -29,7 +29,10 @@ warnings.filterwarnings("ignore", message=".*EXPERIMENTAL.*")
 warnings.filterwarnings("ignore", message=".*GEMINI_VIA_LITELLM.*")
 warnings.filterwarnings("ignore", category=DeprecationWarning, module="vertexai")
 
-LITE_ENGINE_ID = "4981388556929859584"
+# Supplied per run (--engine-id or LITE_ENGINE_ID), never hardcoded: the id names
+# one deployment, and a checked-in default points at whatever engine happened to
+# exist the day it was written. Test 3 skips itself when there is nothing to point at.
+LITE_ENGINE_ID = os.environ.get("LITE_ENGINE_ID", "")
 MANIFEST_PATH = "examples/multi_model_agents/manifest.yaml"
 EVAL_DATA_PATH = "examples/multi_model_agents/eval_data/eval_cases.yaml"
 LITE_OPT_DIR = "examples/multi_model_agents/agents/lite_opt"
@@ -133,16 +136,20 @@ def test_sampler_config():
         return True
 
 
-def test_single_eval():
+def test_single_eval(engine_id):
     """Test 3: Run a real eval with 2 cases against the lite agent engine."""
     _header("Test 3: Single-Agent Eval (2 cases)")
+
+    if not engine_id:
+        print("  SKIP: no engine id — pass --engine-id or set LITE_ENGINE_ID")
+        return True
 
     from wrangler.eval.evaluator import run_batch_eval
 
     t0 = time.time()
     try:
         result = run_batch_eval(
-            engine_id=LITE_ENGINE_ID,
+            engine_id=engine_id,
             eval_cases=SMOKE_CASES,
             agent_name="smoke-test-lite",
         )
@@ -310,10 +317,15 @@ def main():
         "--skip-optimize", action="store_true", help="Skip the GEPA optimization test (slowest)"
     )
     parser.add_argument("--skip-eval", action="store_true", help="Skip the batch eval test")
+    parser.add_argument(
+        "--engine-id",
+        default=LITE_ENGINE_ID,
+        help="Agent Engine to eval against (default: $LITE_ENGINE_ID; test 3 skips if unset)",
+    )
     args = parser.parse_args()
 
     print("GEPA Prompt Wrangler — Smoke Test")
-    print(f"  Engine: {LITE_ENGINE_ID}")
+    print(f"  Engine: {args.engine_id or '(none — test 3 will skip)'}")
     print(f"  Manifest: {MANIFEST_PATH}")
 
     results = {}
@@ -323,7 +335,7 @@ def main():
     results["sampler"] = test_sampler_config()
 
     if not args.skip_eval:
-        results["eval"] = test_single_eval()
+        results["eval"] = test_single_eval(args.engine_id)
 
     results["agent_load"] = test_agent_load()
 

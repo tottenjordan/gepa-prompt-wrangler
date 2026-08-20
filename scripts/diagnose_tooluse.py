@@ -11,6 +11,7 @@ Verdict branches:
 """
 
 import json
+import os
 import sys
 import time
 
@@ -33,7 +34,10 @@ USE_FIXED = "--fixed" in sys.argv
 
 disable_pyopenssl()  # pyopenssl 26.x context-reuse guard breaks GCS upload
 
-ENGINE_ID = "6075838033171578880"
+# Whichever engine you are diagnosing today — `ENGINE_ID=... uv run python
+# scripts/diagnose_tooluse.py`. Not hardcoded: the id this was first written against
+# is long gone, and a stale default would point the diagnostic at someone else's agent.
+ENGINE_ID = os.environ.get("ENGINE_ID", "")
 GCS_EVAL_DEST = f"gs://{GCP_STAGING_BUCKET}/eval-results"
 
 # Representative tool-requiring cases (single-tool, should be trivially toolable).
@@ -77,6 +81,8 @@ def _scan_for_tools(val) -> list[str]:
 
 
 def main() -> None:
+    if not ENGINE_ID:
+        sys.exit("Set ENGINE_ID to the Agent Engine you want to diagnose.")
     print(f"PROJECT={GCP_PROJECT_ID} REGION={GCP_REGION} ENGINE={ENGINE_ID}", flush=True)
     vertexai.init(
         project=GCP_PROJECT_ID, location=GCP_REGION, staging_bucket=f"gs://{GCP_STAGING_BUCKET}"

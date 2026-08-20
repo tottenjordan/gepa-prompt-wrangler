@@ -174,6 +174,7 @@ For multi-model agents: `SEARCH_MCP_SERVER`, `BOOKING_MCP_SERVER`, `EXPENSE_MCP_
 - **Run evals sequentially** (one pair at a time) to avoid 429 rate limit errors.
 - **Sampler configs** in `agents/*_opt/sampler_config.json` are the **single source of truth** for GEPA criteria and thresholds. When a sampler_config.json exists it is used verbatim — experiment/manifest thresholds do NOT override it. To tune what GEPA optimizes against, edit the sampler_config.json. The `eval_thresholds` flowing from manifests only (a) seed the fallback `_build_criteria()` when no sampler_config.json exists, and (b) drive report pass/fail marking — keep them in sync with the sampler config for accurate reports.
 - Agent `__init__.py` files must use absolute imports (e.g., `from agents.example_agent.agent import ...`) for GEAP deployment compatibility.
+- **Do not pin Agent Engine deployment ids** — no hardcoded ids in source, and nothing may *require* `*_ENGINE_ID` to be present in `.env`. An id names one deployment; whether a change means update, redeploy, or a brand-new engine is decided ad hoc at the time. Engine ids arrive at the call site (`--engine-id`, manifest `engine_id`, an env var read where it is used) and a missing one should skip or fail clearly, never fall back to a checked-in default. The example scripts write ids into `.env` as scratch space for their own `--update` flow; that is convenience, not configuration.
 
 ## Source-Based GEAP Deployment
 

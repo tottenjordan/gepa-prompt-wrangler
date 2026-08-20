@@ -117,8 +117,13 @@ SIMULATOR_MODEL = os.environ.get("SIMULATOR_MODEL", "gemini-3.5-flash")
 # Evaluation
 EVAL_OUTPUT_DIR = os.environ.get("EVAL_OUTPUT_DIR", "eval_outputs")
 BQ_EVAL_DATASET = os.environ.get("BQ_EVAL_DATASET", "geap_workshop_logs")
-AGENT_ENGINE_ID = os.environ.get("AGENT_ENGINE_ID", "2479350891879071744")
-ROUTER_ENGINE_ID = os.environ.get("ROUTER_ENGINE_ID", "6023683798619652096")
+
+# No engine ids here on purpose. A deployment id is not configuration — it names
+# one particular Agent Engine that may since have been redeployed or deleted, and
+# a stale default sends every caller that forgets to set the env var at a resource
+# that is not theirs. Pass the id in at the call site (CLI flag, manifest
+# `engine_id`, or an env var read where it is used) and decide redeploy-vs-new per
+# deployment.
 
 
 def disable_pyopenssl():
