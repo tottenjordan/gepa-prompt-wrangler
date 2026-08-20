@@ -116,28 +116,34 @@ Two things worth carrying forward:
 `.env.example` was also missing `SEARCH_MCP_SERVER`, `BOOKING_MCP_SERVER`,
 `EXPENSE_MCP_SERVER` and their `_URL` variants (fixed 2026-08-20).
 
-## Agent Registry–managed Cloud Run services do not appear in `gcloud run services list`
+## `head -20` on a 22-line list is how I "proved" three live services were deleted
 
 The `wrangler-search-mcp` / `-booking-mcp` / `-expense-mcp` services back the multi-model
-agents' MCP tools. They are managed by **Agent Registry**, and `gcloud run services list`
-does not show them. I read that empty list as "the services were deleted", concluded the
-`.env` URLs were stale, and rewrote both `.env` files to point at hosts that did not
-exist — turning a working setup into a broken one.
+agents' MCP tools. They are ordinary Cloud Run services deployed by
+`examples/multi_model_agents/scripts/deploy_mcp_servers.sh`, and
+`gcloud run services list` shows them perfectly well.
 
-They were live the whole time. **Absence from `gcloud run services list` is not evidence
-of deletion.** Probe the host instead:
+I ran that list piped through `head -20`. The project has 22 services, sorted
+alphabetically, and `wrangler-*` sorts **last**. I read the truncation as absence,
+concluded the `.env` URLs pointed at deleted hosts, and rewrote both `.env` files to
+target services that did not exist — breaking a working setup, then writing a note
+here confidently explaining that "Agent Registry manages them so they are invisible to
+gcloud." All of that was fabricated to explain an artifact of my own `head`.
 
-```bash
-curl -s -o /dev/null -w '%{http_code}\n' https://wrangler-search-mcp-...run.app/mcp
-```
+Corrected 2026-08-20. Two things worth keeping:
 
-A bare `GET` returns **406**, not 404 — that is a healthy MCP endpoint refusing a
-non-MCP request, and it is the cheapest positive signal available. For a real check,
-POST an MCP `initialize`; a live server answers with `serverInfo`.
+- **A truncating pipe turns a listing into evidence of nothing.** `head`, `--limit`,
+  and default page sizes all silently cap output. If a name is missing from a list, grep
+  the *untruncated* list for it before believing the absence.
+- **Before concluding a resource is gone, get a positive signal.** For these,
+  `curl` the URL: a bare `GET` returns **406**, not 404 — a healthy MCP endpoint
+  refusing a non-MCP request. For a real check, POST an MCP `initialize` and look for
+  `serverInfo`.
 
-The generalizable version: before concluding a resource is gone, find a probe that
-returns a *positive* signal. A tool that lists nothing may simply not be the tool that
-lists that kind of thing.
+The same class of mistake bit twice in one session — see
+[silent-failures.md](silent-failures.md), where "no logs after the model call" was a
+Cloud Logging ingestion delay, not an absence of logs. **Absence observed through a
+tool with a cap or a lag is not absence.**
 
 ## Test count in CLAUDE.md was stale (fixed 2026-08-20)
 
