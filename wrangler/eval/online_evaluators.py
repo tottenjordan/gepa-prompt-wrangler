@@ -25,6 +25,9 @@ from ..core.config import GCP_PROJECT_ID, GCP_REGION
 PROJECT_NUMBER = os.environ.get("PROJECT_NUMBER", "")
 API_BASE = f"https://{GCP_REGION}-aiplatform.googleapis.com/v1beta1/projects/{PROJECT_NUMBER}/locations/{GCP_REGION}"
 
+# Seconds. Without it these calls can hang forever against a wedged endpoint.
+HTTP_TIMEOUT = 60
+
 CUSTOM_METRICS = [
     {
         "displayName": "Wrangler Task Quality",
@@ -95,7 +98,7 @@ def _agent_resource(engine_id: str) -> str:
 
 
 def _list_registered_metrics(headers) -> dict[str, str]:
-    resp = http_requests.get(f"{API_BASE}/evaluationMetrics", headers=headers)
+    resp = http_requests.get(f"{API_BASE}/evaluationMetrics", headers=headers, timeout=HTTP_TIMEOUT)
     if resp.status_code != 200:
         return {}
     result = {}
@@ -125,6 +128,7 @@ def register_custom_metrics() -> list[str]:
             f"{API_BASE}/evaluationMetrics",
             headers=headers,
             json=metric_def,
+            timeout=HTTP_TIMEOUT,
         )
         if resp.status_code == 200:
             result = resp.json()
@@ -158,7 +162,7 @@ def _build_evaluator_config(label: str, engine_id: str, custom_metric_names: lis
 
 def list_evaluators():
     headers = _get_headers()
-    resp = http_requests.get(f"{API_BASE}/onlineEvaluators", headers=headers)
+    resp = http_requests.get(f"{API_BASE}/onlineEvaluators", headers=headers, timeout=HTTP_TIMEOUT)
     resp.raise_for_status()
     evaluators = resp.json().get("onlineEvaluators", [])
 
@@ -207,7 +211,9 @@ def create_evaluators():
         n_metrics = len(config["metricSources"])
         print(f"  Creating '{config['displayName']}' with {n_metrics} metrics...")
 
-        resp = http_requests.post(f"{API_BASE}/onlineEvaluators", headers=headers, json=config)
+        resp = http_requests.post(
+            f"{API_BASE}/onlineEvaluators", headers=headers, json=config, timeout=HTTP_TIMEOUT
+        )
         if resp.status_code == 200:
             result = resp.json()
             print(f"  Operation: {result.get('name', '')}")
@@ -223,7 +229,7 @@ def verify_evaluators():
     agents = _get_agent_engine_ids()
 
     print("=== Online Evaluator Status ===")
-    resp = http_requests.get(f"{API_BASE}/onlineEvaluators", headers=headers)
+    resp = http_requests.get(f"{API_BASE}/onlineEvaluators", headers=headers, timeout=HTTP_TIMEOUT)
     resp.raise_for_status()
     evaluators = resp.json().get("onlineEvaluators", [])
 
@@ -260,6 +266,7 @@ def verify_evaluators():
             "https://logging.googleapis.com/v2/entries:list",
             headers=headers,
             json=body,
+            timeout=HTTP_TIMEOUT,
         )
         entries = resp.json().get("entries", [])
         print(f"\n  {label} ({engine_id}): {len(entries)} eval result(s)")
@@ -271,6 +278,7 @@ def delete_evaluator(evaluator_id: str):
     resp = http_requests.delete(
         f"{API_BASE}/onlineEvaluators/{evaluator_id}",
         headers=headers,
+        timeout=HTTP_TIMEOUT,
     )
     if resp.status_code == 200:
         print("  Deleted")
@@ -285,7 +293,7 @@ def cleanup():
     agent_ids = set(agents.values())
 
     print("=== Cleaning up Online Evaluators ===")
-    resp = http_requests.get(f"{API_BASE}/onlineEvaluators", headers=headers)
+    resp = http_requests.get(f"{API_BASE}/onlineEvaluators", headers=headers, timeout=HTTP_TIMEOUT)
     resp.raise_for_status()
     for ev in resp.json().get("onlineEvaluators", []):
         agent = ev.get("agentResource", "").split("/")[-1]
@@ -300,7 +308,9 @@ def cleanup():
         if display_name in metric_names:
             mid = resource_name.split("/")[-1]
             print(f"Deleting metric '{display_name}' ({mid})...")
-            resp = http_requests.delete(f"{API_BASE}/evaluationMetrics/{mid}", headers=headers)
+            resp = http_requests.delete(
+                f"{API_BASE}/evaluationMetrics/{mid}", headers=headers, timeout=HTTP_TIMEOUT
+            )
             print(f"  {'Deleted' if resp.status_code == 200 else f'Error {resp.status_code}'}")
 
     print("\nCleanup complete.")

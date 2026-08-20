@@ -260,9 +260,9 @@ async def _prewarm_mcp_toolsets(agent, tag: str = "  ", max_retries: int = 3) ->
 
 def optimize(
     agent_module_path: str,
-    evalset_path: str = None,
-    sampler_config_path: str = None,
-    eval_data_path: str = None,
+    evalset_path: str | None = None,
+    sampler_config_path: str | None = None,
+    eval_data_path: str | None = None,
     agent_name: str = "",
     eval_thresholds: dict[str, float] | None = None,
     judge_model: str = "gemini-2.5-flash",

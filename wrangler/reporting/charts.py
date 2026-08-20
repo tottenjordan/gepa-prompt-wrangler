@@ -65,6 +65,7 @@ def _try_paperbanana(
                 text=True,
                 timeout=timeout,
                 env=env,
+                check=False,
             )
 
             if result.returncode != 0:

@@ -24,7 +24,7 @@ DIAGRAMS = {
 }
 
 
-def generate_diagram(source_path: str, caption: str, output_dir: str = None):
+def generate_diagram(source_path: str, caption: str, output_dir: str | None = None):
     """Generate a diagram using PaperBanana CLI."""
     output_dir = output_dir or DIAGRAMS_DIR
     Path(output_dir).mkdir(parents=True, exist_ok=True)
@@ -57,7 +57,7 @@ def generate_diagram(source_path: str, caption: str, output_dir: str = None):
     ]
 
     print(f"  Generating: {Path(source_path).stem}...")
-    result = subprocess.run(cmd, env=env, capture_output=True, text=True, timeout=600)
+    result = subprocess.run(cmd, env=env, capture_output=True, text=True, timeout=600, check=False)
 
     if result.returncode != 0:
         print(f"    Error: {result.stderr[-200:]}")
@@ -84,7 +84,7 @@ def generate_diagram(source_path: str, caption: str, output_dir: str = None):
     return None
 
 
-def main(source: str = None):
+def main(source: str | None = None):
     Path(DIAGRAMS_DIR).mkdir(parents=True, exist_ok=True)
 
     if source:

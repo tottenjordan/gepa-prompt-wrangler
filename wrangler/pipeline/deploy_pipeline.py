@@ -50,6 +50,7 @@ def _image_exists(image_uri: str) -> bool:
             capture_output=True,
             text=True,
             timeout=30,
+            check=False,
         )
         return result.returncode == 0 and result.stdout.strip() != ""
     except (subprocess.TimeoutExpired, FileNotFoundError):
@@ -97,6 +98,7 @@ def build_pipeline_image(
         ],
         capture_output=True,
         text=True,
+        check=False,
     )
     repo_check = subprocess.run(
         [
@@ -112,6 +114,7 @@ def build_pipeline_image(
         ],
         capture_output=True,
         text=True,
+        check=False,
     )
     if repo_check.returncode != 0:
         logger.info(f"Creating Artifact Registry repo: {IMAGE_REPO}")
@@ -165,6 +168,7 @@ def build_pipeline_image(
         capture_output=True,
         text=True,
         timeout=1500,
+        check=False,
     )
     cb_path.unlink(missing_ok=True)
     if result.returncode != 0:

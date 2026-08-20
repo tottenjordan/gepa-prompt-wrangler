@@ -18,7 +18,7 @@ def run_step(name: str, cmd: list[str]) -> bool:
     print(f"\n{'=' * 60}")
     print(f"  {name}")
     print(f"{'=' * 60}")
-    result = subprocess.run(cmd, timeout=600)
+    result = subprocess.run(cmd, timeout=600, check=False)
     return result.returncode == 0
 
 

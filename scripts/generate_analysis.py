@@ -26,7 +26,7 @@ CHARTS_DIR = Path(REPORTS_DIR) / "charts"
 AGENTS_DIR = Path(REPORTS_DIR) / "agents"
 
 
-def load_results(input_path: str = None) -> dict:
+def load_results(input_path: str | None = None) -> dict:
     if input_path:
         with open(input_path) as f:
             return json.load(f)
@@ -50,7 +50,7 @@ def _get_case_metadata(results: dict) -> list[dict] | None:
     return None
 
 
-def main(input_path: str = None):
+def main(input_path: str | None = None):
     print("Loading results...")
     results = normalize_agent_keys(load_results(input_path))
     case_metadata = _get_case_metadata(results)

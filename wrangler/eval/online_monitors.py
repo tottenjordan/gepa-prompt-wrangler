@@ -49,7 +49,7 @@ def _resolve_agent_resource(agent_id: str) -> str:
     return f"projects/{GCP_PROJECT_ID}/locations/{GCP_REGION}/reasoningEngines/{agent_id}"
 
 
-def run_quick_eval(agent_id: str, num_cases: int = None) -> dict:
+def run_quick_eval(agent_id: str, num_cases: int | None = None) -> dict:
     """Run a quick evaluation against a deployed agent."""
     agent_resource = _resolve_agent_resource(agent_id)
     cases = QUICK_EVAL_CASES[:num_cases] if num_cases else QUICK_EVAL_CASES

@@ -31,7 +31,7 @@ def run_step(name: str, cmd: list[str], step_times: list) -> bool:
     print(f"  {name}")
     print(f"{'=' * 60}")
     t0 = time.time()
-    result = subprocess.run(cmd, timeout=7200)
+    result = subprocess.run(cmd, timeout=7200, check=False)
     elapsed = time.time() - t0
     step_times.append((name, elapsed))
     ok = result.returncode == 0
