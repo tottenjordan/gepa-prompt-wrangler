@@ -53,6 +53,39 @@ class TestBuildSourcePackage:
         assert (build_path / "__init__.py").exists()
         assert (build_path / "prompts" / "default.py").exists()
 
+    def test_missing_config_py_is_fatal(self, tmp_path):
+        """A package with no config.py deploys fine and then fails to start.
+
+        The failure surfaces as an opaque GEAP "failed to be updated" twenty
+        minutes later, so it has to be caught at build time.
+        """
+        import pytest
+
+        from wrangler.core.deploy import build_source_package
+
+        orphan = tmp_path / "nowhere" / "agent.py"
+        orphan.parent.mkdir()
+        orphan.write_text("root_agent = None\n")
+
+        with pytest.raises(FileNotFoundError, match=r"config\.py not found"):
+            build_source_package(str(orphan), "Prompt", "gemini-3.5-flash", str(tmp_path / "build"))
+
+    def test_accepts_a_dotted_module_path(self, tmp_path, monkeypatch):
+        """`a.b.c_agent` is the importable form and gets passed by hand a lot.
+
+        `Path()` accepts it silently -- `.parent` is `"."` -- so without
+        normalisation it builds a package with no config.py.
+        """
+        from wrangler.core.deploy import build_source_package
+
+        _make_agent_tree(tmp_path)
+        monkeypatch.chdir(tmp_path)
+        dotted = "multi_model_agents.agents.sonnet_agent"
+
+        result = build_source_package(dotted, "Prompt", "gemini-3.5-flash", str(tmp_path / "build"))
+
+        assert (Path(result) / "config.py").exists()
+
     def test_instruction_content(self, tmp_path):
         from wrangler.core.deploy import build_source_package
 
@@ -117,6 +150,45 @@ class TestBuildSourcePackage:
         assert 'os.environ.get("SEARCH_MCP_SERVER", "")' in config_text
         assert 'os.environ.get("BOOKING_MCP_SERVER", "")' in config_text
         assert 'os.environ.get("EXPENSE_MCP_SERVER", "")' in config_text
+
+    def test_shipped_config_resolves_the_real_agent_model(self, tmp_path):
+        """The emitted config.py must survive `resolve_model` with a project set.
+
+        GEAP imports config.py at container start, so anything the build step
+        does to it that only breaks at runtime shows up as an opaque "Reasoning
+        Engine failed to be updated" after a ~10 minute build. A textual rewrite
+        of this file once hoisted a guard's body and left the substituted return
+        outside it, producing `UnboundLocalError: cannot access local variable
+        '_proj'` on every deploy with a project configured.
+        """
+        import subprocess
+        import sys
+
+        from wrangler.core.deploy import build_source_package
+
+        real_agent = "examples/multi_model_agents/agents/sonnet_agent"
+        build_dir = str(tmp_path / "build")
+        build_source_package(real_agent, "Prompt", "claude-sonnet-4-6", build_dir)
+
+        probe = subprocess.run(
+            [
+                sys.executable,
+                "-c",
+                "import config; print(config.resolve_model('claude-sonnet-4-6'))",
+            ],
+            cwd=build_dir,
+            env={
+                "PATH": "/usr/bin:/bin",
+                "GCP_PROJECT_ID": "test-proj",
+                "GOOGLE_CLOUD_PROJECT": "test-proj",
+                "GOOGLE_GENAI_USE_VERTEXAI": "1",
+            },
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+        assert probe.returncode == 0, probe.stderr
 
     def test_no_pycache_in_prompts(self, tmp_path):
         from wrangler.core.deploy import build_source_package

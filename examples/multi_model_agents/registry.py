@@ -46,4 +46,29 @@ def get_mcp_tools(server_name: str):
     from google.adk.integrations.agent_registry import AgentRegistry
 
     registry = AgentRegistry(project_id=GCP_PROJECT_ID, location=AGENT_REGISTRY_LOCATION)
-    return registry.get_mcp_toolset(server_name)
+    return registry.get_mcp_toolset(_resolve_registry_name(registry, server_name))
+
+
+def _resolve_registry_name(registry, server_name: str) -> str:
+    """Map a `*_MCP_SERVER` value to a real Agent Registry resource name.
+
+    The registry's own names look like
+    ``projects/P/locations/L/mcpServers/agentregistry-<uuid>`` — an opaque id
+    you cannot construct, only look up. The `*_MCP_SERVER` values in `.env` are
+    Cloud Run service paths (``.../services/wrangler-search-mcp``), which the
+    direct-URL path above uses purely as dict keys. Passing one straight to
+    ``get_mcp_toolset`` 404s, so match on displayName instead.
+    """
+    if "/mcpServers/" in server_name:
+        return server_name
+
+    display_name = server_name.rstrip("/").rsplit("/", 1)[-1]
+    for server in registry.list_mcp_servers().get("mcpServers", []):
+        if server.get("displayName") == display_name:
+            return server["name"]
+
+    raise ValueError(
+        f"No MCP server named {display_name!r} in the Agent Registry "
+        f"({GCP_PROJECT_ID}/{AGENT_REGISTRY_LOCATION}), and no direct URL "
+        f"configured for {server_name!r}. Set the matching *_MCP_URL."
+    )

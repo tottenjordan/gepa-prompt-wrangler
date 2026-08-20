@@ -461,6 +461,17 @@ def build_source_package(
         The build_dir path.
     """
     agent_path = Path(agent_module)
+
+    # Accept a dotted module path ("examples.multi_model_agents.agents.x") as
+    # well as the manifest's slash form.  Path() happily swallows the dotted
+    # form -- its .parent is "." -- so the walk below then fails to find
+    # config.py and used to warn and carry on, producing a package with no
+    # config.py that GEAP accepts and then fails to start twenty minutes later.
+    if not agent_path.exists() and not agent_path.with_suffix(".py").exists():
+        dotted = Path(agent_module.replace(".", "/"))
+        if dotted.exists() or dotted.with_suffix(".py").exists():
+            agent_path = dotted
+
     agent_parent = agent_path.parent
 
     # config.py may live alongside the agents/ directory, not inside it.
@@ -475,11 +486,11 @@ def build_source_package(
                 break
             agent_parent = candidate
         if not found:
-            import logging
-
-            logging.getLogger(__name__).warning(
-                f"config.py not found within 3 levels of {agent_module} — "
-                f"build package may be incomplete"
+            raise FileNotFoundError(
+                f"config.py not found within 3 levels of {agent_module!r}. "
+                f"agent_module must be a path relative to the project root "
+                f"(e.g. 'examples/multi_model_agents/agents/sonnet_agent'). "
+                f"Deploying without it produces an agent that cannot start."
             )
 
     if build_dir is None:
@@ -512,17 +523,23 @@ def build_source_package(
     # service account provides ADC automatically.
     (build_path / "registry.py").write_text(_REGISTRY_PY_TEMPLATE)
 
-    # Patch config.py for GEAP compatibility:
-    # 1. Rewrite hard os.environ["KEY"] to os.environ.get() for MCP vars.
-    #    As of 2026-08-20 the example config already uses .get(), so this is a
-    #    no-op there. It stays as a safety net for third-party agent configs,
-    #    which we do not control and which crash the GEAP container on import
-    #    if they subscript an env var the server does not set.
-    # 2. Legacy safety net for third-party configs whose resolve_model() still
-    #    passes Claude a bare model id. Ours no longer does — config.py pins
-    #    the location per model via model_location() — but GEAP treats
-    #    GOOGLE_CLOUD_LOCATION as a restricted env var and can serve it back as
-    #    us-central1, which a bare Claude id would then trust and fail on.
+    # Patch config.py for GEAP compatibility: rewrite hard os.environ["KEY"]
+    # to os.environ.get() for the MCP vars. A third-party agent config that
+    # subscripts an env var the GEAP server does not set crashes the container
+    # on import. This repo's config already uses .get(), so it is a no-op here.
+    #
+    # There used to be a second rewrite that re-pointed Claude at a global
+    # resource path by string-replacing `return Claude(model=model_str)`. It is
+    # gone, and should not come back. config.py now pins the location per model
+    # itself (model_location()), and the replacement was indentation-blind: once
+    # that return moved under an `if not project:` guard, the rewrite hoisted
+    # the guard's body and left the substituted `return` outside it, so every
+    # deploy with a project set died at import with
+    #
+    #   UnboundLocalError: cannot access local variable '_proj'
+    #
+    # A textual .replace() on Python source is a rewrite that cannot see scope.
+    # Fix the source, do not patch it on the way past.
     config_copy = build_path / "config.py"
     if config_copy.exists():
         text = config_copy.read_text()
@@ -530,13 +547,6 @@ def build_source_package(
             r'= os\.environ\["(SEARCH_MCP_SERVER|BOOKING_MCP_SERVER|EXPENSE_MCP_SERVER)"\]',
             r'= os.environ.get("\1", "")',
             text,
-        )
-        # No-op against this repo's config.py (the pattern is gone); retained
-        # for agent configs we do not control.
-        text = text.replace(
-            "return Claude(model=model_str)",
-            '_proj = os.environ.get("GCP_PROJECT_ID", os.environ.get("GOOGLE_CLOUD_PROJECT", ""))\n'
-            '        return Claude(model=f"projects/{_proj}/locations/global/publishers/anthropic/models/{model_str}")',
         )
         config_copy.write_text(text)
 
@@ -666,9 +676,7 @@ def deploy_agent_from_source(
                 shutil.rmtree(build_dir, ignore_errors=True)
             if attempt < 2:
                 wait = 30 * (attempt + 1)
-                print(
-                    f"  Deploy attempt {attempt + 1} failed (GEAP transient error), retrying in {wait}s..."
-                )
+                print(f"  Deploy attempt {attempt + 1} failed, retrying in {wait}s: {e}")
                 _time.sleep(wait)
             else:
                 import logging
@@ -727,9 +735,7 @@ def update_agent_from_source(
                 shutil.rmtree(build_dir, ignore_errors=True)
             if attempt < 2:
                 wait = 30 * (attempt + 1)
-                print(
-                    f"  Update attempt {attempt + 1} failed (GEAP transient error), retrying in {wait}s..."
-                )
+                print(f"  Update attempt {attempt + 1} failed, retrying in {wait}s: {e}")
                 _time.sleep(wait)
             else:
                 import logging
