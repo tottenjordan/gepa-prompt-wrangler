@@ -153,3 +153,78 @@ class TestParetoFrontier:
         with tempfile.TemporaryDirectory() as td:
             generate_cost_quality_chart(results, charts_dir=Path(td))
             assert (Path(td) / "cost_quality.png").exists()
+
+
+class TestImageTag:
+    def test_tag_changes_when_lockfile_changes(self, tmp_path):
+        """The image tag must track uv.lock, not just pyproject.toml.
+
+        pyproject.toml holds version *ranges*. Resolved versions can move
+        without it changing, so hashing it alone lets two builds share a tag
+        while containing different packages.
+        """
+        from wrangler.pipeline.deploy_pipeline import _compute_image_tag
+
+        pyproject = tmp_path / "pyproject.toml"
+        lock = tmp_path / "uv.lock"
+        pyproject.write_text("[project]\nname='x'\n")
+        lock.write_text("version = 1\n")
+
+        tag_before = _compute_image_tag(pyproject, lock)
+        lock.write_text("version = 2\n")
+        tag_after = _compute_image_tag(pyproject, lock)
+
+        assert tag_before != tag_after
+
+    def test_tag_changes_when_pyproject_changes(self, tmp_path):
+        from wrangler.pipeline.deploy_pipeline import _compute_image_tag
+
+        pyproject = tmp_path / "pyproject.toml"
+        lock = tmp_path / "uv.lock"
+        pyproject.write_text("[project]\nname='x'\n")
+        lock.write_text("version = 1\n")
+
+        tag_before = _compute_image_tag(pyproject, lock)
+        pyproject.write_text("[project]\nname='y'\n")
+        assert _compute_image_tag(pyproject, lock) != tag_before
+
+    def test_tag_is_stable_for_identical_inputs(self, tmp_path):
+        from wrangler.pipeline.deploy_pipeline import _compute_image_tag
+
+        pyproject = tmp_path / "pyproject.toml"
+        lock = tmp_path / "uv.lock"
+        pyproject.write_text("[project]\nname='x'\n")
+        lock.write_text("version = 1\n")
+
+        assert _compute_image_tag(pyproject, lock) == _compute_image_tag(pyproject, lock)
+
+    def test_missing_pyproject_is_not_a_shared_tag(self, tmp_path):
+        """Two different projects with no pyproject must not collide on 'unknown'."""
+        from wrangler.pipeline.deploy_pipeline import _compute_image_tag
+
+        missing = tmp_path / "pyproject.toml"
+        lock = tmp_path / "uv.lock"
+        lock.write_text("version = 1\n")
+        tag_a = _compute_image_tag(missing, lock)
+        lock.write_text("version = 2\n")
+        assert _compute_image_tag(missing, lock) != tag_a
+
+    def test_tag_changes_when_dockerfile_changes(self, tmp_path):
+        """Dockerfile.pipeline pins its own deps and is not derived from pyproject.
+
+        It copies pyproject.toml but installs from a hardcoded list, so bumping a
+        pin there changes the image while both other inputs stay byte-identical.
+        """
+        from wrangler.pipeline.deploy_pipeline import _compute_image_tag
+
+        pyproject = tmp_path / "pyproject.toml"
+        lock = tmp_path / "uv.lock"
+        dockerfile = tmp_path / "Dockerfile.pipeline"
+        pyproject.write_text("[project]\nname='x'\n")
+        lock.write_text("version = 1\n")
+        dockerfile.write_text('RUN pip install "google-adk>=2.2.0"\n')
+
+        tag_before = _compute_image_tag(pyproject, lock, dockerfile)
+        dockerfile.write_text('RUN pip install "google-adk>=2.7.1"\n')
+
+        assert _compute_image_tag(pyproject, lock, dockerfile) != tag_before

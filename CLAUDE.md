@@ -66,7 +66,7 @@ All non-2.x models use `GOOGLE_CLOUD_LOCATION=global`.
 
 KFP v2 components in `pipeline/components.py` are self-contained (KFP serializes each function in isolation). Code is injected via GCS tarball, env vars from Secret Manager. Local MCP servers start inside the optimize container for reliable tool connections. The DAG in `pipeline/dag.py` uses `dsl.ParallelFor` with `parallelism=1` for rate-limited stages.
 
-Pre-built Docker image via Cloud Build, cached by `pyproject.toml` hash. Image tag = `md5(pyproject.toml)[:12]`.
+Pre-built Docker image via Cloud Build, cached by a dependency hash. Image tag = `md5(pyproject.toml + uv.lock + Dockerfile.pipeline)[:12]`.
 
 **Deploy/redeploy components** use source-based deployment (`deploy_agent_from_source` / `update_agent_from_source`). The pipeline container assembles a build package at `/app/_geap_build_pkg/`, the SDK tarballs and uploads it, and GEAP builds the agent container from source. No cloudpickle involved.
 
@@ -205,7 +205,7 @@ KFP caches each component independently based on: **(1) component function body 
 `deploy_pipeline.py` packages the **full project tree** using an exclude-list (`.venv`, `.git`, `__pycache__`, `outputs`, `experiments`, `_geap_build_pkg`). Missing directories have caused multiple pipeline failures. If you add new directories the agents depend on, they'll be included automatically. The `_geap_build_pkg` directory is excluded because it's a transient build artifact created during deployment.
 
 ### Docker Image
-Pre-built via Cloud Build, tagged by `md5(pyproject.toml)[:12]`. Adding any dependency to `pyproject.toml` or `Dockerfile.pipeline` triggers a rebuild (~3 min). The image must include `fastmcp>=2.0.0` for local MCP servers.
+Pre-built via Cloud Build, tagged by `md5(pyproject.toml + uv.lock + Dockerfile.pipeline)[:12]` (`_compute_image_tag()` in `wrangler/pipeline/deploy_pipeline.py`). Adding a dependency to any of the three triggers a rebuild (~3 min). All three are needed: `pyproject.toml` holds ranges rather than resolved versions, and `Dockerfile.pipeline` installs from its own hardcoded `pip install` list — it copies `pyproject.toml` but does not install from it. The image must include `fastmcp>=2.0.0` for local MCP servers.
 
 ### reporter.REPORTS_DIR / CHARTS_DIR
 Must be `Path` objects, not strings. The reporter calls `.mkdir()` on them. When overriding in pipeline components, pass `Path(...)` not `str(...)`.

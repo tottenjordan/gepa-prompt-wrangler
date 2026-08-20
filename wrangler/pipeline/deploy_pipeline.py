@@ -26,12 +26,41 @@ IMAGE_REPO = "gepa-wrangler"
 IMAGE_NAME = "pipeline"
 
 
+def _compute_image_tag(
+    pyproject_path: Path,
+    lock_path: Path,
+    dockerfile_path: Path | None = None,
+) -> str:
+    """Image tag = md5 of the inputs that determine the image contents, first 12 chars.
+
+    All three matter:
+
+    - `pyproject.toml` holds version *ranges*, so a resolved dependency can move to a
+      new version without it changing.
+    - `uv.lock` pins those resolutions.
+    - `Dockerfile.pipeline` carries its own hardcoded `pip install` list — it copies
+      `pyproject.toml` but does not install from it. Editing a pin there changes the
+      image while leaving the other two files untouched.
+
+    Miss any of them and two builds can share a tag with different packages inside, at
+    which point the stale cached image silently wins.
+    """
+    h = hashlib.md5(usedforsecurity=False)  # a cache key, not a security primitive
+    for path in (pyproject_path, lock_path, dockerfile_path):
+        # The separator keeps `(a, b)` from hashing the same as `(ab, "")`.
+        h.update(path.read_bytes() if path and path.exists() else b"")
+        h.update(b"\0")
+    return h.hexdigest()[:12]
+
+
 def _compute_deps_hash() -> str:
-    """Hash pyproject.toml to detect dependency changes."""
-    pyproject = Path(__file__).resolve().parent.parent.parent / "pyproject.toml"
-    if not pyproject.exists():
-        return "unknown"
-    return hashlib.md5(pyproject.read_bytes(), usedforsecurity=False).hexdigest()[:12]
+    """Hash everything that determines the pipeline image contents."""
+    root = Path(__file__).resolve().parent.parent.parent
+    return _compute_image_tag(
+        root / "pyproject.toml",
+        root / "uv.lock",
+        root / "Dockerfile.pipeline",
+    )
 
 
 def _image_exists(image_uri: str) -> bool:
