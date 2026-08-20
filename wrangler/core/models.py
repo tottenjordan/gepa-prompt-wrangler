@@ -37,6 +37,10 @@ class ModelSpec:
     rpm: int
     retirement_date: dt.date | None = None
     retired: bool = False
+    # False for Claude Opus 4.7 and later, which return 400 when temperature,
+    # top_p, or top_k is set to a non-default value. Prompt for the behavior
+    # instead. https://platform.claude.com/docs/en/about-claude/model-deprecations
+    supports_sampling_params: bool = True
     notes: str = ""
     # Short key used for this model in manifests, agent dirs, and reports
     # (e.g. "opus47"). Empty means the model is not offered as an agent pair,
@@ -49,15 +53,24 @@ class ModelSpec:
         return {"gemini": "Google", "claude": "Anthropic"}[self.family]
 
 
-# Costs source:
-# https://cloud.google.com/gemini-enterprise-agent-platform/generative-ai/pricing
+# Costs are standard (non-batch, non-cached) list price per 1M tokens, verified
+# 2026-08-20 against:
+#   https://ai.google.dev/gemini-api/docs/pricing
+#   https://platform.claude.com/docs/en/about-claude/pricing
+#
+# Retirement dates come from the vendor deprecation pages. Two caveats:
+#   - Anthropic's dates are "not sooner than", and they apply to Anthropic-operated
+#     platforms. Google Cloud sets its own schedule for partner models, so treat the
+#     Claude dates as an early-warning floor rather than a contract.
+#   - Google publishes two dates for the 2.x shutdown: 2026-10-16 for the Gemini
+#     Developer API and 2026-10-20 for Agent Platform. We record the earlier one.
 MODELS: dict[str, ModelSpec] = {
     # --- Gemini 2.x — RETIRING 2026-10-16, regional endpoints ---
     "gemini-2.5-flash": ModelSpec(
         "gemini-2.5-flash",
         "gemini",
-        0.15,
-        0.60,
+        0.30,
+        2.50,
         100,
         retirement_date=dt.date(2026, 10, 16),
         notes="Successor: gemini-3.6-flash",
@@ -73,20 +86,74 @@ MODELS: dict[str, ModelSpec] = {
     ),
     # --- Gemini 3.x — global endpoint ---
     "gemini-3.1-flash-lite": ModelSpec(
-        "gemini-3.1-flash-lite", "gemini", 0.25, 1.5, 5, alias="lite"
+        "gemini-3.1-flash-lite",
+        "gemini",
+        0.25,
+        1.5,
+        5,
+        retirement_date=dt.date(2027, 5, 7),
+        notes="Successor: gemini-3.5-flash-lite",
+        alias="lite",
     ),
-    "gemini-3.5-flash": ModelSpec("gemini-3.5-flash", "gemini", 1.50, 9.0, 5, alias="flash"),
+    "gemini-3.5-flash-lite": ModelSpec(
+        "gemini-3.5-flash-lite", "gemini", 0.30, 2.50, 5, alias="lite35"
+    ),
+    "gemini-3.5-flash": ModelSpec(
+        "gemini-3.5-flash",
+        "gemini",
+        1.50,
+        9.0,
+        5,
+        retirement_date=dt.date(2027, 5, 19),
+        alias="flash",
+    ),
+    "gemini-3.6-flash": ModelSpec(
+        "gemini-3.6-flash",
+        "gemini",
+        0.75,
+        3.75,
+        5,
+        notes=(
+            "GA since 2026-07-21, but on the short-term availability track: retires 45 "
+            "days after a replacement ships, with no date published in advance. Cheaper "
+            "and newer than gemini-3.5-flash, but 3.5-flash is the stable pin (shutdown "
+            "not before 2027-05-19). Price rises to 1.50/7.50 on 2027-01-01."
+        ),
+        alias="flash36",
+    ),
     "gemini-3.1-pro-preview": ModelSpec(
         "gemini-3.1-pro-preview",
         "gemini",
         4.0,
         18.0,
         5,
+        notes="Preview id — expect churn; may be repointed after GA. Costs are the >200k tier",
         alias="pro",
-        notes="Preview id — expect churn; may be repointed after GA",
     ),
     # --- Claude — global/multi-region endpoints ---
-    "claude-sonnet-4-6": ModelSpec("claude-sonnet-4-6", "claude", 3.0, 15.0, 2000, alias="sonnet"),
+    # Costs assume the global endpoint, which the repo pins via
+    # GOOGLE_CLOUD_LOCATION=global. Regional and multi-region endpoints carry a
+    # 10% premium on top of these for Claude 4.5 and later.
+    "claude-sonnet-4-6": ModelSpec(
+        "claude-sonnet-4-6",
+        "claude",
+        3.0,
+        15.0,
+        2000,
+        retirement_date=dt.date(2027, 2, 17),
+        alias="sonnet",
+    ),
+    "claude-sonnet-5": ModelSpec(
+        "claude-sonnet-5",
+        "claude",
+        2.0,
+        10.0,
+        2000,
+        retirement_date=dt.date(2027, 6, 30),
+        supports_sampling_params=False,
+        notes="Cheaper than sonnet-4-6 in both directions",
+        alias="sonnet5",
+    ),
     "claude-opus-4-6": ModelSpec(
         "claude-opus-4-6",
         "claude",
@@ -96,9 +163,47 @@ MODELS: dict[str, ModelSpec] = {
         retirement_date=dt.date(2027, 2, 5),
         alias="opus",
     ),
-    "claude-opus-4-7": ModelSpec("claude-opus-4-7", "claude", 5.0, 25.0, 800, alias="opus47"),
-    "claude-opus-4-8": ModelSpec("claude-opus-4-8", "claude", 5.0, 25.0, 800, alias="opus48"),
-    "claude-fable-5": ModelSpec("claude-fable-5", "claude", 10.0, 50.0, 800, alias="fable"),
+    "claude-opus-4-7": ModelSpec(
+        "claude-opus-4-7",
+        "claude",
+        5.0,
+        25.0,
+        800,
+        retirement_date=dt.date(2027, 4, 16),
+        supports_sampling_params=False,
+        notes="First model on the newer tokenizer: ~30% more tokens for the same text",
+        alias="opus47",
+    ),
+    "claude-opus-4-8": ModelSpec(
+        "claude-opus-4-8",
+        "claude",
+        5.0,
+        25.0,
+        800,
+        retirement_date=dt.date(2027, 5, 28),
+        supports_sampling_params=False,
+        alias="opus48",
+    ),
+    "claude-opus-5": ModelSpec(
+        "claude-opus-5",
+        "claude",
+        5.0,
+        25.0,
+        800,
+        retirement_date=dt.date(2027, 7, 24),
+        supports_sampling_params=False,
+        alias="opus5",
+    ),
+    "claude-fable-5": ModelSpec(
+        "claude-fable-5",
+        "claude",
+        10.0,
+        50.0,
+        800,
+        retirement_date=dt.date(2027, 6, 9),
+        supports_sampling_params=False,
+        alias="fable",
+    ),
 }
 
 

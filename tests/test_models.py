@@ -48,6 +48,27 @@ def test_retired_models_are_flagged():
             )
 
 
+def test_sampling_params_flagged_for_models_that_reject_them():
+    """Claude Opus 4.7 and later 400 on a non-default temperature/top_p/top_k.
+
+    The cutoff is the model generation, not the Opus tier — Sonnet 5 and Fable 5
+    are affected too, and Opus 4.6 is not. Getting that boundary wrong is a
+    runtime 400 on a deployed agent.
+    """
+    rejects = {
+        "claude-opus-4-7",
+        "claude-opus-4-8",
+        "claude-opus-5",
+        "claude-sonnet-5",
+        "claude-fable-5",
+    }
+    for name, spec in MODELS.items():
+        assert spec.supports_sampling_params is (name not in rejects), (
+            f"{name}: supports_sampling_params={spec.supports_sampling_params} "
+            f"contradicts the Anthropic deprecation table"
+        )
+
+
 def test_gemini_2x_resolves_to_plain_string():
     """Gemini 2.x uses regional endpoints and is passed through as a string."""
     assert resolve_model("gemini-2.5-flash") == "gemini-2.5-flash"
@@ -65,8 +86,8 @@ def test_get_spec_raises_for_unknown_model():
 
 
 def test_blended_cost_uses_four_to_one_ratio():
-    """gemini-2.5-flash: (4 * 0.15 + 1 * 0.60) / 5 == 0.24."""
-    assert blended_cost("gemini-2.5-flash") == pytest.approx(0.24)
+    """gemini-2.5-flash: (4 * 0.30 + 1 * 2.50) / 5 == 0.74."""
+    assert blended_cost("gemini-2.5-flash") == pytest.approx(0.74)
 
 
 def test_blended_cost_accepts_custom_costs_for_unregistered_models():
@@ -91,13 +112,14 @@ class TestGetBatchConfig:
     def test_lookup_is_exact_not_substring(self):
         """The old RATE_LIMITS loop matched by substring.
 
-        ``"gemini-3.5-flash" in "gemini-3.5-flash-lite"`` is true, so a
-        hypothetical lite variant silently inherited the parent's limit, and
-        which limit won depended on dict insertion order.
+        ``"claude-opus-5" in "claude-opus-5-turbo"`` is true, so a hypothetical
+        variant silently inherited the parent's limit, and which limit won
+        depended on dict insertion order. The unregistered id must instead fall
+        through to DEFAULT_RPM.
         """
-        assert "gemini-3.5-flash-lite" not in MODELS
-        assert get_batch_config("gemini-3.5-flash-lite") == (16, 5.0, 10)
-        assert get_batch_config("gemini-3.5-flash") == (4, 15.0, 4)
+        assert "claude-opus-5-turbo" not in MODELS
+        assert get_batch_config("claude-opus-5-turbo") == (16, 5.0, 10)
+        assert get_batch_config("claude-opus-5") == (64, 0.0, 20)
 
 
 class TestResolveModel:
