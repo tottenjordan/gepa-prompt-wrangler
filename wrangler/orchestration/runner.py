@@ -7,7 +7,7 @@ import warnings
 from collections import Counter
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from contextlib import contextmanager
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 
 os.environ.setdefault("ADK_SUPPRESS_GEMINI_LITELLM_WARNINGS", "true")
@@ -192,7 +192,7 @@ class WranglerPipeline:
             "source": "wrangler GEPA optimization",
             "eval_cases": case_count,
             "judge_model": judge,
-            "timestamp": datetime.now().isoformat(),
+            "timestamp": datetime.now(tz=UTC).isoformat(),
         }
 
         content = prompts_file.read_text()
@@ -420,7 +420,9 @@ class WranglerPipeline:
             generate_report(self.results, self.manifest.name)
 
         # Save raw results
-        output_path = Path("outputs") / f"results_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+        output_path = (
+            Path("outputs") / f"results_{datetime.now(tz=UTC).strftime('%Y%m%d_%H%M%S')}.json"
+        )
         output_path.parent.mkdir(parents=True, exist_ok=True)
         with open(output_path, "w") as f:
             json.dump(self.results, f, indent=2, default=str)

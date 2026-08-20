@@ -13,7 +13,7 @@ Usage:
 import json
 import sys
 import time
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 
 import vertexai
@@ -53,7 +53,7 @@ def run_quick_eval(agent_id: str, num_cases: int = None) -> dict:
     """Run a quick evaluation against a deployed agent."""
     agent_resource = _resolve_agent_resource(agent_id)
     cases = QUICK_EVAL_CASES[:num_cases] if num_cases else QUICK_EVAL_CASES
-    run_id = f"monitor_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+    run_id = f"monitor_{datetime.now(tz=UTC).strftime('%Y%m%d_%H%M%S')}"
 
     vertexai.init(
         project=GCP_PROJECT_ID,
@@ -127,7 +127,7 @@ def run_quick_eval(agent_id: str, num_cases: int = None) -> dict:
     result = {
         "agent_id": agent_id,
         "run_id": run_id,
-        "timestamp": datetime.now().isoformat(),
+        "timestamp": datetime.now(tz=UTC).isoformat(),
         "num_cases": len(cases),
         "scores": scores,
     }

@@ -335,7 +335,7 @@ def deploy_pipeline(
     aiplatform.init(project=project_id, location=location)
 
     pipeline_root = f"gs://{bucket_name}/pipeline-runs/{run_id}/pipeline_root"
-    timestamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+    timestamp = datetime.datetime.now(tz=datetime.UTC).strftime("%Y%m%d-%H%M%S")
     job_id = f"gepa-{run_id}-{timestamp}"
     display_name = f"gepa-{manifest.name}-{run_id}"
 

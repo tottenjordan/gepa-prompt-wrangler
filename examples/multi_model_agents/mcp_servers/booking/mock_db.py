@@ -1,7 +1,7 @@
 """Mock booking database — in-memory store for flight and hotel reservations."""
 
 import uuid
-from datetime import datetime
+from datetime import UTC, datetime
 
 # Pre-seeded bookings so eval cases that reference fixed IDs (BK-001..BK-006)
 # and owners (EMP001/EMP002) have real data to act on. Cases that use
@@ -76,7 +76,7 @@ def create_booking(booking_type: str, item_id: str, details: dict) -> dict:
         "type": booking_type,
         "item_id": item_id,
         "status": "confirmed",
-        "created_at": datetime.now().isoformat(),
+        "created_at": datetime.now(tz=UTC).isoformat(),
         **details,
     }
     bookings[booking_id] = booking
@@ -87,7 +87,7 @@ def cancel_booking(booking_id: str) -> dict | None:
     if booking_id not in bookings:
         return None
     bookings[booking_id]["status"] = "cancelled"
-    bookings[booking_id]["cancelled_at"] = datetime.now().isoformat()
+    bookings[booking_id]["cancelled_at"] = datetime.now(tz=UTC).isoformat()
     return bookings[booking_id]
 
 

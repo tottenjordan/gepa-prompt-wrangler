@@ -664,20 +664,20 @@ def save_eval_results(
 ) -> str:
     """Save eval results to JSON. Returns the file path."""
     import json
-    from datetime import datetime
+    from datetime import UTC, datetime
     from pathlib import Path
 
     output_dir = Path(output_dir or "outputs")
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    timestamp = datetime.now(tz=UTC).strftime("%Y%m%d_%H%M%S")
     filename = f"eval_{agent_name}_{phase}_{timestamp}.json"
     path = output_dir / filename
 
     data = {
         "agent": agent_name,
         "phase": phase,
-        "timestamp": datetime.now().isoformat(),
+        "timestamp": datetime.now(tz=UTC).isoformat(),
         "scores": scores,
     }
     with open(path, "w") as f:

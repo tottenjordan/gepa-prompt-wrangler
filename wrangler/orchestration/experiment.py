@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -49,7 +49,7 @@ class Experiment:
 
         name = name or manifest.name
         version = version or "wrangler_v1"
-        now = datetime.now().isoformat(timespec="seconds")
+        now = datetime.now(tz=UTC).isoformat(timespec="seconds")
 
         exp_dir = Path(base_dir) / name
         if exp_dir.exists():
@@ -204,7 +204,7 @@ class Experiment:
         stage_info = stages.setdefault(stage, {"status": "pending", "pairs": {}})
         stage_info["pairs"][pair_id] = {
             "status": status,
-            "completed_at": datetime.now().isoformat(timespec="seconds"),
+            "completed_at": datetime.now(tz=UTC).isoformat(timespec="seconds"),
         }
 
         all_pairs = set(self.pair_ids)
@@ -213,7 +213,7 @@ class Experiment:
         }
         if done_pairs >= all_pairs:
             stage_info["status"] = "complete"
-            stage_info["completed_at"] = datetime.now().isoformat(timespec="seconds")
+            stage_info["completed_at"] = datetime.now(tz=UTC).isoformat(timespec="seconds")
         elif done_pairs:
             stage_info["status"] = "partial"
         self._write_tracking(tracking)

@@ -10,7 +10,7 @@ import argparse
 import json
 import os
 import sys
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -103,7 +103,7 @@ def run_demo(agent_names: list[str], skip_deploy: bool = False):
     disable_pyopenssl()
 
     eval_cases = load_eval_file(EVAL_DATA)
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    timestamp = datetime.now(tz=UTC).strftime("%Y%m%d_%H%M%S")
 
     results = {}
     engine_ids = {}

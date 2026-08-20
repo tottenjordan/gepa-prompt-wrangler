@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import importlib.util
 import time
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -418,7 +418,7 @@ def _save_optimized_prompt(exp: Experiment, pair: AgentPromptPair, prompt: str) 
         "source": "wrangler GEPA optimization",
         "eval_cases": case_count,
         "judge_model": judge,
-        "timestamp": datetime.now().isoformat(),
+        "timestamp": datetime.now(tz=UTC).isoformat(),
     }
 
     content = prompts_file.read_text()
@@ -501,7 +501,7 @@ def stage_redeploy(exp: Experiment, pair_id: str | None = None) -> None:
             pair.id,
             {
                 "engine_id": engine_id,
-                "updated_at": datetime.now().isoformat(timespec="seconds"),
+                "updated_at": datetime.now(tz=UTC).isoformat(timespec="seconds"),
                 "elapsed": elapsed,
             },
         )

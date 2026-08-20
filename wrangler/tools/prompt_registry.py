@@ -6,7 +6,7 @@ Automatically appends new optimization results to the agent's prompt file.
 import importlib
 import os
 import sys
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 
 
@@ -49,7 +49,7 @@ def save_optimized_prompt(
 
     # Generate version name if not provided
     if version_name is None:
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        timestamp = datetime.now(tz=UTC).strftime("%Y%m%d_%H%M%S")
         version_name = f"{source}_v_{timestamp}"
 
     # Load existing module to get current OPTIMIZED dict
@@ -67,7 +67,7 @@ def save_optimized_prompt(
         "eval_cases": eval_cases,
         "judge_model": judge_model,
         "notes": notes,
-        "timestamp": datetime.now().isoformat(),
+        "timestamp": datetime.now(tz=UTC).isoformat(),
     }
 
     # Rebuild the file

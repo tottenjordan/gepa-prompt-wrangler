@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import difflib
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -335,7 +335,7 @@ def format_analysis_report(
     """Generate a markdown analysis report."""
     lines: list[str] = []
     lines.append(f"# Analysis Report — {analysis.experiment_name}\n")
-    lines.append(f"Generated: {datetime.now().isoformat(timespec='seconds')}\n")
+    lines.append(f"Generated: {datetime.now(tz=UTC).isoformat(timespec='seconds')}\n")
 
     # --- Aggregate summary ---
     lines.append("## Summary\n")

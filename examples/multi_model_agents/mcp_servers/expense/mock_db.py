@@ -1,7 +1,7 @@
 """Mock expense database — in-memory store with corporate policy limit enforcement."""
 
 import uuid
-from datetime import datetime
+from datetime import UTC, datetime
 
 POLICY_LIMITS = {
     "meals": 75.00,
@@ -123,7 +123,7 @@ def submit_expense(amount: float, category: str, description: str, user_id: str)
         "user_id": user_id,
         "status": "approved" if policy_check["within_policy"] else "pending_review",
         "policy_check": policy_check,
-        "submitted_at": datetime.now().isoformat(),
+        "submitted_at": datetime.now(tz=UTC).isoformat(),
     }
     expenses[expense_id] = expense
     return expense

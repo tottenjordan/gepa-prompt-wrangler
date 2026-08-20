@@ -656,7 +656,7 @@ def redeploy_single_agent(
     import sys
     import tarfile
     import time
-    from datetime import datetime
+    from datetime import UTC, datetime
 
     from google.cloud import storage
 
@@ -739,7 +739,7 @@ def redeploy_single_agent(
     result = {
         "pair_id": pair_id,
         "engine_id": engine_id,
-        "updated_at": datetime.now().isoformat(timespec="seconds"),
+        "updated_at": datetime.now(tz=UTC).isoformat(timespec="seconds"),
         "elapsed": elapsed,
     }
     stage_blob = f"pipeline-runs/{run_id}/stages/redeploy/{pair_id}.json"
