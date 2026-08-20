@@ -225,3 +225,97 @@ class TestRetryFailedCases:
             "gemini-3.1-pro",
         )
         assert mock_batched.called
+
+
+class TestDefaultMetricVersions:
+    """Guard the metric versions batch eval submits to the service.
+
+    An unversioned RubricMetric resolves through the SDK's client-side
+    METRIC_LATEST_SPEC_NAME table, which drifts ahead of what the eval service
+    serves. When it does, the service errors per-metric and the SDK's
+    extra='forbid' result model then fails to parse the WHOLE result file --
+    silently zeroing every per-case score. These tests fail loudly instead.
+    """
+
+    def test_all_default_metrics_are_v1(self):
+        """v1 is what the us-central1 service serves (probed 2026-08-20).
+
+        It is also what the report layer keys on: thresholds_from_sampler_config
+        emits final_response_quality_v1 / hallucination_v1 / safety_v1 /
+        tool_use_quality_v1, so a v2 metric name silently misses every lookup.
+        """
+        from wrangler.eval.evaluator import _TOOL_USE_METRIC_NAME, DEFAULT_METRICS
+
+        for metric in DEFAULT_METRICS:
+            name = metric.name.lower()
+            if name == _TOOL_USE_METRIC_NAME:
+                continue  # custom LLMMetric, not a predefined versioned one
+            assert metric.version == "v1", (
+                f"{name} must pin version='v1'; an unpinned metric follows the "
+                "SDK's latest table and gets rejected by the service"
+            )
+
+    def test_no_unversioned_predefined_metrics(self):
+        from wrangler.eval.evaluator import _TOOL_USE_METRIC_NAME, DEFAULT_METRICS
+
+        unpinned = [
+            m.name
+            for m in DEFAULT_METRICS
+            if m.name.lower() != _TOOL_USE_METRIC_NAME and getattr(m, "version", None) is None
+        ]
+        assert not unpinned, f"unpinned predefined metrics: {unpinned}"
+
+
+class TestMcpEnvPropagation:
+    """The local deploy path used to ship agents with no MCP env vars at all.
+
+    A toolless agent does not fail loudly -- it comes up with an empty toolset
+    and role-plays tool use, emitting literal <tool_call> text. Only the
+    pipeline path passed env_vars, so `wrangler run` deployed broken agents.
+    """
+
+    def test_mcp_vars_collected_from_environ(self, monkeypatch):
+        from wrangler.core.deploy import mcp_env_from_environ
+
+        monkeypatch.setenv("SEARCH_MCP_SERVER", "wrangler-search-mcp")
+        monkeypatch.setenv("SEARCH_MCP_URL", "https://search.example/mcp")
+        monkeypatch.setenv("UNRELATED_VAR", "nope")
+
+        env = mcp_env_from_environ()
+        assert env["SEARCH_MCP_SERVER"] == "wrangler-search-mcp"
+        assert env["SEARCH_MCP_URL"] == "https://search.example/mcp"
+        assert "UNRELATED_VAR" not in env
+
+    def test_empty_values_are_dropped(self, monkeypatch):
+        """An empty string is worse than absent: it looks configured."""
+        from wrangler.core.deploy import mcp_env_from_environ
+
+        monkeypatch.setenv("BOOKING_MCP_URL", "")
+        assert "BOOKING_MCP_URL" not in mcp_env_from_environ()
+
+    def test_source_config_includes_mcp_env(self, monkeypatch, tmp_path):
+        from wrangler.core.deploy import _build_source_config
+
+        monkeypatch.setenv("EXPENSE_MCP_SERVER", "wrangler-expense-mcp")
+        monkeypatch.setenv("EXPENSE_MCP_URL", "https://expense.example/mcp")
+        monkeypatch.chdir(tmp_path)
+        build_dir = tmp_path / "_geap_build_pkg"
+        build_dir.mkdir()
+
+        config = _build_source_config(str(build_dir), "test-agent")
+        assert config["env_vars"]["EXPENSE_MCP_SERVER"] == "wrangler-expense-mcp"
+        assert config["env_vars"]["EXPENSE_MCP_URL"] == "https://expense.example/mcp"
+
+    def test_explicit_env_vars_win_over_environ(self, monkeypatch, tmp_path):
+        """The pipeline overrides MCP URLs to localhost -- that must stick."""
+        from wrangler.core.deploy import _build_source_config
+
+        monkeypatch.setenv("SEARCH_MCP_URL", "https://cloudrun.example/mcp")
+        monkeypatch.chdir(tmp_path)
+        build_dir = tmp_path / "_geap_build_pkg"
+        build_dir.mkdir()
+
+        config = _build_source_config(
+            str(build_dir), "test-agent", env_vars={"SEARCH_MCP_URL": "http://localhost:8001/mcp"}
+        )
+        assert config["env_vars"]["SEARCH_MCP_URL"] == "http://localhost:8001/mcp"

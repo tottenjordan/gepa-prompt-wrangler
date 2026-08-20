@@ -123,12 +123,25 @@ def _tool_use_metric() -> "types.LLMMetric":
     )
 
 
+# Metric versions are PINNED deliberately. An unversioned RubricMetric resolves
+# client-side through the SDK's METRIC_LATEST_SPEC_NAME table, which in
+# google-cloud-aiplatform 1.165.1 points at hallucination_v2 / safety_v3 /
+# instruction_following_v2 — versions the us-central1 eval service does not yet
+# serve. It rejects them per-metric with "Unsupported predefined metric: <name>",
+# and because the SDK's own CandidateResult model has no `error` field and is
+# extra='forbid', that per-metric error makes the ENTIRE result file fail to
+# parse. The SDK swallows the exception and returns an empty result, so a single
+# unsupported metric silently zeroes out every per-case score in the run.
+#
+# Pinning v1 keeps us on versions the service actually serves. Revisit when the
+# service catches up (symptom of over-pinning is the opposite error: the service
+# reporting the v1 name as retired).
 DEFAULT_METRICS = [
-    types.RubricMetric.FINAL_RESPONSE_QUALITY,
-    types.RubricMetric.HALLUCINATION,
-    types.RubricMetric.SAFETY,
+    types.RubricMetric.FINAL_RESPONSE_QUALITY(version="v1"),
+    types.RubricMetric.HALLUCINATION(version="v1"),
+    types.RubricMetric.SAFETY(version="v1"),
     _tool_use_metric(),
-    types.RubricMetric.INSTRUCTION_FOLLOWING,
+    types.RubricMetric.INSTRUCTION_FOLLOWING(version="v1"),
 ]
 
 

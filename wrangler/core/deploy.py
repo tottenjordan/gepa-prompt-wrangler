@@ -6,6 +6,7 @@ live here too; it was deleted because cloudpickle captures module references
 (registry.py, config.py, prompts/) that do not exist on the GEAP server.
 """
 
+import os
 import re
 import shutil
 from pathlib import Path
@@ -17,15 +18,20 @@ from .config import GCP_PROJECT_ID, GCP_REGION, GCP_STAGING_BUCKET
 # --- Source-based deployment constants ---
 
 _SOURCE_REQUIREMENTS = [
-    "google-cloud-aiplatform[adk,agent-engines]>=1.154.0",
-    "google-genai>=1.66.0",
+    "google-cloud-aiplatform[adk,agent-engines]>=1.163.0",
+    "google-genai>=2",
     "google-auth>=2.52.0",
-    "google-adk[a2a,agent-identity,eval,mcp]>=2.2.0",
+    "google-adk[a2a,agent-identity,eval,mcp]==2.6.3",
     "anthropic[vertex]>=0.49.0",
     "litellm>=1.83.14",
     "python-dotenv>=1.0.0",
     "pydantic>=2.12.5",
-    "httpx>=0.28.0",
+    # httpx is deliberately not pinned here. google-adk and anthropic both
+    # depend on it, and pinning a third bound on top of theirs is how the GEAP
+    # image build ends up unresolvable. Let their constraints decide.
+    "opentelemetry-instrumentation-google-genai",
+    "opentelemetry-instrumentation-grpc",
+    "opentelemetry-instrumentation-httpx",
 ]
 
 # Standard ADK class_methods for Agent Engine — copied from
@@ -273,7 +279,17 @@ async def _startup_checks():
     if mcp_ok == 0 and mcp_fail > 0:
         _log.error("[GEAP startup] FATAL: no MCP tools connected — agent cannot use tools")
 
-    # 2. Model ping — send a trivial request to verify the model endpoint works
+    # 2. Model ping — send a trivial request to verify the model endpoint works.
+    #
+    # Gemini only. The genai client resolves a bare model id under
+    # publishers/google/, so pinging a Claude id here asks for
+    # publishers/google/models/claude-sonnet-4-6 and always 404s -- a false
+    # alarm that says nothing about the agent, which reaches Claude through
+    # resolve_model()'s publishers/anthropic/ path. Skip rather than lie.
+    if not MODEL.startswith("gemini"):
+        _log.info("[GEAP startup] model ping skipped for non-Gemini model %s "
+                  "(resolved via %s)", MODEL, type(resolved).__name__)
+        return
     try:
         from google import genai
         client = genai.Client(vertexai=True,
@@ -285,13 +301,32 @@ async def _startup_checks():
                   response.text[:50] if response.text else "(empty)")
     except Exception as exc:
         _log.error("[GEAP startup] FATAL: model ping failed for %s: %s", MODEL, exc)
-        raise RuntimeError("Model %s is not reachable: %s" % (MODEL, exc)) from exc
 
-try:
-    asyncio.run(_startup_checks())
-except RuntimeError as exc:
-    if "cannot be called from a running event loop" not in str(exc):
-        raise
+# Run the checks on a dedicated thread with its own event loop.
+#
+# The previous form was a bare `asyncio.run(_startup_checks())` guarded by an
+# except that swallowed "cannot be called from a running event loop". Under
+# GEAP that guard always fired: the module is imported from inside a running
+# loop, asyncio.run() raised immediately, and the coroutine was never awaited
+# (visible only as a RuntimeWarning). So the checks NEVER ran, and an agent
+# that could not reach its MCP servers started up looking perfectly healthy.
+#
+# A daemon thread runs regardless of whether a loop is already active. Failures
+# are logged, never raised — a broken MCP server should be loud in the logs, not
+# a crash-loop on startup.
+def _run_startup_checks_in_background():
+    import threading
+
+    def _target():
+        try:
+            asyncio.run(_startup_checks())
+        except Exception as exc:
+            _log.error("[GEAP startup] startup checks failed: %s", exc, exc_info=True)
+
+    threading.Thread(target=_target, name="geap-startup-checks", daemon=True).start()
+
+
+_run_startup_checks_in_background()
 '''
 
 _REGISTRY_PY_TEMPLATE = '''\
@@ -451,9 +486,11 @@ def build_source_package(
     #    no-op there. It stays as a safety net for third-party agent configs,
     #    which we do not control and which crash the GEAP container on import
     #    if they subscript an env var the server does not set.
-    # 2. Patch resolve_model() so Claude models use full resource name with
-    #    locations/global — GEAP sets GOOGLE_CLOUD_LOCATION=us-central1
-    #    (restricted env var) but Claude requires global.
+    # 2. Legacy safety net for third-party configs whose resolve_model() still
+    #    passes Claude a bare model id. Ours no longer does — config.py pins
+    #    the location per model via model_location() — but GEAP treats
+    #    GOOGLE_CLOUD_LOCATION as a restricted env var and can serve it back as
+    #    us-central1, which a bare Claude id would then trust and fail on.
     config_copy = build_path / "config.py"
     if config_copy.exists():
         text = config_copy.read_text()
@@ -462,9 +499,8 @@ def build_source_package(
             r'= os.environ.get("\1", "")',
             text,
         )
-        # Patch resolve_model: Claude models need full resource name with
-        # locations/global. Gemini 3.x models use the GOOGLE_CLOUD_LOCATION
-        # env var set in app.py (no resource name rewrite needed).
+        # No-op against this repo's config.py (the pattern is gone); retained
+        # for agent configs we do not control.
         text = text.replace(
             "return Claude(model=model_str)",
             '_proj = os.environ.get("GCP_PROJECT_ID", os.environ.get("GOOGLE_CLOUD_PROJECT", ""))\n'
@@ -499,6 +535,26 @@ def build_source_package(
     return str(build_path)
 
 
+_MCP_ENV_PREFIXES = ("SEARCH_MCP", "BOOKING_MCP", "EXPENSE_MCP")
+
+
+def mcp_env_from_environ() -> dict[str, str]:
+    """Collect the MCP server/URL env vars the deployed agent needs.
+
+    The generated ``registry.py`` in the build package reads ``*_MCP_SERVER``
+    and ``*_MCP_URL`` from the *GEAP server's* environment, so they must travel
+    in the deployment config's ``env_vars``. They cannot arrive any other way:
+    the ``.env`` copied into the build package is at
+    ``/code/_geap_build_pkg/.env``, while ``config.py``'s ``load_dotenv()``
+    searches from the process CWD (``/code``) and never finds it.
+
+    An agent deployed without these does not fail loudly — it comes up with an
+    empty toolset and *role-plays* tool use, emitting literal ``<tool_call>``
+    text in its response. See docs/notes/repo-traps.md.
+    """
+    return {k: v for k, v in os.environ.items() if k.startswith(_MCP_ENV_PREFIXES) and v}
+
+
 def _build_source_config(
     build_dir: str,
     display_name: str,
@@ -531,6 +587,9 @@ def _build_source_config(
             "GOOGLE_CLOUD_AGENT_ENGINE_ENABLE_TELEMETRY": "true",
             "OTEL_SEMCONV_STABILITY_OPT_IN": "gen_ai_latest_experimental",
             "OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT": "EVENT_ONLY",
+            # MCP vars are a *default* layer: an explicit env_vars from the
+            # caller (the pipeline passes its localhost overrides here) wins.
+            **mcp_env_from_environ(),
             **(env_vars or {}),
         },
     }
