@@ -2,7 +2,7 @@
 
 **Verified on:** 2026-08-20, during the Task 3.4 smoke test.
 
-Four defects found in one sitting. None of them raised. Every one reported success while
+Five defects found in one sitting. None of them raised. Every one reported success while
 producing worthless output — which is why they had survived so long. Grouped here because
 the *shape* is the transferable part, not the individual bugs (those are fixed).
 
@@ -97,3 +97,32 @@ Two hours went to hunting a trajectory-capture bug that did not exist. **The les
 score that is plausible-but-low reads as an agent problem. Before optimizing against a
 metric, verify it can return 1.0 for known-good input — a metric with a ceiling below 1.0
 is a broken instrument, and GEPA will happily spend a whole budget chasing it.
+
+## 5. GEAP answers 200 with an empty event stream from a booting worker
+
+**Symptom:** `stream_query` / `async_stream_query` against a healthy engine returns HTTP
+200, zero events, no error — intermittently, roughly half the time under light load.
+
+**Cause:** GEAP routes a request to a worker that has not finished starting up. The
+ReasoningEngine logs show it plainly: worker `1237` logged `Application startup complete`
+and served `POST /api/stream_reasoning_engine 200 OK` **in the same second**, while warm
+worker `1169` handling the neighbouring request logged a real `rawPredict` to the model.
+Startup is ~8s here — three MCP handshakes. The request is consumed during boot and never
+reaches the agent.
+
+**It is not a cold-start-from-idle problem.** New workers appeared mid-run under steady
+back-to-back load (PIDs 956, 997, 1023, 1169, 1237 across two minutes), so
+`GEAP_MIN_INSTANCES` narrows the window but cannot close it. **Callers must treat an empty
+stream as retryable.** `wrangler/tools/traffic.py` retries twice with a fresh session;
+that took one engine from 0/3 to 5/6 queries producing traces.
+
+**A dead end worth not repeating:** this first looked like "sync `stream_query` is broken,
+`async_stream_query` works" — an early async call succeeded where three sync calls had
+failed. Alternating the two methods against one engine showed them identical
+(2,2 / 0,0 / 2,2 / 0,0). **The lesson:** before concluding that A works and B does not,
+check that the thing varying is A-vs-B and not time. An intermittent fault will happily
+frame whichever variable you happened to change, and a small consecutive sample is exactly
+how it does that.
+
+**Blast radius:** batch eval goes through server-side `client.evals.run_inference`, which
+is unaffected. This hits anything driving a deployed engine from the client side.
