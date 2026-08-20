@@ -140,4 +140,7 @@ unused-ignore-comment = "warn"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "--cov=wrangler --cov-report=term-missing"
+# The floor is a ratchet: raise it when coverage rises, never lower it to make a
+# red build pass. Measured baseline was 49.84%; the floor sits just under it rather
+# than at the nearest round number, so a real regression cannot hide in the slack.
+addopts = "--cov=wrangler --cov-report=term-missing --cov-fail-under=49"
