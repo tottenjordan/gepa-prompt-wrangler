@@ -13,7 +13,10 @@ from dotenv import load_dotenv
 
 load_dotenv(override=True)
 
-from ..core.config import disable_pyopenssl
+# E402 below is deliberate: load_dotenv() must run before importing modules
+# that read GCP config at import time.
+
+from ..core.config import disable_pyopenssl  # noqa: E402
 
 disable_pyopenssl()
 

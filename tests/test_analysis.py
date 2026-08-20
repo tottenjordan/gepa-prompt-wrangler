@@ -1,9 +1,15 @@
 """Tests for wrangler.analysis — report generation and analysis functions."""
 
 from pathlib import Path
+from unittest.mock import MagicMock, patch
 
 from wrangler.reporting.analysis import (
     compute_tier_scores,
+    generate_category_heatmap,
+    generate_radar_chart,
+    generate_tier_breakdown_chart,
+    generate_tier_improvement_heatmap,
+    normalize_agent_keys,
 )
 from wrangler.reporting.report_sections import (
     _cost_benefit_section,
@@ -306,16 +312,6 @@ class TestGenerateComparisonReport:
 
 
 # ── Chart function tests ──────────────────────────────────────────
-
-from unittest.mock import MagicMock, patch
-
-from wrangler.reporting.analysis import (
-    generate_category_heatmap,
-    generate_radar_chart,
-    generate_tier_breakdown_chart,
-    generate_tier_improvement_heatmap,
-    normalize_agent_keys,
-)
 
 
 class TestNormalizeAgentKeys:

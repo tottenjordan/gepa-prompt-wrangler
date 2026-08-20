@@ -33,12 +33,14 @@ EVAL_DATA_DIR = EXAMPLE_ROOT / "eval_data"
 YAML_PATH = EVAL_DATA_DIR / "eval_cases.yaml"
 
 sys.path.insert(0, str(EXAMPLE_ROOT))
-from mcp_servers.booking import server as booking_server
-from mcp_servers.booking.mock_db import bookings as BOOKINGS
-from mcp_servers.expense import server as expense_server
-from mcp_servers.expense.mock_db import POLICY_LIMITS
-from mcp_servers.search import server as search_server
-from mcp_servers.search.mock_db import FLIGHTS, HOTELS
+# E402 below is deliberate: the example package is only importable after
+# the sys.path insert above.
+from mcp_servers.booking import server as booking_server  # noqa: E402
+from mcp_servers.booking.mock_db import bookings as BOOKINGS  # noqa: E402
+from mcp_servers.expense import server as expense_server  # noqa: E402
+from mcp_servers.expense.mock_db import POLICY_LIMITS  # noqa: E402
+from mcp_servers.search import server as search_server  # noqa: E402
+from mcp_servers.search.mock_db import FLIGHTS, HOTELS  # noqa: E402
 
 # Sentinel for arg values only knowable at execution time (e.g. the flight_id of
 # "the cheapest flight just searched"). Task 3 references this constant.
@@ -100,7 +102,7 @@ BOOKING_IDS = set(BOOKINGS.keys())
 EXPENSE_CATEGORIES = set(POLICY_LIMITS.keys())
 # User IDs: union of booking owners and (would-be) expense owners. The booking
 # mock_db alone covers EMP001-EMP004; union with expense_db owners for safety.
-from mcp_servers.expense.mock_db import expenses as _EXPENSES
+from mcp_servers.expense.mock_db import expenses as _EXPENSES  # noqa: E402
 
 USER_IDS = {b["user_id"] for b in BOOKINGS.values()} | {e["user_id"] for e in _EXPENSES.values()}
 

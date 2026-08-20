@@ -14,7 +14,9 @@ EVAL_DATA_DIR = EXAMPLE_ROOT / "eval_data"
 AGENTS_DIR = EXAMPLE_ROOT / "agents"
 
 sys.path.insert(0, str(EXAMPLE_ROOT))
-from mcp_servers.search.mock_db import FLIGHTS, HOTELS
+# E402 below is deliberate: the example package is only importable after
+# the sys.path insert above.
+from mcp_servers.search.mock_db import FLIGHTS, HOTELS  # noqa: E402
 
 YAML_PATH = EVAL_DATA_DIR / "eval_cases.yaml"
 MODELS = ["lite", "flash", "pro", "sonnet", "opus"]
@@ -41,13 +43,13 @@ def _load_yaml_cases():
 from scripts.generate_evalsets import (  # noqa: E402
     EVALSET_TARGETS as GEN_EVALSET_TARGETS,
 )
-from scripts.generate_evalsets import (
+from scripts.generate_evalsets import (  # noqa: E402
     build_eval_case as _gen_build_eval_case,
 )
-from scripts.generate_evalsets import (
+from scripts.generate_evalsets import (  # noqa: E402
     load_yaml_cases as _gen_load_yaml_cases,
 )
-from scripts.generate_evalsets import (
+from scripts.generate_evalsets import (  # noqa: E402
     select_cases as _gen_select_cases,
 )
 

@@ -7,7 +7,9 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 EXAMPLE_ROOT = REPO_ROOT / "examples" / "multi_model_agents"
 
 sys.path.insert(0, str(EXAMPLE_ROOT))
-from mcp_servers.expense import mock_db as expense_db
+# E402 below is deliberate: the example package is only importable after
+# the sys.path insert above.
+from mcp_servers.expense import mock_db as expense_db  # noqa: E402
 
 
 # ---------------------------------------------------------------------------

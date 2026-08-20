@@ -6,9 +6,9 @@ import difflib
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from ..core.config import blended_cost
-from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from ..orchestration.experiment import Experiment

@@ -6,17 +6,17 @@ import importlib.util
 import time
 from datetime import datetime
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from ..core import deploy as deployer
 from ..core.converter import load_eval_file
 from ..eval.evaluator import run_batch_eval_averaged
 from ..optimize.optimizer import optimize
 from ..reporting.reporter import generate_report as _generate_report
-from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from .experiment import Experiment
     from ..core.factory import AgentPromptPair, Manifest
+    from .experiment import Experiment
 
 
 def _fmt_duration(seconds: float) -> str:

@@ -14,12 +14,15 @@ os.environ.setdefault("ADK_SUPPRESS_GEMINI_LITELLM_WARNINGS", "true")
 warnings.filterwarnings("ignore", message=".*EXPERIMENTAL.*")
 warnings.filterwarnings("ignore", message=".*GEMINI_VIA_LITELLM.*")
 
-from ..core import deploy as deployer
-from ..core.converter import load_eval_file
-from ..core.factory import AgentPromptPair, PairFactory
-from ..eval.evaluator import EvalResult, run_batch_eval_averaged
-from ..optimize.optimizer import optimize
-from ..reporting.reporter import generate_report
+# E402 below is deliberate: the filterwarnings() calls above must execute
+# before the ADK/Vertex imports, or their import-time warnings escape.
+
+from ..core import deploy as deployer  # noqa: E402
+from ..core.converter import load_eval_file  # noqa: E402
+from ..core.factory import AgentPromptPair, PairFactory  # noqa: E402
+from ..eval.evaluator import EvalResult, run_batch_eval_averaged  # noqa: E402
+from ..optimize.optimizer import optimize  # noqa: E402
+from ..reporting.reporter import generate_report  # noqa: E402
 
 
 def _fmt_duration(seconds: float) -> str:

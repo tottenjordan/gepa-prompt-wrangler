@@ -11,12 +11,20 @@ warnings.filterwarnings("ignore", category=DeprecationWarning, module="vertexai"
 warnings.filterwarnings("ignore", message=".*ExperimentalWarning.*")
 warnings.filterwarnings("ignore", message=".*experimental.*")
 
-import pandas as pd
-import vertexai
-from vertexai import Client, types
-from vertexai._genai import _evals_common
+# E402 below is deliberate: the filterwarnings() calls above must execute
+# before vertexai is imported, or its import-time warnings escape.
 
-from ..core.config import GCP_PROJECT_ID, GCP_REGION, GCP_STAGING_BUCKET, get_batch_config
+import pandas as pd  # noqa: E402
+import vertexai  # noqa: E402
+from vertexai import Client, types  # noqa: E402
+from vertexai._genai import _evals_common  # noqa: E402
+
+from ..core.config import (  # noqa: E402
+    GCP_PROJECT_ID,
+    GCP_REGION,
+    GCP_STAGING_BUCKET,
+    get_batch_config,
+)
 
 GCS_EVAL_DEST = f"gs://{GCP_STAGING_BUCKET}/eval-results"
 MAX_POLL_SECONDS = 2400
