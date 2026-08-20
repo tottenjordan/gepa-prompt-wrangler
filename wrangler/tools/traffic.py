@@ -212,7 +212,11 @@ if __name__ == "__main__":
     from dotenv import load_dotenv
 
     load_dotenv()
-    example_env = Path(__file__).parent.parent / "examples" / "multi_model_agents" / ".env"
+    # parents[2] is the repo root: this file is wrangler/tools/traffic.py, so
+    # parent.parent stopped inside `wrangler/` and pointed at a path that has
+    # never existed — the example .env was silently never loaded.
+    repo_root = Path(__file__).resolve().parents[2]
+    example_env = repo_root / "examples" / "multi_model_agents" / ".env"
     if example_env.exists():
         load_dotenv(str(example_env), override=True)
 
