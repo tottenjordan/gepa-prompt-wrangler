@@ -60,7 +60,11 @@ All non-2.x models use `GOOGLE_CLOUD_LOCATION=global`.
 
 ### ADK Patches
 
-`optimize/optimizer.py:_patch_adk()` applies 5 monkey-patches to ADK internals required for GEPA to work. These compensate for ADK bugs (tracked in github.com/google/adk-python issues #5906, #6071, #6072). Do NOT remove patches without testing each one individually — ADK 2.2.0 still requires all of them.
+`optimize/optimizer.py:_patch_adk()` applies 4 monkey-patches to ADK internals required for GEPA to work. Patches 1–3 compensate for ADK bugs (github.com/google/adk-python issues #5906, #6071); patch 4 is local instrumentation. All three bug workarounds are still required at ADK 2.7.1 even though their issues are closed — the fixes are not in the release.
+
+**Patch 5 was removed on 2026-08-20.** It overrode `rubric_based_evaluator._normalize_text` and `convert_auto_rater_response_to_score`. ADK 2.7.1 fixed issue #6072 and went further, adding `rubric_id`-based verdict matching and an empty-response guard; the override, written against ADK 2.2, did text-only matching and silently discarded both, corrupting the rubric scores GEPA optimizes against. A redundant patch is not harmless.
+
+Do NOT remove or add patches without re-running the per-patch probe in [docs/notes/adk-patch-status.md](docs/notes/adk-patch-status.md) against the installed ADK.
 
 ### Pipeline Architecture
 

@@ -3,8 +3,9 @@
 **Verified on:** 2026-08-20 against `google-adk==2.7.1` (the latest release on PyPI at
 that date).
 
-`wrangler/optimize/optimizer.py:_patch_adk()` applies five patches to ADK internals.
-CLAUDE.md says all five were required at ADK 2.2.0. That is no longer true at 2.7.1.
+`wrangler/optimize/optimizer.py:_patch_adk()` applies four patches to ADK internals.
+CLAUDE.md said all five were required at ADK 2.2.0. That stopped being true at 2.7.1,
+and **Patch 5 was deleted on 2026-08-20** (Phase 1 Task 1.1) — see below.
 
 **Re-run the probe below on every ADK bump.** A redundant patch is not harmless — it can
 overwrite newer upstream behavior, which is exactly what happened to Patch 5.
@@ -22,7 +23,7 @@ Related: [toolchain-baseline.md](toolchain-baseline.md),
 | 2 | `model_rebuild(force=True)` after patch 1 | — (companion to #5906) | — | **Yes** (pairs with 1) |
 | 3 | `LocalEvalService._evaluate_single_inference_result` null guard | [#6071](https://github.com/google/adk-python/issues/6071) | **Closed** 2026-08-06 | **Yes** |
 | 4 | `LocalEvalSampler._extract_eval_data` — score-None coercion + logging | — (local instrumentation) | — | Yes, but it is diagnostics, not a bug workaround |
-| 5 | `rubric_based_evaluator._normalize_text` + `convert_auto_rater_response_to_score` | [#6072](https://github.com/google/adk-python/issues/6072) | **Closed** 2026-07-31 | **No — actively harmful** |
+| 5 | `rubric_based_evaluator._normalize_text` + `convert_auto_rater_response_to_score` | [#6072](https://github.com/google/adk-python/issues/6072) | **Closed** 2026-07-31 | **No — was actively harmful; DELETED 2026-08-20** |
 
 ### Patch 1 / 2 — still required despite the issue being closed
 
@@ -39,7 +40,7 @@ installed `_evaluate_single_inference_result` source contains no `inferences is 
 check and never emits `NOT_EVALUATED`. The fix is presumably on `main` awaiting a
 release. Re-check at ADK 2.8.x — this patch should become removable.
 
-### Patch 5 — remove it, upstream absorbed it and went further
+### Patch 5 — REMOVED 2026-08-20; upstream absorbed it and went further
 
 Upstream 2.7.1 `_normalize_text` now does exactly what the local `_fuzzy_normalize`
 does: NFKC normalization, a `_SMART_CHARS` translation table, whitespace collapsing,
@@ -56,9 +57,19 @@ does not have:
    with an empty verdict list. The local override passes a possibly-empty string
    straight into `self._auto_rater_response_parser.parse(...)`.
 
-The local override does add a **substring fallback** (unique-candidate containment
-match) that upstream lacks. If that fallback has earned its keep, re-derive it *on top
-of* the current upstream implementation rather than replacing the method wholesale.
+The local override did add a **substring fallback** (unique-candidate containment
+match) that upstream lacks, and that fallback went away with the deletion. If
+`Rubric ... not found in the rubrics provided to the metric` warnings reappear in GEPA
+logs, re-derive *only* that fallback on top of the current upstream implementation —
+do not restore the whole method.
+
+`tests/test_optimizer.py::TestFuzzyNormalize` now exercises upstream `_normalize_text`
+directly with the nine garbled-text cases that motivated the override (markdown
+bullets, smart quotes, em/en dashes, doubled whitespace). All nine pass at 2.7.1, which
+is the evidence that deleting the normalizer override lost nothing. If an ADK bump
+breaks those tests, upstream has regressed and the override becomes necessary again.
+`test_patch_adk_preserves_upstream_rubric_id_matching` guards the other direction: it
+fails if anyone reinstates a `convert_auto_rater_response_to_score` override.
 
 ---
 

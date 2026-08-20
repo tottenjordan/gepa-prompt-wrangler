@@ -1,38 +1,36 @@
 """Tests for wrangler.optimizer — wrapper module creation, patch helpers, and config handling."""
 
 import asyncio
-import re
-import unicodedata
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from google.adk.evaluation.rubric_based_evaluator import _normalize_text
 
 from wrangler.optimize.optimizer import _create_wrapper_module, _prewarm_mcp_toolsets
 
-# --- Reproduce _fuzzy_normalize for direct unit testing ---
-# Mirrors the implementation inside _patch_adk() in optimizer.py.
 
-_SMART_CHARS = {
-    0x2018: "'",
-    0x2019: "'",
-    0x201C: '"',
-    0x201D: '"',
-    0x2013: "-",
-    0x2014: "-",
-    0x2026: "...",
-}
+def test_patch_adk_preserves_upstream_rubric_id_matching():
+    """Patch 5 must not clobber upstream's rubric_id-based matching.
 
+    ADK 2.7.1 (issue #6072, fixed 2026-07-31) matches rubric verdicts by
+    rubric_id first, falling back to normalized text. An override derived
+    from ADK 2.2 does text-only matching and silently discards the more
+    reliable path, corrupting the scores GEPA optimizes against.
+    """
+    import inspect
 
-def _fuzzy_normalize(text):
-    if not isinstance(text, str):
-        return ""
-    text = unicodedata.normalize("NFKC", text)
-    text = text.translate(_SMART_CHARS)
-    text = re.sub(r'^[\s*•\-"\']+', "", text)
-    text = re.sub(r'[\s*•\-"\']+$', "", text)
-    text = re.sub(r"\s+", " ", text)
-    return text.lower().strip()
+    from google.adk.evaluation import rubric_based_evaluator as rbe
+
+    from wrangler.optimize.optimizer import _patch_adk
+
+    _patch_adk()
+
+    src = inspect.getsource(rbe.RubricBasedEvaluator.convert_auto_rater_response_to_score)
+    assert "rubric_by_id" in src, (
+        "convert_auto_rater_response_to_score was replaced by an override that "
+        "lacks rubric_id matching"
+    )
 
 
 class TestCreateWrapperModule:
@@ -161,7 +159,12 @@ class TestThresholdInjection:
 
 
 class TestFuzzyNormalize:
-    """Validate NFKC + smart-char normalization for rubric matching (issue #6072)."""
+    """Guard upstream ADK's rubric-text normalization (issue #6072).
+
+    These cases are why wrangler once shipped its own ``_fuzzy_normalize``
+    override. ADK 2.7.1 handles all of them, so the override was deleted --
+    these tests are the canary that a future ADK bump has not regressed it.
+    """
 
     RUBRIC = "the response correctly uses tools"
 
@@ -180,60 +183,23 @@ class TestFuzzyNormalize:
         ],
     )
     def test_garbled_text_matches_rubric(self, label, input_text):
-        assert _fuzzy_normalize(input_text) == self.RUBRIC
+        assert _normalize_text(input_text) == self.RUBRIC
 
     def test_smart_single_quotes_stripped_at_boundaries(self):
-        assert _fuzzy_normalize("‘hello’") == "hello"
+        assert _normalize_text("‘hello’") == "hello"
 
     def test_smart_single_quotes_normalized_mid_word(self):
-        assert _fuzzy_normalize("the response’s tools") == "the response's tools"
+        assert _normalize_text("the response’s tools") == "the response's tools"
 
     def test_ellipsis_normalized(self):
-        assert _fuzzy_normalize("The response… uses tools") == "the response... uses tools"
+        assert _normalize_text("The response… uses tools") == "the response... uses tools"
 
     def test_non_string_returns_empty(self):
-        assert _fuzzy_normalize(None) == ""
-        assert _fuzzy_normalize(42) == ""
+        assert _normalize_text(None) == ""
+        assert _normalize_text(42) == ""
 
     def test_empty_string(self):
-        assert _fuzzy_normalize("") == ""
+        assert _normalize_text("") == ""
 
     def test_accented_chars_preserved(self):
-        assert _fuzzy_normalize("réponse") == "réponse"
-
-
-class TestSubstringUniquenessGuard:
-    """Verify substring fallback only matches when exactly one rubric candidate exists."""
-
-    def test_unique_substring_match_accepted(self):
-        normalized_map = {
-            _fuzzy_normalize("uses tools correctly"): "rubric_1",
-        }
-        judge_text = _fuzzy_normalize("the agent uses tools correctly and efficiently")
-        result = normalized_map.get(judge_text)
-
-        if not result:
-            candidates = [
-                r for ct, r in normalized_map.items() if ct in judge_text or judge_text in ct
-            ]
-            if len(candidates) == 1:
-                result = candidates[0]
-
-        assert result == "rubric_1"
-
-    def test_ambiguous_substring_match_rejected(self):
-        normalized_map = {
-            _fuzzy_normalize("uses tools correctly"): "rubric_1",
-            _fuzzy_normalize("uses tools efficiently"): "rubric_2",
-        }
-        judge_text = _fuzzy_normalize("uses tools")
-        result = normalized_map.get(judge_text)
-
-        if not result:
-            candidates = [
-                r for ct, r in normalized_map.items() if ct in judge_text or judge_text in ct
-            ]
-            if len(candidates) == 1:
-                result = candidates[0]
-
-        assert result is None
+        assert _normalize_text("réponse") == "réponse"

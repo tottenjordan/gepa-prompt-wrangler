@@ -22,7 +22,23 @@ def _fmt_elapsed(t0: float) -> str:
 
 
 def _patch_adk():
-    """Apply ADK patches for GEPA compatibility."""
+    """Apply ADK patches for GEPA compatibility.
+
+    Verified against google-adk 2.7.1 on 2026-08-20.
+
+    Patch 1/2 — eval_case/eval_set extra="forbid" (issue #5906). Issue is
+        CLOSED but extra="forbid" is still present on 8 classes at 2.7.1.
+        Still required.
+    Patch 3 — LocalEvalService null guard (issue #6071). Issue CLOSED
+        2026-08-06 but the fix is NOT in the 2.7.1 release. Still required;
+        re-check at 2.8.x.
+    Patch 4 — LocalEvalSampler score coercion + logging. Local
+        instrumentation, not an upstream workaround.
+    Patch 5 — REMOVED. Upstream fixed #6072 in 2.7.1 and went further
+        (rubric_id matching). Keeping it was a regression.
+
+    Re-run the probe in docs/notes/adk-patch-status.md on every ADK bump.
+    """
     from google.adk.evaluation import eval_case as _ec
     from google.adk.evaluation import eval_set as _es
 
@@ -105,93 +121,7 @@ def _patch_adk():
 
     sampler_mod.LocalEvalSampler._extract_eval_data = _patched_extract
 
-    # Patch 5: Fuzzy rubric text matching — ADK's _normalize_text only does
-    # .lower().strip(), so judge-garbled text (markdown bullets, non-ASCII)
-    # causes exact match failures.  We also override
-    # convert_auto_rater_response_to_score with a substring fallback.
-    import re as _re
-    import unicodedata as _ud
-
-    from google.adk.evaluation import rubric_based_evaluator as _rbe
-
-    smart_chars = {
-        0x2018: "'",
-        0x2019: "'",
-        0x201C: '"',
-        0x201D: '"',
-        0x2013: "-",
-        0x2014: "-",
-        0x2026: "...",
-    }
-
-    def _fuzzy_normalize(text: str) -> str:
-        if not isinstance(text, str):
-            return ""
-        text = _ud.normalize("NFKC", text)
-        text = text.translate(smart_chars)
-        text = _re.sub(r'^[\s*•\-"\']+', "", text)
-        text = _re.sub(r'[\s*•\-"\']+$', "", text)
-        text = _re.sub(r"\s+", " ", text)
-        return text.lower().strip()
-
-    _rbe._normalize_text = _fuzzy_normalize  # ty: ignore[invalid-assignment]  (ADK patch)
-
-    _orig_convert = _rbe.RubricBasedEvaluator.convert_auto_rater_response_to_score
-
-    def _patched_convert(self, auto_rater_response):
-        from google.adk.evaluation.rubric_based_evaluator import (
-            AutoRaterScore,
-            RubricScore,
-            get_average_rubric_score,
-            get_text_from_content,
-        )
-
-        response_text = get_text_from_content(auto_rater_response.content)
-        rubric_responses = self._auto_rater_response_parser.parse(response_text)
-        rubric_scores = []
-
-        normalized_map = {}
-        for r in self.get_effective_rubrics_list():
-            normalized_map[_fuzzy_normalize(r.rubric_content.text_property)] = r
-
-        for rubric_response in rubric_responses:
-            norm_text = _fuzzy_normalize(rubric_response.property_text)
-            rubric = normalized_map.get(norm_text)
-
-            if not rubric and norm_text:
-                candidates = [
-                    r
-                    for ct, r in normalized_map.items()
-                    if ct and (ct in norm_text or norm_text in ct)
-                ]
-                if len(candidates) == 1:
-                    rubric = candidates[0]
-                    log.debug(
-                        "Rubric substring fallback: '%s' → '%s'",
-                        rubric_response.property_text[:60],
-                        rubric.rubric_id,
-                    )
-
-            if rubric:
-                rubric_scores.append(
-                    RubricScore(
-                        rubric_id=rubric.rubric_id,
-                        rationale=rubric_response.rationale,
-                        score=rubric_response.score,
-                    )
-                )
-            else:
-                log.warning(
-                    "Rubric not matched (even with fuzzy): '%s'",
-                    rubric_response.property_text[:80],
-                )
-
-        aggregated_score = get_average_rubric_score(rubric_scores)
-        return AutoRaterScore(score=aggregated_score, rubric_scores=rubric_scores)
-
-    _rbe.RubricBasedEvaluator.convert_auto_rater_response_to_score = _patched_convert
-
-    log.info("ADK patches applied (including fuzzy rubric matching)")
+    log.info("ADK patches applied (1-4; patch 5 removed — upstream #6072 fixed in ADK 2.7.1)")
 
 
 def _create_wrapper_module(agent_module_path: str, temp_dir: str) -> str:
