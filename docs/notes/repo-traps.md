@@ -50,19 +50,28 @@ CLAUDE.md flags that `wrangler/core/config.py` and `examples/multi_model_agents/
 both define `resolve_model()` and must be kept in sync. What it does not say is **how far
 apart they already are** — they diverge from line 1. The examples copy additionally:
 
-- hardcodes `GCP_PROJECT_ID` default to `"hybrid-vertex"` (a real project name, committed)
-- defaults the staging bucket to `-geap-staging`, not `-wrangler-staging`
-- reads `os.environ["SEARCH_MCP_SERVER"]` / `BOOKING_` / `EXPENSE_` with **bare
-  subscript access**, so simply *importing the module* raises `KeyError` when those are
-  unset. `build_source_package()` rewrites these to `.get(..., "")` for deployment, but
-  local imports and tests get no such protection.
+- defaults the staging bucket to `-geap-staging`, not `-wrangler-staging` — **still
+  true**, and the reason a run can write artifacts to a bucket you did not expect
+- ~~hardcodes `GCP_PROJECT_ID` default to `"hybrid-vertex"`~~ — **fixed 2026-08-20.**
+  The default is now `""`, and `tests/test_config.py::test_no_hardcoded_project_identifiers`
+  fails the build if a real project id or number reappears in any tracked `.py`, `.sh`,
+  `.yaml` or `.yml`. Markdown is deliberately exempt, so prose can still name a project
+  when describing a real run.
+- ~~reads `os.environ["SEARCH_MCP_SERVER"]` with bare subscript access~~ — **fixed
+  2026-08-20.** These are `.get(..., "")` at the source now. The `build_source_package()`
+  rewrite stays as a safety net for third-party agent configs.
 
-`hybrid-vertex` and the project number `934903580331` appear in 8 committed files
-including CLAUDE.md and several `examples/multi_model_agents/scripts/*.sh`.
+The trap that generalizes: the deploy-time rewrite in `build_source_package()` made the
+subscript bug invisible, because the only path anyone exercised was deployment. A bug
+that a build step silently papers over is one nobody reports.
 
-## `.env.example` contradicts CLAUDE.md on `GOOGLE_CLOUD_LOCATION`
+## `.env.example` contradicted CLAUDE.md on `GOOGLE_CLOUD_LOCATION` (fixed 2026-08-20)
 
-`.env.example:10` sets `GOOGLE_CLOUD_LOCATION=${GCP_REGION}` → `us-central1`.
+**Fixed** — `.env.example` now sets `global` and carries the six MCP variables. Kept
+here because the failure mode is worth recognizing: it is silent at import and only
+surfaces as a model-not-found at the first inference call.
+
+`.env.example:10` used to set `GOOGLE_CLOUD_LOCATION=${GCP_REGION}` → `us-central1`.
 
 CLAUDE.md:49 and :86, README.md:613, `wrangler/core/config.py:86`, and
 `wrangler/core/deploy.py:420` all say it must be **`global`** for Gemini 3.x and Claude.
@@ -70,15 +79,16 @@ CLAUDE.md:49 and :86, README.md:613, `wrangler/core/config.py:86`, and
 Following `.env.example` verbatim gives a broken setup for every non-Gemini-2.x model —
 which is most of them, and all of them after 2026-10-16.
 
-`.env.example` is also missing `SEARCH_MCP_SERVER`, `BOOKING_MCP_SERVER`,
-`EXPENSE_MCP_SERVER` and their `_URL` variants, which CLAUDE.md lists as required for
-the multi-model agents — the same vars whose absence makes
+It was also missing `SEARCH_MCP_SERVER`, `BOOKING_MCP_SERVER`, `EXPENSE_MCP_SERVER`
+and their `_URL` variants, which CLAUDE.md lists as required for the multi-model
+agents — the same vars whose absence used to make
 `examples/multi_model_agents/config.py` raise on import.
 
 ## Test count in CLAUDE.md was stale
 
-CLAUDE.md said 316; the suite is 356. Corrected 2026-08-20. Worth re-checking whenever
-CLAUDE.md quotes a number.
+CLAUDE.md said 316; the suite was 356 at the time. Corrected 2026-08-20, and it has
+moved again since (369 as of the Phase 1 work). Worth re-checking whenever CLAUDE.md
+quotes a number — nothing enforces it.
 
 ## `wrangler inspect` emits literal `TODO` strings
 

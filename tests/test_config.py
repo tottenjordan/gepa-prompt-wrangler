@@ -1,5 +1,6 @@
 """Tests for wrangler.config — model resolution, constants, and utilities."""
 
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 from wrangler.core.config import MODEL_COSTS, resolve_model
@@ -95,3 +96,33 @@ def test_examples_config_imports_without_mcp_env(monkeypatch):
     finally:
         sys.path.pop(0)
         sys.modules.pop("config", None)
+
+
+def test_no_hardcoded_project_identifiers():
+    """Committed code must not contain a real GCP project id or number.
+
+    This repo is meant to be reusable; a hardcoded project silently points
+    a new user's runs at someone else's infrastructure. Prose docs are
+    exempt -- markdown may name a project when describing a real run.
+    """
+    import subprocess
+
+    banned = ("hybrid-vertex", "934903580331")
+    tracked = subprocess.run(
+        ["git", "ls-files", "*.py", "*.sh", "*.yaml", "*.yml"],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.split()
+
+    # This file has to name the banned strings in order to search for them.
+    self_path = Path(__file__).resolve()
+
+    offenders = [
+        f
+        for f in tracked
+        if Path(f).is_file()
+        and Path(f).resolve() != self_path
+        and any(b in Path(f).read_text(errors="ignore") for b in banned)
+    ]
+    assert not offenders, f"hardcoded project identifiers in: {offenders}"

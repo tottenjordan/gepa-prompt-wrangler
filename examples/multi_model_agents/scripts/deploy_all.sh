@@ -25,7 +25,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 EXAMPLE_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 REPO_ROOT="$(cd "$EXAMPLE_DIR/../.." && pwd)"
 
-PROJECT_ID="${GCP_PROJECT_ID:-hybrid-vertex}"
+PROJECT_ID="${GCP_PROJECT_ID:?GCP_PROJECT_ID must be set — see .env.example}"
 REGION="${GCP_REGION:-us-central1}"
 PROJECT_NUM=$(gcloud projects describe "$PROJECT_ID" --format="value(projectNumber)" 2>/dev/null || echo "unknown")
 STAGING_BUCKET="${GCP_STAGING_BUCKET:-${PROJECT_ID}-geap-staging}"

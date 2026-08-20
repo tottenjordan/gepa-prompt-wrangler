@@ -16,7 +16,7 @@ Session notes and known traps live in [docs/notes/README.md](docs/notes/README.m
 
 ```bash
 uv sync                          # Install dependencies
-uv run pytest tests/ -v           # Run all 356 tests
+uv run pytest tests/ -v           # Run the full suite (369 tests as of 2026-08-20)
 uv run pytest tests/test_config.py -v  # Run single test file
 uv run pytest tests/test_config.py::TestResolveModel -v  # Run single test class
 uv run wrangler --help            # CLI entry point
@@ -147,13 +147,13 @@ For redeploy: `update_agent_from_source()` rebuilds the package with the new ins
 
 7. **Cloud Run MCP services need IAM invoker + session affinity** — the GEAP service account (`service-{PROJECT_NUMBER}@gcp-sa-aiplatform-re.iam.gserviceaccount.com`) must have `roles/run.invoker` on each Cloud Run MCP service. Session affinity must be enabled so MCP sessions stick to the same instance (without it, follow-up tool calls get 404). Grant and configure with:
    ```bash
-   SA="service-934903580331@gcp-sa-aiplatform-re.iam.gserviceaccount.com"
+   SA="service-${PROJECT_NUMBER}@gcp-sa-aiplatform-re.iam.gserviceaccount.com"
    for SVC in wrangler-search-mcp wrangler-booking-mcp wrangler-expense-mcp; do
-     gcloud run services add-iam-policy-binding $SVC \
-       --region=us-central1 --project=hybrid-vertex \
+     gcloud run services add-iam-policy-binding "$SVC" \
+       --region="$GCP_REGION" --project="$GCP_PROJECT_ID" \
        --member="serviceAccount:$SA" --role="roles/run.invoker" --quiet
-     gcloud run services update $SVC \
-       --region=us-central1 --project=hybrid-vertex \
+     gcloud run services update "$SVC" \
+       --region="$GCP_REGION" --project="$GCP_PROJECT_ID" \
        --session-affinity --quiet
    done
    ```
