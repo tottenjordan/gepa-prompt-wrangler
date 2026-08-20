@@ -1,0 +1,24 @@
+version: 2
+updates:
+  - package-ecosystem: "uv"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    groups:
+      # google-adk and google-cloud-aiplatform move together and share the
+      # ADK internals this repo monkey-patches, so they must be reviewed as
+      # one change rather than as separate PRs that each look harmless.
+      google-sdks:
+        patterns:
+          - "google-*"
+      dev-tools:
+        patterns:
+          - "ruff"
+          - "ty"
+          - "pytest*"
+    open-pull-requests-limit: 5
+
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "monthly"
