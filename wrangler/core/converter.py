@@ -78,7 +78,9 @@ def _load_simplified_yaml(path: Path) -> list[dict[str, Any]]:
     if isinstance(data, dict) and "eval_cases" in data:
         data = data["eval_cases"]
     if not isinstance(data, list):
-        raise ValueError(f"Expected a YAML list of eval cases, got {type(data).__name__}")
+        raise ValueError(  # noqa: TRY004  (file content, not a call argument)
+            f"Expected a YAML list of eval cases, got {type(data).__name__}"
+        )
 
     cases = []
     for item in data:

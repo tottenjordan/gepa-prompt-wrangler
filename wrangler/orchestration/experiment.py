@@ -136,18 +136,17 @@ class Experiment:
     @property
     def manifest(self) -> Manifest:
         cfg = self.config
-        pairs = []
-        for entry in cfg.get("pairs", []):
-            pairs.append(
-                AgentPromptPair(
-                    id=entry["id"],
-                    model=entry["model"],
-                    system_prompt=entry.get("system_prompt", ""),
-                    description=entry.get("description", ""),
-                    agent_module=entry.get("agent_module", ""),
-                    engine_id=entry.get("engine_id", ""),
-                )
+        pairs = [
+            AgentPromptPair(
+                id=entry["id"],
+                model=entry["model"],
+                system_prompt=entry.get("system_prompt", ""),
+                description=entry.get("description", ""),
+                agent_module=entry.get("agent_module", ""),
+                engine_id=entry.get("engine_id", ""),
             )
+            for entry in cfg.get("pairs", [])
+        ]
         return Manifest(
             name=cfg.get("experiment", {}).get("name", self.name),
             description=cfg.get("experiment", {}).get("description", ""),

@@ -36,7 +36,7 @@ sys.path.insert(0, str(EXAMPLE_ROOT))
 # E402 below is deliberate: the example package is only importable after
 # the sys.path insert above.
 from mcp_servers.booking import server as booking_server  # noqa: E402
-from mcp_servers.booking.mock_db import bookings as BOOKINGS  # noqa: E402
+from mcp_servers.booking.mock_db import bookings as BOOKINGS  # noqa: E402, N812
 from mcp_servers.expense import server as expense_server  # noqa: E402
 from mcp_servers.expense.mock_db import POLICY_LIMITS  # noqa: E402
 from mcp_servers.search import server as search_server  # noqa: E402
@@ -102,7 +102,7 @@ BOOKING_IDS = set(BOOKINGS.keys())
 EXPENSE_CATEGORIES = set(POLICY_LIMITS.keys())
 # User IDs: union of booking owners and (would-be) expense owners. The booking
 # mock_db alone covers EMP001-EMP004; union with expense_db owners for safety.
-from mcp_servers.expense.mock_db import expenses as _EXPENSES  # noqa: E402
+from mcp_servers.expense.mock_db import expenses as _EXPENSES  # noqa: E402, N812
 
 USER_IDS = {b["user_id"] for b in BOOKINGS.values()} | {e["user_id"] for e in _EXPENSES.values()}
 
@@ -124,7 +124,8 @@ def test_introspected_registry_covers_all_expected_tools():
     """Sanity-check the introspection path before relying on it."""
     missing = _EXPECTED_TOOL_NAMES - VALID_TOOL_NAMES
     extra = VALID_TOOL_NAMES - _EXPECTED_TOOL_NAMES
-    assert not missing and not extra, (
+    assert not missing, f"Introspected tool registry is missing: {sorted(missing)}"
+    assert not extra, (
         f"Introspected tool registry does not match expected set.\n"
         f"  missing: {sorted(missing)}\n"
         f"  unexpected: {sorted(extra)}"

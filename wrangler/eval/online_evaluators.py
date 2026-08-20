@@ -145,8 +145,7 @@ def _build_evaluator_config(label: str, engine_id: str, custom_metric_names: lis
     metric_sources = [
         {"metric": {"predefinedMetricSpec": {"metricSpecName": m}}} for m in PREDEFINED_METRICS
     ]
-    for name in custom_metric_names:
-        metric_sources.append({"metricResourceName": name})
+    metric_sources.extend({"metricResourceName": name} for name in custom_metric_names)
 
     return {
         "displayName": f"Wrangler {label.title()} Online Evaluator",

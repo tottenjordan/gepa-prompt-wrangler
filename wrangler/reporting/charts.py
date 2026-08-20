@@ -68,8 +68,11 @@ def _try_paperbanana(
                 check=False,
             )
 
+            # Both raises below deliberately funnel into this function's own
+            # `except` so the attempt loop can retry them uniformly.
             if result.returncode != 0:
-                raise RuntimeError(result.stderr[-300:] if result.stderr else "unknown error")
+                msg = result.stderr[-300:] if result.stderr else "unknown error"
+                raise RuntimeError(msg)  # noqa: TRY301
 
             run_dirs = sorted(glob.glob("outputs/run_*"), reverse=True)
             for run_dir in run_dirs:
@@ -80,7 +83,8 @@ def _try_paperbanana(
                     print(f"  Generated (PaperBanana): {output_path.name}")
                     return True
 
-            raise FileNotFoundError("PaperBanana output not found in run directories")
+            msg = "PaperBanana output not found in run directories"
+            raise FileNotFoundError(msg)  # noqa: TRY301
 
         except Exception as e:
             last_error = e

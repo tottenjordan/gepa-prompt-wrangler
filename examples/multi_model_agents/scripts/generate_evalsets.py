@@ -210,10 +210,10 @@ def main():
         all_ids = {c["eval_id"] for c in evalset["eval_cases"]}
         train_set = set(TRAIN_CASE_IDS)
         val_set = set(VAL_CASE_IDS)
-        assert train_set & val_set == set(), f"Train/val overlap: {train_set & val_set}"
-        assert train_set | val_set == all_ids, (
-            f"Split missing cases: {all_ids - (train_set | val_set)}"
-        )
+        if train_set & val_set:
+            raise ValueError(f"Train/val overlap: {train_set & val_set}")
+        if train_set | val_set != all_ids:
+            raise ValueError(f"Split missing cases: {all_ids - (train_set | val_set)}")
 
         # Sampler configs are the hand-tuned source of truth — never overwrite.
         # Only bootstrap one when absent.

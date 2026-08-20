@@ -111,5 +111,5 @@ class TestAgentInspectorInspect:
             AgentInspector.inspect(str(agent_dir))
 
     def test_inspect_nonexistent_path_raises(self):
-        with pytest.raises(Exception):
+        with pytest.raises(FileNotFoundError, match=r"__init__\.py"):
             AgentInspector.inspect("/nonexistent/path/agent")

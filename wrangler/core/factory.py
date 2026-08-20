@@ -66,7 +66,9 @@ class PairFactory:
             raw = yaml.safe_load(f)
 
         if not isinstance(raw, dict):
-            raise ValueError("Manifest must be a YAML mapping at the top level.")
+            raise ValueError(  # noqa: TRY004  (file content, not a call argument)
+                "Manifest must be a YAML mapping at the top level."
+            )
 
         # Required fields
         for key in ("name", "agent_module", "pairs"):

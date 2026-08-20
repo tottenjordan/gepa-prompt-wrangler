@@ -228,17 +228,17 @@ class AgentInspector:
                 }
             )
 
-        for tool in mcp_tools[: max(count - len(cases), 1)]:
-            cases.append(
-                {
-                    "prompt": f"TODO: Write a query that uses the {tool.name} MCP toolset",
-                    "expected_response": "TODO: Expected agent response",
-                    "expected_tools": [
-                        {"name": f"{tool.eval_name}_TOOL_NAME", "args": {}},
-                    ],
-                    "_note": f"MCP tools are prefixed: {tool.eval_name}_<tool_function_name>",
-                }
-            )
+        cases.extend(
+            {
+                "prompt": f"TODO: Write a query that uses the {tool.name} MCP toolset",
+                "expected_response": "TODO: Expected agent response",
+                "expected_tools": [
+                    {"name": f"{tool.eval_name}_TOOL_NAME", "args": {}},
+                ],
+                "_note": f"MCP tools are prefixed: {tool.eval_name}_<tool_function_name>",
+            }
+            for tool in mcp_tools[: max(count - len(cases), 1)]
+        )
 
         if not cases:
             cases.append(

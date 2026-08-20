@@ -80,12 +80,12 @@ def run_quick_eval(agent_id: str, num_cases: int | None = None) -> dict:
     print(f" {time.time() - t0:.0f}s")
 
     print("  Creating evaluation run...", end="", flush=True)
-    GCS_DEST = f"gs://{GCP_STAGING_BUCKET}/monitor-results/"
+    gcs_dest = f"gs://{GCP_STAGING_BUCKET}/monitor-results/"
     evaluation_run = client.evals.create_evaluation_run(
         dataset=inference_result,
         agent=agent_resource,
         metrics=EVAL_METRICS,
-        dest=GCS_DEST,
+        dest=gcs_dest,
         labels={"solution": "promp-wrangler"},
     )
 

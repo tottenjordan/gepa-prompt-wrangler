@@ -173,9 +173,10 @@ def _find_removed_content(
         line_stripped = line.strip()
         if not line_stripped or len(line_stripped) < 10:
             continue
-        if line_stripped.lower() not in opt_lower:
-            if any(kw in line_stripped.lower() for kw in keywords):
-                removed.append(line_stripped)
+        if line_stripped.lower() not in opt_lower and any(
+            kw in line_stripped.lower() for kw in keywords
+        ):
+            removed.append(line_stripped)
     return removed
 
 
@@ -389,8 +390,7 @@ def format_analysis_report(
             lines.append(
                 f"\n**Removed content with policy/tool keywords** ({len(removed)} lines):\n"
             )
-            for r in removed[:10]:
-                lines.append(f"  - `{r[:120]}`")
+            lines.extend(f"  - `{r[:120]}`" for r in removed[:10])
         lines.append("")
 
     # --- Degradation diagnosis ---

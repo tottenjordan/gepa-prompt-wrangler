@@ -1,6 +1,7 @@
 """Tests for wrangler.reporter — report generation, and wrangler.analysis — chart generation."""
 
 import subprocess
+from typing import ClassVar
 from unittest.mock import MagicMock, patch
 
 
@@ -248,7 +249,7 @@ class TestGenerateReport:
 
 
 class TestPaperBananaFallback:
-    RESULTS = {
+    RESULTS: ClassVar[dict] = {
         "lite": {
             "model": "gemini-3.1-flash-lite",
             "before": {"final_response_quality_v1": 0.7},

@@ -88,8 +88,9 @@ class TestEvalCasesYaml:
 
     def test_all_cases_have_tier(self):
         for case in _load_yaml_cases():
-            assert "tier" in case and case["tier"] in {"low", "medium", "high"}, (
-                f"Missing or invalid 'tier' in case: {case['prompt'][:50]}"
+            assert "tier" in case, f"Missing 'tier' in case: {case['prompt'][:50]}"
+            assert case["tier"] in {"low", "medium", "high"}, (
+                f"Invalid 'tier' in case: {case['prompt'][:50]}"
             )
 
     def test_all_cases_have_category(self):
@@ -104,9 +105,8 @@ class TestEvalCasesYaml:
             "error_handling",
         }
         for case in _load_yaml_cases():
-            assert "category" in case and case["category"] in valid, (
-                f"Missing or invalid 'category' in case: {case['prompt'][:50]}"
-            )
+            assert "category" in case, f"Missing 'category' in case: {case['prompt'][:50]}"
+            assert case["category"] in valid, f"Invalid 'category' in case: {case['prompt'][:50]}"
 
     def test_tier_distribution(self):
         from collections import Counter

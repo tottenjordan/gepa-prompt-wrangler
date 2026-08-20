@@ -26,9 +26,11 @@ def _eval_dataset_section(case_metadata: list[dict] | None) -> list[str]:
             tier_counts[m.get("tier", "unknown")] += 1
             cat_counts[m.get("category", "unknown")] += 1
         lines.append(f"- **Total cases:** {len(case_metadata)}")
-        for tier in TIER_ORDER:
-            if tier in tier_counts:
-                lines.append(f"- **{tier.title()} complexity:** {tier_counts[tier]} cases")
+        lines.extend(
+            f"- **{tier.title()} complexity:** {tier_counts[tier]} cases"
+            for tier in TIER_ORDER
+            if tier in tier_counts
+        )
         lines.append(f"- **Categories:** {', '.join(sorted(cat_counts.keys()))}")
     else:
         lines.append("- See eval_cases.yaml for case details")
@@ -159,8 +161,7 @@ def _prompt_evolution_summary(original: str, optimized: str) -> list[str]:
 
     if added:
         lines.append("**Key additions by GEPA:**\n")
-        for a in added:
-            lines.append(f"- {a}")
+        lines.extend(f"- {a}" for a in added)
         lines.append("")
 
     return lines
@@ -855,8 +856,9 @@ def generate_comparison_report(
 
     # --- Per-Agent Reports ---
     lines.append("## Per-Agent Reports\n")
-    for name in ordered:
-        lines.append(f"- [{name.title()} Agent Analysis](agents/{name}_analysis.md)")
+    lines.extend(
+        f"- [{name.title()} Agent Analysis](agents/{name}_analysis.md)" for name in ordered
+    )
     lines.append("")
 
     report_path = output_dir / "comparison_report.md"

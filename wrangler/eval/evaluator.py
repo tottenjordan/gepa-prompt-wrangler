@@ -415,10 +415,13 @@ def _retry_failed_cases(
     for retry_idx, original_idx in enumerate(failed_indices):
         if retry_idx < len(retry_df):
             retry_response = retry_df.iloc[retry_idx].get("response")
-            if retry_response is not None and retry_response != "":
-                if not (isinstance(retry_response, dict) and "error" in retry_response):
-                    result_df.iloc[original_idx] = retry_df.iloc[retry_idx]
-                    recovered += 1
+            if (
+                retry_response is not None
+                and retry_response != ""
+                and not (isinstance(retry_response, dict) and "error" in retry_response)
+            ):
+                result_df.iloc[original_idx] = retry_df.iloc[retry_idx]
+                recovered += 1
 
     print(f"  {tag}Recovered {recovered}/{n_failed} failed cases", flush=True)
     return types.EvaluationDataset(eval_dataset_df=result_df)

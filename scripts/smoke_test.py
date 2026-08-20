@@ -125,11 +125,12 @@ def test_sampler_config():
             else:
                 print(f"    {k}: {v} (scalar)")
 
-        return True
     except Exception as e:
         _fail(f"Sampler config validation failed: {e}")
         traceback.print_exc()
         return False
+    else:
+        return True
 
 
 def test_single_eval():
@@ -155,12 +156,13 @@ def test_single_eval():
         _pass(f"Eval complete ({elapsed:.0f}s) — {len(result.scores)} metrics, avg={avg:.2f}")
         for m, s in sorted(result.scores.items()):
             print(f"    {m:40s} {s:.2f}")
-        return True
     except Exception as e:
         elapsed = time.time() - t0
         _fail(f"Eval failed ({elapsed:.0f}s): {e}")
         traceback.print_exc()
         return False
+    else:
+        return True
 
 
 def test_agent_load():
@@ -200,11 +202,12 @@ def test_agent_load():
             tname = getattr(t, "name", type(t).__name__)
             print(f"      - {tname}")
 
-        return True
     except Exception as e:
         _fail(f"Agent load failed: {e}")
         traceback.print_exc()
         return False
+    else:
+        return True
 
 
 def test_gepa_optimize():
@@ -292,12 +295,13 @@ def test_gepa_optimize():
             f"GEPA complete ({elapsed:.0f}s) — best variant {best_idx}, "
             f"score={best.overall_score:.3f}, prompt={len(prompt)} chars"
         )
-        return True
     except Exception as e:
         elapsed = time.time() - t0
         _fail(f"GEPA failed ({elapsed:.0f}s): {e}")
         traceback.print_exc()
         return False
+    else:
+        return True
 
 
 def main():

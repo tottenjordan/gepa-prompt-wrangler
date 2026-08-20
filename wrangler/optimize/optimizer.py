@@ -114,7 +114,7 @@ def _patch_adk():
 
     from google.adk.evaluation import rubric_based_evaluator as _rbe
 
-    _SMART_CHARS = {
+    smart_chars = {
         0x2018: "'",
         0x2019: "'",
         0x201C: '"',
@@ -128,7 +128,7 @@ def _patch_adk():
         if not isinstance(text, str):
             return ""
         text = _ud.normalize("NFKC", text)
-        text = text.translate(_SMART_CHARS)
+        text = text.translate(smart_chars)
         text = _re.sub(r'^[\s*•\-"\']+', "", text)
         text = _re.sub(r'[\s*•\-"\']+$', "", text)
         text = _re.sub(r"\s+", " ", text)
@@ -242,11 +242,10 @@ async def _prewarm_mcp_toolsets(agent, tag: str = "  ", max_retries: int = 3) ->
                     )
                     await asyncio.sleep(wait)
                 else:
-                    log.error(
-                        "MCP pre-warm failed after %d attempts for %s: %s",
+                    log.exception(
+                        "MCP pre-warm failed after %d attempts for %s",
                         max_retries,
                         type(ts).__name__,
-                        exc,
                     )
     if mcp_toolsets:
         print(f"{tag}  Pre-warmed {warmed}/{len(mcp_toolsets)} MCP toolset(s)", flush=True)

@@ -691,8 +691,8 @@ def deploy_agent_from_source(
             else:
                 import logging
 
-                logging.getLogger(__name__).error(
-                    f"Deploy failed after 3 attempts for {display_name or 'gepa-agent'}: {e}"
+                logging.getLogger(__name__).exception(
+                    f"Deploy failed after 3 attempts for {display_name or 'gepa-agent'}"
                 )
                 raise
     else:
@@ -749,8 +749,8 @@ def update_agent_from_source(
             else:
                 import logging
 
-                logging.getLogger(__name__).error(
-                    f"Update failed after 3 attempts for {engine_id.split('/')[-1]}: {e}"
+                logging.getLogger(__name__).exception(
+                    f"Update failed after 3 attempts for {engine_id.split('/')[-1]}"
                 )
                 raise
     else:
