@@ -45,7 +45,9 @@ def manifest_yaml(tmp_path):
 @pytest.fixture
 def experiment(manifest_yaml, tmp_path):
     """Create a fresh experiment from manifest."""
-    return Experiment.create(manifest_yaml, name="test-exp", version="v1", base_dir=tmp_path / "experiments")
+    return Experiment.create(
+        manifest_yaml, name="test-exp", version="v1", base_dir=tmp_path / "experiments"
+    )
 
 
 class TestExperimentCreate:
@@ -244,11 +246,18 @@ class TestCLIExperiment:
         from wrangler.cli import main
 
         runner = CliRunner()
-        result = runner.invoke(main, [
-            "experiment", "create", str(manifest_yaml),
-            "--name", "cli-test",
-            "--dir", str(tmp_path / "exp"),
-        ])
+        result = runner.invoke(
+            main,
+            [
+                "experiment",
+                "create",
+                str(manifest_yaml),
+                "--name",
+                "cli-test",
+                "--dir",
+                str(tmp_path / "exp"),
+            ],
+        )
         assert result.exit_code == 0, result.output
         assert "Created experiment" in result.output
         assert (tmp_path / "exp" / "cli-test" / "config.yaml").exists()

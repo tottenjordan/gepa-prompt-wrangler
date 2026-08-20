@@ -46,10 +46,12 @@ class TestDisablePyopenssl:
     def test_no_openssl_is_noop(self):
         with patch.dict("sys.modules", {"OpenSSL": None, "OpenSSL.SSL": None}):
             from wrangler.core.config import disable_pyopenssl
+
             disable_pyopenssl()
 
     def test_function_exists_and_callable(self):
         from wrangler.core.config import disable_pyopenssl
+
         assert callable(disable_pyopenssl)
 
 

@@ -68,16 +68,15 @@ def run_quick_eval(agent_id: str, num_cases: int = None) -> dict:
     print(f"  Cases:  {len(cases)}")
 
     import pandas as pd
+
     session_inputs = types.evals.SessionInput(user_id="monitor-user", state={})
-    eval_df = pd.DataFrame([
-        {"prompt": case, "session_inputs": session_inputs}
-        for case in cases
-    ])
+    eval_df = pd.DataFrame([{"prompt": case, "session_inputs": session_inputs} for case in cases])
 
     print("  Running inference...", end="", flush=True)
     t0 = time.time()
     inference_result = client.evals.run_inference(
-        agent=agent_resource, src=eval_df,
+        agent=agent_resource,
+        src=eval_df,
     )
     print(f" {time.time() - t0:.0f}s")
 

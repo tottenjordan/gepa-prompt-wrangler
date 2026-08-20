@@ -42,14 +42,20 @@ def run_step(name: str, cmd: list[str], step_times: list) -> bool:
 
 def main():
     parser = argparse.ArgumentParser(description="Run the full GEPA experiment pipeline")
-    parser.add_argument("--manifest", default="examples/multi_model_agents/manifest.yaml",
-                        help="Path to manifest.yaml")
-    parser.add_argument("--skip-diagrams", action="store_true",
-                        help="Skip PaperBanana diagram generation")
-    parser.add_argument("--max-concurrent", type=int, default=1,
-                        help="Max parallel evals (default: 1 = sequential)")
-    parser.add_argument("--version", default=None,
-                        help="Version tag for saved prompts (e.g. wrangler_v5)")
+    parser.add_argument(
+        "--manifest",
+        default="examples/multi_model_agents/manifest.yaml",
+        help="Path to manifest.yaml",
+    )
+    parser.add_argument(
+        "--skip-diagrams", action="store_true", help="Skip PaperBanana diagram generation"
+    )
+    parser.add_argument(
+        "--max-concurrent", type=int, default=1, help="Max parallel evals (default: 1 = sequential)"
+    )
+    parser.add_argument(
+        "--version", default=None, help="Version tag for saved prompts (e.g. wrangler_v5)"
+    )
     args = parser.parse_args()
 
     pipeline_start = time.time()
@@ -82,8 +88,15 @@ def main():
         return
 
     # Step 3: Run the full pipeline (deploy → eval → optimize → redeploy → eval → report)
-    run_cmd = ["uv", "run", "wrangler", "run", args.manifest,
-               "--max-concurrent", str(args.max_concurrent)]
+    run_cmd = [
+        "uv",
+        "run",
+        "wrangler",
+        "run",
+        args.manifest,
+        "--max-concurrent",
+        str(args.max_concurrent),
+    ]
     if args.version:
         run_cmd.extend(["--version", args.version])
     ok = run_step(

@@ -56,6 +56,7 @@ class TestConverter:
 
     def test_missing_file_raises(self, tmp_path):
         from wrangler.core.converter import load_eval_file
+
         with pytest.raises((FileNotFoundError, OSError)):
             load_eval_file(str(tmp_path / "nonexistent.yaml"))
 
@@ -128,7 +129,11 @@ class TestGepaEvalsetGeneration:
             },
         ]
         evalset_path = generate_gepa_evalset(
-            cases, str(tmp_path), eval_set_id="test", app_name="test_opt", count=1,
+            cases,
+            str(tmp_path),
+            eval_set_id="test",
+            app_name="test_opt",
+            count=1,
         )
         with open(evalset_path) as f:
             data = json.load(f)
@@ -150,7 +155,11 @@ class TestGepaEvalsetGeneration:
             },
         ]
         evalset_path = generate_gepa_evalset(
-            cases, str(tmp_path), eval_set_id="test", app_name="test_opt", count=1,
+            cases,
+            str(tmp_path),
+            eval_set_id="test",
+            app_name="test_opt",
+            count=1,
         )
         with open(evalset_path) as f:
             data = json.load(f)
@@ -169,7 +178,11 @@ class TestGepaEvalsetGeneration:
             },
         ]
         evalset_path = generate_gepa_evalset(
-            cases, str(tmp_path), eval_set_id="test", app_name="test_opt", count=1,
+            cases,
+            str(tmp_path),
+            eval_set_id="test",
+            app_name="test_opt",
+            count=1,
         )
         with open(evalset_path) as f:
             data = json.load(f)
@@ -218,7 +231,10 @@ class TestSamplerConfig:
 
         config = generate_sampler_config("test_opt")
         criteria = config["eval_config"]["criteria"]
-        assert criteria["rubric_based_final_response_quality_v1"]["judge_model_options"]["judge_model"] == "gemini-2.5-flash"
+        assert (
+            criteria["rubric_based_final_response_quality_v1"]["judge_model_options"]["judge_model"]
+            == "gemini-2.5-flash"
+        )
 
     def test_judge_model_propagated(self):
         from wrangler.core.converter import generate_sampler_config
@@ -226,8 +242,14 @@ class TestSamplerConfig:
         config = generate_sampler_config("test_opt", judge_model="gemini-2.5-flash")
         criteria = config["eval_config"]["criteria"]
 
-        assert criteria["rubric_based_tool_use_quality_v1"]["judge_model_options"]["judge_model"] == "gemini-2.5-flash"
-        assert criteria["rubric_based_final_response_quality_v1"]["judge_model_options"]["judge_model"] == "gemini-2.5-flash"
+        assert (
+            criteria["rubric_based_tool_use_quality_v1"]["judge_model_options"]["judge_model"]
+            == "gemini-2.5-flash"
+        )
+        assert (
+            criteria["rubric_based_final_response_quality_v1"]["judge_model_options"]["judge_model"]
+            == "gemini-2.5-flash"
+        )
 
     def test_multi_judge_enabled(self):
         from wrangler.core.converter import generate_sampler_config

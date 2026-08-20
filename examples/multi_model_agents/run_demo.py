@@ -19,17 +19,38 @@ sys.path.insert(0, os.path.join(SCRIPT_DIR, "agents"))
 os.chdir(SCRIPT_DIR)
 
 from dotenv import load_dotenv
+
 load_dotenv(os.path.join(SCRIPT_DIR, ".env"))
 
 from generic_prompts import GENERIC_PROMPT, AGENT_GENERIC_PROMPTS
 from config import GCP_PROJECT_ID, GCP_REGION, GCP_STAGING_BUCKET, resolve_model
 
 AGENTS = {
-    "lite": {"module": "lite_agent", "attr": "lite_agent", "model": os.environ.get("LITE_MODEL", "gemini-3.1-flash-lite")},
-    "flash": {"module": "flash_agent", "attr": "flash_agent", "model": os.environ.get("FLASH_MODEL", "gemini-3.5-flash")},
-    "pro": {"module": "pro_agent", "attr": "pro_agent", "model": os.environ.get("PRO_MODEL", "gemini-3.1-pro-preview")},
-    "sonnet": {"module": "sonnet_agent", "attr": "sonnet_agent", "model": os.environ.get("SONNET_MODEL", "claude-sonnet-4-6")},
-    "opus": {"module": "opus_agent", "attr": "opus_agent", "model": os.environ.get("OPUS_MODEL", "claude-opus-4-6")},
+    "lite": {
+        "module": "lite_agent",
+        "attr": "lite_agent",
+        "model": os.environ.get("LITE_MODEL", "gemini-3.1-flash-lite"),
+    },
+    "flash": {
+        "module": "flash_agent",
+        "attr": "flash_agent",
+        "model": os.environ.get("FLASH_MODEL", "gemini-3.5-flash"),
+    },
+    "pro": {
+        "module": "pro_agent",
+        "attr": "pro_agent",
+        "model": os.environ.get("PRO_MODEL", "gemini-3.1-pro-preview"),
+    },
+    "sonnet": {
+        "module": "sonnet_agent",
+        "attr": "sonnet_agent",
+        "model": os.environ.get("SONNET_MODEL", "claude-sonnet-4-6"),
+    },
+    "opus": {
+        "module": "opus_agent",
+        "attr": "opus_agent",
+        "model": os.environ.get("OPUS_MODEL", "claude-opus-4-6"),
+    },
 }
 
 ENV_FILE = os.path.join(SCRIPT_DIR, ".env")
@@ -66,7 +87,10 @@ def load_agent(name: str, prompt: str):
 
 def run_demo(agent_names: list[str], skip_deploy: bool = False):
     import vertexai
-    vertexai.init(project=GCP_PROJECT_ID, location=GCP_REGION, staging_bucket=f"gs://{GCP_STAGING_BUCKET}")
+
+    vertexai.init(
+        project=GCP_PROJECT_ID, location=GCP_REGION, staging_bucket=f"gs://{GCP_STAGING_BUCKET}"
+    )
 
     # Add wrangler lib to path
     sys.path.insert(0, os.path.join(SCRIPT_DIR, "..", ".."))
@@ -74,6 +98,7 @@ def run_demo(agent_names: list[str], skip_deploy: bool = False):
     from wrangler.core.deploy import deploy_agent, update_agent
     from wrangler.converter import load_eval_file
     from wrangler.core.config import disable_pyopenssl
+
     disable_pyopenssl()
 
     eval_cases = load_eval_file(EVAL_DATA)
@@ -88,7 +113,7 @@ def run_demo(agent_names: list[str], skip_deploy: bool = False):
     print(f"  Project:  {GCP_PROJECT_ID}")
     print(f"  Agents:   {agent_names}")
     print(f"  Eval:     {len(eval_cases)} cases")
-    print(f"  Prompt:   \"{GENERIC_PROMPT[:50]}...\"")
+    print(f'  Prompt:   "{GENERIC_PROMPT[:50]}..."')
 
     # --- Phase 1: Deploy with generic prompts ---
     if not skip_deploy:
@@ -153,7 +178,9 @@ def run_demo(agent_names: list[str], skip_deploy: bool = False):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="E2E GEPA optimization demo")
     parser.add_argument("--agents", nargs="*", default=list(AGENTS.keys()))
-    parser.add_argument("--skip-deploy", action="store_true", help="Skip deployment, use existing engine IDs")
+    parser.add_argument(
+        "--skip-deploy", action="store_true", help="Skip deployment, use existing engine IDs"
+    )
     args = parser.parse_args()
 
     run_demo(args.agents, skip_deploy=args.skip_deploy)

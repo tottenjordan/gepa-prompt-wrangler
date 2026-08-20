@@ -106,7 +106,9 @@ def deploy_single_agent(
     # -- Code injection --
     logging.info(f"Injecting code from gs://{bucket_name}/pipeline-runs/{run_id}/code.tar.gz")
     gcs = storage.Client(project=project_id)
-    gcs.bucket(bucket_name).blob(f"pipeline-runs/{run_id}/code.tar.gz").download_to_filename("/tmp/code.tar.gz")
+    gcs.bucket(bucket_name).blob(f"pipeline-runs/{run_id}/code.tar.gz").download_to_filename(
+        "/tmp/code.tar.gz"
+    )
     with tarfile.open("/tmp/code.tar.gz", "r:gz") as tar:
         tar.extractall(path="/app")
     sys.path.insert(0, "/app")
@@ -123,6 +125,7 @@ def deploy_single_agent(
         from google.cloud import secretmanager
         from dotenv import load_dotenv
         import io
+
         logging.info(f"Loading secrets from {secret_id}")
         sm = secretmanager.SecretManagerServiceClient()
         secret_name = f"projects/{project_id}/secrets/{secret_id}/versions/latest"
@@ -133,20 +136,28 @@ def deploy_single_agent(
         os.environ.pop("GEMINI_API_KEY", None)
 
     instruction = pair.get("system_prompt", "")
-    logging.info(f"[{pair_id}] Deploy config: model={model}, instruction={len(instruction)}chars, module={agent_module}")
+    logging.info(
+        f"[{pair_id}] Deploy config: model={model}, instruction={len(instruction)}chars, module={agent_module}"
+    )
 
     existing_engine_id = pair.get("engine_id", "")
     if existing_engine_id:
         logging.info(f"[{pair_id}] Reusing existing engine: {existing_engine_id}")
         result = {
-            "pair_id": pair_id, "engine_id": existing_engine_id,
-            "model": model, "source": "existing", "elapsed": 0,
+            "pair_id": pair_id,
+            "engine_id": existing_engine_id,
+            "model": model,
+            "source": "existing",
+            "elapsed": 0,
         }
     else:
         from wrangler.core.deploy import deploy_agent_from_source
 
-        mcp_env = {k: v for k, v in os.environ.items()
-                   if k.startswith(("SEARCH_MCP", "BOOKING_MCP", "EXPENSE_MCP"))}
+        mcp_env = {
+            k: v
+            for k, v in os.environ.items()
+            if k.startswith(("SEARCH_MCP", "BOOKING_MCP", "EXPENSE_MCP"))
+        }
 
         t0 = time.time()
         engine_id = deploy_agent_from_source(
@@ -159,16 +170,20 @@ def deploy_single_agent(
         elapsed = time.time() - t0
 
         result = {
-            "pair_id": pair_id, "engine_id": engine_id,
-            "model": model, "original_prompt": pair["system_prompt"],
-            "source": "deployed", "elapsed": elapsed,
+            "pair_id": pair_id,
+            "engine_id": engine_id,
+            "model": model,
+            "original_prompt": pair["system_prompt"],
+            "source": "deployed",
+            "elapsed": elapsed,
         }
         logging.info(f"[{pair_id}] Deployed in {elapsed:.0f}s: {engine_id}")
 
     # Upload stage result to GCS
     blob_path = f"pipeline-runs/{run_id}/stages/deploy/{pair_id}.json"
     gcs.bucket(bucket_name).blob(blob_path).upload_from_string(
-        json.dumps(result, indent=2, default=str), content_type="application/json")
+        json.dumps(result, indent=2, default=str), content_type="application/json"
+    )
 
     metrics.log_metric("elapsed_seconds", result.get("elapsed", 0))
     with open(summary.path, "w") as f:
@@ -223,7 +238,9 @@ def eval_single_agent(
 
     # -- Code injection --
     gcs = storage.Client(project=project_id)
-    gcs.bucket(bucket_name).blob(f"pipeline-runs/{run_id}/code.tar.gz").download_to_filename("/tmp/code.tar.gz")
+    gcs.bucket(bucket_name).blob(f"pipeline-runs/{run_id}/code.tar.gz").download_to_filename(
+        "/tmp/code.tar.gz"
+    )
     with tarfile.open("/tmp/code.tar.gz", "r:gz") as tar:
         tar.extractall(path="/app")
     sys.path.insert(0, "/app")
@@ -240,13 +257,17 @@ def eval_single_agent(
     from wrangler.core.config import MODEL_COSTS
 
     # Read deploy result from GCS
-    deploy_blob = gcs.bucket(bucket_name).blob(f"pipeline-runs/{run_id}/stages/deploy/{pair_id}.json")
+    deploy_blob = gcs.bucket(bucket_name).blob(
+        f"pipeline-runs/{run_id}/stages/deploy/{pair_id}.json"
+    )
     deploy_data = json.loads(deploy_blob.download_as_text())
     engine_id = deploy_data["engine_id"]
 
     # Resolve the prompt being evaluated
     if phase == "after":
-        opt_blob = gcs.bucket(bucket_name).blob(f"pipeline-runs/{run_id}/stages/optimize/{pair_id}.json")
+        opt_blob = gcs.bucket(bucket_name).blob(
+            f"pipeline-runs/{run_id}/stages/optimize/{pair_id}.json"
+        )
         opt_data = json.loads(opt_blob.download_as_text())
         active_prompt = opt_data.get("optimized_prompt", "")
     else:
@@ -257,8 +278,11 @@ def eval_single_agent(
 
     t0 = time.time()
     result = run_batch_eval_averaged(
-        engine_id, eval_cases, num_runs=num_runs,
-        agent_name=pair_id, model=model,
+        engine_id,
+        eval_cases,
+        num_runs=num_runs,
+        agent_name=pair_id,
+        model=model,
     )
     elapsed = time.time() - t0
 
@@ -280,7 +304,8 @@ def eval_single_agent(
     stage_name = f"eval_{phase}"
     stage_blob = f"pipeline-runs/{run_id}/stages/{stage_name}/{pair_id}.json"
     gcs.bucket(bucket_name).blob(stage_blob).upload_from_string(
-        json.dumps(stage_data, indent=2, default=str), content_type="application/json")
+        json.dumps(stage_data, indent=2, default=str), content_type="application/json"
+    )
 
     avg_score = sum(result.scores.values()) / max(len(result.scores), 1) if result.scores else 0
     metrics.log_metric("avg_score", round(avg_score, 4))
@@ -355,7 +380,9 @@ def optimize_single_agent(
 
     # -- Code injection --
     gcs = storage.Client(project=project_id)
-    gcs.bucket(bucket_name).blob(f"pipeline-runs/{run_id}/code.tar.gz").download_to_filename("/tmp/code.tar.gz")
+    gcs.bucket(bucket_name).blob(f"pipeline-runs/{run_id}/code.tar.gz").download_to_filename(
+        "/tmp/code.tar.gz"
+    )
     with tarfile.open("/tmp/code.tar.gz", "r:gz") as tar:
         tar.extractall(path="/app")
     sys.path.insert(0, "/app")
@@ -371,6 +398,7 @@ def optimize_single_agent(
     if secret_id:
         from google.cloud import secretmanager
         from dotenv import load_dotenv
+
         logging.info(f"Loading secrets from {secret_id}")
         sm = secretmanager.SecretManagerServiceClient()
         secret_name = f"projects/{project_id}/secrets/{secret_id}/versions/latest"
@@ -385,6 +413,7 @@ def optimize_single_agent(
 
     # -- Start local MCP servers for reliable tool connections --
     import subprocess
+
     mcp_servers_dir = Path("/app/examples/multi_model_agents/mcp_servers")
     mcp_procs = []
     if mcp_servers_dir.exists():
@@ -399,7 +428,8 @@ def optimize_single_agent(
                 proc = subprocess.Popen(
                     [sys.executable, str(server_py)],
                     cwd=str(mcp_servers_dir / name),
-                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
                 )
                 mcp_procs.append(proc)
                 os.environ[env_key] = f"http://localhost:{port}/mcp"
@@ -427,13 +457,18 @@ def optimize_single_agent(
 
     original_prompt = pair.get("system_prompt", "")
     logging.info(f"[{pair_id}] Optimize config: model={model}, opt_dir={agent_path}")
-    logging.info(f"[{pair_id}] Baseline prompt ({len(original_prompt)}chars): '{original_prompt[:100]}...'")
-    logging.info(f"[{pair_id}] Sampler config: {sampler_cfg if sampler_cfg.exists() else 'auto-generated'}")
+    logging.info(
+        f"[{pair_id}] Baseline prompt ({len(original_prompt)}chars): '{original_prompt[:100]}...'"
+    )
+    logging.info(
+        f"[{pair_id}] Sampler config: {sampler_cfg if sampler_cfg.exists() else 'auto-generated'}"
+    )
     logging.info(f"[{pair_id}] Max metric calls: {max_metric_calls}")
 
     # -- Pre-flight: check if baseline already exceeds all thresholds --
     eval_before_blob = gcs.bucket(bucket_name).blob(
-        f"pipeline-runs/{run_id}/stages/eval_before/{pair_id}.json")
+        f"pipeline-runs/{run_id}/stages/eval_before/{pair_id}.json"
+    )
     if eval_before_blob.exists() and sampler_cfg.exists():
         eval_before = json.loads(eval_before_blob.download_as_text())
         baseline_scores = eval_before.get("scores", {})
@@ -449,18 +484,28 @@ def optimize_single_agent(
         }
         all_above = True
         for gepa_key, cfg_val in criteria.items():
-            threshold = cfg_val if isinstance(cfg_val, (int, float)) else cfg_val.get("threshold", 0)
+            threshold = (
+                cfg_val if isinstance(cfg_val, (int, float)) else cfg_val.get("threshold", 0)
+            )
             eval_key = _METRIC_MAP.get(gepa_key, gepa_key)
             baseline = baseline_scores.get(eval_key)
             margin = (baseline - threshold) if baseline is not None else None
             status = "ABOVE" if margin and margin > 0 else "BELOW"
             if margin is not None and margin <= 0:
                 all_above = False
-            logging.info(f"[{pair_id}] Pre-flight: {eval_key}={baseline:.3f} vs threshold={threshold} → {status} (margin={margin:+.3f})" if baseline is not None else f"[{pair_id}] Pre-flight: {eval_key}=N/A vs threshold={threshold}")
+            logging.info(
+                f"[{pair_id}] Pre-flight: {eval_key}={baseline:.3f} vs threshold={threshold} → {status} (margin={margin:+.3f})"
+                if baseline is not None
+                else f"[{pair_id}] Pre-flight: {eval_key}=N/A vs threshold={threshold}"
+            )
 
         if all_above:
-            logging.warning(f"[{pair_id}] *** PRE-FLIGHT WARNING: baseline ALREADY EXCEEDS ALL sampler_config thresholds! ***")
-            logging.warning(f"[{pair_id}] GEPA will likely return the prompt unchanged. Consider raising thresholds.")
+            logging.warning(
+                f"[{pair_id}] *** PRE-FLIGHT WARNING: baseline ALREADY EXCEEDS ALL sampler_config thresholds! ***"
+            )
+            logging.warning(
+                f"[{pair_id}] GEPA will likely return the prompt unchanged. Consider raising thresholds."
+            )
 
     t0 = time.time()
     optimized_prompt = optimize(
@@ -487,18 +532,20 @@ def optimize_single_agent(
     # Clean up MCP sessions
     import asyncio
     from google.adk.tools.base_toolset import BaseToolset
+
     async def _cleanup_sessions():
         for mod_name in list(sys.modules):
             mod = sys.modules.get(mod_name)
-            if mod and hasattr(mod, 'root_agent'):
-                agent = getattr(mod, 'root_agent', None)
-                if agent and hasattr(agent, 'tools'):
+            if mod and hasattr(mod, "root_agent"):
+                agent = getattr(mod, "root_agent", None)
+                if agent and hasattr(agent, "tools"):
                     for t in agent.tools:
                         if isinstance(t, BaseToolset):
                             try:
                                 await t.close()
                             except Exception:
                                 pass
+
     try:
         asyncio.run(_cleanup_sessions())
     except RuntimeError:
@@ -523,7 +570,11 @@ def optimize_single_agent(
         with open(sampler_cfg) as f:
             _sc = json.load(f)
         for k, v in _sc.get("eval_config", {}).get("criteria", {}).items():
-            thr = v if isinstance(v, (int, float)) else (v.get("threshold") if isinstance(v, dict) else None)
+            thr = (
+                v
+                if isinstance(v, (int, float))
+                else (v.get("threshold") if isinstance(v, dict) else None)
+            )
             if thr is not None:
                 gepa_thresholds[_METRIC_MAP.get(k, k)] = float(thr)
 
@@ -542,7 +593,8 @@ def optimize_single_agent(
     }
     stage_blob = f"pipeline-runs/{run_id}/stages/optimize/{pair_id}.json"
     gcs.bucket(bucket_name).blob(stage_blob).upload_from_string(
-        json.dumps(stage_data, indent=2, default=str), content_type="application/json")
+        json.dumps(stage_data, indent=2, default=str), content_type="application/json"
+    )
 
     metrics.log_metric("elapsed_seconds", round(elapsed, 1))
     metrics.log_metric("original_chars", len(original_prompt))
@@ -558,13 +610,19 @@ def optimize_single_agent(
         f.write(f"## Optimization: {pair_id}\n\n")
         f.write(f"- **Model**: `{model}`\n")
         f.write(f"- **Elapsed**: {m}m {s:02d}s\n")
-        f.write(f"- **Prompt**: {len(original_prompt)} → {len(optimized_prompt)} chars ({pct:+.0f}%)\n")
+        f.write(
+            f"- **Prompt**: {len(original_prompt)} → {len(optimized_prompt)} chars ({pct:+.0f}%)\n"
+        )
         f.write(f"- **Input tokens**: ~{est_input:,} | **Output tokens**: ~{est_output:,}\n")
-        f.write(f"- **Input cost**: ${input_cost:.4f} | **Output cost**: ${output_cost:.4f} | **Total**: ${input_cost + output_cost:.4f}\n\n")
+        f.write(
+            f"- **Input cost**: ${input_cost:.4f} | **Output cost**: ${output_cost:.4f} | **Total**: ${input_cost + output_cost:.4f}\n\n"
+        )
         f.write(f"### Original Prompt\n\n```\n{original_prompt}\n```\n\n")
         f.write(f"### Optimized Prompt\n\n```\n{optimized_prompt}\n```\n")
 
-    logging.info(f"[{pair_id}] Optimized in {m}m {s:02d}s: {len(original_prompt)} → {len(optimized_prompt)} chars")
+    logging.info(
+        f"[{pair_id}] Optimized in {m}m {s:02d}s: {len(original_prompt)} → {len(optimized_prompt)} chars"
+    )
     return json.dumps(stage_data)
 
 
@@ -609,7 +667,9 @@ def redeploy_single_agent(
 
     # -- Code injection --
     gcs = storage.Client(project=project_id)
-    gcs.bucket(bucket_name).blob(f"pipeline-runs/{run_id}/code.tar.gz").download_to_filename("/tmp/code.tar.gz")
+    gcs.bucket(bucket_name).blob(f"pipeline-runs/{run_id}/code.tar.gz").download_to_filename(
+        "/tmp/code.tar.gz"
+    )
     with tarfile.open("/tmp/code.tar.gz", "r:gz") as tar:
         tar.extractall(path="/app")
     sys.path.insert(0, "/app")
@@ -625,6 +685,7 @@ def redeploy_single_agent(
     if secret_id:
         from google.cloud import secretmanager
         from dotenv import load_dotenv
+
         logging.info(f"Loading secrets from {secret_id}")
         sm = secretmanager.SecretManagerServiceClient()
         secret_name = f"projects/{project_id}/secrets/{secret_id}/versions/latest"
@@ -636,9 +697,15 @@ def redeploy_single_agent(
 
     # Read deploy + optimize results from GCS
     deploy_data = json.loads(
-        gcs.bucket(bucket_name).blob(f"pipeline-runs/{run_id}/stages/deploy/{pair_id}.json").download_as_text())
+        gcs.bucket(bucket_name)
+        .blob(f"pipeline-runs/{run_id}/stages/deploy/{pair_id}.json")
+        .download_as_text()
+    )
     optimize_data = json.loads(
-        gcs.bucket(bucket_name).blob(f"pipeline-runs/{run_id}/stages/optimize/{pair_id}.json").download_as_text())
+        gcs.bucket(bucket_name)
+        .blob(f"pipeline-runs/{run_id}/stages/optimize/{pair_id}.json")
+        .download_as_text()
+    )
 
     engine_id = deploy_data["engine_id"]
     optimized_prompt = optimize_data["optimized_prompt"]
@@ -646,12 +713,17 @@ def redeploy_single_agent(
     model = model or deploy_data.get("model", "")
     prompt_changed = optimized_prompt != original_prompt
     logging.info(f"[{pair_id}] Redeploy: engine={engine_id}, model={model}")
-    logging.info(f"[{pair_id}] Prompt: {len(original_prompt)}→{len(optimized_prompt)}chars, changed={prompt_changed}")
+    logging.info(
+        f"[{pair_id}] Prompt: {len(original_prompt)}→{len(optimized_prompt)}chars, changed={prompt_changed}"
+    )
 
     from wrangler.core.deploy import update_agent_from_source
 
-    mcp_env = {k: v for k, v in os.environ.items()
-               if k.startswith(("SEARCH_MCP", "BOOKING_MCP", "EXPENSE_MCP"))}
+    mcp_env = {
+        k: v
+        for k, v in os.environ.items()
+        if k.startswith(("SEARCH_MCP", "BOOKING_MCP", "EXPENSE_MCP"))
+    }
 
     t0 = time.time()
     update_agent_from_source(
@@ -665,13 +737,15 @@ def redeploy_single_agent(
     elapsed = time.time() - t0
 
     result = {
-        "pair_id": pair_id, "engine_id": engine_id,
+        "pair_id": pair_id,
+        "engine_id": engine_id,
         "updated_at": datetime.now().isoformat(timespec="seconds"),
         "elapsed": elapsed,
     }
     stage_blob = f"pipeline-runs/{run_id}/stages/redeploy/{pair_id}.json"
     gcs.bucket(bucket_name).blob(stage_blob).upload_from_string(
-        json.dumps(result, indent=2, default=str), content_type="application/json")
+        json.dumps(result, indent=2, default=str), content_type="application/json"
+    )
 
     metrics.log_metric("elapsed_seconds", round(elapsed, 1))
     with open(summary.path, "w") as f:
@@ -721,7 +795,9 @@ def generate_analysis(
 
     # -- Code injection --
     gcs = gcs_storage.Client(project=project_id)
-    gcs.bucket(bucket_name).blob(f"pipeline-runs/{run_id}/code.tar.gz").download_to_filename("/tmp/code.tar.gz")
+    gcs.bucket(bucket_name).blob(f"pipeline-runs/{run_id}/code.tar.gz").download_to_filename(
+        "/tmp/code.tar.gz"
+    )
     with tarfile.open("/tmp/code.tar.gz", "r:gz") as tar:
         tar.extractall(path="/app")
     sys.path.insert(0, "/app")
@@ -736,6 +812,7 @@ def generate_analysis(
     os.environ["IMAGE_MODEL"] = os.getenv("IMAGE_MODEL", "gemini-3.1-flash-image")
 
     import matplotlib
+
     matplotlib.use("Agg")
 
     from wrangler.reporting.reporter import generate_report
@@ -790,8 +867,12 @@ def generate_analysis(
             eval_cases = load_eval_file(f"/app/{eval_data_path}")
             results["_eval_metadata"] = {
                 "cases": [
-                    {"tier": c.get("tier", ""), "category": c.get("category", ""),
-                     "prompt": c.get("prompt", ""), "index": i}
+                    {
+                        "tier": c.get("tier", ""),
+                        "category": c.get("category", ""),
+                        "prompt": c.get("prompt", ""),
+                        "index": i,
+                    }
                     for i, c in enumerate(eval_cases)
                 ]
             }
@@ -804,6 +885,7 @@ def generate_analysis(
     charts_dir.mkdir(parents=True, exist_ok=True)
 
     from wrangler.reporting import reporter
+
     original_reports = reporter.REPORTS_DIR
     original_charts = reporter.CHARTS_DIR
     try:
@@ -829,7 +911,9 @@ def generate_analysis(
     for pair_id, data in results.items():
         if pair_id.startswith("_"):
             continue
-        before_avg = sum(data["before"].values()) / max(len(data["before"]), 1) if data["before"] else 0
+        before_avg = (
+            sum(data["before"].values()) / max(len(data["before"]), 1) if data["before"] else 0
+        )
         after_avg = sum(data["after"].values()) / max(len(data["after"]), 1) if data["after"] else 0
         summary_data["pairs"][pair_id] = {
             "model": data["model"],
@@ -847,7 +931,8 @@ def generate_analysis(
 
     summary_blob = f"pipeline-runs/{run_id}/reports/summary.json"
     gcs_bucket.blob(summary_blob).upload_from_string(
-        json.dumps(summary_data, indent=2), content_type="application/json",
+        json.dumps(summary_data, indent=2),
+        content_type="application/json",
     )
 
     for pair_id, pair_summary in summary_data["pairs"].items():
@@ -891,12 +976,18 @@ def generate_analysis(
             avg_a = ps["after_avg"]
             avg_d = ps["delta"]
             avg_pct = f"{avg_d / avg_b * 100:+.1f}%" if avg_b > 0 else "N/A"
-            f.write(f"| **Average** | **{avg_b:.2f}** | **{avg_a:.2f}** | **{avg_d:+.2f}** | **{avg_pct}** |\n\n")
-            f.write(f"Cost: ${pair_in + pair_out:.3f} (in: ${pair_in:.3f} / out: ${pair_out:.3f})\n\n")
+            f.write(
+                f"| **Average** | **{avg_b:.2f}** | **{avg_a:.2f}** | **{avg_d:+.2f}** | **{avg_pct}** |\n\n"
+            )
+            f.write(
+                f"Cost: ${pair_in + pair_out:.3f} (in: ${pair_in:.3f} / out: ${pair_out:.3f})\n\n"
+            )
 
         f.write(f"**Total cost**: ${total_input_cost + total_output_cost:.4f} | ")
         f.write(f"**Total time**: {m}m {s:02d}s\n")
         f.write(f"\n**Reports**: `gs://{bucket_name}/pipeline-runs/{run_id}/reports/`\n")
 
-    logging.info(f"Analysis complete. Reports at gs://{bucket_name}/pipeline-runs/{run_id}/reports/")
+    logging.info(
+        f"Analysis complete. Reports at gs://{bucket_name}/pipeline-runs/{run_id}/reports/"
+    )
     return json.dumps(summary_data)

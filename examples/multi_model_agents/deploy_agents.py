@@ -9,13 +9,16 @@ sys.path.insert(0, SCRIPT_DIR)
 sys.path.insert(0, os.path.join(SCRIPT_DIR, "agents"))
 
 from dotenv import load_dotenv
+
 load_dotenv(os.path.join(SCRIPT_DIR, ".env"))
 
 import vertexai
 from config import GCP_PROJECT_ID, GCP_REGION, GCP_STAGING_BUCKET
 
 os.chdir(SCRIPT_DIR)
-vertexai.init(project=GCP_PROJECT_ID, location=GCP_REGION, staging_bucket=f"gs://{GCP_STAGING_BUCKET}")
+vertexai.init(
+    project=GCP_PROJECT_ID, location=GCP_REGION, staging_bucket=f"gs://{GCP_STAGING_BUCKET}"
+)
 
 AGENTS = {
     "lite": ("lite_agent", "lite_agent"),
@@ -52,6 +55,7 @@ def deploy_single(name: str, generic: bool = False, update: bool = False, versio
 
     if generic:
         from generic_prompts import GENERIC_PROMPT
+
         agent.instruction = GENERIC_PROMPT
         print(f"  Using generic prompt")
 
@@ -62,12 +66,15 @@ def deploy_single(name: str, generic: bool = False, update: bool = False, versio
         if not engine_id:
             print(f"  No ENGINE_ID for {name}, deploying new instead")
             from wrangler.core.deploy import deploy_agent
+
             engine_id = deploy_agent(agent, display_name=display_name)
         else:
             from wrangler.core.deploy import update_agent
+
             update_agent(agent, engine_id, display_name=display_name)
     else:
         from wrangler.core.deploy import deploy_agent
+
         engine_id = deploy_agent(agent, display_name=display_name)
 
     env_key = f"{name.upper()}_ENGINE_ID"
@@ -78,11 +85,18 @@ def deploy_single(name: str, generic: bool = False, update: bool = False, versio
 
 if __name__ == "__main__":
     import argparse
+
     parser = argparse.ArgumentParser()
     parser.add_argument("agents", nargs="*", default=list(AGENTS.keys()))
-    parser.add_argument("--generic", action="store_true", help="Use generic prompts instead of optimized")
-    parser.add_argument("--update", action="store_true", help="Update existing agents instead of creating new")
-    parser.add_argument("--version", default="v4", help="Version tag for display name (default: v4)")
+    parser.add_argument(
+        "--generic", action="store_true", help="Use generic prompts instead of optimized"
+    )
+    parser.add_argument(
+        "--update", action="store_true", help="Update existing agents instead of creating new"
+    )
+    parser.add_argument(
+        "--version", default="v4", help="Version tag for display name (default: v4)"
+    )
     args = parser.parse_args()
 
     print(f"Project: {GCP_PROJECT_ID}")

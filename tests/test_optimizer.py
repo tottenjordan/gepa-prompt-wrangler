@@ -16,9 +16,12 @@ from wrangler.optimize.optimizer import _create_wrapper_module, _prewarm_mcp_too
 # Mirrors the implementation inside _patch_adk() in optimizer.py.
 
 _SMART_CHARS = {
-    0x2018: "'", 0x2019: "'",
-    0x201C: '"', 0x201D: '"',
-    0x2013: "-", 0x2014: "-",
+    0x2018: "'",
+    0x2019: "'",
+    0x201C: '"',
+    0x201D: '"',
+    0x2013: "-",
+    0x2014: "-",
     0x2026: "...",
 }
 
@@ -26,11 +29,11 @@ _SMART_CHARS = {
 def _fuzzy_normalize(text):
     if not isinstance(text, str):
         return ""
-    text = unicodedata.normalize('NFKC', text)
+    text = unicodedata.normalize("NFKC", text)
     text = text.translate(_SMART_CHARS)
-    text = re.sub(r'^[\s*•\-"\']+', '', text)
-    text = re.sub(r'[\s*•\-"\']+$', '', text)
-    text = re.sub(r'\s+', ' ', text)
+    text = re.sub(r'^[\s*•\-"\']+', "", text)
+    text = re.sub(r'[\s*•\-"\']+$', "", text)
+    text = re.sub(r"\s+", " ", text)
     return text.lower().strip()
 
 
@@ -52,12 +55,14 @@ class TestCreateWrapperModule:
 
     def test_patch_adk_is_callable(self):
         from wrangler.optimize.optimizer import _patch_adk
+
         assert callable(_patch_adk)
 
 
 def _make_toolset(tools=None, fail=False):
     """Create a mock MCP toolset (BaseToolset subclass)."""
     from google.adk.tools.base_toolset import BaseToolset
+
     ts = MagicMock(spec=BaseToolset)
     if fail:
         ts.get_tools = AsyncMock(side_effect=ConnectionError("timeout"))
@@ -162,17 +167,20 @@ class TestFuzzyNormalize:
 
     RUBRIC = "the response correctly uses tools"
 
-    @pytest.mark.parametrize("label,input_text", [
-        ("exact", "The response correctly uses tools"),
-        ("markdown_bullet", "- The response correctly uses tools"),
-        ("bullet_bold", "* **The response correctly uses tools**"),
-        ("smart_double_quotes", "“The response correctly uses tools”"),
-        ("double_spaces", "The  response  correctly  uses  tools"),
-        ("em_dash_prefix", "— The response correctly uses tools"),
-        ("en_dash_prefix", "– The response correctly uses tools"),
-        ("unicode_bullet", "• The response correctly uses tools"),
-        ("leading_whitespace", "   The response correctly uses tools"),
-    ])
+    @pytest.mark.parametrize(
+        "label,input_text",
+        [
+            ("exact", "The response correctly uses tools"),
+            ("markdown_bullet", "- The response correctly uses tools"),
+            ("bullet_bold", "* **The response correctly uses tools**"),
+            ("smart_double_quotes", "“The response correctly uses tools”"),
+            ("double_spaces", "The  response  correctly  uses  tools"),
+            ("em_dash_prefix", "— The response correctly uses tools"),
+            ("en_dash_prefix", "– The response correctly uses tools"),
+            ("unicode_bullet", "• The response correctly uses tools"),
+            ("leading_whitespace", "   The response correctly uses tools"),
+        ],
+    )
     def test_garbled_text_matches_rubric(self, label, input_text):
         assert _fuzzy_normalize(input_text) == self.RUBRIC
 
@@ -208,8 +216,7 @@ class TestSubstringUniquenessGuard:
 
         if not result:
             candidates = [
-                r for ct, r in normalized_map.items()
-                if ct in judge_text or judge_text in ct
+                r for ct, r in normalized_map.items() if ct in judge_text or judge_text in ct
             ]
             if len(candidates) == 1:
                 result = candidates[0]
@@ -226,8 +233,7 @@ class TestSubstringUniquenessGuard:
 
         if not result:
             candidates = [
-                r for ct, r in normalized_map.items()
-                if ct in judge_text or judge_text in ct
+                r for ct, r in normalized_map.items() if ct in judge_text or judge_text in ct
             ]
             if len(candidates) == 1:
                 result = candidates[0]

@@ -212,7 +212,9 @@ def _extract_per_case_scores(evaluation_run) -> list[dict[str, float]]:
         if item_results is None:
             per_case = _extract_per_case_via_api(evaluation_run)
             if not per_case:
-                print("  Warning: evaluation_item_results is None and API fallback returned no results")
+                print(
+                    "  Warning: evaluation_item_results is None and API fallback returned no results"
+                )
             return per_case
 
         case_results = getattr(item_results, "eval_case_results", None)
@@ -226,10 +228,16 @@ def _extract_per_case_scores(evaluation_run) -> list[dict[str, float]]:
             if candidates:
                 metric_results = getattr(candidates[0], "metric_results", None)
                 if metric_results:
-                    items_dict = metric_results if isinstance(metric_results, dict) else dict(metric_results)
+                    items_dict = (
+                        metric_results if isinstance(metric_results, dict) else dict(metric_results)
+                    )
                     for metric_key, metric_val in items_dict.items():
                         short = metric_key.split("/")[-1] if "/" in metric_key else metric_key
-                        score = getattr(metric_val, "score", None) if not isinstance(metric_val, (int, float)) else metric_val
+                        score = (
+                            getattr(metric_val, "score", None)
+                            if not isinstance(metric_val, (int, float))
+                            else metric_val
+                        )
                         if score is not None:
                             case_scores[short] = float(score)
             per_case.append(case_scores)
@@ -361,7 +369,11 @@ def _retry_failed_cases(
 
     for idx, row in result_df.iterrows():
         response = row.get("response")
-        if response is None or (not isinstance(response, dict) and pd.isna(response)) or response == "":
+        if (
+            response is None
+            or (not isinstance(response, dict) and pd.isna(response))
+            or response == ""
+        ):
             failed_indices.append(idx)
         elif isinstance(response, dict) and "error" in response:
             failed_indices.append(idx)
@@ -372,13 +384,21 @@ def _retry_failed_cases(
         return inference_result
 
     n_failed = len(failed_indices)
-    print(f"  {tag}Detected {n_failed}/{len(result_df)} failed cases — waiting 30s for rate limit cooldown...", flush=True)
+    print(
+        f"  {tag}Detected {n_failed}/{len(result_df)} failed cases — waiting 30s for rate limit cooldown...",
+        flush=True,
+    )
     time.sleep(30)
 
     failed_eval_df = eval_df.iloc[failed_indices].reset_index(drop=True)
     retry_result = _run_batched_inference(
-        client, agent_resource, failed_eval_df,
-        batch_size=2, delay=20.0, max_workers=2, tag=f"{tag}retry ",
+        client,
+        agent_resource,
+        failed_eval_df,
+        batch_size=2,
+        delay=20.0,
+        max_workers=2,
+        tag=f"{tag}retry ",
     )
 
     recovered = 0
@@ -420,19 +440,36 @@ def run_batch_eval(
     batch_size, delay, max_workers = get_batch_config(model)
 
     if batch_size < len(eval_cases):
-        print(f"  {tag}Inference: sending {len(eval_cases)} cases in batches of {batch_size} "
-              f"({max_workers} workers, {delay}s delay) to engine {engine_id}...", flush=True)
+        print(
+            f"  {tag}Inference: sending {len(eval_cases)} cases in batches of {batch_size} "
+            f"({max_workers} workers, {delay}s delay) to engine {engine_id}...",
+            flush=True,
+        )
     else:
-        print(f"  {tag}Inference: sending {len(eval_cases)} cases to engine {engine_id}...", flush=True)
+        print(
+            f"  {tag}Inference: sending {len(eval_cases)} cases to engine {engine_id}...",
+            flush=True,
+        )
 
     t0 = time.time()
     inference_result = _run_batched_inference(
-        client, agent_resource, eval_df, batch_size, delay, max_workers, tag,
+        client,
+        agent_resource,
+        eval_df,
+        batch_size,
+        delay,
+        max_workers,
+        tag,
     )
 
     if retry_failed:
         inference_result = _retry_failed_cases(
-            client, agent_resource, eval_df, inference_result, model, tag,
+            client,
+            agent_resource,
+            eval_df,
+            inference_result,
+            model,
+            tag,
         )
 
     print(f"  {tag}Inference complete ({_fmt_elapsed(t0)})", flush=True)
@@ -449,7 +486,9 @@ def run_batch_eval(
         invalid_mask = invalid_mask | result_df["agent_data"].apply(_is_invalid)
     n_invalid = invalid_mask.sum()
     if n_invalid > 0:
-        print(f"  {tag}Dropped {n_invalid}/{len(result_df)} rows with invalid agent_data", flush=True)
+        print(
+            f"  {tag}Dropped {n_invalid}/{len(result_df)} rows with invalid agent_data", flush=True
+        )
         clean_df = result_df[~invalid_mask].reset_index(drop=True)
         inference_result = types.EvaluationDataset(eval_dataset_df=clean_df)
 
@@ -485,7 +524,9 @@ def run_batch_eval(
         return EvalResult()
 
     if "SUCCEEDED" not in state:
-        print(f"  {tag}ERROR: Eval run timed out after {MAX_POLL_SECONDS}s (state={state}). Re-run this pair.")
+        print(
+            f"  {tag}ERROR: Eval run timed out after {MAX_POLL_SECONDS}s (state={state}). Re-run this pair."
+        )
         return EvalResult()
 
     print(f"  {tag}Fetching per-case results...", flush=True)
@@ -500,11 +541,16 @@ def run_batch_eval(
     for case_scores in per_case:
         # Same single-tool-use-metric clobber assumption as above.
         if _TOOL_USE_METRIC_NAME in case_scores:
-            case_scores[_alias_tool_use_key(_TOOL_USE_METRIC_NAME)] = case_scores.pop(_TOOL_USE_METRIC_NAME)
+            case_scores[_alias_tool_use_key(_TOOL_USE_METRIC_NAME)] = case_scores.pop(
+                _TOOL_USE_METRIC_NAME
+            )
     token_usage = _estimate_token_usage(inference_result.eval_dataset_df)
 
-    print(f"  {tag}Eval complete — total: {_fmt_elapsed(t0)}, {len(scores)} metrics, {len(per_case)} cases, "
-          f"~{token_usage['input_tokens']:,} in / ~{token_usage['output_tokens']:,} out tokens (est.)", flush=True)
+    print(
+        f"  {tag}Eval complete — total: {_fmt_elapsed(t0)}, {len(scores)} metrics, {len(per_case)} cases, "
+        f"~{token_usage['input_tokens']:,} in / ~{token_usage['output_tokens']:,} out tokens (est.)",
+        flush=True,
+    )
     return EvalResult(scores=scores, per_case=per_case, token_usage=token_usage)
 
 
@@ -519,22 +565,37 @@ def run_batch_eval_averaged(
 ) -> EvalResult:
     """Run batch eval N times and return averaged scores with std dev."""
     if num_runs <= 1:
-        return run_batch_eval(engine_id, eval_cases, metrics=metrics, agent_name=agent_name,
-                              model=model, retry_failed=retry_failed)
+        return run_batch_eval(
+            engine_id,
+            eval_cases,
+            metrics=metrics,
+            agent_name=agent_name,
+            model=model,
+            retry_failed=retry_failed,
+        )
 
     tag = f"[{agent_name}] " if agent_name else ""
     all_results: list[EvalResult] = []
 
     for i in range(num_runs):
         print(f"  {tag}Run {i + 1}/{num_runs}...", flush=True)
-        result = run_batch_eval(engine_id, eval_cases, metrics=metrics, agent_name=agent_name,
-                                model=model, retry_failed=retry_failed)
+        result = run_batch_eval(
+            engine_id,
+            eval_cases,
+            metrics=metrics,
+            agent_name=agent_name,
+            model=model,
+            retry_failed=retry_failed,
+        )
         if result.scores:
             all_results.append(result)
             avg = sum(result.scores.values()) / max(len(result.scores), 1)
             print(f"  {tag}Run {i + 1}/{num_runs} avg: {avg:.3f}", flush=True)
         else:
-            print(f"  {tag}Run {i + 1}/{num_runs} returned no scores (skipping from average)", flush=True)
+            print(
+                f"  {tag}Run {i + 1}/{num_runs} returned no scores (skipping from average)",
+                flush=True,
+            )
 
     if not all_results:
         print(f"  {tag}WARNING: All {num_runs} runs returned no scores", flush=True)
@@ -573,7 +634,10 @@ def run_batch_eval_averaged(
     successful = len(all_results)
     skipped = num_runs - successful
     skip_note = f" ({skipped} skipped — timeout/failure)" if skipped else ""
-    print(f"  {tag}Averaged {successful}/{num_runs} runs — overall: {overall:.3f}{skip_note}", flush=True)
+    print(
+        f"  {tag}Averaged {successful}/{num_runs} runs — overall: {overall:.3f}{skip_note}",
+        flush=True,
+    )
 
     return EvalResult(
         scores=avg_scores,

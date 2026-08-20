@@ -101,9 +101,8 @@ EXPENSE_CATEGORIES = set(POLICY_LIMITS.keys())
 # User IDs: union of booking owners and (would-be) expense owners. The booking
 # mock_db alone covers EMP001-EMP004; union with expense_db owners for safety.
 from mcp_servers.expense.mock_db import expenses as _EXPENSES
-USER_IDS = {b["user_id"] for b in BOOKINGS.values()} | {
-    e["user_id"] for e in _EXPENSES.values()
-}
+
+USER_IDS = {b["user_id"] for b in BOOKINGS.values()} | {e["user_id"] for e in _EXPENSES.values()}
 
 # Per-arg existence rules: arg name -> (valid set, label).
 _EXISTENCE_RULES = {
@@ -158,8 +157,7 @@ def test_eval_cases_structural_integrity():
             # Check 1: tool name is known.
             if name not in VALID_TOOL_NAMES:
                 violations.append(
-                    f"{label}: unknown tool name {name!r} "
-                    f"(not in {sorted(VALID_TOOL_NAMES)})"
+                    f"{label}: unknown tool name {name!r} (not in {sorted(VALID_TOOL_NAMES)})"
                 )
                 # Can't check args against an unknown signature.
                 continue
@@ -185,9 +183,7 @@ def test_eval_cases_structural_integrity():
 
             # Check 4: list_all_bookings must have empty args.
             if name == "wrangler_booking_mcp_list_all_bookings" and args != {}:
-                violations.append(
-                    f"{label}: tool {name!r} must have empty args, got {args!r}"
-                )
+                violations.append(f"{label}: tool {name!r} must have empty args, got {args!r}")
 
             # Check 5: referenced-ID / enum existence.
             if is_error_handling:

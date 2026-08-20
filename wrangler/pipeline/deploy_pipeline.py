@@ -14,6 +14,7 @@ from dotenv import load_dotenv
 load_dotenv(override=True)
 
 from ..core.config import disable_pyopenssl
+
 disable_pyopenssl()
 
 logger = logging.getLogger(__name__)
@@ -34,9 +35,18 @@ def _image_exists(image_uri: str) -> bool:
     """Check if the image already exists in Artifact Registry."""
     try:
         result = subprocess.run(
-            ["gcloud", "artifacts", "docker", "images", "describe", image_uri,
-             "--format=value(image_summary.digest)"],
-            capture_output=True, text=True, timeout=30,
+            [
+                "gcloud",
+                "artifacts",
+                "docker",
+                "images",
+                "describe",
+                image_uri,
+                "--format=value(image_summary.digest)",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=30,
         )
         return result.returncode == 0 and result.stdout.strip() != ""
     except (subprocess.TimeoutExpired, FileNotFoundError):
@@ -67,44 +77,87 @@ def build_pipeline_image(
 
     # Ensure Artifact Registry repo exists
     subprocess.run(
-        ["gcloud", "artifacts", "repositories", "describe", IMAGE_REPO,
-         "--location", region, "--project", project_id],
-        capture_output=True, text=True,
+        [
+            "gcloud",
+            "artifacts",
+            "repositories",
+            "describe",
+            IMAGE_REPO,
+            "--location",
+            region,
+            "--project",
+            project_id,
+        ],
+        capture_output=True,
+        text=True,
     )
     repo_check = subprocess.run(
-        ["gcloud", "artifacts", "repositories", "describe", IMAGE_REPO,
-         "--location", region, "--project", project_id],
-        capture_output=True, text=True,
+        [
+            "gcloud",
+            "artifacts",
+            "repositories",
+            "describe",
+            IMAGE_REPO,
+            "--location",
+            region,
+            "--project",
+            project_id,
+        ],
+        capture_output=True,
+        text=True,
     )
     if repo_check.returncode != 0:
         logger.info(f"Creating Artifact Registry repo: {IMAGE_REPO}")
         subprocess.run(
-            ["gcloud", "artifacts", "repositories", "create", IMAGE_REPO,
-             "--repository-format=docker", "--location", region,
-             "--project", project_id,
-             "--labels=solution=promp-wrangler"],
-            check=True, capture_output=True, text=True,
+            [
+                "gcloud",
+                "artifacts",
+                "repositories",
+                "create",
+                IMAGE_REPO,
+                "--repository-format=docker",
+                "--location",
+                region,
+                "--project",
+                project_id,
+                "--labels=solution=promp-wrangler",
+            ],
+            check=True,
+            capture_output=True,
+            text=True,
         )
 
     cloudbuild_config = {
-        "steps": [{
-            "name": "gcr.io/cloud-builders/docker",
-            "args": ["build", "-t", image_uri, "-f", "Dockerfile.pipeline", "."],
-        }],
+        "steps": [
+            {
+                "name": "gcr.io/cloud-builders/docker",
+                "args": ["build", "-t", image_uri, "-f", "Dockerfile.pipeline", "."],
+            }
+        ],
         "images": [image_uri],
         "timeout": "1200s",
     }
     import yaml
+
     cb_path = project_root / "cloudbuild_pipeline.yaml"
     cb_path.write_text(yaml.dump(cloudbuild_config))
 
     result = subprocess.run(
-        ["gcloud", "builds", "submit",
-         "--project", project_id,
-         "--region", location,
-         "--config", str(cb_path),
-         str(project_root)],
-        capture_output=True, text=True, timeout=1500,
+        [
+            "gcloud",
+            "builds",
+            "submit",
+            "--project",
+            project_id,
+            "--region",
+            location,
+            "--config",
+            str(cb_path),
+            str(project_root),
+        ],
+        capture_output=True,
+        text=True,
+        timeout=1500,
     )
     cb_path.unlink(missing_ok=True)
     if result.returncode != 0:
@@ -127,8 +180,15 @@ def package_and_upload_code(
     tarball_path = "/tmp/wrangler_code.tar.gz"
 
     excludes = {
-        ".venv", ".git", ".claude", "__pycache__", ".pytest_cache",
-        "outputs", "experiments", "node_modules", ".mypy_cache",
+        ".venv",
+        ".git",
+        ".claude",
+        "__pycache__",
+        ".pytest_cache",
+        "outputs",
+        "experiments",
+        "node_modules",
+        ".mypy_cache",
         "_geap_build_pkg",
     }
 
@@ -172,20 +232,26 @@ def deploy_pipeline(
     manifest_path_p = Path(manifest_path)
     if manifest_path_p.exists():
         import yaml
+
         with open(manifest_path_p) as f:
             raw = yaml.safe_load(f)
         pipeline_config = raw.get("pipeline", {})
 
     project_id = os.getenv("GCP_PROJECT_ID", "")
     location = pipeline_config.get("region", os.getenv("GCP_REGION", "us-central1"))
-    bucket_name = pipeline_config.get("bucket", os.getenv("GCP_STAGING_BUCKET", f"{project_id}-wrangler-staging"))
-    service_account = pipeline_config.get("service_account", os.getenv("PIPELINE_SERVICE_ACCOUNT", ""))
+    bucket_name = pipeline_config.get(
+        "bucket", os.getenv("GCP_STAGING_BUCKET", f"{project_id}-wrangler-staging")
+    )
+    service_account = pipeline_config.get(
+        "service_account", os.getenv("PIPELINE_SERVICE_ACCOUNT", "")
+    )
     secret_id = pipeline_config.get("secret_id", "")
 
     # run_id is deterministic from inputs so KFP caching works across submissions.
     # job_id gets a unique timestamp suffix so Vertex AI doesn't reject duplicates.
     if not run_id:
         import hashlib
+
         cache_key = hashlib.md5(
             f"{manifest.name}:{manifest.agent_module}:{manifest.eval_data}:"
             f"{','.join(p.id for p in manifest.pairs)}".encode()
@@ -205,7 +271,8 @@ def deploy_pipeline(
         "eval_config": manifest.eval_config,
         "pairs": [
             {
-                "id": p.id, "model": p.model,
+                "id": p.id,
+                "model": p.model,
                 "system_prompt": p.system_prompt,
                 "description": p.description,
                 "engine_id": p.engine_id,
@@ -219,7 +286,8 @@ def deploy_pipeline(
 
     pairs_json = [
         {
-            "id": p.id, "model": p.model,
+            "id": p.id,
+            "model": p.model,
             "system_prompt": p.system_prompt,
             "engine_id": p.engine_id,
             "agent_module": p.agent_module,
@@ -237,12 +305,15 @@ def deploy_pipeline(
     package_and_upload_code(bucket_name, run_id, project_id)
 
     from google.cloud import storage as _storage
+
     _gcs = _storage.Client(project=project_id)
     _gcs.bucket(bucket_name).blob(f"pipeline-runs/{run_id}/manifest.json").upload_from_string(
-        manifest_json, content_type="application/json")
+        manifest_json, content_type="application/json"
+    )
 
     # Step 3: Compile pipeline with the built image
     from .dag import build_pipeline
+
     pipeline_func = build_pipeline(image_uri)
 
     pipeline_yaml = f"/tmp/gepa_pipeline_{run_id}.yaml"

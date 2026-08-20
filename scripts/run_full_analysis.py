@@ -26,16 +26,20 @@ def main(skip_diagrams: bool = False):
     print("GEPA Prompt Wrangler — Full Analysis Pipeline\n")
 
     # Step 1: Charts + per-agent reports
-    ok = run_step("Step 1: Generate Charts & Agent Reports",
-                   ["uv", "run", "python", "scripts/generate_analysis.py"])
+    ok = run_step(
+        "Step 1: Generate Charts & Agent Reports",
+        ["uv", "run", "python", "scripts/generate_analysis.py"],
+    )
     if not ok:
         print("Analysis generation failed.")
         return
 
     # Step 2: Architecture diagrams
     if not skip_diagrams:
-        run_step("Step 2: Generate Architecture Diagrams",
-                 ["uv", "run", "python", "scripts/generate_diagrams.py"])
+        run_step(
+            "Step 2: Generate Architecture Diagrams",
+            ["uv", "run", "python", "scripts/generate_diagrams.py"],
+        )
     else:
         print("\nStep 2: Skipping diagrams (--skip-diagrams)")
 

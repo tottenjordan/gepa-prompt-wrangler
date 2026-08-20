@@ -47,7 +47,10 @@ dev = [
 [tool.ruff]
 line-length = 100
 target-version = "py311"
-extend-exclude = ["experiments", "outputs", "_geap_build_pkg"]
+# *.md is excluded because ruff reformats Python code blocks inside Markdown.
+# docs/notes/ quotes upstream ADK source verbatim (2-space Google style) as
+# evidence; reformatting it to 4-space would make those quotes misleading.
+extend-exclude = ["experiments", "outputs", "_geap_build_pkg", "*.md"]
 
 [tool.ruff.lint]
 select = ["ALL"]

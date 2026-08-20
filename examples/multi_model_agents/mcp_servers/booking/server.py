@@ -1,9 +1,11 @@
 """Booking MCP server — exposes flight and hotel booking tools over StreamableHTTP."""
 
 import logging
+
 logging.basicConfig(level=logging.INFO)
 try:
     from otel_setup import setup_opentelemetry
+
     setup_opentelemetry("booking-mcp")
 except Exception as e:
     logging.warning("OTel setup failed: %s", e)
@@ -39,11 +41,15 @@ def book_hotel(hotel_id: str, guest_name: str, checkin: str, checkout: str) -> d
         checkin: Check-in date (YYYY-MM-DD)
         checkout: Check-out date (YYYY-MM-DD)
     """
-    return create_booking("hotel", hotel_id, {
-        "guest_name": guest_name,
-        "checkin": checkin,
-        "checkout": checkout,
-    })
+    return create_booking(
+        "hotel",
+        hotel_id,
+        {
+            "guest_name": guest_name,
+            "checkin": checkin,
+            "checkout": checkout,
+        },
+    )
 
 
 @mcp.tool()

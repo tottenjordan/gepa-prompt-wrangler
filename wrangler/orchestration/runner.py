@@ -31,7 +31,13 @@ def _fmt_duration(seconds: float) -> str:
 
 
 class WranglerPipeline:
-    def __init__(self, manifest_path: str, max_concurrent: int = 1, version: str | None = None, num_runs: int = 1):
+    def __init__(
+        self,
+        manifest_path: str,
+        max_concurrent: int = 1,
+        version: str | None = None,
+        num_runs: int = 1,
+    ):
         self.manifest = PairFactory.load(manifest_path)
         self.manifest_dir = Path(manifest_path).parent
         self.results: dict[str, dict] = {}
@@ -50,8 +56,10 @@ class WranglerPipeline:
         elapsed = time.time() - t0
         self._phase_times.append((name, elapsed))
         total = time.time() - self._pipeline_start
-        print(f"\n  >> {name} complete ({_fmt_duration(elapsed)}) "
-              f"[total elapsed: {_fmt_duration(total)}]")
+        print(
+            f"\n  >> {name} complete ({_fmt_duration(elapsed)}) "
+            f"[total elapsed: {_fmt_duration(total)}]"
+        )
 
     def load_results(self, results_path: str):
         """Load previous results JSON to resume from a later phase."""
@@ -78,6 +86,7 @@ class WranglerPipeline:
         prompts_dir = self.manifest_dir / "prompts"
         if prompts_dir.exists():
             import re
+
             for py_file in prompts_dir.glob("*_prompts.py"):
                 for match in re.finditer(r"wrangler_v(\d+)", py_file.read_text()):
                     max_ver = max(max_ver, int(match.group(1)))
@@ -162,7 +171,9 @@ class WranglerPipeline:
             fallback = Path(self.manifest.agent_module)
         return fallback
 
-    def _save_optimized_prompt(self, pair: AgentPromptPair, prompt: str, version: str | None = None):
+    def _save_optimized_prompt(
+        self, pair: AgentPromptPair, prompt: str, version: str | None = None
+    ):
         """Save optimized prompt to the agent's prompts.py file."""
         agent_ref = pair.agent_module or self.manifest.agent_module
         stem = Path(agent_ref).stem.replace("_agent", "")
@@ -184,6 +195,7 @@ class WranglerPipeline:
 
         content = prompts_file.read_text()
         import ast
+
         tree = ast.parse(content)
         optimized_node = None
         for node in ast.walk(tree):
@@ -196,7 +208,9 @@ class WranglerPipeline:
             print(f"  [{pair.id}] Warning: OPTIMIZED dict not found in {prompts_file}", flush=True)
             return
 
-        optimized_dict = ast.literal_eval(content[content.index("OPTIMIZED =") + len("OPTIMIZED ="):])
+        optimized_dict = ast.literal_eval(
+            content[content.index("OPTIMIZED =") + len("OPTIMIZED =") :]
+        )
         optimized_dict[version] = entry
 
         lines = [f'    "{version}": {{']
@@ -253,7 +267,9 @@ class WranglerPipeline:
         def _eval_one(pair: AgentPromptPair) -> tuple[str, EvalResult, float]:
             engine_id = self.results[pair.id]["engine_id"]
             t0 = time.time()
-            result = run_batch_eval_averaged(engine_id, eval_cases, num_runs=self.num_runs, agent_name=pair.id)
+            result = run_batch_eval_averaged(
+                engine_id, eval_cases, num_runs=self.num_runs, agent_name=pair.id
+            )
             elapsed = time.time() - t0
             return pair.id, result, elapsed
 
@@ -280,10 +296,13 @@ class WranglerPipeline:
                 _record(pair_id, result, elapsed)
         else:
             for batch_start in range(0, len(pairs), mc):
-                batch = pairs[batch_start:batch_start + mc]
+                batch = pairs[batch_start : batch_start + mc]
                 batch_num = batch_start // mc + 1
                 total_batches = (len(pairs) + mc - 1) // mc
-                print(f"\n  --- Batch {batch_num}/{total_batches} ({len(batch)} agents) ---", flush=True)
+                print(
+                    f"\n  --- Batch {batch_num}/{total_batches} ({len(batch)} agents) ---",
+                    flush=True,
+                )
 
                 with ThreadPoolExecutor(max_workers=mc) as pool:
                     futures = {pool.submit(_eval_one, pair): pair for pair in batch}
@@ -331,17 +350,24 @@ class WranglerPipeline:
         n_pairs = len(self.manifest.pairs)
 
         for pair in self.manifest.pairs:
-            self.results.setdefault(pair.id, {
-                "model": pair.model,
-                "original_prompt": pair.system_prompt,
-            })
+            self.results.setdefault(
+                pair.id,
+                {
+                    "model": pair.model,
+                    "original_prompt": pair.system_prompt,
+                },
+            )
 
         self.results["_eval_metadata"] = {
             "version": self._next_version(),
             "num_runs": self.num_runs,
             "case_count": len(eval_cases),
             "cases": [
-                {"tier": c.get("tier", ""), "category": c.get("category", ""), "prompt": c.get("prompt", "")}
+                {
+                    "tier": c.get("tier", ""),
+                    "category": c.get("category", ""),
+                    "prompt": c.get("prompt", ""),
+                }
                 for c in eval_cases
             ],
         }
@@ -354,7 +380,9 @@ class WranglerPipeline:
             with self._phase("Phase 1: Deploy to GEAP"):
                 for i, pair in enumerate(self.manifest.pairs, 1):
                     if pair.engine_id:
-                        print(f"  [{pair.id}] ({i}/{n_pairs}) Using existing engine: {pair.engine_id}")
+                        print(
+                            f"  [{pair.id}] ({i}/{n_pairs}) Using existing engine: {pair.engine_id}"
+                        )
                         self.results[pair.id]["engine_id"] = pair.engine_id
                     else:
                         print(f"  [{pair.id}] ({i}/{n_pairs}) Deploying...", end="", flush=True)

@@ -20,7 +20,8 @@ class TestSaveOptimizedPrompt:
         prompts_dir = prompt_module_dir("test")
         try:
             version = save_optimized_prompt(
-                "test", "New optimized prompt text",
+                "test",
+                "New optimized prompt text",
                 version_name="v1",
                 prompts_dir=prompts_dir,
             )
@@ -34,7 +35,8 @@ class TestSaveOptimizedPrompt:
         prompts_dir = prompt_module_dir("test")
         try:
             version = save_optimized_prompt(
-                "test", "Prompt text",
+                "test",
+                "Prompt text",
                 prompts_dir=prompts_dir,
             )
             assert version.startswith("wrangler_v_")
@@ -45,7 +47,8 @@ class TestSaveOptimizedPrompt:
         prompts_dir = prompt_module_dir("test")
         try:
             version = save_optimized_prompt(
-                "test", "Prompt text",
+                "test",
+                "Prompt text",
                 version_name="my_custom_v1",
                 prompts_dir=prompts_dir,
             )
@@ -57,7 +60,8 @@ class TestSaveOptimizedPrompt:
         prompts_dir = prompt_module_dir("test")
         try:
             save_optimized_prompt(
-                "test", "Prompt for raw file",
+                "test",
+                "Prompt for raw file",
                 version_name="v1",
                 prompts_dir=prompts_dir,
             )
@@ -71,7 +75,8 @@ class TestSaveOptimizedPrompt:
     def test_file_not_found_raises(self):
         with pytest.raises(FileNotFoundError):
             save_optimized_prompt(
-                "nonexistent", "Prompt",
+                "nonexistent",
+                "Prompt",
                 prompts_dir="/nonexistent/path/prompts",
             )
 
@@ -79,13 +84,15 @@ class TestSaveOptimizedPrompt:
         prompts_dir = prompt_module_dir("test")
         try:
             save_optimized_prompt(
-                "test", "First prompt",
+                "test",
+                "First prompt",
                 version_name="v1",
                 prompts_dir=prompts_dir,
             )
             _cleanup_prompt_modules()
             save_optimized_prompt(
-                "test", "Second prompt",
+                "test",
+                "Second prompt",
                 version_name="v2",
                 prompts_dir=prompts_dir,
             )
@@ -101,7 +108,8 @@ class TestSaveOptimizedPrompt:
         prompts_dir = prompt_module_dir("test")
         try:
             save_optimized_prompt(
-                "test", 'Prompt with """triple quotes""" inside',
+                "test",
+                'Prompt with """triple quotes""" inside',
                 version_name="v1",
                 prompts_dir=prompts_dir,
             )
@@ -124,7 +132,8 @@ class TestListVersions:
         prompts_dir = prompt_module_dir("test")
         try:
             save_optimized_prompt(
-                "test", "Saved prompt",
+                "test",
+                "Saved prompt",
                 version_name="v1",
                 prompts_dir=prompts_dir,
             )

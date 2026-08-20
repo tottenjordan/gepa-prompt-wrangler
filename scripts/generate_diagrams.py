@@ -11,6 +11,7 @@ import subprocess
 from pathlib import Path
 
 import sys
+
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from wrangler.core.config import PAPERBANANA_PROJECT, PAPERBANANA_LOCATION, DIAGRAMS_DIR
@@ -36,14 +37,24 @@ def generate_diagram(source_path: str, caption: str, output_dir: str = None):
     env["GOOGLE_CLOUD_LOCATION"] = PAPERBANANA_LOCATION
 
     cmd = [
-        "uv", "run", "paperbanana", "generate",
-        "-i", source_path,
-        "-c", caption,
-        "-o", str(dest),
-        "--vlm-provider", "gemini",
-        "--image-provider", "google_imagen",
-        "--image-model", "gemini-3-pro-image",
-        "-n", "2",
+        "uv",
+        "run",
+        "paperbanana",
+        "generate",
+        "-i",
+        source_path,
+        "-c",
+        caption,
+        "-o",
+        str(dest),
+        "--vlm-provider",
+        "gemini",
+        "--image-provider",
+        "google_imagen",
+        "--image-model",
+        "gemini-3-pro-image",
+        "-n",
+        "2",
     ]
 
     print(f"  Generating: {Path(source_path).stem}...")
@@ -56,11 +67,13 @@ def generate_diagram(source_path: str, caption: str, output_dir: str = None):
     # PaperBanana may write to a run-specific dir instead of -o path
     if not dest.exists():
         import glob
+
         run_dirs = sorted(glob.glob(str(Path(output_dir) / "run_*")), reverse=True)
         for run_dir in run_dirs:
             final = Path(run_dir) / "final_output.png"
             if final.exists():
                 import shutil
+
                 shutil.copy2(str(final), str(dest))
                 break
 

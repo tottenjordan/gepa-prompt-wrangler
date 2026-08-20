@@ -26,6 +26,7 @@ class TestInspectFunctionTool:
         def search_flights(origin: str, destination: str):
             """Search for available flights."""
             pass
+
         spec = _inspect_function_tool(search_flights)
         assert spec.name == "search_flights"
         assert spec.description == "Search for available flights."
@@ -36,6 +37,7 @@ class TestInspectFunctionTool:
         def func(count: int, price: float, active: bool):
             """Test."""
             pass
+
         spec = _inspect_function_tool(func)
         assert spec.parameters["count"]["type"] == "integer"
         assert spec.parameters["price"]["type"] == "number"
@@ -45,6 +47,7 @@ class TestInspectFunctionTool:
         def func(name):
             """Test."""
             pass
+
         spec = _inspect_function_tool(func)
         assert spec.parameters["name"]["type"] == "string"
 
@@ -52,6 +55,7 @@ class TestInspectFunctionTool:
         def func(required_param: str, optional_param: str = "default"):
             """Test."""
             pass
+
         spec = _inspect_function_tool(func)
         assert spec.parameters["required_param"]["required"] is True
         assert spec.parameters["optional_param"]["required"] is False
@@ -60,6 +64,7 @@ class TestInspectFunctionTool:
         def method(self, name: str):
             """Test."""
             pass
+
         spec = _inspect_function_tool(method)
         assert "self" not in spec.parameters
         assert "name" in spec.parameters
@@ -68,7 +73,8 @@ class TestInspectFunctionTool:
 class TestAgentInspectorToYaml:
     def test_yaml_output_structure(self):
         spec = AgentSpec(
-            name="test_agent", model="gemini-2.0-flash",
+            name="test_agent",
+            model="gemini-2.0-flash",
             instruction="Be helpful.",
             tools=[
                 ToolSpec(name="tool1", description="First tool"),

@@ -40,6 +40,7 @@ def thresholds_from_sampler_config(sampler_cfg_path: Path) -> dict[str, float]:
     'threshold' key. Returns {} if the file is missing/unreadable.
     """
     import json
+
     try:
         with open(sampler_cfg_path) as f:
             cfg = json.load(f)
@@ -64,6 +65,7 @@ def _validate_sampler_config(
 ) -> None:
     """Warn about sampler config / judge-model misalignment before optimization."""
     import json
+
     try:
         with open(sampler_cfg_path) as f:
             cfg = json.load(f)
@@ -78,8 +80,10 @@ def _validate_sampler_config(
         if isinstance(val, dict) and "judge_model_options" in val:
             cfg_judge = val["judge_model_options"].get("judge_model", "")
             if cfg_judge and cfg_judge != judge_model:
-                print(f"  [{pair_id}] Warning: sampler_config — judge model mismatch: "
-                      f"{key} uses '{cfg_judge}', experiment uses '{judge_model}'")
+                print(
+                    f"  [{pair_id}] Warning: sampler_config — judge model mismatch: "
+                    f"{key} uses '{cfg_judge}', experiment uses '{judge_model}'"
+                )
 
 
 def _post_eval_sanity_check(
@@ -89,13 +93,13 @@ def _post_eval_sanity_check(
 ) -> None:
     """Warn about common eval data issues after all pairs complete."""
     all_per_case_empty = all(
-        not stage_data.get(p.id, {}).get("per_case")
-        for p in pairs
-        if p.id in stage_data
+        not stage_data.get(p.id, {}).get("per_case") for p in pairs if p.id in stage_data
     )
     if all_per_case_empty and stage_data:
         print(f"\n  WARNING: All per_case arrays are empty in {stage_name}.")
-        print(f"  Tier/category analysis will be unavailable. Check _extract_per_case_scores() field mapping.")
+        print(
+            f"  Tier/category analysis will be unavailable. Check _extract_per_case_scores() field mapping."
+        )
 
     for p in pairs:
         scores = stage_data.get(p.id, {}).get("scores", {})
@@ -163,7 +167,9 @@ def _load_agent(manifest: Manifest, pair: AgentPromptPair, manifest_dir: Path | 
     )
 
 
-def _resolve_optimize_module(manifest: Manifest, pair: AgentPromptPair, manifest_dir: Path | None = None) -> Path:
+def _resolve_optimize_module(
+    manifest: Manifest, pair: AgentPromptPair, manifest_dir: Path | None = None
+) -> Path:
     """Resolve the GEPA-compatible optimization directory for a pair."""
     agent_ref = pair.agent_module or manifest.agent_module
     agent_path = Path(agent_ref)
@@ -231,12 +237,16 @@ def stage_deploy(exp: Experiment, pair_id: str | None = None) -> None:
         tag = f"[{pair.id}] ({i}/{len(pairs)})"
         if pair.engine_id:
             print(f"  {tag} Using existing engine: {pair.engine_id}")
-            exp.merge_pair("deploy", pair.id, {
-                "engine_id": pair.engine_id,
-                "model": pair.model,
-                "original_prompt": pair.system_prompt,
-                "source": "config",
-            })
+            exp.merge_pair(
+                "deploy",
+                pair.id,
+                {
+                    "engine_id": pair.engine_id,
+                    "model": pair.model,
+                    "original_prompt": pair.system_prompt,
+                    "source": "config",
+                },
+            )
         elif pair.id in deploy_data and deploy_data[pair.id].get("engine_id"):
             eid = deploy_data[pair.id]["engine_id"]
             print(f"  {tag} Already deployed: {eid}")
@@ -253,12 +263,16 @@ def stage_deploy(exp: Experiment, pair_id: str | None = None) -> None:
                 display_name=display,
             )
             print(f" {_fmt_duration(time.time() - t0)}")
-            exp.merge_pair("deploy", pair.id, {
-                "engine_id": engine_id,
-                "model": pair.model,
-                "original_prompt": pair.system_prompt,
-                "source": "deployed",
-            })
+            exp.merge_pair(
+                "deploy",
+                pair.id,
+                {
+                    "engine_id": engine_id,
+                    "model": pair.model,
+                    "original_prompt": pair.system_prompt,
+                    "source": "deployed",
+                },
+            )
 
 
 def stage_eval(
@@ -294,8 +308,12 @@ def stage_eval(
         print(f"\n  [{pair.id}] ({i}/{len(pairs)}) Evaluating ({phase})...", flush=True)
         t0 = time.time()
         result = run_batch_eval_averaged(
-            engine_id, eval_cases, num_runs=num_runs, agent_name=pair.id,
-            model=model, retry_failed=retry_failed,
+            engine_id,
+            eval_cases,
+            num_runs=num_runs,
+            agent_name=pair.id,
+            model=model,
+            retry_failed=retry_failed,
         )
         elapsed = time.time() - t0
 
@@ -307,14 +325,18 @@ def stage_eval(
             std_str = f" +/- {std:.3f}" if std else ""
             print(f"    {m:40s} {s:.2f}{std_str}")
 
-        exp.merge_pair(stage_name, pair.id, {
-            "scores": result.scores,
-            "per_case": result.per_case,
-            "scores_std": result.scores_std,
-            "num_runs": result.num_runs,
-            "elapsed": elapsed,
-            "token_usage": result.token_usage,
-        })
+        exp.merge_pair(
+            stage_name,
+            pair.id,
+            {
+                "scores": result.scores,
+                "per_case": result.per_case,
+                "scores_std": result.scores_std,
+                "num_runs": result.num_runs,
+                "elapsed": elapsed,
+                "token_usage": result.token_usage,
+            },
+        )
 
     # Post-eval sanity checks
     stage_data = exp.read_stage(stage_name)
@@ -356,12 +378,16 @@ def stage_optimize(exp: Experiment, pair_id: str | None = None) -> None:
         elapsed = time.time() - t0
         print(f"  [{pair.id}] Done ({_fmt_duration(elapsed)}) — {len(optimized)} chars")
 
-        exp.merge_pair("optimize", pair.id, {
-            "optimized_prompt": optimized,
-            "elapsed": elapsed,
-            "chars": len(optimized),
-            "thresholds": thresholds,
-        })
+        exp.merge_pair(
+            "optimize",
+            pair.id,
+            {
+                "optimized_prompt": optimized,
+                "elapsed": elapsed,
+                "chars": len(optimized),
+                "thresholds": thresholds,
+            },
+        )
 
         _save_optimized_prompt(exp, pair, optimized)
 
@@ -467,11 +493,15 @@ def stage_redeploy(exp: Experiment, pair_id: str | None = None) -> None:
         elapsed = time.time() - t0
         print(f" {_fmt_duration(elapsed)}")
 
-        exp.merge_pair("redeploy", pair.id, {
-            "engine_id": engine_id,
-            "updated_at": datetime.now().isoformat(timespec="seconds"),
-            "elapsed": elapsed,
-        })
+        exp.merge_pair(
+            "redeploy",
+            pair.id,
+            {
+                "engine_id": engine_id,
+                "updated_at": datetime.now().isoformat(timespec="seconds"),
+                "elapsed": elapsed,
+            },
+        )
 
 
 def stage_report(exp: Experiment, use_paperbanana: bool = True) -> None:
@@ -506,21 +536,28 @@ def stage_report(exp: Experiment, use_paperbanana: bool = True) -> None:
     eval_cases = load_eval_file(str(eval_path))
     results["_eval_metadata"] = {
         "cases": [
-            {"tier": c.get("tier", ""), "category": c.get("category", ""),
-             "prompt": c.get("prompt", ""), "index": i}
+            {
+                "tier": c.get("tier", ""),
+                "category": c.get("category", ""),
+                "prompt": c.get("prompt", ""),
+                "index": i,
+            }
             for i, c in enumerate(eval_cases)
         ]
     }
 
     import matplotlib
+
     matplotlib.use("Agg")
 
     from ..reporting.reporter import REPORTS_DIR, CHARTS_DIR
+
     original_reports = REPORTS_DIR
     original_charts = CHARTS_DIR
 
     try:
         from ..reporting import reporter
+
         reporter.REPORTS_DIR = exp.dir / "reports"
         reporter.CHARTS_DIR = exp.dir / "reports" / "charts"
         reporter.REPORTS_DIR.mkdir(parents=True, exist_ok=True)

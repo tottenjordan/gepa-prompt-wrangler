@@ -46,7 +46,10 @@ DEFAULT_QUERIES = [
     ("Search hotels in New York, then check if the rate fits lodging policy", "medium"),
     ("Check if a $100 meal and $250 entertainment expense are within policy", "medium"),
     ("Show expense history for EMP001 and flag policy violations", "medium"),
-    ("Book flight FL001 for Alice, check Grand Hyatt lodging policy, submit $75 meals for EMP001", "high"),
+    (
+        "Book flight FL001 for Alice, check Grand Hyatt lodging policy, submit $75 meals for EMP001",
+        "high",
+    ),
     ("Compare flights SFO-JFK vs LAX-ORD with hotel costs in each city", "high"),
     ("I have a $2000 budget for London. Find flights, hotels, check policies.", "high"),
 ]
@@ -162,19 +165,27 @@ if __name__ == "__main__":
 
     parser = argparse.ArgumentParser(description="Generate traffic for deployed agents")
     parser.add_argument(
-        "--agent-id", nargs="+", required=True,
+        "--agent-id",
+        nargs="+",
+        required=True,
         help="Agent Engine ID(s) to send traffic to",
     )
     parser.add_argument(
-        "--count", type=int, default=None,
+        "--count",
+        type=int,
+        default=None,
         help="Max number of queries per agent (default: all)",
     )
     parser.add_argument(
-        "--interval", type=float, default=1.0,
+        "--interval",
+        type=float,
+        default=1.0,
         help="Seconds between queries (default: 1.0)",
     )
     parser.add_argument(
-        "--eval-data", type=str, default=None,
+        "--eval-data",
+        type=str,
+        default=None,
         help="Path to eval YAML to use as query source",
     )
     args = parser.parse_args()

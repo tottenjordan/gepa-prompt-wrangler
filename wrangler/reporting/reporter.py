@@ -9,6 +9,7 @@ import tempfile
 from pathlib import Path
 
 import matplotlib
+
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
@@ -82,11 +83,15 @@ def _executive_summary(results: dict, ordered: list[str]) -> list[str]:
     lines.append("")
 
     if improved:
-        lines.append(f"- **Improved:** {', '.join(f'{n} ({agent_deltas[n]:+.3f})' for n in improved)}")
+        lines.append(
+            f"- **Improved:** {', '.join(f'{n} ({agent_deltas[n]:+.3f})' for n in improved)}"
+        )
     if stable:
         lines.append(f"- **Stable:** {', '.join(f'{n} ({agent_deltas[n]:+.3f})' for n in stable)}")
     if regressed:
-        lines.append(f"- **Regressed:** {', '.join(f'{n} ({agent_deltas[n]:+.3f})' for n in regressed)}")
+        lines.append(
+            f"- **Regressed:** {', '.join(f'{n} ({agent_deltas[n]:+.3f})' for n in regressed)}"
+        )
     lines.append("")
 
     metric_avg_deltas = {}
@@ -101,9 +106,13 @@ def _executive_summary(results: dict, ordered: list[str]) -> list[str]:
     best_metric = max(metric_avg_deltas, key=metric_avg_deltas.get)
     worst_metric = min(metric_avg_deltas, key=metric_avg_deltas.get)
     if metric_avg_deltas[best_metric] > 0.005:
-        lines.append(f"**Strongest metric gain:** {METRIC_LABELS[best_metric]} ({metric_avg_deltas[best_metric]:+.3f} avg across models)")
+        lines.append(
+            f"**Strongest metric gain:** {METRIC_LABELS[best_metric]} ({metric_avg_deltas[best_metric]:+.3f} avg across models)"
+        )
     if metric_avg_deltas[worst_metric] < -0.005:
-        lines.append(f"**Largest metric decline:** {METRIC_LABELS[worst_metric]} ({metric_avg_deltas[worst_metric]:+.3f} avg across models)")
+        lines.append(
+            f"**Largest metric decline:** {METRIC_LABELS[worst_metric]} ({metric_avg_deltas[worst_metric]:+.3f} avg across models)"
+        )
     lines.append("")
 
     return lines
@@ -121,7 +130,9 @@ def _methodology_section(results: dict, ordered: list[str], experiment_name: str
         provider = PROVIDERS.get(model, "Unknown")
         cost = MODEL_COSTS.get(model, {"input": 0, "output": 0})
         blend = blended_cost(model)
-        lines.append(f"| {name} | `{model}` | {provider} | ${cost['input']:.2f} | ${cost['output']:.2f} | ${blend:.2f} |")
+        lines.append(
+            f"| {name} | `{model}` | {provider} | ${cost['input']:.2f} | ${cost['output']:.2f} | ${blend:.2f} |"
+        )
     lines.append("")
 
     lines.append("**Metrics evaluated:**\n")
@@ -159,7 +170,9 @@ def _scores_section(results: dict, ordered: list[str]) -> list[str]:
             avg_a = sum(after.values()) / max(len(after), 1) if after else 0
             avg_d = avg_a - avg_b
             avg_pct = f"{avg_d / avg_b * 100:+.1f}%" if avg_b > 0 else "N/A"
-            lines.append(f"| **Average** | **{avg_b:.2f}** | **{avg_a:.2f}** | **{avg_d:+.2f}** | **{avg_pct}** |")
+            lines.append(
+                f"| **Average** | **{avg_b:.2f}** | **{avg_a:.2f}** | **{avg_d:+.2f}** | **{avg_pct}** |"
+            )
         else:
             lines.append("| Metric | Score |")
             lines.append("|--------|-------|")
@@ -231,8 +244,10 @@ def _significance_section(results: dict, ordered: list[str]) -> list[str]:
         return lines
 
     lines.append("## Statistical Significance\n")
-    lines.append("Pooled standard error: `se = sqrt(std_before² + std_after²) / sqrt(n)`. "
-                 "Significant if `|delta| > 2 × se` (approx. p < 0.05).\n")
+    lines.append(
+        "Pooled standard error: `se = sqrt(std_before² + std_after²) / sqrt(n)`. "
+        "Significant if `|delta| > 2 × se` (approx. p < 0.05).\n"
+    )
 
     header = "| Metric |" + " | ".join(n.title() for n in ordered) + " |"
     sep = "|--------|" + " | ".join("------" for _ in ordered) + " |"
@@ -261,16 +276,19 @@ def _significance_section(results: dict, ordered: list[str]) -> list[str]:
                 row += f" {d:+.02f} |"
         lines.append(row)
     lines.append("")
-    lines.append(f"*★ = statistically significant. {sig_count}/{total_count} metric-model combinations showed significant change.*\n")
+    lines.append(
+        f"*★ = statistically significant. {sig_count}/{total_count} metric-model combinations showed significant change.*\n"
+    )
     return lines
 
 
-def _per_case_winners_losers(results: dict, ordered: list[str], case_metadata: list[dict] | None) -> list[str]:
+def _per_case_winners_losers(
+    results: dict, ordered: list[str], case_metadata: list[dict] | None
+) -> list[str]:
     """Show top improved and regressed test cases per model."""
     lines = []
     has_per_case = any(
-        results[n].get("before_per_case") and results[n].get("after_per_case")
-        for n in ordered
+        results[n].get("before_per_case") and results[n].get("after_per_case") for n in ordered
     )
     if not has_per_case:
         return lines
@@ -316,7 +334,9 @@ def _per_case_winners_losers(results: dict, ordered: list[str], case_metadata: l
                 label = _case_label(idx, case_metadata)
                 best_l = METRIC_LABELS.get(best_m, best_m)
                 worst_l = METRIC_LABELS.get(worst_m, worst_m)
-                lines.append(f"| {label} | {_case_category(idx, case_metadata)} | {delta:+.3f} | {best_l} | {worst_l} |")
+                lines.append(
+                    f"| {label} | {_case_category(idx, case_metadata)} | {delta:+.3f} | {best_l} | {worst_l} |"
+                )
             lines.append("")
 
         if top_regressed:
@@ -327,7 +347,9 @@ def _per_case_winners_losers(results: dict, ordered: list[str], case_metadata: l
                 label = _case_label(idx, case_metadata)
                 best_l = METRIC_LABELS.get(best_m, best_m)
                 worst_l = METRIC_LABELS.get(worst_m, worst_m)
-                lines.append(f"| {label} | {_case_category(idx, case_metadata)} | {delta:+.3f} | {best_l} | {worst_l} |")
+                lines.append(
+                    f"| {label} | {_case_category(idx, case_metadata)} | {delta:+.3f} | {best_l} | {worst_l} |"
+                )
             lines.append("")
 
     return lines
@@ -374,7 +396,9 @@ def _per_model_section(results: dict, ordered: list[str]) -> list[str]:
 
         verdict = "improved" if delta > 0.005 else ("regressed" if delta < -0.005 else "stable")
 
-        lines.append(f"### {name.title()} (`{model}`, ${cost['input']:.2f}/${cost['output']:.2f} in/out per M)\n")
+        lines.append(
+            f"### {name.title()} (`{model}`, ${cost['input']:.2f}/${cost['output']:.2f} in/out per M)\n"
+        )
         lines.append(f"**Overall:** {avg_b:.2f} → {avg_a:.2f} ({delta:+.3f}, {verdict})\n")
 
         if improved:
@@ -385,8 +409,10 @@ def _per_model_section(results: dict, ordered: list[str]) -> list[str]:
         opt_prompt = results[name].get("optimized_prompt", "")
         orig_prompt = results[name].get("original_prompt", "")
         if opt_prompt:
-            lines.append(f"- **Prompt expansion:** {len(orig_prompt)} → {len(opt_prompt)} chars "
-                         f"({len(opt_prompt)/max(len(orig_prompt),1):.0f}x)")
+            lines.append(
+                f"- **Prompt expansion:** {len(orig_prompt)} → {len(opt_prompt)} chars "
+                f"({len(opt_prompt) / max(len(orig_prompt), 1):.0f}x)"
+            )
         lines.append("")
 
     return lines
@@ -396,8 +422,12 @@ def _cost_benefit_section(results: dict, ordered: list[str]) -> list[str]:
     """Cost-benefit analysis with quality/$ ranking."""
     lines = []
     lines.append("## Cost-Benefit Analysis\n")
-    lines.append("| Agent | Model | Input $/M | Output $/M | Blended $/M | Before | After | Delta | Quality/$ |")
-    lines.append("|-------|-------|-----------|------------|-------------|--------|-------|-------|----------|")
+    lines.append(
+        "| Agent | Model | Input $/M | Output $/M | Blended $/M | Before | After | Delta | Quality/$ |"
+    )
+    lines.append(
+        "|-------|-------|-----------|------------|-------------|--------|-------|-------|----------|"
+    )
 
     for name in ordered:
         model = results[name].get("model", "unknown")
@@ -409,10 +439,14 @@ def _cost_benefit_section(results: dict, ordered: list[str]) -> list[str]:
         avg_a = sum(after.values()) / max(len(after), 1) if after else 0
         delta = avg_a - avg_b
         qpd = avg_a / max(blend, 0.01)
-        lines.append(f"| {name.title()} | `{model}` | ${cost['input']:.2f} | ${cost['output']:.2f} | ${blend:.2f} | {avg_b:.2f} | {avg_a:.2f} | {delta:+.02f} | {qpd:.3f} |")
+        lines.append(
+            f"| {name.title()} | `{model}` | ${cost['input']:.2f} | ${cost['output']:.2f} | ${blend:.2f} | {avg_b:.2f} | {avg_a:.2f} | {delta:+.02f} | {qpd:.3f} |"
+        )
 
     lines.append("")
-    lines.append("*Blended $/M = weighted average assuming 4:1 input:output token ratio. Quality/$ = avg quality / blended cost.*\n")
+    lines.append(
+        "*Blended $/M = weighted average assuming 4:1 input:output token ratio. Quality/$ = avg quality / blended cost.*\n"
+    )
     return lines
 
 
@@ -422,14 +456,46 @@ def _charts_section() -> list[str]:
     lines.append("## Visualizations\n")
 
     chart_info = [
-        ("radar.png", "Metric Profiles", "Radar overlay showing each model's strength/weakness pattern across all metrics."),
-        ("comparison.png", "Baseline Comparison", "Grouped bar chart of pre-optimization scores across all agents."),
-        ("improvement_delta.png", "Optimization Impact", "Per-metric score change from GEPA optimization. Bars above zero = improved."),
-        ("cost_quality.png", "Cost-Quality Tradeoff", "Model cost vs average quality. Arrows show before→after movement."),
-        ("tier_breakdown.png", "Tier Performance", "Average scores by complexity tier (low/medium/high)."),
-        ("category_heatmap.png", "Category Capability", "Heatmap of per-category scores across models."),
-        ("tier_improvement_heatmap.png", "Tier Improvement", "Optimization impact by complexity tier. Green=improved, red=regressed."),
-        ("run_comparison.png", "Run Comparison", "Side-by-side comparison with previous experiment run."),
+        (
+            "radar.png",
+            "Metric Profiles",
+            "Radar overlay showing each model's strength/weakness pattern across all metrics.",
+        ),
+        (
+            "comparison.png",
+            "Baseline Comparison",
+            "Grouped bar chart of pre-optimization scores across all agents.",
+        ),
+        (
+            "improvement_delta.png",
+            "Optimization Impact",
+            "Per-metric score change from GEPA optimization. Bars above zero = improved.",
+        ),
+        (
+            "cost_quality.png",
+            "Cost-Quality Tradeoff",
+            "Model cost vs average quality. Arrows show before→after movement.",
+        ),
+        (
+            "tier_breakdown.png",
+            "Tier Performance",
+            "Average scores by complexity tier (low/medium/high).",
+        ),
+        (
+            "category_heatmap.png",
+            "Category Capability",
+            "Heatmap of per-category scores across models.",
+        ),
+        (
+            "tier_improvement_heatmap.png",
+            "Tier Improvement",
+            "Optimization impact by complexity tier. Green=improved, red=regressed.",
+        ),
+        (
+            "run_comparison.png",
+            "Run Comparison",
+            "Side-by-side comparison with previous experiment run.",
+        ),
     ]
 
     for filename, title, caption in chart_info:
@@ -464,7 +530,9 @@ def _conclusions_section(results: dict, ordered: list[str]) -> list[str]:
     if len(improved) >= len(ordered) * 0.6:
         lines.append("GEPA optimization was broadly successful. ")
     elif len(regressed) >= len(ordered) * 0.6:
-        lines.append("GEPA optimization showed widespread regression — review sampler config thresholds and eval criteria alignment. ")
+        lines.append(
+            "GEPA optimization showed widespread regression — review sampler config thresholds and eval criteria alignment. "
+        )
     else:
         lines.append("Results were mixed across models. ")
 
@@ -481,12 +549,20 @@ def _conclusions_section(results: dict, ordered: list[str]) -> list[str]:
                 vals.append(a - b)
             metric_deltas[metric] = sum(vals) / len(vals) if vals else 0
         worst = min(metric_deltas, key=metric_deltas.get)
-        lines.append(f"1. **Investigate {METRIC_LABELS[worst]} regression** ({metric_deltas[worst]:+.3f} avg in regressed models) — "
-                     f"consider adding as explicit optimization target in sampler config")
+        lines.append(
+            f"1. **Investigate {METRIC_LABELS[worst]} regression** ({metric_deltas[worst]:+.3f} avg in regressed models) — "
+            f"consider adding as explicit optimization target in sampler config"
+        )
 
-    lines.append(f"2. **Re-run with tighter thresholds** — higher thresholds force GEPA to discover domain-specific content")
-    lines.append(f"3. **Verify per-case scores** are being extracted correctly for tier/category analysis")
-    lines.append(f"4. **Monitor deployed agents** with online evaluators to catch drift on real traffic")
+    lines.append(
+        f"2. **Re-run with tighter thresholds** — higher thresholds force GEPA to discover domain-specific content"
+    )
+    lines.append(
+        f"3. **Verify per-case scores** are being extracted correctly for tier/category analysis"
+    )
+    lines.append(
+        f"4. **Monitor deployed agents** with online evaluators to catch drift on real traffic"
+    )
     lines.append("")
 
     return lines

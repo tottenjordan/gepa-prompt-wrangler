@@ -105,9 +105,7 @@ def check_policy(item_type: str, amount_usd: float) -> dict:
     }
 
 
-def create_booking(
-    flight_number: str, date: str, passenger_name: str
-) -> dict:
+def create_booking(flight_number: str, date: str, passenger_name: str) -> dict:
     """Create a confirmed flight booking.
 
     Args:
@@ -169,6 +167,7 @@ def create_agent(model: str = DEFAULT_MODEL, instruction: str = DEFAULT_INSTRUCT
         instruction: System instruction to use for this agent.
     """
     from wrangler.core.config import resolve_model
+
     return Agent(
         model=resolve_model(model),
         name="travel_agent",

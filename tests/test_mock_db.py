@@ -24,10 +24,7 @@ class TestExpenseMockDbSeed:
         assert len(expense_db.get_expenses("EMP002")) >= 1
 
     def test_at_least_one_over_limit_record(self):
-        over_limit = [
-            e for e in expense_db.expenses.values()
-            if e["status"] == "pending_review"
-        ]
+        over_limit = [e for e in expense_db.expenses.values() if e["status"] == "pending_review"]
         assert over_limit, (
             "at least one seeded expense must be over its policy limit "
             "(status == 'pending_review') so policy-violation eval cases have signal"
@@ -35,8 +32,14 @@ class TestExpenseMockDbSeed:
 
     def test_seed_records_have_submit_expense_shape(self):
         expected_keys = {
-            "expense_id", "amount", "category", "description",
-            "user_id", "status", "policy_check", "submitted_at",
+            "expense_id",
+            "amount",
+            "category",
+            "description",
+            "user_id",
+            "status",
+            "policy_check",
+            "submitted_at",
         }
         for e in expense_db.expenses.values():
             assert set(e.keys()) == expected_keys, (
@@ -55,6 +58,6 @@ class TestExpenseMockDbSeed:
 
     def test_policy_check_matches_check_policy(self):
         for e in expense_db.expenses.values():
-            assert e["policy_check"] == expense_db.check_policy(
-                e["amount"], e["category"]
-            ), f"{e['expense_id']}: policy_check drift"
+            assert e["policy_check"] == expense_db.check_policy(e["amount"], e["category"]), (
+                f"{e['expense_id']}: policy_check drift"
+            )

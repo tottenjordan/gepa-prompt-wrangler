@@ -8,8 +8,12 @@ from unittest.mock import patch, MagicMock
 import pandas as pd
 
 from wrangler.eval.evaluator import (
-    _build_eval_dataset, _resolve_resource_name, save_eval_results,
-    EvalResult, run_batch_eval_averaged, _retry_failed_cases,
+    _build_eval_dataset,
+    _resolve_resource_name,
+    save_eval_results,
+    EvalResult,
+    run_batch_eval_averaged,
+    _retry_failed_cases,
 )
 from wrangler.core.config import get_batch_config
 
@@ -17,7 +21,9 @@ from wrangler.core.config import get_batch_config
 class TestBuildEvalDataset:
     def test_basic_cases_to_dataframe(self):
         cases = [
-            {"prompt": "q1"}, {"prompt": "q2"}, {"prompt": "q3"},
+            {"prompt": "q1"},
+            {"prompt": "q2"},
+            {"prompt": "q3"},
         ]
         df = _build_eval_dataset(cases)
         assert len(df) == 3
@@ -163,8 +169,9 @@ class TestGetBatchConfig:
 
 class TestRetryFailedCases:
     def _make_inference_result(self, responses):
-        df = pd.DataFrame({"prompt": [f"q{i}" for i in range(len(responses))],
-                           "response": responses})
+        df = pd.DataFrame(
+            {"prompt": [f"q{i}" for i in range(len(responses))], "response": responses}
+        )
         result = MagicMock()
         result.eval_dataset_df = df
         return result
@@ -179,7 +186,11 @@ class TestRetryFailedCases:
         mock_batched.return_value = MagicMock(eval_dataset_df=retry_df)
 
         result = _retry_failed_cases(
-            MagicMock(), "agent", eval_df, inference_result, "gemini-3.1-flash-lite",
+            MagicMock(),
+            "agent",
+            eval_df,
+            inference_result,
+            "gemini-3.1-flash-lite",
         )
         mock_sleep.assert_called_once_with(30)
         mock_batched.assert_called_once()
@@ -190,7 +201,11 @@ class TestRetryFailedCases:
         inference_result = self._make_inference_result(["good", "also good"])
 
         result = _retry_failed_cases(
-            MagicMock(), "agent", eval_df, inference_result, "gemini-3.5-flash",
+            MagicMock(),
+            "agent",
+            eval_df,
+            inference_result,
+            "gemini-3.5-flash",
         )
         assert result is inference_result
 
@@ -198,14 +213,16 @@ class TestRetryFailedCases:
     @patch("wrangler.eval.evaluator.time.sleep")
     def test_detects_error_dict_responses(self, mock_sleep, mock_batched):
         eval_df = pd.DataFrame({"prompt": ["q0", "q1"]})
-        inference_result = self._make_inference_result(
-            ["good", {"error": "Resource exhausted"}]
-        )
+        inference_result = self._make_inference_result(["good", {"error": "Resource exhausted"}])
 
         retry_df = pd.DataFrame({"prompt": ["q1"], "response": ["recovered"]})
         mock_batched.return_value = MagicMock(eval_dataset_df=retry_df)
 
         result = _retry_failed_cases(
-            MagicMock(), "agent", eval_df, inference_result, "gemini-3.1-pro",
+            MagicMock(),
+            "agent",
+            eval_df,
+            inference_result,
+            "gemini-3.1-pro",
         )
         assert mock_batched.called

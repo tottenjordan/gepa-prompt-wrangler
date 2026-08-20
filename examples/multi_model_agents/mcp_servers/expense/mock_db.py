@@ -25,12 +25,15 @@ def check_policy(amount: float, category: str) -> dict:
         "limit": limit,
         "amount": amount,
         "category": category_lower,
-        "reason": None if amount <= limit else f"Amount ${amount:.2f} exceeds ${limit:.2f} limit for {category_lower}",
+        "reason": None
+        if amount <= limit
+        else f"Amount ${amount:.2f} exceeds ${limit:.2f} limit for {category_lower}",
     }
 
 
-def _seed(expense_id: str, amount: float, category: str, description: str,
-          user_id: str, submitted_at: str) -> dict:
+def _seed(
+    expense_id: str, amount: float, category: str, description: str, user_id: str, submitted_at: str
+) -> dict:
     """Build a seed record with the exact shape submit_expense() produces.
 
     status and policy_check are derived from check_policy() at module load so
@@ -58,23 +61,53 @@ def _seed(expense_id: str, amount: float, category: str, description: str,
 # booking mock_db: EMP001=Alice Johnson, EMP002=Lisa Wang, EMP003=Bob Smith,
 # EMP004=Carol Davis.
 expenses: dict[str, dict] = {
-    rec["expense_id"]: rec for rec in [
-        _seed("EX-001", 42.50, "meals", "Team lunch with client", "EMP001",
-              "2026-05-01T12:30:00"),
-        _seed("EX-002", 500.00, "lodging", "Hotel stay - 2 nights downtown", "EMP001",
-              "2026-05-02T18:00:00"),
-        _seed("EX-003", 65.00, "transport", "Airport taxi round trip", "EMP002",
-              "2026-05-03T09:15:00"),
-        _seed("EX-004", 200.00, "entertainment", "Client dinner and event tickets", "EMP002",
-              "2026-05-04T20:00:00"),
-        _seed("EX-005", 38.00, "supplies", "Notebooks and presentation materials", "EMP003",
-              "2026-05-05T10:00:00"),
-        _seed("EX-006", 120.00, "transport", "Rental car for site visit", "EMP003",
-              "2026-05-06T08:45:00"),
-        _seed("EX-007", 70.00, "meals", "Working dinner solo", "EMP004",
-              "2026-05-07T19:30:00"),
-        _seed("EX-008", 95.00, "supplies", "Conference badge printer ink", "EMP004",
-              "2026-05-08T11:00:00"),
+    rec["expense_id"]: rec
+    for rec in [
+        _seed("EX-001", 42.50, "meals", "Team lunch with client", "EMP001", "2026-05-01T12:30:00"),
+        _seed(
+            "EX-002",
+            500.00,
+            "lodging",
+            "Hotel stay - 2 nights downtown",
+            "EMP001",
+            "2026-05-02T18:00:00",
+        ),
+        _seed(
+            "EX-003", 65.00, "transport", "Airport taxi round trip", "EMP002", "2026-05-03T09:15:00"
+        ),
+        _seed(
+            "EX-004",
+            200.00,
+            "entertainment",
+            "Client dinner and event tickets",
+            "EMP002",
+            "2026-05-04T20:00:00",
+        ),
+        _seed(
+            "EX-005",
+            38.00,
+            "supplies",
+            "Notebooks and presentation materials",
+            "EMP003",
+            "2026-05-05T10:00:00",
+        ),
+        _seed(
+            "EX-006",
+            120.00,
+            "transport",
+            "Rental car for site visit",
+            "EMP003",
+            "2026-05-06T08:45:00",
+        ),
+        _seed("EX-007", 70.00, "meals", "Working dinner solo", "EMP004", "2026-05-07T19:30:00"),
+        _seed(
+            "EX-008",
+            95.00,
+            "supplies",
+            "Conference badge printer ink",
+            "EMP004",
+            "2026-05-08T11:00:00",
+        ),
     ]
 }
 

@@ -152,9 +152,7 @@ _ADK_CLASS_METHODS = [
         "name": "async_add_session_to_memory",
         "description": "Generates memories.",
         "parameters": {
-            "properties": {
-                "session": {"additionalProperties": True, "type": "object"}
-            },
+            "properties": {"session": {"additionalProperties": True, "type": "object"}},
             "required": ["session"],
             "type": "object",
         },
@@ -474,7 +472,9 @@ def update_agent(
 
     print(f"  Updating {agent.name} ({engine_id.split('/')[-1]})...")
     remote = _get_client().agent_engines.update(
-        name=engine_id, agent=agent, config=config,
+        name=engine_id,
+        agent=agent,
+        config=config,
     )
     resource_name = getattr(remote, "resource_name", None) or remote.api_resource.name
     print(f"  Updated: {resource_name.split('/')[-1]}")
@@ -525,6 +525,7 @@ def build_source_package(
             agent_parent = candidate
         if not found:
             import logging
+
             logging.getLogger(__name__).warning(
                 f"config.py not found within 3 levels of {agent_module} — "
                 f"build package may be incomplete"
@@ -550,7 +551,8 @@ def build_source_package(
     prompts_src = agent_parent / "prompts"
     if prompts_src.is_dir():
         shutil.copytree(
-            prompts_src, build_path / "prompts",
+            prompts_src,
+            build_path / "prompts",
             ignore=shutil.ignore_patterns("__pycache__"),
         )
 
@@ -576,7 +578,7 @@ def build_source_package(
         # locations/global. Gemini 3.x models use the GOOGLE_CLOUD_LOCATION
         # env var set in app.py (no resource name rewrite needed).
         text = text.replace(
-            'return Claude(model=model_str)',
+            "return Claude(model=model_str)",
             '_proj = os.environ.get("GCP_PROJECT_ID", os.environ.get("GOOGLE_CLOUD_PROJECT", ""))\n'
             '        return Claude(model=f"projects/{_proj}/locations/global/publishers/anthropic/models/{model_str}")',
         )
@@ -593,9 +595,7 @@ def build_source_package(
     (build_path / "instruction.txt").write_text(instruction)
 
     # Write requirements
-    (build_path / "requirements.txt").write_text(
-        "\n".join(_SOURCE_REQUIREMENTS) + "\n"
-    )
+    (build_path / "requirements.txt").write_text("\n".join(_SOURCE_REQUIREMENTS) + "\n")
 
     # Write __init__.py
     (build_path / "__init__.py").write_text("")
@@ -685,10 +685,13 @@ def deploy_agent_from_source(
             shutil.rmtree(build_dir, ignore_errors=True)
             if attempt < 2:
                 wait = 30 * (attempt + 1)
-                print(f"  Deploy attempt {attempt + 1} failed (GEAP transient error), retrying in {wait}s...")
+                print(
+                    f"  Deploy attempt {attempt + 1} failed (GEAP transient error), retrying in {wait}s..."
+                )
                 _time.sleep(wait)
             else:
                 import logging
+
                 logging.getLogger(__name__).error(
                     f"Deploy failed after 3 attempts for {display_name or 'gepa-agent'}: {e}"
                 )
@@ -740,10 +743,13 @@ def update_agent_from_source(
             shutil.rmtree(build_dir, ignore_errors=True)
             if attempt < 2:
                 wait = 30 * (attempt + 1)
-                print(f"  Update attempt {attempt + 1} failed (GEAP transient error), retrying in {wait}s...")
+                print(
+                    f"  Update attempt {attempt + 1} failed (GEAP transient error), retrying in {wait}s..."
+                )
                 _time.sleep(wait)
             else:
                 import logging
+
                 logging.getLogger(__name__).error(
                     f"Update failed after 3 attempts for {engine_id.split('/')[-1]}: {e}"
                 )

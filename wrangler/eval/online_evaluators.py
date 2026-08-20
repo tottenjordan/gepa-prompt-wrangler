@@ -123,7 +123,9 @@ def register_custom_metrics() -> list[str]:
 
         print(f"  Registering '{display_name}'...")
         resp = http_requests.post(
-            f"{API_BASE}/evaluationMetrics", headers=headers, json=metric_def,
+            f"{API_BASE}/evaluationMetrics",
+            headers=headers,
+            json=metric_def,
         )
         if resp.status_code == 200:
             result = resp.json()
@@ -138,8 +140,7 @@ def register_custom_metrics() -> list[str]:
 
 def _build_evaluator_config(label: str, engine_id: str, custom_metric_names: list[str]) -> dict:
     metric_sources = [
-        {"metric": {"predefinedMetricSpec": {"metricSpecName": m}}}
-        for m in PREDEFINED_METRICS
+        {"metric": {"predefinedMetricSpec": {"metricSpecName": m}}} for m in PREDEFINED_METRICS
     ]
     for name in custom_metric_names:
         metric_sources.append({"metricResourceName": name})
@@ -228,9 +229,7 @@ def verify_evaluators():
     evaluators = resp.json().get("onlineEvaluators", [])
 
     agent_ids = set(agents.values())
-    matching = [
-        e for e in evaluators if e.get("agentResource", "").split("/")[-1] in agent_ids
-    ]
+    matching = [e for e in evaluators if e.get("agentResource", "").split("/")[-1] in agent_ids]
 
     if not matching:
         print("  No evaluators found for wrangler agents")
@@ -260,7 +259,8 @@ def verify_evaluators():
         }
         resp = http_requests.post(
             "https://logging.googleapis.com/v2/entries:list",
-            headers=headers, json=body,
+            headers=headers,
+            json=body,
         )
         entries = resp.json().get("entries", [])
         print(f"\n  {label} ({engine_id}): {len(entries)} eval result(s)")
@@ -270,7 +270,8 @@ def delete_evaluator(evaluator_id: str):
     headers = _get_headers()
     print(f"Deleting evaluator {evaluator_id}...")
     resp = http_requests.delete(
-        f"{API_BASE}/onlineEvaluators/{evaluator_id}", headers=headers,
+        f"{API_BASE}/onlineEvaluators/{evaluator_id}",
+        headers=headers,
     )
     if resp.status_code == 200:
         print("  Deleted")
@@ -310,7 +311,9 @@ COMMANDS = {
     "list": lambda args: list_evaluators(),
     "create": lambda args: create_evaluators(),
     "verify": lambda args: verify_evaluators(),
-    "delete": lambda args: delete_evaluator(args[0]) if args else print("Usage: delete <evaluator_id>"),
+    "delete": lambda args: (
+        delete_evaluator(args[0]) if args else print("Usage: delete <evaluator_id>")
+    ),
     "cleanup": lambda args: cleanup(),
 }
 

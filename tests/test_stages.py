@@ -17,8 +17,11 @@ def _make_manifest(pairs=None):
             AgentPromptPair(id="sonnet", model="claude-sonnet-4-6", system_prompt="Be thorough."),
         ]
     return Manifest(
-        name="test", description="", agent_module="agents/example_agent",
-        eval_data="eval_data/test.yaml", pairs=pairs,
+        name="test",
+        description="",
+        agent_module="agents/example_agent",
+        eval_data="eval_data/test.yaml",
+        pairs=pairs,
     )
 
 
@@ -67,13 +70,19 @@ class TestStageDeployWithExperiment:
             "agent_module": "agents/example_agent",
             "eval_data": "eval_data/test.yaml",
             "pairs": [
-                {"id": "flash", "model": "gemini-3.5-flash",
-                 "system_prompt": "Be helpful.", "engine_id": "existing-123"},
+                {
+                    "id": "flash",
+                    "model": "gemini-3.5-flash",
+                    "system_prompt": "Be helpful.",
+                    "engine_id": "existing-123",
+                },
             ],
         }
         manifest_path = tmp_path / "manifest.yaml"
         manifest_path.write_text(yaml.dump(manifest_data))
-        return Experiment.create(str(manifest_path), name="test-deploy", base_dir=str(tmp_path / "experiments"))
+        return Experiment.create(
+            str(manifest_path), name="test-deploy", base_dir=str(tmp_path / "experiments")
+        )
 
     def test_reuses_existing_engine_id(self, tmp_path):
         from wrangler.orchestration.stages import stage_deploy
@@ -99,7 +108,9 @@ class TestStageEvalGating:
         }
         manifest_path = tmp_path / "manifest.yaml"
         manifest_path.write_text(yaml.dump(manifest_data))
-        exp = Experiment.create(str(manifest_path), name="test-gate", base_dir=str(tmp_path / "experiments"))
+        exp = Experiment.create(
+            str(manifest_path), name="test-gate", base_dir=str(tmp_path / "experiments")
+        )
 
         stage_eval(exp, phase="before")
         assert exp.read_stage("eval_before") == {}

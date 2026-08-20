@@ -59,6 +59,7 @@ def _call_judge(model: str, prompt: str) -> float:
         return max(0.0, min(1.0, score))
     except ValueError:
         import re
+
         match = re.search(r"(\d+\.?\d*)", text)
         if match:
             return max(0.0, min(1.0, float(match.group(1))))

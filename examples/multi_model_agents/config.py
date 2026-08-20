@@ -52,9 +52,12 @@ def resolve_model(model_str: str):
         return model_str
     if model_str.startswith("claude"):
         from google.adk.models.anthropic_llm import Claude
+
         return Claude(model=model_str)
     from google.adk.models.google_llm import Gemini
+
     return Gemini(model=model_str)
+
 
 # Multi-model router (5-tier: lite → flash → pro → sonnet → opus)
 LITE_MODEL = os.environ.get("LITE_MODEL", "gemini-3.1-flash-lite")
@@ -83,6 +86,7 @@ def disable_pyopenssl():
     """
     try:
         import OpenSSL.SSL as _ssl
+
         for attr in dir(_ssl.Context):
             method = getattr(_ssl.Context, attr, None)
             if callable(method) and hasattr(method, "__wrapped__"):

@@ -70,20 +70,25 @@ class Experiment:
             },
             "agent_module": manifest.agent_module,
             "eval_data": manifest.eval_data,
-            "defaults": {"num_runs": 3, "judge_model": manifest.eval_config.get("judge_model", "gemini-3.5-flash")},
+            "defaults": {
+                "num_runs": 3,
+                "judge_model": manifest.eval_config.get("judge_model", "gemini-3.5-flash"),
+            },
             "pairs": [],
             "eval_config": manifest.eval_config,
         }
 
         for pair in manifest.pairs:
-            config["pairs"].append({
-                "id": pair.id,
-                "model": pair.model,
-                "description": pair.description,
-                "agent_module": pair.agent_module,
-                "engine_id": pair.engine_id,
-                "system_prompt": pair.system_prompt,
-            })
+            config["pairs"].append(
+                {
+                    "id": pair.id,
+                    "model": pair.model,
+                    "description": pair.description,
+                    "agent_module": pair.agent_module,
+                    "engine_id": pair.engine_id,
+                    "system_prompt": pair.system_prompt,
+                }
+            )
 
         with open(exp_dir / "config.yaml", "w") as f:
             yaml.dump(config, f, default_flow_style=False, sort_keys=False, width=120)
@@ -134,14 +139,16 @@ class Experiment:
         cfg = self.config
         pairs = []
         for entry in cfg.get("pairs", []):
-            pairs.append(AgentPromptPair(
-                id=entry["id"],
-                model=entry["model"],
-                system_prompt=entry.get("system_prompt", ""),
-                description=entry.get("description", ""),
-                agent_module=entry.get("agent_module", ""),
-                engine_id=entry.get("engine_id", ""),
-            ))
+            pairs.append(
+                AgentPromptPair(
+                    id=entry["id"],
+                    model=entry["model"],
+                    system_prompt=entry.get("system_prompt", ""),
+                    description=entry.get("description", ""),
+                    agent_module=entry.get("agent_module", ""),
+                    engine_id=entry.get("engine_id", ""),
+                )
+            )
         return Manifest(
             name=cfg.get("experiment", {}).get("name", self.name),
             description=cfg.get("experiment", {}).get("description", ""),
@@ -202,7 +209,9 @@ class Experiment:
         }
 
         all_pairs = set(self.pair_ids)
-        done_pairs = {pid for pid, info in stage_info["pairs"].items() if info.get("status") == "complete"}
+        done_pairs = {
+            pid for pid, info in stage_info["pairs"].items() if info.get("status") == "complete"
+        }
         if done_pairs >= all_pairs:
             stage_info["status"] = "complete"
             stage_info["completed_at"] = datetime.now().isoformat(timespec="seconds")
@@ -218,7 +227,9 @@ class Experiment:
         result = {}
         for stage in STAGES:
             info = tracking.get("stages", {}).get(stage, {"status": "pending", "pairs": {}})
-            done = [pid for pid, p in info.get("pairs", {}).items() if p.get("status") == "complete"]
+            done = [
+                pid for pid, p in info.get("pairs", {}).items() if p.get("status") == "complete"
+            ]
             remaining = sorted(all_pairs - set(done))
             result[stage] = {
                 "status": info.get("status", "pending"),
@@ -253,7 +264,10 @@ class Experiment:
 
         stage_data = self.read_stage(required)
         if not stage_data:
-            return False, f"Stage '{required}' has no results yet (required before '{target_stage}')"
+            return (
+                False,
+                f"Stage '{required}' has no results yet (required before '{target_stage}')",
+            )
 
         if pair_id:
             if pair_id not in stage_data:

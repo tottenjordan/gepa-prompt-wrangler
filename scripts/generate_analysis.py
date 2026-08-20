@@ -10,13 +10,17 @@ import json
 from pathlib import Path
 
 import sys
+
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from wrangler.core.config import REPORTS_DIR, OUTPUTS_DIR
 from wrangler.analysis import (
-    generate_agent_report, generate_comparison_report, normalize_agent_keys,
+    generate_agent_report,
+    generate_comparison_report,
+    normalize_agent_keys,
     generate_all_charts,
-    METRIC_LABELS, AGENT_ORDER,
+    METRIC_LABELS,
+    AGENT_ORDER,
 )
 
 CHARTS_DIR = Path(REPORTS_DIR) / "charts"
@@ -27,7 +31,9 @@ def load_results(input_path: str = None) -> dict:
     if input_path:
         with open(input_path) as f:
             return json.load(f)
-    files = sorted(Path(OUTPUTS_DIR).glob("demo_*.json")) + sorted(Path(OUTPUTS_DIR).glob("results_*.json"))
+    files = sorted(Path(OUTPUTS_DIR).glob("demo_*.json")) + sorted(
+        Path(OUTPUTS_DIR).glob("results_*.json")
+    )
     if not files:
         raise FileNotFoundError("No results files found in outputs/")
     with open(files[-1]) as f:

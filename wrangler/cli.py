@@ -30,7 +30,9 @@ def experiment():
 @click.argument("manifest")
 @click.option("--name", "-n", default=None, help="Experiment name (defaults to manifest name).")
 @click.option("--version", "-v", default=None, help="Version tag (e.g. wrangler_v5).")
-@click.option("--dir", "base_dir", default="experiments/active", help="Base directory for experiments.")
+@click.option(
+    "--dir", "base_dir", default="experiments/active", help="Base directory for experiments."
+)
 def experiment_create(manifest: str, name: str, version: str, base_dir: str):
     """Create a new experiment from a manifest YAML."""
     from .orchestration.experiment import Experiment
@@ -92,8 +94,21 @@ def deploy(target: str, pair: str):
 @click.option("--eval-data", default=None, help="Path to eval data file (standalone mode).")
 @click.option("--agent-name", default=None, help="Label for this agent in results.")
 @click.option("--num-runs", "-n", default=1, type=int, help="Number of eval runs to average.")
-@click.option("--retry-failed/--no-retry-failed", default=True, help="Retry failed inference cases (default: on).")
-def eval_cmd(target: str, phase: str, pair: str, engine_id: str, eval_data: str, agent_name: str, num_runs: int, retry_failed: bool):
+@click.option(
+    "--retry-failed/--no-retry-failed",
+    default=True,
+    help="Retry failed inference cases (default: on).",
+)
+def eval_cmd(
+    target: str,
+    phase: str,
+    pair: str,
+    engine_id: str,
+    eval_data: str,
+    agent_name: str,
+    num_runs: int,
+    retry_failed: bool,
+):
     """Run batch evaluation against deployed agents.
 
     Experiment mode:  wrangler eval <experiment_dir> before|after [--pair ID]
@@ -109,8 +124,13 @@ def eval_cmd(target: str, phase: str, pair: str, engine_id: str, eval_data: str,
 
         exp = Experiment.load(target)
         click.echo(f"Evaluating ({phase}) — experiment: {exp.name}")
-        stage_eval(exp, phase=phase, pair_id=pair, num_runs=num_runs if num_runs > 1 else None,
-                   retry_failed=retry_failed)
+        stage_eval(
+            exp,
+            phase=phase,
+            pair_id=pair,
+            num_runs=num_runs if num_runs > 1 else None,
+            retry_failed=retry_failed,
+        )
     elif engine_id:
         from .core.converter import load_eval_file
         from .eval.evaluator import run_batch_eval_averaged
@@ -119,6 +139,7 @@ def eval_cmd(target: str, phase: str, pair: str, engine_id: str, eval_data: str,
             eval_cases = load_eval_file(eval_data)
         elif target and os.path.exists(target):
             from .core.factory import PairFactory
+
             m = PairFactory.load(target)
             eval_cases = load_eval_file(m.eval_data)
         else:
@@ -126,8 +147,9 @@ def eval_cmd(target: str, phase: str, pair: str, engine_id: str, eval_data: str,
             raise SystemExit(1)
 
         label = agent_name or engine_id
-        result = run_batch_eval_averaged(engine_id, eval_cases, num_runs=num_runs, agent_name=label,
-                                         retry_failed=retry_failed)
+        result = run_batch_eval_averaged(
+            engine_id, eval_cases, num_runs=num_runs, agent_name=label, retry_failed=retry_failed
+        )
         click.echo(f"\nResults for {label}:")
         for metric, score in sorted(result.scores.items()):
             std = result.scores_std.get(metric)
@@ -201,7 +223,12 @@ def analyze(experiment_dir: str):
 
 @main.command()
 @click.argument("target", default="outputs")
-@click.option("--no-paperbanana", is_flag=True, default=False, help="Skip PaperBanana, use matplotlib only for charts.")
+@click.option(
+    "--no-paperbanana",
+    is_flag=True,
+    default=False,
+    help="Skip PaperBanana, use matplotlib only for charts.",
+)
 def report(target: str, no_paperbanana: bool):
     """Generate analysis report.
 
@@ -226,6 +253,7 @@ def report(target: str, no_paperbanana: bool):
             results = json.load(f)
 
         from .reporting.reporter import generate_report
+
         generate_report(results, "experiment", use_paperbanana=not no_paperbanana)
         click.echo("Report generated at outputs/reports/experiment_report.md")
 
@@ -240,17 +268,39 @@ def report(target: str, no_paperbanana: bool):
 @click.option("--num-runs", default=3, type=int, help="Number of eval runs to average.")
 @click.option("--pair", "-p", default=None, help="Run only a specific pair.")
 @click.option("--dry-run", is_flag=True, help="Parse and validate without executing.")
-@click.option("--resume-from", "resume_from", default=None, help="Path to previous results JSON (legacy mode).")
-@click.option("--from-phase", "from_phase", default=0, type=int, help="Start from this phase (legacy mode).")
-@click.option("--max-concurrent", "-c", default=1, type=int, help="Max parallel evals (legacy mode).")
-def run(manifest: str, name: str, version: str, num_runs: int, pair: str, dry_run: bool, resume_from: str, from_phase: int, max_concurrent: int):
+@click.option(
+    "--resume-from",
+    "resume_from",
+    default=None,
+    help="Path to previous results JSON (legacy mode).",
+)
+@click.option(
+    "--from-phase", "from_phase", default=0, type=int, help="Start from this phase (legacy mode)."
+)
+@click.option(
+    "--max-concurrent", "-c", default=1, type=int, help="Max parallel evals (legacy mode)."
+)
+def run(
+    manifest: str,
+    name: str,
+    version: str,
+    num_runs: int,
+    pair: str,
+    dry_run: bool,
+    resume_from: str,
+    from_phase: int,
+    max_concurrent: int,
+):
     """Run the full pipeline: deploy -> eval -> optimize -> redeploy -> eval -> report.
 
     Creates an experiment directory and runs all stages in sequence.
     """
     if resume_from or from_phase > 0:
         from .orchestration.runner import WranglerPipeline
-        pipeline = WranglerPipeline(manifest, max_concurrent=max_concurrent, version=version, num_runs=num_runs)
+
+        pipeline = WranglerPipeline(
+            manifest, max_concurrent=max_concurrent, version=version, num_runs=num_runs
+        )
         if resume_from:
             pipeline.load_results(resume_from)
         pipeline.run(from_phase=from_phase)
@@ -258,6 +308,7 @@ def run(manifest: str, name: str, version: str, num_runs: int, pair: str, dry_ru
 
     if dry_run:
         from .core.factory import PairFactory
+
         m = PairFactory.load(manifest)
         click.echo(f"Manifest: {m.name}")
         click.echo(f"Pairs: {len(m.pairs)}")
@@ -266,7 +317,13 @@ def run(manifest: str, name: str, version: str, num_runs: int, pair: str, dry_ru
         return
 
     from .orchestration.experiment import Experiment
-    from .orchestration.stages import stage_deploy, stage_eval, stage_optimize, stage_redeploy, stage_report
+    from .orchestration.stages import (
+        stage_deploy,
+        stage_eval,
+        stage_optimize,
+        stage_redeploy,
+        stage_report,
+    )
 
     exp = Experiment.create(manifest, name=name, version=version)
 
@@ -392,7 +449,11 @@ def inspect(agent_path: str, output: str):
     if spec.tools:
         click.echo(f"\nTool names for eval cases:")
         for t in spec.tools:
-            prefix = f" -> use '{t.eval_name}_<function>' in eval cases" if t.tool_type == "mcp_toolset" else ""
+            prefix = (
+                f" -> use '{t.eval_name}_<function>' in eval cases"
+                if t.tool_type == "mcp_toolset"
+                else ""
+            )
             click.echo(f"  {t.eval_name:40s} [{t.tool_type}]{prefix}")
 
 
@@ -414,8 +475,12 @@ def generate_evalset(from_path: str, output: str, count: int, balanced: bool, ap
 
     eval_set_id = f"{app_name.replace('-', '_')}_eval_set"
     evalset_path = generate_gepa_evalset(
-        cases, output, eval_set_id=eval_set_id,
-        app_name=app_name, count=count, balanced=balanced,
+        cases,
+        output,
+        eval_set_id=eval_set_id,
+        app_name=app_name,
+        count=count,
+        balanced=balanced,
     )
     click.echo(f"  Evalset: {evalset_path} ({min(count, len(cases))} cases)")
 

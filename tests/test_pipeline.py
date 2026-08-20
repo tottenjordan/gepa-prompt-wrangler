@@ -83,10 +83,7 @@ class TestManifestSerialization:
         assert manifest.pairs[0].costs == {"input": 1.5, "output": 9.0}
         assert manifest.pairs[1].costs is None
 
-        pairs_json = [
-            {"id": p.id, "model": p.model, "costs": p.costs}
-            for p in manifest.pairs
-        ]
+        pairs_json = [{"id": p.id, "model": p.model, "costs": p.costs} for p in manifest.pairs]
         serialized = json.dumps(pairs_json)
         restored = json.loads(serialized)
         assert restored[0]["costs"]["input"] == 1.5

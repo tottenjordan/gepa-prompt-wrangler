@@ -24,6 +24,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "examples", "mu
 os.environ.setdefault("ADK_SUPPRESS_GEMINI_LITELLM_WARNINGS", "true")
 
 import warnings
+
 warnings.filterwarnings("ignore", message=".*EXPERIMENTAL.*")
 warnings.filterwarnings("ignore", message=".*GEMINI_VIA_LITELLM.*")
 warnings.filterwarnings("ignore", category=DeprecationWarning, module="vertexai")
@@ -53,9 +54,9 @@ SMOKE_CASES = [
 
 
 def _header(msg):
-    print(f"\n{'='*60}")
+    print(f"\n{'=' * 60}")
     print(f"  {msg}")
-    print(f"{'='*60}")
+    print(f"{'=' * 60}")
 
 
 def _pass(msg):
@@ -100,6 +101,7 @@ def test_sampler_config():
 
     import json
     from wrangler.optimize.optimizer import _patch_adk
+
     _patch_adk()
 
     from google.adk.optimization.local_eval_sampler import LocalEvalSamplerConfig
@@ -109,8 +111,10 @@ def test_sampler_config():
 
     try:
         cfg = LocalEvalSamplerConfig.model_validate(config)
-        _pass(f"LocalEvalSamplerConfig validated — app_name={cfg.app_name}, "
-              f"train_eval_set={cfg.train_eval_set}")
+        _pass(
+            f"LocalEvalSamplerConfig validated — app_name={cfg.app_name}, "
+            f"train_eval_set={cfg.train_eval_set}"
+        )
 
         criteria = config.get("eval_config", {}).get("criteria", {})
         for k, v in criteria.items():
@@ -209,6 +213,7 @@ def test_gepa_optimize():
     import json
     import vertexai
     from wrangler.core.config import GCP_PROJECT_ID, GCP_REGION, GCP_STAGING_BUCKET
+
     vertexai.init(
         project=GCP_PROJECT_ID,
         location=GCP_REGION,
@@ -216,6 +221,7 @@ def test_gepa_optimize():
     )
 
     from wrangler.optimize.optimizer import _patch_adk
+
     _patch_adk()
 
     from google.adk.evaluation.local_eval_sets_manager import LocalEvalSetsManager
@@ -278,8 +284,10 @@ def test_gepa_optimize():
         best_idx = result.gepa_result["best_idx"]
         best = result.optimized_agents[best_idx]
         prompt = best.optimized_agent.instruction
-        _pass(f"GEPA complete ({elapsed:.0f}s) — best variant {best_idx}, "
-              f"score={best.overall_score:.3f}, prompt={len(prompt)} chars")
+        _pass(
+            f"GEPA complete ({elapsed:.0f}s) — best variant {best_idx}, "
+            f"score={best.overall_score:.3f}, prompt={len(prompt)} chars"
+        )
         return True
     except Exception as e:
         elapsed = time.time() - t0
@@ -290,10 +298,10 @@ def test_gepa_optimize():
 
 def main():
     parser = argparse.ArgumentParser(description="Pipeline smoke test")
-    parser.add_argument("--skip-optimize", action="store_true",
-                        help="Skip the GEPA optimization test (slowest)")
-    parser.add_argument("--skip-eval", action="store_true",
-                        help="Skip the batch eval test")
+    parser.add_argument(
+        "--skip-optimize", action="store_true", help="Skip the GEPA optimization test (slowest)"
+    )
+    parser.add_argument("--skip-eval", action="store_true", help="Skip the batch eval test")
     args = parser.parse_args()
 
     print("GEPA Prompt Wrangler — Smoke Test")

@@ -82,7 +82,9 @@ class TestUpdateAgent:
         from wrangler.core.deploy import update_agent
 
         mock_remote = MagicMock()
-        mock_remote.resource_name = "projects/test-project/locations/us-central1/reasoningEngines/12345"
+        mock_remote.resource_name = (
+            "projects/test-project/locations/us-central1/reasoningEngines/12345"
+        )
         mock_client.return_value.agent_engines.update.return_value = mock_remote
 
         agent = MagicMock()
@@ -147,8 +149,7 @@ def _make_agent_tree(tmp_path):
         'EXPENSE_MCP_SERVER = "e"\ndef resolve_model(m): return m\n'
     )
     (project_dir / "registry.py").write_text(
-        'from config import SEARCH_MCP_SERVER\n'
-        'def get_mcp_tools(name): return name\n'
+        "from config import SEARCH_MCP_SERVER\ndef get_mcp_tools(name): return name\n"
     )
     prompts_dir = project_dir / "prompts"
     prompts_dir.mkdir()
@@ -157,7 +158,7 @@ def _make_agent_tree(tmp_path):
     agents_dir = project_dir / "agents"
     agents_dir.mkdir()
     agent_file = agents_dir / "sonnet_agent.py"
-    agent_file.write_text('root_agent = None\n')
+    agent_file.write_text("root_agent = None\n")
 
     return str(agent_file)
 
@@ -168,7 +169,9 @@ class TestBuildSourcePackage:
 
         agent_module = _make_agent_tree(tmp_path)
         build_dir = str(tmp_path / "build")
-        result = build_source_package(agent_module, "Test instruction", "gemini-3.5-flash", build_dir)
+        result = build_source_package(
+            agent_module, "Test instruction", "gemini-3.5-flash", build_dir
+        )
 
         build_path = Path(result)
         assert (build_path / "app.py").exists()
@@ -225,7 +228,7 @@ class TestBuildSourcePackage:
         project_dir = tmp_path / "project"
         project_dir.mkdir()
         (project_dir / "config.py").write_text(
-            'import os\n'
+            "import os\n"
             'SEARCH_MCP_SERVER = os.environ["SEARCH_MCP_SERVER"]\n'
             'BOOKING_MCP_SERVER = os.environ["BOOKING_MCP_SERVER"]\n'
             'EXPENSE_MCP_SERVER = os.environ["EXPENSE_MCP_SERVER"]\n'
@@ -305,7 +308,10 @@ class TestDeployAgentFromSource:
 
         agent_module = _make_agent_tree(tmp_path)
         result = deploy_agent_from_source(
-            agent_module, "gemini-3.5-flash", "Test prompt", "test-agent",
+            agent_module,
+            "gemini-3.5-flash",
+            "Test prompt",
+            "test-agent",
         )
         assert result == "12345"
 
@@ -384,7 +390,9 @@ class TestUpdateAgentFromSource:
         from wrangler.core.deploy import update_agent_from_source
 
         mock_remote = MagicMock()
-        mock_remote.resource_name = "projects/test-project/locations/us-central1/reasoningEngines/12345"
+        mock_remote.resource_name = (
+            "projects/test-project/locations/us-central1/reasoningEngines/12345"
+        )
         mock_client.return_value.agent_engines.update.return_value = mock_remote
 
         agent_module = _make_agent_tree(tmp_path)
@@ -407,7 +415,10 @@ class TestUpdateAgentFromSource:
         agent_module = _make_agent_tree(tmp_path)
         update_agent_from_source(
             "projects/p/locations/l/reasoningEngines/99",
-            agent_module, "gemini-3.5-flash", "Updated prompt", "test",
+            agent_module,
+            "gemini-3.5-flash",
+            "Updated prompt",
+            "test",
         )
 
         call_kwargs = mock_client.return_value.agent_engines.update.call_args
@@ -427,7 +438,10 @@ class TestUpdateAgentFromSource:
         agent_module = _make_agent_tree(tmp_path)
         update_agent_from_source(
             "projects/p/locations/l/reasoningEngines/99",
-            agent_module, "gemini-3.5-flash", "Prompt", "test",
+            agent_module,
+            "gemini-3.5-flash",
+            "Prompt",
+            "test",
         )
 
         call_kwargs = mock_client.return_value.agent_engines.update.call_args

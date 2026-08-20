@@ -118,33 +118,39 @@ class AgentInspector:
             raise ValueError(f"Could not find root_agent in {agent_module_path}")
 
         tools = []
-        for tool in (agent.tools or []):
+        for tool in agent.tools or []:
             try:
                 if callable(tool) and not hasattr(tool, "func") and not hasattr(tool, "agent"):
                     tools.append(_inspect_function_tool(tool))
                 elif hasattr(tool, "func"):
                     tools.append(_inspect_function_tool(tool))
                 elif hasattr(tool, "agent"):
-                    tools.append(ToolSpec(
-                        name=tool.agent.name,
-                        description=getattr(tool.agent, "description", ""),
-                        tool_type="agent_tool",
-                    ))
+                    tools.append(
+                        ToolSpec(
+                            name=tool.agent.name,
+                            description=getattr(tool.agent, "description", ""),
+                            tool_type="agent_tool",
+                        )
+                    )
                 elif hasattr(tool, "connection_params"):
                     mcp_prefix = _detect_mcp_eval_name(tool)
                     tool_name = getattr(tool, "name", type(tool).__name__)
-                    tools.append(ToolSpec(
-                        name=tool_name,
-                        description=f"MCP toolset ({tool_name})",
-                        tool_type="mcp_toolset",
-                        eval_name=mcp_prefix or tool_name,
-                    ))
+                    tools.append(
+                        ToolSpec(
+                            name=tool_name,
+                            description=f"MCP toolset ({tool_name})",
+                            tool_type="mcp_toolset",
+                            eval_name=mcp_prefix or tool_name,
+                        )
+                    )
                 else:
-                    tools.append(ToolSpec(
-                        name=str(type(tool).__name__),
-                        description="Auto-discovered tool",
-                        tool_type="unknown",
-                    ))
+                    tools.append(
+                        ToolSpec(
+                            name=str(type(tool).__name__),
+                            description="Auto-discovered tool",
+                            tool_type="unknown",
+                        )
+                    )
             except Exception:
                 pass
 
@@ -213,29 +219,35 @@ class AgentInspector:
         for i, tool in enumerate(function_tools[:count]):
             param_names = list(tool.parameters.keys())
             param_example = ", ".join(f"{p}=..." for p in param_names[:2])
-            cases.append({
-                "prompt": f"TODO: Write a query that triggers {tool.name}({param_example})",
-                "expected_response": "TODO: Expected agent response",
-                "expected_tools": [
-                    {"name": tool.eval_name, "args": {p: "TODO" for p in param_names[:2]}},
-                ],
-            })
+            cases.append(
+                {
+                    "prompt": f"TODO: Write a query that triggers {tool.name}({param_example})",
+                    "expected_response": "TODO: Expected agent response",
+                    "expected_tools": [
+                        {"name": tool.eval_name, "args": {p: "TODO" for p in param_names[:2]}},
+                    ],
+                }
+            )
 
-        for tool in mcp_tools[:max(count - len(cases), 1)]:
-            cases.append({
-                "prompt": f"TODO: Write a query that uses the {tool.name} MCP toolset",
-                "expected_response": "TODO: Expected agent response",
-                "expected_tools": [
-                    {"name": f"{tool.eval_name}_TOOL_NAME", "args": {}},
-                ],
-                "_note": f"MCP tools are prefixed: {tool.eval_name}_<tool_function_name>",
-            })
+        for tool in mcp_tools[: max(count - len(cases), 1)]:
+            cases.append(
+                {
+                    "prompt": f"TODO: Write a query that uses the {tool.name} MCP toolset",
+                    "expected_response": "TODO: Expected agent response",
+                    "expected_tools": [
+                        {"name": f"{tool.eval_name}_TOOL_NAME", "args": {}},
+                    ],
+                    "_note": f"MCP tools are prefixed: {tool.eval_name}_<tool_function_name>",
+                }
+            )
 
         if not cases:
-            cases.append({
-                "prompt": "TODO: Write a test query for your agent",
-                "expected_response": "TODO: Expected agent response",
-                "expected_tools": [],
-            })
+            cases.append(
+                {
+                    "prompt": "TODO: Write a test query for your agent",
+                    "expected_response": "TODO: Expected agent response",
+                    "expected_tools": [],
+                }
+            )
 
         return cases

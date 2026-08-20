@@ -34,17 +34,18 @@ def get_mcp_tools(server_name: str):
     url = MCP_SERVER_URLS.get(server_name)
     if url:
         log.info("Using direct URL for %s: %s", server_name, url)
-        return McpToolset(connection_params=StreamableHTTPConnectionParams(
-            url=url,
-            timeout=MCP_TIMEOUT_SECONDS,
-            sse_read_timeout=MCP_READ_TIMEOUT_SECONDS,
-            terminate_on_close=False,
-            httpx_client_factory=_create_pooled_client,
-        ))
+        return McpToolset(
+            connection_params=StreamableHTTPConnectionParams(
+                url=url,
+                timeout=MCP_TIMEOUT_SECONDS,
+                sse_read_timeout=MCP_READ_TIMEOUT_SECONDS,
+                terminate_on_close=False,
+                httpx_client_factory=_create_pooled_client,
+            )
+        )
 
     log.info("No direct URL for %s — trying Agent Registry", server_name)
     from google.adk.integrations.agent_registry import AgentRegistry
-    registry = AgentRegistry(
-        project_id=GCP_PROJECT_ID, location=AGENT_REGISTRY_LOCATION
-    )
+
+    registry = AgentRegistry(project_id=GCP_PROJECT_ID, location=AGENT_REGISTRY_LOCATION)
     return registry.get_mcp_toolset(server_name)

@@ -8,9 +8,7 @@ load_dotenv()
 # --- GCP Settings ---
 GCP_PROJECT_ID = os.environ.get("GCP_PROJECT_ID", "")
 GCP_REGION = os.environ.get("GCP_REGION", "us-central1")
-GCP_STAGING_BUCKET = os.environ.get(
-    "GCP_STAGING_BUCKET", f"{GCP_PROJECT_ID}-wrangler-staging"
-)
+GCP_STAGING_BUCKET = os.environ.get("GCP_STAGING_BUCKET", f"{GCP_PROJECT_ID}-wrangler-staging")
 
 # --- Outputs ---
 OUTPUTS_DIR = os.environ.get("OUTPUTS_DIR", "outputs")
@@ -25,7 +23,10 @@ MODEL_COSTS = {
     "gemini-2.5-pro": {"input": 1.25, "output": 10.0},
     "gemini-3.1-flash-lite": {"input": 0.25, "output": 1.5},
     "gemini-3.5-flash": {"input": 1.50, "output": 9.0},
-    "gemini-3.1-pro-preview": {"input": 4.0, "output": 18.0}, # gemini-3.1-pro-preview | gemini-3.1-pro
+    "gemini-3.1-pro-preview": {
+        "input": 4.0,
+        "output": 18.0,
+    },  # gemini-3.1-pro-preview | gemini-3.1-pro
     "claude-sonnet-4-6": {"input": 3.0, "output": 15.0},
     "claude-opus-4-6": {"input": 5.0, "output": 25.0},
     "claude-opus-4-7": {"input": 5.0, "output": 25.0},
@@ -44,13 +45,11 @@ def blended_cost(model: str, custom_costs: dict[str, float] | None = None) -> fl
     return (BLENDED_INPUT_WEIGHT * cost["input"] + BLENDED_OUTPUT_WEIGHT * cost["output"]) / w
 
 
-
-
 # --- Rate limits (RPM) per model for inference throttling ---
 RATE_LIMITS = {
     "gemini-3.1-flash-lite": 5,
     "gemini-3.5-flash": 5,
-    "gemini-3.1-pro-preview": 5, # gemini-3.1-pro-preview | gemini-3.1-pro
+    "gemini-3.1-pro-preview": 5,  # gemini-3.1-pro-preview | gemini-3.1-pro
     "gemini-2.5-flash": 100,
     "gemini-2.5-pro": 80,
     "claude-sonnet-4-6": 2000,
@@ -90,8 +89,10 @@ def resolve_model(model_str: str):
         return model_str
     if model_str.startswith("claude"):
         from google.adk.models.anthropic_llm import Claude
+
         return Claude(model=model_str)
     from google.adk.models.google_llm import Gemini
+
     return Gemini(model=model_str)
 
 
@@ -105,6 +106,7 @@ def disable_pyopenssl():
     """
     try:
         import OpenSSL.SSL as _ssl
+
         for attr in dir(_ssl.Context):
             method = getattr(_ssl.Context, attr, None)
             if callable(method) and hasattr(method, "__wrapped__"):
