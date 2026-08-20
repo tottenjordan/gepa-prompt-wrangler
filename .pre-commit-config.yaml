@@ -1,0 +1,27 @@
+# Run with `uvx prek run --all-files`; install with `uvx prek install`.
+# The ruff rev must match the version pinned in pyproject.toml, otherwise the
+# hook and CI disagree about what "clean" means.
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.16.3
+    hooks:
+      # `ruff-check`, not `ruff` -- the bare id is a deprecated alias.
+      - id: ruff-check
+        args: [--fix]
+      - id: ruff-format
+
+  - repo: https://github.com/Yelp/detect-secrets
+    rev: v1.5.0
+    hooks:
+      - id: detect-secrets
+        args: ["--baseline", ".secrets.baseline"]
+
+  - repo: local
+    hooks:
+      # ty is not distributed as a pre-commit hook, and it needs the project
+      # environment to resolve the Google SDKs, so it runs through uv.
+      - id: ty
+        name: ty check
+        entry: uv run ty check wrangler/
+        language: system
+        pass_filenames: false
