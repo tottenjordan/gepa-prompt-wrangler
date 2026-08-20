@@ -114,6 +114,10 @@ ignore = [
 [tool.ruff.lint.per-file-ignores]
 "tests/*" = ["S101", "PLR2004", "SLF001"]        # asserts, magic values, private access
 "scripts/*" = ["INP001"]                         # standalone scripts, not a package
+# KFP serializes each @dsl.component body in isolation, so a module-level
+# `logger = logging.getLogger(__name__)` is not in scope inside a component.
+# The root logger is what the container's Cloud Logging agent captures anyway.
+"wrangler/pipeline/components.py" = ["LOG015"]
 # The example agents manipulate sys.path and call load_dotenv() before importing, which
 # E402 forbids. That ordering is required for GEAP deployment compatibility.
 "examples/*" = ["E402", "INP001"]

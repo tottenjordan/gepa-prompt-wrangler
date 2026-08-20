@@ -3,12 +3,13 @@
 import logging
 
 logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 try:
     from otel_setup import setup_opentelemetry
 
     setup_opentelemetry("expense-mcp")
 except Exception as e:
-    logging.warning("OTel setup failed: %s", e)
+    logger.warning("OTel setup failed: %s", e)
 
 from fastmcp import FastMCP
 
