@@ -117,9 +117,21 @@ class TestBuildSourcePackage:
         assert "sonnet_agent" in app_content
 
     def test_no_env_file_shipped(self, tmp_path):
+        """A .env next to config.py must not be tarballed up to GEAP.
+
+        The fixture writes one deliberately: without it this test passes
+        vacuously, which is how the build package shipped a secrets file for
+        as long as it did. Nothing on the server reads it — the copy lands at
+        /code/_geap_build_pkg/.env while load_dotenv() searches /code — so it
+        was upload-only risk. The MCP vars travel via `mcp_env_from_environ`.
+        """
         from wrangler.core.deploy import build_source_package
 
         agent_module = _make_agent_tree(tmp_path)
+        env_file = Path(agent_module).parent.parent / ".env"
+        env_file.write_text("SEARCH_MCP_SERVER=http://fake\n")
+        assert env_file.exists(), "premise: a .env exists next to config.py"
+
         build_dir = str(tmp_path / "build")
         build_source_package(agent_module, "Prompt", "gemini-3.5-flash", build_dir)
 

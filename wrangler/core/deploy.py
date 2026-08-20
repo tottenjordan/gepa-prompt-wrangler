@@ -560,12 +560,13 @@ def build_source_package(
         )
         config_copy.write_text(text)
 
-    # Copy .env as fallback for MCP server env vars — config.py's
-    # load_dotenv() will read it if env_vars from the deployment config
-    # are missing or incomplete.
-    env_file = agent_parent / ".env"
-    if env_file.exists():
-        shutil.copy2(env_file, build_path / ".env")
+    # Deliberately NOT copying `agent_parent / ".env"`. It used to be shipped as
+    # a "fallback" for the MCP env vars, but it cannot work as one: the copy
+    # lands at /code/_geap_build_pkg/.env while config.py's load_dotenv()
+    # searches from the process CWD (/code) and never finds it. See
+    # `mcp_env_from_environ` below, which is how those vars actually travel.
+    # So the copy bought nothing and uploaded a secrets file to a server that
+    # never reads it. tests/test_deploy.py::test_no_env_file_shipped pins this.
 
     # Write instruction file (replaced during redeploy)
     (build_path / "instruction.txt").write_text(instruction)
