@@ -21,7 +21,10 @@ _SOURCE_REQUIREMENTS = [
     "google-cloud-aiplatform[adk,agent-engines]>=1.163.0",
     "google-genai>=2",
     "google-auth>=2.52.0",
-    "google-adk[a2a,agent-identity,eval,mcp]==2.6.3",
+    # Pinned exactly, and must match the floor in pyproject.toml -- the
+    # container and the local env otherwise run different ADK versions and
+    # a bug reproduces in only one of them.
+    "google-adk[a2a,agent-identity,eval,mcp]==2.7.1",
     "anthropic[vertex]>=0.49.0",
     "litellm>=1.83.14",
     "python-dotenv>=1.0.0",
@@ -262,19 +265,48 @@ app = AdkApp(agent=root_agent, enable_tracing=True)
 
 # -- Startup checks: MCP tools + model ping --
 async def _startup_checks():
-    # 1. MCP tool warm-up
+    # 1. MCP reachability.
+    #
+    # Deliberately builds THROWAWAY toolsets rather than probing
+    # root_agent.tools. McpToolset caches its session on the event loop that
+    # first opened it, and these checks run on their own short-lived loop. A
+    # probe against the serving agent's toolsets therefore opens sessions,
+    # then closes the loop underneath them, leaving the *serving* path holding
+    # sessions bound to a dead loop -- visible in the logs as
+    #
+    #   Cleaning up session (disconnected or different loop): session_no_headers
+    #   Error cleaning up session ...: original event loop is closed
+    #
+    # The agent then answers ordinary prompts perfectly and dies the moment the
+    # model emits a function_call: the tool await never reaches the network, no
+    # HTTP request is logged, no exception surfaces, and the caller gets 200
+    # with an empty body and zero events.
+    #
+    # A health check must not share mutable connection state with the thing it
+    # is checking.
     mcp_ok, mcp_fail = 0, 0
-    for tool in root_agent.tools:
-        if hasattr(tool, "get_tools"):
-            try:
-                tools = await asyncio.wait_for(tool.get_tools(), timeout=30.0)
-                tool_names = [t.name for t in tools] if tools else []
-                _log.info("[GEAP startup] MCP OK: %s -> %d tools %s",
-                          type(tool).__name__, len(tool_names), tool_names[:3])
-                mcp_ok += 1
-            except Exception as exc:
-                _log.error("[GEAP startup] MCP FAILED: %s -> %s", type(tool).__name__, exc)
-                mcp_fail += 1
+    for server in (SEARCH_MCP_SERVER, BOOKING_MCP_SERVER, EXPENSE_MCP_SERVER):
+        if not server:
+            continue
+        probe = None
+        try:
+            probe = get_mcp_tools(server)
+            tools = await asyncio.wait_for(probe.get_tools(), timeout=30.0)
+            tool_names = [t.name for t in tools] if tools else []
+            _log.info("[GEAP startup] MCP OK: %s -> %d tools %s",
+                      server, len(tool_names), tool_names[:3])
+            mcp_ok += 1
+        except Exception as exc:
+            _log.error("[GEAP startup] MCP FAILED: %s -> %s", server, exc)
+            mcp_fail += 1
+        finally:
+            # Close on the same loop that opened it, so nothing outlives this
+            # coroutine. Failure to close is not itself a health signal.
+            if probe is not None and hasattr(probe, "close"):
+                try:
+                    await probe.close()
+                except Exception as exc:
+                    _log.debug("[GEAP startup] probe close failed for %s: %s", server, exc)
     _log.info("[GEAP startup] MCP summary: %d OK, %d failed", mcp_ok, mcp_fail)
     if mcp_ok == 0 and mcp_fail > 0:
         _log.error("[GEAP startup] FATAL: no MCP tools connected — agent cannot use tools")
