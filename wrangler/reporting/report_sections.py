@@ -225,8 +225,8 @@ def generate_agent_report(
     after_std: dict[str, float] | None = None,
 ) -> str:
     """Generate a per-agent analysis markdown file. Returns the file path."""
-    output_dir = Path(output_dir or REPORTS_DIR) / "agents"
-    output_dir.mkdir(parents=True, exist_ok=True)
+    out_dir = Path(output_dir or REPORTS_DIR) / "agents"
+    out_dir.mkdir(parents=True, exist_ok=True)
 
     cost = MODEL_COSTS.get(model, {"input": 0, "output": 0})
     provider = PROVIDERS.get(model, "Unknown")
@@ -317,7 +317,7 @@ def generate_agent_report(
     phase_label = "Post-Optimization" if after_per_case else "Baseline"
     lines.extend(_category_section(best_per_case or [], case_metadata, phase_label))
 
-    report_path = output_dir / f"{agent_name}_analysis.md"
+    report_path = out_dir / f"{agent_name}_analysis.md"
     with open(report_path, "w") as f:
         f.write("\n".join(lines))
 
@@ -631,7 +631,7 @@ def _interpretation_section(
     )
 
     if metrics_down:
-        worst_metric = min(metrics_down, key=metrics_down.get)
+        worst_metric = min(metrics_down, key=metrics_down.__getitem__)
         lines.append(
             f"3. **Re-optimize with expanded criteria.** The decline in "
             f"{METRIC_LABELS[worst_metric]} ({metrics_down[worst_metric]:+.3f} avg) "
@@ -673,8 +673,8 @@ def generate_comparison_report(
     version: str | None = None,
 ) -> str:
     """Generate a cross-model comparison report with cost-benefit and recommendations."""
-    output_dir = Path(output_dir or REPORTS_DIR)
-    output_dir.mkdir(parents=True, exist_ok=True)
+    out_dir = Path(output_dir or REPORTS_DIR)
+    out_dir.mkdir(parents=True, exist_ok=True)
     version_label = version or _detect_version(all_results)
 
     lines = []
@@ -839,7 +839,7 @@ def generate_comparison_report(
         lines.append("### Optimization Impact\n")
         lines.append("![Improvement Delta](charts/improvement_delta.png)\n")
 
-    charts_dir = Path(output_dir) / "charts"
+    charts_dir = out_dir / "charts"
     if (charts_dir / "tier_breakdown.png").exists():
         lines.append("### Tier Breakdown\n")
         lines.append("![Tier Breakdown](charts/tier_breakdown.png)\n")
@@ -861,7 +861,7 @@ def generate_comparison_report(
     )
     lines.append("")
 
-    report_path = output_dir / "comparison_report.md"
+    report_path = out_dir / "comparison_report.md"
     with open(report_path, "w") as f:
         f.write("\n".join(lines))
 

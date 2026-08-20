@@ -134,7 +134,7 @@ def _patch_adk():
         text = _re.sub(r"\s+", " ", text)
         return text.lower().strip()
 
-    _rbe._normalize_text = _fuzzy_normalize
+    _rbe._normalize_text = _fuzzy_normalize  # ty: ignore[invalid-assignment]  (ADK patch)
 
     _orig_convert = _rbe.RubricBasedEvaluator.convert_auto_rater_response_to_score
 
@@ -317,6 +317,8 @@ def optimize(
         )
 
     spec = importlib.util.spec_from_file_location("agent_mod", init_file)
+    if spec is None or spec.loader is None:
+        raise ImportError(f"Cannot load a Python module from {init_file}")
     module = importlib.util.module_from_spec(spec)
     sys.modules["agent_mod"] = module
     try:
@@ -427,10 +429,11 @@ def optimize(
 
     run_dir = os.path.join("outputs", "gepa_runs", app_name)
     os.makedirs(run_dir, exist_ok=True)
-    opt_kwargs = {"run_dir": run_dir}
-    if max_metric_calls is not None:
-        opt_kwargs["max_metric_calls"] = max_metric_calls
-    optimizer_config = GEPARootAgentPromptOptimizerConfig(**opt_kwargs)
+    optimizer_config = (
+        GEPARootAgentPromptOptimizerConfig(run_dir=run_dir, max_metric_calls=max_metric_calls)
+        if max_metric_calls is not None
+        else GEPARootAgentPromptOptimizerConfig(run_dir=run_dir)
+    )
     eval_sets_manager = LocalEvalSetsManager(agents_dir=agents_dir)
     sampler = LocalEvalSampler(sampler_cfg, eval_sets_manager)
     optimizer = GEPARootAgentPromptOptimizer(optimizer_config)
@@ -490,7 +493,8 @@ def optimize(
                 print(f"{tag}  Generation {gen}: scored in {gen_elapsed:.1f}s", flush=True)
                 return result
 
-            sampler.sample_and_score = _refreshed_sample
+            # ADK patch: wraps the bound method with per-generation MCP refresh.
+            sampler.sample_and_score = _refreshed_sample  # ty: ignore[invalid-assignment]
 
             return await optimizer.optimize(root_agent, sampler)
 

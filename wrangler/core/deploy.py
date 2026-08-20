@@ -669,6 +669,7 @@ def deploy_agent_from_source(
 
     print(f"  Deploying from source ({Path(agent_module).stem})...")
     last_err = None
+    build_dir = None
     for attempt in range(3):
         try:
             build_dir = build_source_package(agent_module, instruction, model)
@@ -681,7 +682,8 @@ def deploy_agent_from_source(
             break
         except Exception as e:
             last_err = e
-            shutil.rmtree(build_dir, ignore_errors=True)
+            if build_dir:
+                shutil.rmtree(build_dir, ignore_errors=True)
             if attempt < 2:
                 wait = 30 * (attempt + 1)
                 print(
@@ -698,7 +700,8 @@ def deploy_agent_from_source(
     else:
         raise last_err  # unreachable, but satisfies type checker
 
-    shutil.rmtree(build_dir, ignore_errors=True)
+    if build_dir:
+        shutil.rmtree(build_dir, ignore_errors=True)
     resource_name = getattr(remote, "resource_name", None) or remote.api_resource.name
     engine_id = resource_name.split("/")[-1]
     print(f"  Deployed: {engine_id}")
@@ -727,6 +730,7 @@ def update_agent_from_source(
 
     print(f"  Updating from source ({engine_id.split('/')[-1]})...")
     last_err = None
+    build_dir = None
     for attempt in range(3):
         try:
             build_dir = build_source_package(agent_module, instruction, model)
@@ -739,7 +743,8 @@ def update_agent_from_source(
             break
         except Exception as e:
             last_err = e
-            shutil.rmtree(build_dir, ignore_errors=True)
+            if build_dir:
+                shutil.rmtree(build_dir, ignore_errors=True)
             if attempt < 2:
                 wait = 30 * (attempt + 1)
                 print(
@@ -756,7 +761,8 @@ def update_agent_from_source(
     else:
         raise last_err
 
-    shutil.rmtree(build_dir, ignore_errors=True)
+    if build_dir:
+        shutil.rmtree(build_dir, ignore_errors=True)
     resource_name = getattr(remote, "resource_name", None) or remote.api_resource.name
     print(f"  Updated: {resource_name.split('/')[-1]}")
     return resource_name.split("/")[-1]

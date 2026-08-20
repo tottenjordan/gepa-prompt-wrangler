@@ -334,13 +334,15 @@ def _run_batched_inference(
     original_retry_fn = _evals_common._execute_agent_run_with_retry
 
     try:
-        _evals_common.AGENT_MAX_WORKERS = min(max_workers, batch_size)
+        # Deliberate monkey-patch: ty infers Literal[20] from the module constant.
+        _evals_common.AGENT_MAX_WORKERS = min(max_workers, batch_size)  # ty: ignore[invalid-assignment]
 
         @functools.wraps(original_retry_fn)
         def _patched_retry(*args, max_retries=6, **kwargs):
             return original_retry_fn(*args, max_retries=max_retries, **kwargs)
 
-        _evals_common._execute_agent_run_with_retry = _patched_retry
+        # Deliberate monkey-patch: the functools.wraps wrapper is not the same type.
+        _evals_common._execute_agent_run_with_retry = _patched_retry  # ty: ignore[invalid-assignment]
 
         all_dfs = []
         for i in range(n_batches):
@@ -518,6 +520,7 @@ def run_batch_eval(
 
     poll_start = time.time()
     poll_count = 0
+    state = ""
     while time.time() - poll_start < MAX_POLL_SECONDS:
         evaluation_run = client.evals.get_evaluation_run(name=evaluation_run.name)
         state = str(getattr(evaluation_run, "state", ""))
@@ -671,12 +674,12 @@ def save_eval_results(
     from datetime import UTC, datetime
     from pathlib import Path
 
-    output_dir = Path(output_dir or "outputs")
-    output_dir.mkdir(parents=True, exist_ok=True)
+    out_dir = Path(output_dir or "outputs")
+    out_dir.mkdir(parents=True, exist_ok=True)
 
     timestamp = datetime.now(tz=UTC).strftime("%Y%m%d_%H%M%S")
     filename = f"eval_{agent_name}_{phase}_{timestamp}.json"
-    path = output_dir / filename
+    path = out_dir / filename
 
     data = {
         "agent": agent_name,

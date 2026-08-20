@@ -53,7 +53,7 @@ def _call_judge(model: str, prompt: str) -> float:
         model=model,
         contents=prompt,
     )
-    text = response.text.strip()
+    text = (response.text or "").strip()
     try:
         score = float(text)
         return max(0.0, min(1.0, score))

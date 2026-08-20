@@ -86,7 +86,7 @@ def disable_pyopenssl():
     all guarded methods back to their originals via __wrapped__.
     """
     try:
-        import OpenSSL.SSL as _ssl  # noqa: N811  (a module, not a constant)
+        import OpenSSL.SSL as _ssl  # noqa: N811  # ty: ignore[unresolved-import]
 
         for attr in dir(_ssl.Context):
             method = getattr(_ssl.Context, attr, None)

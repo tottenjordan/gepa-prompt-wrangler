@@ -90,6 +90,7 @@ def run_quick_eval(agent_id: str, num_cases: int | None = None) -> dict:
     )
 
     poll_start = time.time()
+    state = ""
     while time.time() - poll_start < 600:
         evaluation_run = client.evals.get_evaluation_run(name=evaluation_run.name)
         state = str(getattr(evaluation_run, "state", ""))

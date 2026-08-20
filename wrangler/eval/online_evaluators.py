@@ -142,7 +142,7 @@ def register_custom_metrics() -> list[str]:
 
 
 def _build_evaluator_config(label: str, engine_id: str, custom_metric_names: list[str]) -> dict:
-    metric_sources = [
+    metric_sources: list[dict] = [
         {"metric": {"predefinedMetricSpec": {"metricSpecName": m}}} for m in PREDEFINED_METRICS
     ]
     metric_sources.extend({"metricResourceName": name} for name in custom_metric_names)

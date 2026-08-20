@@ -95,8 +95,8 @@ def _executive_summary(results: dict, ordered: list[str]) -> list[str]:
             vals.append(a - b)
         metric_avg_deltas[metric] = sum(vals) / len(vals) if vals else 0
 
-    best_metric = max(metric_avg_deltas, key=metric_avg_deltas.get)
-    worst_metric = min(metric_avg_deltas, key=metric_avg_deltas.get)
+    best_metric = max(metric_avg_deltas, key=metric_avg_deltas.__getitem__)
+    worst_metric = min(metric_avg_deltas, key=metric_avg_deltas.__getitem__)
     if metric_avg_deltas[best_metric] > 0.005:
         lines.append(
             f"**Strongest metric gain:** {METRIC_LABELS[best_metric]} ({metric_avg_deltas[best_metric]:+.3f} avg across models)"
@@ -539,7 +539,7 @@ def _conclusions_section(results: dict, ordered: list[str]) -> list[str]:
                 a = results[name].get("after", {}).get(metric, 0)
                 vals.append(a - b)
             metric_deltas[metric] = sum(vals) / len(vals) if vals else 0
-        worst = min(metric_deltas, key=metric_deltas.get)
+        worst = min(metric_deltas, key=metric_deltas.__getitem__)
         lines.append(
             f"1. **Investigate {METRIC_LABELS[worst]} regression** ({metric_deltas[worst]:+.3f} avg in regressed models) — "
             f"consider adding as explicit optimization target in sampler config"

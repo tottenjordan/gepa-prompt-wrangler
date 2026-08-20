@@ -28,17 +28,18 @@ def _make_heavy_components(image_uri: str):
     To swap the image, we rebuild the component specs from the existing
     function bodies using ``dsl.component()`` as a function call.
     """
-    common = {
-        "base_image": image_uri,
-        "packages_to_install": [],
-    }
+
+    # Passed explicitly rather than splatted from a dict: a heterogeneous
+    # **kwargs dict collapses every parameter to the union of its value types.
+    def _rebuild(func):
+        return dsl.component(base_image=image_uri, packages_to_install=[])(func)
 
     return {
-        "deploy": dsl.component(**common)(deploy_single_agent.python_func),
-        "eval": dsl.component(**common)(eval_single_agent.python_func),
-        "optimize": dsl.component(**common)(optimize_single_agent.python_func),
-        "redeploy": dsl.component(**common)(redeploy_single_agent.python_func),
-        "analysis": dsl.component(**common)(generate_analysis.python_func),
+        "deploy": _rebuild(deploy_single_agent.python_func),
+        "eval": _rebuild(eval_single_agent.python_func),
+        "optimize": _rebuild(optimize_single_agent.python_func),
+        "redeploy": _rebuild(redeploy_single_agent.python_func),
+        "analysis": _rebuild(generate_analysis.python_func),
     }
 
 

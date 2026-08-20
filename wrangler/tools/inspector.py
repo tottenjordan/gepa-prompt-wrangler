@@ -104,6 +104,8 @@ class AgentInspector:
                     break
 
         spec = importlib.util.spec_from_file_location("_inspect_agent", str(init_file))
+        if spec is None or spec.loader is None:
+            raise ImportError(f"Cannot load a Python module from {init_file}")
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
 

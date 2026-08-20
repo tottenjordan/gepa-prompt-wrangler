@@ -120,10 +120,12 @@ def generate_traffic(
         print(f"  [{query_num}/{total}] → {agent_short} ({complexity}) {query[:55]}")
 
         try:
-            session = agent.create_session(user_id=user_id)
+            # AgentEngine proxies the ADK class_methods list at runtime, so these
+            # attributes do not exist statically.
+            session = agent.create_session(user_id=user_id)  # ty: ignore[unresolved-attribute]
             session_id = session["id"] if isinstance(session, dict) else session.id
 
-            response = agent.stream_query(
+            response = agent.stream_query(  # ty: ignore[unresolved-attribute]
                 user_id=user_id,
                 session_id=session_id,
                 message=query,

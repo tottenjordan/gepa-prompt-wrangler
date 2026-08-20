@@ -143,6 +143,8 @@ def _load_agent(manifest: Manifest, pair: AgentPromptPair, manifest_dir: Path | 
                 break
 
     spec = importlib.util.spec_from_file_location(f"_agent_{pair.id}", str(init_file))
+    if spec is None or spec.loader is None:
+        raise ImportError(f"Cannot load a Python module from {init_file}")
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
 
@@ -425,10 +427,12 @@ def _save_optimized_prompt(exp: Experiment, pair: AgentPromptPair, prompt: str) 
     tree = ast.parse(content)
     optimized_node = None
     for node in ast.walk(tree):
-        if isinstance(node, ast.Assign):
+        # Require a dict literal, not just the name: the code below reads its keys,
+        # and `OPTIMIZED = something_else` is not a shape we can append to.
+        if isinstance(node, ast.Assign) and isinstance(node.value, ast.Dict):
             for target in node.targets:
                 if isinstance(target, ast.Name) and target.id == "OPTIMIZED":
-                    optimized_node = node
+                    optimized_node = node.value
 
     if optimized_node is None:
         print(f"  [{pair.id}] Warning: OPTIMIZED dict not found in {prompts_file}")
@@ -438,7 +442,7 @@ def _save_optimized_prompt(exp: Experiment, pair: AgentPromptPair, prompt: str) 
     # key that already exists produces a literal duplicate and Python silently keeps
     # only the last one, making the earlier GEPA output unreachable. Re-running the
     # same experiment version is normal, so suffix instead of clobbering.
-    existing = {k.value for k in optimized_node.value.keys if isinstance(k, ast.Constant)}
+    existing = {k.value for k in optimized_node.keys if isinstance(k, ast.Constant)}
     if version in existing:
         base, n = version, 2
         while version in existing:

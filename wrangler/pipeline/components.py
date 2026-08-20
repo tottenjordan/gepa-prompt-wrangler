@@ -125,7 +125,7 @@ def deploy_single_agent(
         import io
 
         from dotenv import load_dotenv
-        from google.cloud import secretmanager
+        from google.cloud import secretmanager  # ty: ignore[unresolved-import]
 
         logging.info(f"Loading secrets from {secret_id}")
         sm = secretmanager.SecretManagerServiceClient()
@@ -186,7 +186,7 @@ def deploy_single_agent(
         json.dumps(result, indent=2, default=str), content_type="application/json"
     )
 
-    metrics.log_metric("elapsed_seconds", result.get("elapsed", 0))
+    metrics.log_metric("elapsed_seconds", float(result.get("elapsed", 0)))
     with open(summary.path, "w") as f:
         f.write(f"## Deploy: {pair_id}\n\n")
         f.write(f"- **Model**: {model}\n")
@@ -401,7 +401,7 @@ def optimize_single_agent(
     # -- Load agent env vars from Secret Manager --
     if secret_id:
         from dotenv import load_dotenv
-        from google.cloud import secretmanager
+        from google.cloud import secretmanager  # ty: ignore[unresolved-import]
 
         logging.info(f"Loading secrets from {secret_id}")
         sm = secretmanager.SecretManagerServiceClient()
@@ -688,7 +688,7 @@ def redeploy_single_agent(
     # -- Load agent env vars from Secret Manager --
     if secret_id:
         from dotenv import load_dotenv
-        from google.cloud import secretmanager
+        from google.cloud import secretmanager  # ty: ignore[unresolved-import]
 
         logging.info(f"Loading secrets from {secret_id}")
         sm = secretmanager.SecretManagerServiceClient()
@@ -831,7 +831,7 @@ def generate_analysis(
     pairs = manifest.get("pairs", [])
     eval_data_path = manifest.get("eval_data", "")
 
-    results = {}
+    results: dict = {}
     total_input_cost = 0
     total_output_cost = 0
     total_elapsed = 0
