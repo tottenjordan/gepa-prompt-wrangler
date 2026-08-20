@@ -212,26 +212,47 @@ MODELS: dict[str, ModelSpec] = {
 # Change these to change the framework's defaults. Every default in wrangler/
 # points at one of them, so a model migration is an edit to this block.
 #
-# The three judge constants have three different values because that is what
-# the code actually did before they were named. Collapsing them is a behavior
-# change and belongs to the Phase 3 migration, not here. Naming them first is
-# what makes the inconsistency visible at all — it was spread over 12 literals
-# in 10 files.
+# The judge constants do not all hold the same value, because that is what the
+# code did before they were named. Naming them is what made the inconsistency
+# visible at all — it was spread over 12 literals in 10 files.
+#
+# A judge change silently re-scores every metric, so old and new reports stop
+# being comparable. That is why the scoring judges below are NOT being migrated
+# opportunistically: see docs/notes/model-lifecycle.md and Task 3.2b of
+# docs/plans/2026-08-20-repo-modernization.md, which requires an A/B run against
+# the smoke evalset before any of them moves.
 
-# Judge for GEPA optimization, batch eval, and eval-set conversion.
+# Judge for GEPA optimization, batch eval, and eval-set conversion. This is the
+# main scoring path.
+#
+# DEADLINE: gemini-2.5-flash retires 2026-10-16. When it 404s, GEPA optimization
+# AND batch eval both stop, not just inference. The guard test
+# test_default_models_are_not_near_retirement turns this into a red build 30
+# days out.
 DEFAULT_JUDGE_MODEL = "gemini-2.5-flash"
 
 # Judge used when a manifest's eval_config omits judge_model, and in the
-# manifest scaffold `wrangler init` writes.
+# manifest scaffold `wrangler init` writes. Already on 3.x — so the claim that a
+# 3.x judge is unproven here is not quite true; one scoring path has been using
+# one. Worth weighing in Task 3.2b.
 DEFAULT_MANIFEST_JUDGE_MODEL = "gemini-3.5-flash"
 
-# Judge for generated scaffolding (wrangler inspect, prompt registry).
-DEFAULT_SCAFFOLD_JUDGE_MODEL = "gemini-2.5-pro"
+# Judge written into generated scaffolding (wrangler inspect, prompt registry).
+# Migrated off gemini-2.5-pro ahead of the scoring judges: this value is emitted
+# into config files that do not exist yet, so there is no baseline to keep
+# comparable, and shipping a scaffold that names a model retiring in weeks is a
+# defect on its own. Same pro tier as before; see the churn note on the spec.
+DEFAULT_SCAFFOLD_JUDGE_MODEL = "gemini-3.1-pro-preview"
 
-# Multi-judge ensemble. Order matters: the first is the tie-breaker.
+# Multi-judge ensemble. Order matters: the first is the tie-breaker. Scoring
+# path — holds at 2.5 with DEFAULT_JUDGE_MODEL, and moves with it.
 DEFAULT_JUDGE_ENSEMBLE = ["gemini-2.5-pro", "gemini-2.5-flash"]
 
-# Agent model for the manifest scaffold's example pairs.
+# Agent model for the manifest scaffold's example pairs. Deliberately
+# gemini-3.5-flash and not the cheaper, newer gemini-3.6-flash: 3.6 is on the
+# short-term availability track and can retire 45 days after a replacement
+# ships, with no date announced in advance. A framework default wants the stable
+# pin. Pick 3.6 explicitly in a manifest when the cost matters more.
 DEFAULT_AGENT_MODEL = "gemini-3.5-flash"
 DEFAULT_AGENT_MODEL_ALT = "claude-sonnet-4-6"
 

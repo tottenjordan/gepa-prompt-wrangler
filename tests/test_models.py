@@ -5,6 +5,12 @@ import datetime as dt
 import pytest
 
 from wrangler.core.models import (
+    DEFAULT_AGENT_MODEL,
+    DEFAULT_AGENT_MODEL_ALT,
+    DEFAULT_JUDGE_ENSEMBLE,
+    DEFAULT_JUDGE_MODEL,
+    DEFAULT_MANIFEST_JUDGE_MODEL,
+    DEFAULT_SCAFFOLD_JUDGE_MODEL,
     MODELS,
     ModelSpec,
     blended_cost,
@@ -67,6 +73,73 @@ def test_sampling_params_flagged_for_models_that_reject_them():
             f"{name}: supports_sampling_params={spec.supports_sampling_params} "
             f"contradicts the Anthropic deprecation table"
         )
+
+
+# Every named role, so a new constant cannot dodge the guards below.
+DEFAULT_ROLES = {
+    "DEFAULT_JUDGE_MODEL": [DEFAULT_JUDGE_MODEL],
+    "DEFAULT_MANIFEST_JUDGE_MODEL": [DEFAULT_MANIFEST_JUDGE_MODEL],
+    "DEFAULT_SCAFFOLD_JUDGE_MODEL": [DEFAULT_SCAFFOLD_JUDGE_MODEL],
+    "DEFAULT_JUDGE_ENSEMBLE": DEFAULT_JUDGE_ENSEMBLE,
+    "DEFAULT_AGENT_MODEL": [DEFAULT_AGENT_MODEL],
+    "DEFAULT_AGENT_MODEL_ALT": [DEFAULT_AGENT_MODEL_ALT],
+}
+
+# How much warning the deadline guard gives before a default stops working.
+RETIREMENT_WARNING = dt.timedelta(days=30)
+
+
+def test_every_default_role_names_a_registered_model():
+    """A typo in a default is otherwise a 404 at run time, not at import."""
+    for role, models in DEFAULT_ROLES.items():
+        for model in models:
+            assert model in MODELS, f"{role} points at unregistered {model!r}"
+
+
+def test_no_default_role_is_missing_from_the_guard():
+    """A new DEFAULT_* constant must be added to DEFAULT_ROLES.
+
+    Without this, someone adds DEFAULT_SUMMARY_MODEL, points it at a retiring
+    model, and the deadline guard never looks at it.
+    """
+    from wrangler.core import models as mod
+
+    # The isinstance filter is what excludes DEFAULT_RPM, which is an int and
+    # names a rate limit rather than a model.
+    declared = {
+        name
+        for name in dir(mod)
+        if name.startswith("DEFAULT_") and isinstance(getattr(mod, name), str | list)
+    }
+    assert declared == set(DEFAULT_ROLES), (
+        f"DEFAULT_ROLES is out of sync with wrangler.core.models: {declared ^ set(DEFAULT_ROLES)}"
+    )
+
+
+def test_default_models_are_not_near_retirement():
+    """Fail 30 days before a default model stops answering, not on the day.
+
+    A judge default is the sharp case: when gemini-2.5-flash 404s, GEPA
+    optimization and batch eval both stop, so a same-day failure leaves no room
+    to run the A/B that a judge swap requires (Task 3.2b). Thirty days is enough
+    to measure a replacement and re-baseline.
+
+    To clear a failure, migrate the constant — do not extend the window.
+    """
+    deadline = dt.datetime.now(tz=dt.UTC).date() + RETIREMENT_WARNING
+    overdue = [
+        f"{role} -> {model} (retires {MODELS[model].retirement_date})"
+        for role, models in DEFAULT_ROLES.items()
+        for model in models
+        if MODELS[model].retirement_date and MODELS[model].retirement_date <= deadline
+    ]
+    assert not overdue, (
+        "Default models at or past their retirement warning window:\n"
+        + "\n".join(overdue)
+        + "\n\nMigrate them in wrangler/core/models.py. For a judge, run the A/B in "
+        "Task 3.2b of docs/plans/2026-08-20-repo-modernization.md first — a judge "
+        "swap re-scores everything and invalidates the existing baseline."
+    )
 
 
 def test_gemini_2x_resolves_to_plain_string():
