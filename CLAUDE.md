@@ -81,12 +81,41 @@ system prompt instead.
 
 ### Model Resolution
 
-`core/config.py:resolve_model()` routes models to the correct ADK class:
+`core/models.py:resolve_model()` (re-exported from `core/config.py`) routes models to the
+correct ADK class:
 - Gemini 2.x → plain string (regional endpoint)
 - Gemini 3.x → `Gemini()` from `google.adk.models.google_llm`
 - Claude → `Claude()` from `google.adk.models.anthropic_llm`
 
-All non-2.x models use `GOOGLE_CLOUD_LOCATION=global`.
+**The location rule.** `core/models.py:model_location()` is the single source of truth:
+
+| Model family | Location | Endpoint host |
+| --- | --- | --- |
+| Gemini 2.x (and `models/…`) | `GCP_REGION`, e.g. `us-central1` | `us-central1-aiplatform.googleapis.com` |
+| Gemini 3.x | `global` | `aiplatform.googleapis.com` |
+| Anthropic / Claude (all versions) | `global` | `aiplatform.googleapis.com` |
+
+Gemini 3.x and Claude are **not servable from a region**. Asking for one fails with
+`Publisher Model .../locations/us-central1/publishers/anthropic/models/claude-sonnet-4-6
+is not servable in region us-central1`.
+
+**Do not drive this off `GOOGLE_CLOUD_LOCATION`.** That variable is process-wide, but one
+process routes across five tiers at once (lite/flash/pro are Gemini 3.x, sonnet/opus are
+Claude), so no single value is right for all of them — and GEAP treats it as a restricted
+env var and can serve it back regionally regardless of the deployment config. Instead
+`resolve_model()` pins the location *into each model object*:
+
+- Claude gets a full resource name, `projects/{p}/locations/global/publishers/anthropic/models/{id}`.
+  ADK's `Claude._anthropic_client` parses project and location out of that path and ignores
+  the env var entirely.
+- Gemini 3.x gets `client_kwargs={"vertexai": True, "project": …, "location": "global"}`,
+  forwarded verbatim to `google.genai.Client`, which derives its endpoint host from it.
+
+`GOOGLE_CLOUD_LOCATION=global` stays in `.env` as the fallback for code paths that bypass
+`resolve_model()`. Setting it to `${GCP_REGION}` breaks every Claude and Gemini 3.x agent.
+
+Both `wrangler/core/models.py` and `examples/multi_model_agents/config.py` implement this —
+keep them in sync (see "Two config.py Files" below).
 
 Note `resolve_model()` returns an ADK model *object* for everything except Gemini 2.x.
 Anywhere a plain id string is needed — `deploy_agent_from_source(model=...)`, the build
@@ -255,7 +284,12 @@ Rows with NaN/None/empty responses must be dropped from inference results before
 The MCP session manager passes `headers`, `timeout`, and other kwargs to `httpx_client_factory`. The factory must accept `**kwargs` and pop conflicting keys (`timeout`, `limits`) before passing to `httpx.AsyncClient()`.
 
 ### Two config.py Files
-`wrangler/core/config.py` and `examples/multi_model_agents/config.py` both have `resolve_model()`. Keep them in sync — the multi-model agents import from their local config, not wrangler's.
+`wrangler/core/models.py` (re-exported via `wrangler/core/config.py`) and
+`examples/multi_model_agents/config.py` both define `resolve_model()` / `model_location()`.
+Keep them in sync — the multi-model agents import from their **local** config, not
+wrangler's, and `build_source_package()` copies that local file into `_geap_build_pkg/`, so
+it is the version that actually runs on GEAP. A fix applied only to `wrangler/core/` will
+appear to work locally in the CLI and still ship broken to every deployed agent.
 
 ### Optimizer Prompt Flow
 

@@ -204,10 +204,14 @@ class TestResolveModel:
         assert not isinstance(result, str)
         assert result.model == "gemini-3.5-flash"
 
-    def test_claude_returns_claude_object(self):
+    def test_claude_returns_claude_object(self, monkeypatch):
+        """Claude carries its location in the model resource path, not the env."""
+        monkeypatch.setenv("GCP_PROJECT_ID", "test-proj")
         result = resolve_model("claude-sonnet-4-6")
         assert not isinstance(result, str)
-        assert result.model == "claude-sonnet-4-6"
+        assert result.model == (
+            "projects/test-proj/locations/global/publishers/anthropic/models/claude-sonnet-4-6"
+        )
 
 
 def test_model_spec_is_immutable():

@@ -37,6 +37,7 @@ MCP_SERVER_URLS = {
 }
 
 OTEL_ENV_VARS = {
+    "GOOGLE_CLOUD_AGENT_ENGINE_ENABLE_TELEMETRY": "true",
     "OTEL_SEMCONV_STABILITY_OPT_IN": "gen_ai_latest_experimental",
     "OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT": "EVENT_ONLY",
 }
@@ -44,22 +45,63 @@ OTEL_ENV_VARS = {
 AGENT_MODEL = os.environ.get("AGENT_MODEL", "gemini-3.5-flash")
 
 
+GLOBAL_LOCATION = "global"
+_VERTEX_TRUTHY = {"1", "true", "True", "TRUE"}
+
+
+def is_regional_model(model_str: str) -> bool:
+    """True if `model_str` is served from a regional Vertex AI endpoint."""
+    return model_str.startswith(("gemini-2", "models/"))
+
+
+def model_location(model_str: str) -> str:
+    """Return the Vertex AI location that serves `model_str`.
+
+    Gemini 2.x → regional (GCP_REGION). Gemini 3.x and every Anthropic
+    (Claude) model → "global"; they are not servable from a region, and
+    asking for one fails with "Publisher Model ... is not servable in region
+    us-central1".
+
+    Kept in sync with wrangler/core/models.py:model_location — see that
+    docstring for why this cannot be driven by GOOGLE_CLOUD_LOCATION.
+    """
+    return GCP_REGION if is_regional_model(model_str) else GLOBAL_LOCATION
+
+
 def resolve_model(model_str: str):
     """Resolve model string to an ADK-compatible model.
 
-    Gemini 2.x models work in regional endpoints — pass as plain strings.
-    Gemini 3.x uses the native Gemini class, Claude uses the native Claude
-    class. Both read GOOGLE_CLOUD_LOCATION from env (set to "global").
+    Gemini 2.x passes through as a plain string. Gemini 3.x and Claude get
+    their location from `model_location` pinned into the model object, so a
+    stale or platform-imposed GOOGLE_CLOUD_LOCATION cannot break them.
     """
-    if model_str.startswith(("gemini-2", "models/")):
+    if is_regional_model(model_str):
         return model_str
+
+    location = model_location(model_str)
+    project = GCP_PROJECT_ID or os.environ.get("GOOGLE_CLOUD_PROJECT", "")
+
     if model_str.startswith("claude"):
         from google.adk.models.anthropic_llm import Claude
 
-        return Claude(model=model_str)
+        if not project:
+            return Claude(model=model_str)
+        # ADK's Claude reads project + location out of a full resource path
+        # and ignores GOOGLE_CLOUD_LOCATION when one is given.
+        return Claude(
+            model=f"projects/{project}/locations/{location}/publishers/anthropic/models/{model_str}"
+        )
+
     from google.adk.models.google_llm import Gemini
 
-    return Gemini(model=model_str)
+    if not project or os.environ.get("GOOGLE_GENAI_USE_VERTEXAI", "") not in _VERTEX_TRUTHY:
+        return Gemini(model=model_str)
+    # client_kwargs is forwarded to google.genai.Client, which picks its
+    # endpoint host from `location`.
+    return Gemini(
+        model=model_str,
+        client_kwargs={"vertexai": True, "project": project, "location": location},
+    )
 
 
 # Multi-model router (5-tier: lite → flash → pro → sonnet → opus)

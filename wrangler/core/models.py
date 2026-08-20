@@ -9,9 +9,13 @@ from __future__ import annotations
 
 import datetime as dt
 import logging
+import os
 from dataclasses import dataclass
 
 log = logging.getLogger(__name__)
+
+# Values of GOOGLE_GENAI_USE_VERTEXAI that mean "yes".
+_VERTEX_TRUTHY = {"1", "true", "True", "TRUE"}
 
 BLENDED_INPUT_WEIGHT = 4
 BLENDED_OUTPUT_WEIGHT = 1
@@ -331,20 +335,81 @@ def get_batch_config(model: str) -> tuple[int, float, int]:
     return 64, 0.0, 20
 
 
+GLOBAL_LOCATION = "global"
+
+
+def is_regional_model(model_str: str) -> bool:
+    """True if `model_str` is served from a regional Vertex AI endpoint."""
+    return model_str.startswith(("gemini-2", "models/"))
+
+
+def model_location(model_str: str) -> str:
+    """Return the Vertex AI location that serves `model_str`.
+
+    The rule, which holds for every model this repo uses:
+
+    * **Gemini 2.x** is served from *regional* endpoints
+      (``us-central1-aiplatform.googleapis.com``) → ``GCP_REGION``.
+    * **Gemini 3.x and every Anthropic (Claude) model** are served *only*
+      from the ``global`` endpoint (``aiplatform.googleapis.com``) →
+      ``"global"``. Asking a region for one of them fails outright:
+      ``Publisher Model .../locations/us-central1/publishers/anthropic/
+      models/claude-sonnet-4-6 is not servable in region us-central1``.
+
+    Deciding this from the ``GOOGLE_CLOUD_LOCATION`` env var does not work,
+    which is the whole reason this function exists. That variable is
+    process-wide, but one process here routes across five model tiers at
+    once (lite/flash/pro → Gemini 3.x, sonnet/opus → Claude), so no single
+    value is correct for all of them; and under GEAP the platform may
+    override it regionally regardless of what the deployment config asked
+    for. `resolve_model` therefore pins the location *into each model
+    object*, and this function is the single source of that decision.
+    """
+    if is_regional_model(model_str):
+        return os.environ.get("GCP_REGION", "us-central1")
+    return GLOBAL_LOCATION
+
+
 def resolve_model(model_str: str):
     """Resolve a model string to an ADK-compatible model object.
 
-    Gemini 2.x works on regional endpoints — passed through as a plain string.
-    Gemini 3.x uses the native Gemini class; Claude uses the native Claude
-    class. Both read GOOGLE_CLOUD_LOCATION from the environment, which must
-    be "global".
+    Gemini 2.x is passed through as a plain string — ADK resolves it against
+    the ambient regional endpoint, which is where it is served. Gemini 3.x
+    and Claude are wrapped in their native ADK classes with the location from
+    `model_location` pinned into the object, so a stale or platform-imposed
+    ``GOOGLE_CLOUD_LOCATION`` cannot break them.
     """
-    if model_str.startswith(("gemini-2", "models/")):
+    if is_regional_model(model_str):
         return model_str
+
+    location = model_location(model_str)
+    project = os.environ.get("GCP_PROJECT_ID") or os.environ.get("GOOGLE_CLOUD_PROJECT", "")
+
     if model_str.startswith("claude"):
         from google.adk.models.anthropic_llm import Claude
 
-        return Claude(model=model_str)
+        if not project:
+            # No project to build a resource name from. Fall back to the bare
+            # id and let ADK raise its own (clear) error about missing env.
+            return Claude(model=model_str)
+        # ADK's Claude parses project and location out of a full resource
+        # path and builds its AsyncAnthropicVertex from those, ignoring
+        # GOOGLE_CLOUD_LOCATION entirely. That makes this form the only one
+        # immune to a stale env var.
+        return Claude(
+            model=f"projects/{project}/locations/{location}/publishers/anthropic/models/{model_str}"
+        )
+
     from google.adk.models.google_llm import Gemini
 
-    return Gemini(model=model_str)
+    if not project or os.environ.get("GOOGLE_GENAI_USE_VERTEXAI", "") not in _VERTEX_TRUTHY:
+        # Not on Vertex (or nothing to pin to) — leave client construction to
+        # ADK so API-key mode keeps working.
+        return Gemini(model=model_str)
+    # `client_kwargs` is forwarded verbatim to google.genai.Client, which
+    # derives its endpoint host from `location`. Pinning it here beats setting
+    # GOOGLE_CLOUD_LOCATION for the same reason as above.
+    return Gemini(
+        model=model_str,
+        client_kwargs={"vertexai": True, "project": project, "location": location},
+    )
