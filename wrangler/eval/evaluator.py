@@ -1,5 +1,6 @@
 """Batch evaluation — runs inference + evaluation against deployed agents on GEAP."""
 
+import contextlib
 import functools
 import math
 import statistics
@@ -270,7 +271,9 @@ def _extract_per_case_via_api(evaluation_run) -> list[dict[str, float]]:
 
         for item_name in eval_set.evaluation_items:
             case_scores: dict[str, float] = {}
-            try:
+            # One unreadable item must not drop the scores for every other case;
+            # it just contributes an empty dict.
+            with contextlib.suppress(Exception):
                 item = client.evals.get_evaluation_item(name=item_name)
                 response = getattr(item, "evaluation_response", None)
                 if response:
@@ -280,8 +283,6 @@ def _extract_per_case_via_api(evaluation_run) -> list[dict[str, float]]:
                         if metric and score is not None:
                             short = metric.split("/")[-1] if "/" in metric else metric
                             case_scores[short] = float(score)
-            except Exception:
-                pass
             per_case.append(case_scores)
     except Exception as e:
         print(f"  Warning in API fallback for per-case scores: {e}")

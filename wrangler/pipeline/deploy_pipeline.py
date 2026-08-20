@@ -31,7 +31,7 @@ def _compute_deps_hash() -> str:
     pyproject = Path(__file__).resolve().parent.parent.parent / "pyproject.toml"
     if not pyproject.exists():
         return "unknown"
-    return hashlib.md5(pyproject.read_bytes()).hexdigest()[:12]
+    return hashlib.md5(pyproject.read_bytes(), usedforsecurity=False).hexdigest()[:12]
 
 
 def _image_exists(image_uri: str) -> bool:
@@ -265,7 +265,8 @@ def deploy_pipeline(
 
         cache_key = hashlib.md5(
             f"{manifest.name}:{manifest.agent_module}:{manifest.eval_data}:"
-            f"{','.join(p.id for p in manifest.pairs)}".encode()
+            f"{','.join(p.id for p in manifest.pairs)}".encode(),
+            usedforsecurity=False,
         ).hexdigest()[:10]
         run_id = f"run-{cache_key}"
 

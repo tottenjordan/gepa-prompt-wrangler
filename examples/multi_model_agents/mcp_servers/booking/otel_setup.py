@@ -25,7 +25,7 @@ def setup_opentelemetry(service_name: str) -> None:
     """Configure OpenTelemetry to send traces to Google Cloud Observability."""
     credentials, project_id = google.auth.default()
     if not project_id:
-        raise Exception("Could not determine Google Cloud project ID.")
+        raise RuntimeError("Could not determine Google Cloud project ID.")
 
     resource = Resource.create(
         attributes={

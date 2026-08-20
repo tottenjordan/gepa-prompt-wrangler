@@ -1,6 +1,7 @@
 """GEPA optimization — wraps the ADK GEPARootAgentPromptOptimizer with patches."""
 
 import asyncio
+import contextlib
 import importlib.util
 import json
 import logging
@@ -39,10 +40,10 @@ def _patch_adk():
         for _name in dir(_mod):
             _cls = getattr(_mod, _name)
             if isinstance(_cls, type) and hasattr(_cls, "model_rebuild"):
-                try:
+                # Not every ADK model can be rebuilt; the ones that can't are
+                # already resolved, so a failure here is not actionable.
+                with contextlib.suppress(Exception):
                     _cls.model_rebuild(force=True)
-                except Exception:
-                    pass
 
     from google.adk.evaluation import local_eval_service as les
 
@@ -472,10 +473,10 @@ def optimize(
                     )
                     for tool in root_agent.tools:
                         if isinstance(tool, BaseToolset):
-                            try:
+                            # Closing a stale session is best-effort: the point is
+                            # to re-warm below, and a dead session raises on close.
+                            with contextlib.suppress(Exception):
                                 await tool.close()
-                            except Exception:
-                                pass
                     warmed = await _prewarm_mcp_toolsets(root_agent, tag, max_retries=2)
                     refresh_elapsed = time.time() - gen_t0
                     print(
@@ -528,7 +529,7 @@ def optimize(
     stderr_path = os.path.join(run_dir, "run_log_stderr.txt")
     if os.path.exists(stderr_path):
         with open(stderr_path) as f:
-            rubric_warnings = [l for l in f if "not found in the rubrics" in l]
+            rubric_warnings = [line for line in f if "not found in the rubrics" in line]
         if rubric_warnings:
             print(
                 f"{tag}  WARNING: {len(rubric_warnings)} rubric match failures during optimization",

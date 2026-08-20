@@ -203,7 +203,7 @@ def _sample_balanced(cases: list[dict], count: int, seed: int = 42) -> list[dict
     remainder = count - per_bucket * len(buckets)
 
     sampled = []
-    for i, (level, bucket) in enumerate(sorted(buckets.items())):
+    for i, (_level, bucket) in enumerate(sorted(buckets.items())):
         n = per_bucket + (1 if i < remainder else 0)
         n = min(n, len(bucket))
         sampled.extend(rng.sample(bucket, n))

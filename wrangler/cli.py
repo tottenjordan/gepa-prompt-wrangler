@@ -379,7 +379,7 @@ def init(output: str, agent_dir: str):
             spec = AgentInspector.inspect(agent_dir)
         except Exception as e:
             click.echo(f"Error inspecting agent: {e}")
-            raise SystemExit(1)
+            raise SystemExit(1) from e
 
         manifest = AgentInspector.generate_manifest_stub(spec, agent_dir)
         click.echo(f"  Agent: {spec.name}")

@@ -1,5 +1,6 @@
 """Agent introspection — auto-discover tools and generate YAML scaffold."""
 
+import contextlib
 import importlib.util
 import inspect
 from dataclasses import dataclass, field
@@ -117,7 +118,9 @@ class AgentInspector:
 
         tools = []
         for tool in agent.tools or []:
-            try:
+            # Introspection is advisory: an unrecognised tool shape should not
+            # abort the whole agent spec.
+            with contextlib.suppress(Exception):
                 if (
                     callable(tool) and not hasattr(tool, "func") and not hasattr(tool, "agent")
                 ) or hasattr(tool, "func"):
@@ -149,8 +152,6 @@ class AgentInspector:
                             tool_type="unknown",
                         )
                     )
-            except Exception:
-                pass
 
         model_str = str(agent.model) if agent.model else "unknown"
         if hasattr(agent.model, "model"):

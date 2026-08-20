@@ -141,8 +141,8 @@ def _prompt_diff_summary(original: str, optimized: str) -> str:
     if not diff:
         return "(prompts are identical)"
 
-    added = sum(1 for l in diff if l.startswith("+") and not l.startswith("+++"))
-    removed = sum(1 for l in diff if l.startswith("-") and not l.startswith("---"))
+    added = sum(1 for line in diff if line.startswith("+") and not line.startswith("+++"))
+    removed = sum(1 for line in diff if line.startswith("-") and not line.startswith("---"))
     return f"+{added} lines / -{removed} lines"
 
 

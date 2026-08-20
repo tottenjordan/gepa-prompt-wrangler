@@ -109,7 +109,8 @@ def deploy_single_agent(
         "/tmp/code.tar.gz"
     )
     with tarfile.open("/tmp/code.tar.gz", "r:gz") as tar:
-        tar.extractall(path="/app")
+        # filter="data" rejects absolute paths, ".." escapes, and special files.
+        tar.extractall(path="/app", filter="data")
     sys.path.insert(0, "/app")
 
     os.environ["GCP_PROJECT_ID"] = project_id
@@ -242,7 +243,8 @@ def eval_single_agent(
         "/tmp/code.tar.gz"
     )
     with tarfile.open("/tmp/code.tar.gz", "r:gz") as tar:
-        tar.extractall(path="/app")
+        # filter="data" rejects absolute paths, ".." escapes, and special files.
+        tar.extractall(path="/app", filter="data")
     sys.path.insert(0, "/app")
 
     os.environ["GCP_PROJECT_ID"] = project_id
@@ -363,6 +365,7 @@ def optimize_single_agent(
     summary: Output[Markdown],
 ) -> str:
     """Run GEPA optimization for a single agent-prompt pair."""
+    import contextlib
     import io
     import json
     import logging
@@ -384,7 +387,8 @@ def optimize_single_agent(
         "/tmp/code.tar.gz"
     )
     with tarfile.open("/tmp/code.tar.gz", "r:gz") as tar:
-        tar.extractall(path="/app")
+        # filter="data" rejects absolute paths, ".." escapes, and special files.
+        tar.extractall(path="/app", filter="data")
     sys.path.insert(0, "/app")
 
     os.environ["GCP_PROJECT_ID"] = project_id
@@ -541,15 +545,14 @@ def optimize_single_agent(
                 if agent and hasattr(agent, "tools"):
                     for t in agent.tools:
                         if isinstance(t, BaseToolset):
-                            try:
+                            # Best-effort teardown; a session that already died
+                            # raises on close and there is nothing left to do.
+                            with contextlib.suppress(Exception):
                                 await t.close()
-                            except Exception:
-                                pass
 
-    try:
+    # RuntimeError here means there is no usable event loop left to close on.
+    with contextlib.suppress(RuntimeError):
         asyncio.run(_cleanup_sessions())
-    except RuntimeError:
-        pass
 
     judge_costs = MODEL_COSTS.get(judge_model, {"input": 0, "output": 0})
     est_input = len(original_prompt) * 50
@@ -671,7 +674,8 @@ def redeploy_single_agent(
         "/tmp/code.tar.gz"
     )
     with tarfile.open("/tmp/code.tar.gz", "r:gz") as tar:
-        tar.extractall(path="/app")
+        # filter="data" rejects absolute paths, ".." escapes, and special files.
+        tar.extractall(path="/app", filter="data")
     sys.path.insert(0, "/app")
 
     os.environ["GCP_PROJECT_ID"] = project_id
@@ -781,6 +785,7 @@ def generate_analysis(
     summary: Output[Markdown],
 ) -> str:
     """Aggregate all per-pair results and generate the final analysis report."""
+    import contextlib
     import json
     import logging
     import os
@@ -798,7 +803,8 @@ def generate_analysis(
         "/tmp/code.tar.gz"
     )
     with tarfile.open("/tmp/code.tar.gz", "r:gz") as tar:
-        tar.extractall(path="/app")
+        # filter="data" rejects absolute paths, ".." escapes, and special files.
+        tar.extractall(path="/app", filter="data")
     sys.path.insert(0, "/app")
 
     os.environ["GCP_PROJECT_ID"] = project_id
@@ -861,7 +867,8 @@ def generate_analysis(
             total_elapsed += stage_data.get("elapsed", 0)
 
     if eval_data_path:
-        try:
+        # Per-case metadata enriches the report but is not required for it.
+        with contextlib.suppress(Exception):
             eval_cases = load_eval_file(f"/app/{eval_data_path}")
             results["_eval_metadata"] = {
                 "cases": [
@@ -874,8 +881,6 @@ def generate_analysis(
                     for i, c in enumerate(eval_cases)
                 ]
             }
-        except Exception:
-            pass
 
     reports_dir = Path("/tmp/reports")
     charts_dir = Path("/tmp/reports/charts")
