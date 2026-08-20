@@ -3,133 +3,6 @@
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-
-class TestDeployAgent:
-    @patch("wrangler.core.deploy.vertexai")
-    @patch("wrangler.core.deploy._get_client")
-    def test_returns_engine_id(self, mock_client, mock_vertexai):
-        from wrangler.core.deploy import deploy_agent
-
-        mock_remote = MagicMock()
-        mock_remote.resource_name = "projects/p/locations/l/reasoningEngines/12345"
-        mock_client.return_value.agent_engines.create.return_value = mock_remote
-
-        agent = MagicMock()
-        agent.name = "test-agent"
-        result = deploy_agent(agent, display_name="test")
-        assert result == "12345"
-
-    @patch("wrangler.core.deploy.vertexai")
-    @patch("wrangler.core.deploy._get_client")
-    def test_config_includes_labels(self, mock_client, mock_vertexai):
-        from wrangler.core.deploy import deploy_agent
-
-        mock_remote = MagicMock()
-        mock_remote.resource_name = "projects/p/locations/l/reasoningEngines/99"
-        mock_client.return_value.agent_engines.create.return_value = mock_remote
-
-        agent = MagicMock()
-        agent.name = "test-agent"
-        deploy_agent(agent)
-
-        call_kwargs = mock_client.return_value.agent_engines.create.call_args
-        config = call_kwargs.kwargs.get("config") or call_kwargs[1].get("config")
-        assert config["labels"] == {"solution": "promp-wrangler"}
-
-    @patch("wrangler.core.deploy.vertexai")
-    @patch("wrangler.core.deploy._get_client")
-    def test_config_includes_requirements(self, mock_client, mock_vertexai):
-        from wrangler.core.deploy import REQUIREMENTS, deploy_agent
-
-        mock_remote = MagicMock()
-        mock_remote.resource_name = "projects/p/locations/l/reasoningEngines/99"
-        mock_client.return_value.agent_engines.create.return_value = mock_remote
-
-        agent = MagicMock()
-        agent.name = "test-agent"
-        deploy_agent(agent)
-
-        call_kwargs = mock_client.return_value.agent_engines.create.call_args
-        config = call_kwargs.kwargs.get("config") or call_kwargs[1].get("config")
-        assert config["requirements"] == REQUIREMENTS
-
-    @patch("wrangler.core.deploy.vertexai")
-    @patch("wrangler.core.deploy._get_client")
-    def test_custom_display_name(self, mock_client, mock_vertexai):
-        from wrangler.core.deploy import deploy_agent
-
-        mock_remote = MagicMock()
-        mock_remote.resource_name = "projects/p/locations/l/reasoningEngines/99"
-        mock_client.return_value.agent_engines.create.return_value = mock_remote
-
-        agent = MagicMock()
-        agent.name = "test-agent"
-        deploy_agent(agent, display_name="custom-name")
-
-        call_kwargs = mock_client.return_value.agent_engines.create.call_args
-        config = call_kwargs.kwargs.get("config") or call_kwargs[1].get("config")
-        assert config["display_name"] == "custom-name"
-
-
-class TestUpdateAgent:
-    @patch("wrangler.core.deploy.vertexai")
-    @patch("wrangler.core.deploy._get_client")
-    @patch("wrangler.core.deploy.GCP_PROJECT_ID", "test-project")
-    @patch("wrangler.core.deploy.GCP_REGION", "us-central1")
-    def test_short_engine_id_expanded(self, mock_client, mock_vertexai):
-        from wrangler.core.deploy import update_agent
-
-        mock_remote = MagicMock()
-        mock_remote.resource_name = (
-            "projects/test-project/locations/us-central1/reasoningEngines/12345"
-        )
-        mock_client.return_value.agent_engines.update.return_value = mock_remote
-
-        agent = MagicMock()
-        agent.name = "test-agent"
-        update_agent(agent, "12345")
-
-        call_kwargs = mock_client.return_value.agent_engines.update.call_args
-        name = call_kwargs.kwargs.get("name") or call_kwargs[1].get("name")
-        assert "projects/test-project" in name
-        assert "12345" in name
-
-    @patch("wrangler.core.deploy.vertexai")
-    @patch("wrangler.core.deploy._get_client")
-    def test_full_resource_name_passthrough(self, mock_client, mock_vertexai):
-        from wrangler.core.deploy import update_agent
-
-        full_name = "projects/p/locations/l/reasoningEngines/99"
-        mock_remote = MagicMock()
-        mock_remote.resource_name = full_name
-        mock_client.return_value.agent_engines.update.return_value = mock_remote
-
-        agent = MagicMock()
-        agent.name = "test-agent"
-        update_agent(agent, full_name)
-
-        call_kwargs = mock_client.return_value.agent_engines.update.call_args
-        name = call_kwargs.kwargs.get("name") or call_kwargs[1].get("name")
-        assert name == full_name
-
-    @patch("wrangler.core.deploy.vertexai")
-    @patch("wrangler.core.deploy._get_client")
-    def test_update_config_includes_labels(self, mock_client, mock_vertexai):
-        from wrangler.core.deploy import update_agent
-
-        mock_remote = MagicMock()
-        mock_remote.resource_name = "projects/p/locations/l/reasoningEngines/99"
-        mock_client.return_value.agent_engines.update.return_value = mock_remote
-
-        agent = MagicMock()
-        agent.name = "test-agent"
-        update_agent(agent, "projects/p/locations/l/reasoningEngines/99")
-
-        call_kwargs = mock_client.return_value.agent_engines.update.call_args
-        config = call_kwargs.kwargs.get("config") or call_kwargs[1].get("config")
-        assert config["labels"] == {"solution": "promp-wrangler"}
-
-
 # --- Source-based deployment tests ---
 
 
@@ -366,6 +239,38 @@ class TestDeployAgentFromSource:
 
     @patch("wrangler.core.deploy.vertexai")
     @patch("wrangler.core.deploy._get_client")
+    def test_config_includes_labels(self, mock_client, mock_vertexai, tmp_path):
+        from wrangler.core.deploy import deploy_agent_from_source
+
+        mock_remote = MagicMock()
+        mock_remote.resource_name = "projects/p/locations/l/reasoningEngines/99"
+        mock_client.return_value.agent_engines.create.return_value = mock_remote
+
+        agent_module = _make_agent_tree(tmp_path)
+        deploy_agent_from_source(agent_module, "gemini-3.5-flash", "Prompt", "test")
+
+        call_kwargs = mock_client.return_value.agent_engines.create.call_args
+        config = call_kwargs.kwargs.get("config") or call_kwargs[1].get("config")
+        assert config["labels"] == {"solution": "promp-wrangler"}
+
+    @patch("wrangler.core.deploy.vertexai")
+    @patch("wrangler.core.deploy._get_client")
+    def test_custom_display_name(self, mock_client, mock_vertexai, tmp_path):
+        from wrangler.core.deploy import deploy_agent_from_source
+
+        mock_remote = MagicMock()
+        mock_remote.resource_name = "projects/p/locations/l/reasoningEngines/99"
+        mock_client.return_value.agent_engines.create.return_value = mock_remote
+
+        agent_module = _make_agent_tree(tmp_path)
+        deploy_agent_from_source(agent_module, "gemini-3.5-flash", "Prompt", "custom-name")
+
+        call_kwargs = mock_client.return_value.agent_engines.create.call_args
+        config = call_kwargs.kwargs.get("config") or call_kwargs[1].get("config")
+        assert config["display_name"] == "custom-name"
+
+    @patch("wrangler.core.deploy.vertexai")
+    @patch("wrangler.core.deploy._get_client")
     def test_cleans_up_build_dir(self, mock_client, mock_vertexai, tmp_path):
         from wrangler.core.deploy import deploy_agent_from_source
 
@@ -444,3 +349,172 @@ class TestUpdateAgentFromSource:
 
         call_kwargs = mock_client.return_value.agent_engines.update.call_args
         assert "agent" not in (call_kwargs.kwargs or {})
+
+    @patch("wrangler.core.deploy.vertexai")
+    @patch("wrangler.core.deploy._get_client")
+    def test_full_resource_name_passthrough(self, mock_client, mock_vertexai, tmp_path):
+        from wrangler.core.deploy import update_agent_from_source
+
+        full_name = "projects/p/locations/l/reasoningEngines/99"
+        mock_remote = MagicMock()
+        mock_remote.resource_name = full_name
+        mock_client.return_value.agent_engines.update.return_value = mock_remote
+
+        agent_module = _make_agent_tree(tmp_path)
+        update_agent_from_source(full_name, agent_module, "gemini-3.5-flash", "Prompt", "test")
+
+        call_kwargs = mock_client.return_value.agent_engines.update.call_args
+        assert (call_kwargs.kwargs.get("name") or call_kwargs[1].get("name")) == full_name
+
+    @patch("wrangler.core.deploy.vertexai")
+    @patch("wrangler.core.deploy._get_client")
+    def test_update_config_includes_labels(self, mock_client, mock_vertexai, tmp_path):
+        from wrangler.core.deploy import update_agent_from_source
+
+        mock_remote = MagicMock()
+        mock_remote.resource_name = "projects/p/locations/l/reasoningEngines/99"
+        mock_client.return_value.agent_engines.update.return_value = mock_remote
+
+        agent_module = _make_agent_tree(tmp_path)
+        update_agent_from_source(
+            "projects/p/locations/l/reasoningEngines/99",
+            agent_module,
+            "gemini-3.5-flash",
+            "Prompt",
+            "test",
+        )
+
+        call_kwargs = mock_client.return_value.agent_engines.update.call_args
+        config = call_kwargs.kwargs.get("config") or call_kwargs[1].get("config")
+        assert config["labels"] == {"solution": "promp-wrangler"}
+
+
+# --- Call-site tests ---
+#
+# cli.py and runner.py used to call the cloudpickle path. CLAUDE.md documents
+# that path as broken on GEAP -- cloudpickle captures module references
+# (registry.py, config.py, prompts/) that do not exist server-side -- so
+# `wrangler deploy manifest.yaml` took the failing route while `wrangler run`
+# and the KFP pipeline took the working one. These tests pin the call sites.
+
+
+def _manifest_with_agent_dir(tmp_path, *, agent_module="agents/demo", pair_agent_module=None):
+    """Write a manifest plus the agent directory it points at."""
+    import yaml
+
+    (tmp_path / agent_module).mkdir(parents=True)
+    pair = {"id": "p1", "model": "gemini-3.5-flash", "system_prompt": "Be helpful."}
+    if pair_agent_module is not None:
+        pair["agent_module"] = pair_agent_module
+    path = tmp_path / "manifest.yaml"
+    path.write_text(
+        yaml.dump(
+            {
+                "name": "test",
+                "agent_module": agent_module,
+                "eval_data": "eval.yaml",
+                "pairs": [pair],
+            }
+        )
+    )
+    return str(path)
+
+
+class TestRunnerDeployCallSites:
+    def test_deploy_pair_uses_source_deployment(self, tmp_path, monkeypatch):
+        from wrangler.orchestration import runner as runner_mod
+
+        seen = {}
+        monkeypatch.setattr(
+            runner_mod.deployer,
+            "deploy_agent_from_source",
+            lambda **kw: seen.update(kw) or "engine-123",
+        )
+
+        pipeline = runner_mod.WranglerPipeline(_manifest_with_agent_dir(tmp_path))
+        pair = pipeline.manifest.pairs[0]
+        assert pipeline._deploy_pair(pair) == "engine-123"
+        assert seen["agent_module"] == str(tmp_path / "agents" / "demo")
+        assert seen["model"] == "gemini-3.5-flash"
+        assert seen["instruction"] == "Be helpful."
+        assert seen["display_name"] == "p1"
+
+    def test_redeploy_pair_sends_the_optimized_prompt(self, tmp_path, monkeypatch):
+        """Phase 4 must redeploy what GEPA produced, not the seed prompt.
+
+        The old cloudpickle path got there by mutating ``agent.instruction`` on
+        a freshly imported agent object. The source-based path passes the text
+        straight through, so this is the seam where a redeploy could silently
+        ship the original prompt and make the after-scores meaningless.
+        """
+        from wrangler.orchestration import runner as runner_mod
+
+        seen = {}
+        monkeypatch.setattr(
+            runner_mod.deployer,
+            "update_agent_from_source",
+            lambda **kw: seen.update(kw) or "engine-123",
+        )
+
+        pipeline = runner_mod.WranglerPipeline(_manifest_with_agent_dir(tmp_path))
+        pair = pipeline.manifest.pairs[0]
+        pair.system_prompt = "OPTIMIZED BY GEPA"
+        pipeline._redeploy_pair(pair, "engine-123")
+        assert seen["engine_id"] == "engine-123"
+        assert seen["instruction"] == "OPTIMIZED BY GEPA"
+
+    def test_pair_agent_module_overrides_the_manifest_default(self, tmp_path):
+        from wrangler.orchestration.runner import WranglerPipeline
+
+        (tmp_path / "agents" / "other").mkdir(parents=True)
+        path = _manifest_with_agent_dir(tmp_path, pair_agent_module="agents/other")
+        pipeline = WranglerPipeline(path)
+        resolved = pipeline._agent_module_path(pipeline.manifest.pairs[0])
+        assert resolved == str(tmp_path / "agents" / "other")
+
+    def test_agent_module_path_falls_back_to_the_bare_reference(self, tmp_path):
+        """A manifest may name a path relative to the CWD rather than to itself.
+
+        ``_load_agent`` allowed both before this migration; dropping the
+        fallback would break those manifests at deploy time only.
+        """
+        from wrangler.orchestration.runner import WranglerPipeline
+
+        path = _manifest_with_agent_dir(tmp_path, pair_agent_module="somewhere/else")
+        pipeline = WranglerPipeline(path)
+        resolved = pipeline._agent_module_path(pipeline.manifest.pairs[0])
+        assert resolved == "somewhere/else"
+
+
+class TestCliDeployCallSite:
+    def test_manifest_deploy_uses_source_based_path(self, tmp_path, monkeypatch):
+        from click.testing import CliRunner
+
+        from wrangler.cli import main
+        from wrangler.orchestration import runner as runner_mod
+
+        seen = {}
+        monkeypatch.setattr(
+            runner_mod.deployer,
+            "deploy_agent_from_source",
+            lambda **kw: seen.update(kw) or "engine-123",
+        )
+
+        result = CliRunner().invoke(main, ["deploy", _manifest_with_agent_dir(tmp_path)])
+        assert result.exit_code == 0, result.output
+        assert seen["display_name"] == "p1"
+        assert "engine-123" in result.output
+
+
+def test_cloudpickle_entrypoints_are_gone():
+    """The legacy names must not come back through a merge or a revert.
+
+    They are not deprecated -- they are known-broken against GEAP, so a caller
+    reaching one is a failed deployment, not a slow one.
+    """
+    import wrangler.core
+    import wrangler.core.deploy as deploy_mod
+
+    for name in ("deploy_agent", "update_agent", "REQUIREMENTS"):
+        assert not hasattr(deploy_mod, name), f"wrangler.core.deploy.{name} is back"
+        assert not hasattr(wrangler.core, name), f"wrangler.core.{name} is back"

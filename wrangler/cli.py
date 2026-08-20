@@ -80,15 +80,13 @@ def deploy(target: str, pair: str):
         click.echo(f"Deploying — experiment: {exp.name}")
         stage_deploy(exp, pair_id=pair)
     else:
-        from .core import deploy as deployer
         from .orchestration.runner import WranglerPipeline
 
         pipeline = WranglerPipeline(target)
         pairs = [pipeline.manifest.get_pair(pair)] if pair else pipeline.manifest.pairs
         for p in pairs:
             click.echo(f"\n[{p.id}] Deploying {p.model}...")
-            agent = pipeline._load_agent(p)
-            engine_id = deployer.deploy_agent(agent, display_name=p.id)
+            engine_id = pipeline._deploy_pair(p)
             click.echo(f"  Engine ID: {engine_id}")
 
 

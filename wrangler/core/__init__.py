@@ -9,7 +9,7 @@ from .config import (
     resolve_model,
 )
 from .converter import load_eval_file
-from .deploy import deploy_agent, update_agent
+from .deploy import deploy_agent_from_source, update_agent_from_source
 from .factory import AgentPromptPair, Manifest, PairFactory
 
 __all__ = [
@@ -22,9 +22,9 @@ __all__ = [
     "Manifest",
     "PairFactory",
     "blended_cost",
-    "deploy_agent",
+    "deploy_agent_from_source",
     "get_batch_config",
     "load_eval_file",
     "resolve_model",
-    "update_agent",
+    "update_agent_from_source",
 ]

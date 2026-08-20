@@ -16,7 +16,7 @@ Session notes and known traps live in [docs/notes/README.md](docs/notes/README.m
 
 ```bash
 uv sync                          # Install dependencies
-uv run pytest tests/ -v           # Run the full suite (369 tests as of 2026-08-20)
+uv run pytest tests/ -v           # Run the full suite (count intentionally not quoted here — it goes stale)
 uv run pytest tests/test_config.py -v  # Run single test file
 uv run pytest tests/test_config.py::TestResolveModel -v  # Run single test class
 uv run wrangler --help            # CLI entry point
@@ -173,9 +173,9 @@ config = {
 }
 ```
 
-### Legacy functions
+### There is no legacy path
 
-`deploy_agent()` and `update_agent()` (pickle-based) still exist in `deploy.py` but are not used by the pipeline or local workflow. They remain for backward compatibility only.
+`deploy_agent()` and `update_agent()` (pickle-based) were deleted. Every caller — the CLI, `WranglerPipeline`, the KFP components, and the example scripts — uses the source-based functions. `tests/test_deploy.py::test_cloudpickle_entrypoints_are_gone` fails if the names reappear on `wrangler.core.deploy` or `wrangler.core`.
 
 ## Pipeline Pitfalls (Learned the Hard Way)
 
@@ -235,10 +235,8 @@ manifest system_prompt → deploy (instruction.txt) → eval-before (deployed ag
 
 The `_opt/__init__.py` files should NOT override `instruction` — the `initial_instruction` parameter handles prompt selection.
 
-### deploy.py Requirements Lists
-`wrangler/core/deploy.py` has two requirements lists:
-- `REQUIREMENTS` — legacy pickle-based deployment (includes `cloudpickle`). Not used by current workflow.
-- `_SOURCE_REQUIREMENTS` — source-based deployment. Written into `_geap_build_pkg/requirements.txt` and installed by GEAP. Must match the ADK version in `pyproject.toml` or agents will fail to start with import errors.
+### deploy.py Requirements List
+`_SOURCE_REQUIREMENTS` in `wrangler/core/deploy.py` is written into `_geap_build_pkg/requirements.txt` and installed by GEAP. Must match the ADK version in `pyproject.toml` or agents will fail to start with import errors.
 
 ## Testing Manifests
 

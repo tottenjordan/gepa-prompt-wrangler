@@ -102,56 +102,36 @@ class WranglerPipeline:
             eval_path = Path(self.manifest.eval_data)
         return load_eval_file(str(eval_path))
 
-    def _load_agent(self, pair: AgentPromptPair):
-        """Import and instantiate the agent with the pair's model and prompt."""
-        import importlib.util
+    def _agent_module_path(self, pair: AgentPromptPair) -> str:
+        """Resolve a pair's agent module to a filesystem path for the build package.
 
+        Tries the manifest-relative path first, then the reference as written —
+        manifests in the wild use both, and the loader this replaced accepted
+        both too.
+        """
         module_ref = pair.agent_module or self.manifest.agent_module
         agent_path = self.manifest_dir / module_ref
         if not agent_path.exists():
-            agent_path = Path(module_ref)
+            return module_ref
+        return str(agent_path)
 
-        if agent_path.is_file():
-            init_file = agent_path
-        elif not agent_path.suffix and (agent_path.with_suffix(".py")).is_file():
-            init_file = agent_path.with_suffix(".py")
-        else:
-            init_file = agent_path / "__init__.py"
-            if not init_file.exists():
-                for py_file in agent_path.glob("*.py"):
-                    init_file = py_file
-                    break
+    def _deploy_pair(self, pair: AgentPromptPair) -> str:
+        """Deploy one pair to GEAP from source. Returns the engine id."""
+        return deployer.deploy_agent_from_source(
+            agent_module=self._agent_module_path(pair),
+            model=pair.model,
+            instruction=pair.system_prompt,
+            display_name=pair.id,
+        )
 
-        spec = importlib.util.spec_from_file_location(f"_agent_{pair.id}", str(init_file))
-        if spec is None or spec.loader is None:
-            raise ImportError(f"Cannot load a Python module from {init_file}")
-        module = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(module)
-
-        from ..core.config import resolve_model
-
-        if hasattr(module, "create_agent"):
-            return module.create_agent(pair.model, pair.system_prompt)
-
-        agent = None
-        if hasattr(module, "agent") and hasattr(module.agent, "root_agent"):
-            agent = module.agent.root_agent
-        elif hasattr(module, "root_agent"):
-            agent = module.root_agent
-
-        if agent is not None:
-            agent.model = resolve_model(pair.model)
-            agent.instruction = pair.system_prompt
-            return agent
-
-        exports = [k for k in dir(module) if not k.startswith("_")]
-        raise ValueError(
-            f"Could not load agent from {agent_path}.\n"
-            f"  Module exports: {exports}\n"
-            f"  Expected one of:\n"
-            f"    1. create_agent(model, instruction) — factory function (recommended)\n"
-            f"    2. agent.root_agent — SimpleNamespace wrapping an LlmAgent\n"
-            f"    3. root_agent — LlmAgent directly"
+    def _redeploy_pair(self, pair: AgentPromptPair, engine_id: str) -> str:
+        """Redeploy one pair in place with its current (post-GEPA) prompt."""
+        return deployer.update_agent_from_source(
+            engine_id=engine_id,
+            agent_module=self._agent_module_path(pair),
+            model=pair.model,
+            instruction=pair.system_prompt,
+            display_name=pair.id,
         )
 
     def _resolve_optimize_module(self, pair: AgentPromptPair) -> Path:
@@ -392,8 +372,7 @@ class WranglerPipeline:
                     else:
                         print(f"  [{pair.id}] ({i}/{n_pairs}) Deploying...", end="", flush=True)
                         t0 = time.time()
-                        agent = self._load_agent(pair)
-                        engine_id = deployer.deploy_agent(agent, display_name=pair.id)
+                        engine_id = self._deploy_pair(pair)
                         self.results[pair.id]["engine_id"] = engine_id
                         print(f" {_fmt_duration(time.time() - t0)}")
 
@@ -411,8 +390,7 @@ class WranglerPipeline:
                     print(f"  [{pair.id}] ({i}/{n_pairs}) Redeploying...", end="", flush=True)
                     t0 = time.time()
                     engine_id = self.results[pair.id]["engine_id"]
-                    agent = self._load_agent(pair)
-                    deployer.update_agent(agent, engine_id, display_name=pair.id)
+                    self._redeploy_pair(pair, engine_id)
                     print(f" {_fmt_duration(time.time() - t0)}")
 
         if from_phase <= 5:

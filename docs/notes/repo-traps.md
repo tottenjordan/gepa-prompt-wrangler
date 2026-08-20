@@ -27,22 +27,36 @@ The 918 KB lockfile in the working tree is **local only**. Consequences:
 Committing the lockfile also fixes that last one implicitly — but the cache key should
 be `md5(pyproject.toml + uv.lock)` to be correct.
 
-## `wrangler deploy` uses the deployment path CLAUDE.md calls broken
+## `wrangler deploy` used the deployment path CLAUDE.md calls broken (fixed 2026-08-20)
 
-CLAUDE.md says the cloudpickle path "failed because cloudpickle captures module
-references … that don't exist on the GEAP server", and that `deploy_agent()` /
-`update_agent()` "remain for backward compatibility only" and are "not used by the
-pipeline or local workflow."
+**Fixed** — the cloudpickle functions are deleted, all call sites use
+`deploy_agent_from_source()` / `update_agent_from_source()`, and
+`tests/test_deploy.py::test_cloudpickle_entrypoints_are_gone` fails if the names come
+back. Kept here for the pattern, which is the actually transferable part.
 
-That last part is wrong. Live callers:
+CLAUDE.md said `deploy_agent()` / `update_agent()` "remain for backward compatibility
+only" and were "not used by the pipeline or local workflow." That last part was wrong:
+the `wrangler deploy manifest.yaml` branch of the CLI and both the deploy and redeploy
+phases of `WranglerPipeline.run()` all called them. Only the *experiment-directory*
+branch of `wrangler deploy` (via `stage_deploy`) reached the working path — so
+`wrangler deploy manifest.yaml` took the broken route while `wrangler run
+manifest.yaml` worked, with no hint from the CLI.
 
-- `wrangler/cli.py:83` — the `wrangler deploy` CLI command, manifest branch
-- `wrangler/orchestration/runner.py:363` — `deploy_agent()`
-- `wrangler/orchestration/runner.py:382` — `update_agent()`
+**The pattern:** a doc that says "legacy, kept for compatibility" is a claim about
+call sites, and nothing enforces it. When a working replacement lands beside a broken
+original, the original does not stop being called just because the docs stop
+mentioning it. Delete it, or add a test that asserts it is unreachable.
 
-Only the *experiment-directory* branch of `wrangler deploy` (`cli.py:73`, via
-`stage_deploy`) reaches the working source-based path. So `wrangler deploy manifest.yaml`
-takes the broken route while `wrangler run manifest.yaml` works. The CLI gives no hint.
+Two things the migration turned up that the phrase "swap the call" hides:
+
+- The redeploy path used to carry the optimized prompt by mutating `agent.instruction`
+  on a freshly imported agent object. Source-based deployment passes the text as an
+  argument instead, so it is now possible to redeploy the *seed* prompt and get
+  after-scores that silently mean nothing. Pinned by
+  `test_redeploy_pair_sends_the_optimized_prompt`.
+- `examples/multi_model_agents/` reads the model off `config.py` rather than off the
+  imported agent, because the agent holds the model **resolved** to an ADK
+  `Gemini()`/`Claude()` object while the build package wants the plain id string.
 
 ## Two `config.py` files that have drifted
 
@@ -84,11 +98,12 @@ and their `_URL` variants, which CLAUDE.md lists as required for the multi-model
 agents — the same vars whose absence used to make
 `examples/multi_model_agents/config.py` raise on import.
 
-## Test count in CLAUDE.md was stale
+## Test count in CLAUDE.md was stale (fixed 2026-08-20)
 
-CLAUDE.md said 316; the suite was 356 at the time. Corrected 2026-08-20, and it has
-moved again since (369 as of the Phase 1 work). Worth re-checking whenever CLAUDE.md
-quotes a number — nothing enforces it.
+CLAUDE.md said 316; the suite was 356. Corrected, then it went stale twice more in the
+same day (369, 401). **Fixed by removing the number** rather than updating it — nothing
+enforces a count in prose, so quoting one guarantees it will be wrong. The same applies
+to any other figure a doc quotes about the code.
 
 ## `wrangler inspect` emits literal `TODO` strings
 

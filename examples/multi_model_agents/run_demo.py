@@ -22,7 +22,7 @@ from dotenv import load_dotenv
 
 load_dotenv(os.path.join(SCRIPT_DIR, ".env"))
 
-from config import GCP_PROJECT_ID, GCP_REGION, GCP_STAGING_BUCKET, resolve_model
+from config import GCP_PROJECT_ID, GCP_REGION, GCP_STAGING_BUCKET
 from generic_prompts import GENERIC_PROMPT
 
 AGENTS = {
@@ -75,16 +75,6 @@ def update_env(key: str, value: str):
         f.writelines(lines)
 
 
-def load_agent(name: str, prompt: str):
-    """Import agent and override its instruction."""
-    info = AGENTS[name]
-    mod = __import__(info["module"], fromlist=[info["attr"]])
-    agent = getattr(mod, info["attr"])
-    agent.instruction = prompt
-    agent.model = resolve_model(info["model"])
-    return agent
-
-
 def run_demo(agent_names: list[str], skip_deploy: bool = False):
     import vertexai
 
@@ -94,10 +84,9 @@ def run_demo(agent_names: list[str], skip_deploy: bool = False):
 
     # Add wrangler lib to path
     sys.path.insert(0, os.path.join(SCRIPT_DIR, "..", ".."))
-    from wrangler.converter import load_eval_file
-
     from wrangler.core.config import disable_pyopenssl
-    from wrangler.core.deploy import deploy_agent
+    from wrangler.core.converter import load_eval_file
+    from wrangler.core.deploy import deploy_agent_from_source
     from wrangler.eval.evaluator import run_batch_eval
 
     disable_pyopenssl()
@@ -121,8 +110,12 @@ def run_demo(agent_names: list[str], skip_deploy: bool = False):
         print("\n--- Phase 1: Deploy with Generic Prompts ---")
         for name in agent_names:
             print(f"\n  [{name}]")
-            agent = load_agent(name, GENERIC_PROMPT)
-            eid = deploy_agent(agent, display_name=f"wrangler-{name}-agent")
+            eid = deploy_agent_from_source(
+                agent_module=os.path.join(SCRIPT_DIR, "agents", AGENTS[name]["module"]),
+                model=AGENTS[name]["model"],
+                instruction=GENERIC_PROMPT,
+                display_name=f"wrangler-{name}-agent",
+            )
             engine_ids[name] = eid
             update_env(f"{name.upper()}_ENGINE_ID", eid)
     else:
