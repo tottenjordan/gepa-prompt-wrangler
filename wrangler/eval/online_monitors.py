@@ -6,8 +6,8 @@ every 10 minutes, Online Monitors let you trigger evaluations explicitly and
 store results for trend analysis.
 
 Usage:
-    uv run python -m wrangler.online_monitors <engine-id>
-    uv run python -m wrangler.online_monitors <engine-id> --cases 10
+    uv run python -m wrangler.eval.online_monitors <engine-id>
+    uv run python -m wrangler.eval.online_monitors <engine-id> --cases 10
 """
 
 import json
@@ -151,7 +151,7 @@ if __name__ == "__main__":
         load_dotenv(str(example_env), override=True)
 
     if len(sys.argv) < 2:
-        print("Usage: python -m wrangler.online_monitors <engine-id> [--cases N]")
+        print("Usage: python -m wrangler.eval.online_monitors <engine-id> [--cases N]")
         sys.exit(1)
 
     agent_id = sys.argv[1]

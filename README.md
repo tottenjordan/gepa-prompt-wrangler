@@ -248,7 +248,7 @@ eval_data: eval_data/example_eval.yaml
 pairs:
   - id: gemini-flash
     model: gemini-3.5-flash
-    costs:                              # optional — overrides MODEL_COSTS
+    costs:                              # optional — overrides wrangler/core/models.py
       input: 1.50
       output: 9.0
     system_prompt: |
@@ -262,7 +262,7 @@ pairs:
       Use tools to search flights and book hotels.
 
 eval_config:
-  judge_model: gemini-2.5-pro
+  judge_model: gemini-3.5-flash
   response_match_threshold: 0.5
   safety_threshold: 0.8
   thresholds:                           # optional — per-metric GEPA thresholds
@@ -290,7 +290,7 @@ pipeline:                               # optional — Vertex AI Pipeline config
 
 | Field | Description |
 |-------|-------------|
-| `pairs[].costs` | Custom token costs `{input, output}` in $/M tokens (overrides `MODEL_COSTS`) |
+| `pairs[].costs` | Custom token costs `{input, output}` in $/M tokens (overrides the registry in `wrangler/core/models.py`) |
 | `eval_config.thresholds` | Per-metric GEPA thresholds (higher = stricter optimization) |
 | `pipeline` | Vertex AI Pipeline config (bucket, region, num_runs, service_account) |
 
@@ -401,11 +401,14 @@ The GEPA evalset uses all 64 cases with a stratified train/val split (49/15). Th
 |---------|-------------|
 | `wrangler init` | Create a starter manifest.yaml |
 | `wrangler inspect <agent_path>` | Auto-discover agent tools, generate YAML scaffold |
+| `wrangler generate-evalset --from <yaml>` | Convert a simplified evalset into GEPA/ADK format |
 | `wrangler run <manifest>` | Full local pipeline: deploy → eval → optimize → redeploy → eval → report |
 | `wrangler eval <manifest>` | Run batch eval against a deployed agent |
 | `wrangler optimize <manifest>` | Run GEPA optimization for each pair |
 | `wrangler report <outputs_dir>` | Generate analysis report from results |
+| `wrangler analyze <experiment_dir>` | Per-pair diffs, prompt analysis, recommendations |
 | `wrangler deploy <manifest>` | Deploy agent pairs to GEAP |
+| `wrangler redeploy <experiment_dir>` | Redeploy agents with their optimized prompts |
 | `wrangler pipeline run <manifest>` | Submit experiment as a Vertex AI Pipeline |
 | `wrangler pipeline status <job-id>` | Check pipeline job status |
 | `wrangler experiment create <manifest>` | Create a DOE experiment campaign directory |
@@ -415,9 +418,11 @@ The GEPA evalset uses all 64 cases with a stratified train/val split (49/15). Th
 
 ```bash
 # Run locally
-wrangler run manifest.yaml --dry-run                      # Validate without executing
-wrangler run manifest.yaml --max-concurrent 1              # Sequential evals (default)
+wrangler run manifest.yaml --dry-run                       # Validate without executing
+wrangler run manifest.yaml --name my-experiment            # Name the experiment directory
 wrangler run manifest.yaml --version wrangler_v5           # Set prompt version tag
+wrangler run manifest.yaml --pair lite                     # Run a single pair
+wrangler run manifest.yaml --num-runs 3                    # Average 3 eval runs (default 3)
 
 # Run as Vertex AI Pipeline
 wrangler pipeline run manifest.yaml                        # Submit to Vertex AI
@@ -425,8 +430,9 @@ wrangler pipeline run manifest.yaml --run-id my-run-001    # Custom run ID
 wrangler pipeline run manifest.yaml --num-runs 3           # Average 3 eval runs
 wrangler pipeline status gepa-run-20260609-143022          # Check job status
 
-# Resume from a previous run
+# Resume from a previous run (legacy WranglerPipeline path)
 wrangler run manifest.yaml --resume-from outputs/results_20250530.json --from-phase 3
+wrangler run manifest.yaml --from-phase 3 --max-concurrent 2   # -c only applies on this path
 
 # Deploy
 wrangler deploy manifest.yaml --pair flash                 # Deploy specific pair
@@ -451,7 +457,7 @@ Run the full 64-case eval dataset against a deployed agent. Scores are computed 
 
 ```bash
 # Eval a single agent by engine ID
-uv run python -m wrangler.evaluator <engine-id> eval_data/example_eval.yaml
+uv run python -m wrangler.eval.evaluator <engine-id> eval_data/example_eval.yaml
 
 # Or via CLI
 wrangler eval manifest.yaml --engine-id <ENGINE_ID>
@@ -465,19 +471,19 @@ Always-on evaluators that score OTel traces from live traffic every 10 minutes.
 
 ```bash
 # Create evaluators for all deployed agents
-uv run python -m wrangler.online_evaluators create
+uv run python -m wrangler.eval.online_evaluators create
 
 # Check status
-uv run python -m wrangler.online_evaluators verify
+uv run python -m wrangler.eval.online_evaluators verify
 
 # List all evaluators
-uv run python -m wrangler.online_evaluators list
+uv run python -m wrangler.eval.online_evaluators list
 
 # Delete a specific evaluator
-uv run python -m wrangler.online_evaluators delete <evaluator_id>
+uv run python -m wrangler.eval.online_evaluators delete <evaluator_id>
 
 # Remove all wrangler evaluators
-uv run python -m wrangler.online_evaluators cleanup
+uv run python -m wrangler.eval.online_evaluators cleanup
 ```
 
 **When to use:** Continuous monitoring of production traffic quality. Results appear in the Agent Engine Observability tab.
@@ -488,10 +494,10 @@ Quick spot-check against a deployed agent with a small set of test queries.
 
 ```bash
 # Run 8 default queries against an agent
-uv run python -m wrangler.online_monitors <engine-id>
+uv run python -m wrangler.eval.online_monitors <engine-id>
 
 # Run fewer queries for a faster check
-uv run python -m wrangler.online_monitors <engine-id> --cases 3
+uv run python -m wrangler.eval.online_monitors <engine-id> --cases 3
 ```
 
 **When to use:** Health checks, regression testing, pre/post deployment validation. Results saved to `outputs/monitors/`.
@@ -515,7 +521,7 @@ print(result)
 "
 ```
 
-**When to use:** After baseline eval shows room for improvement. Uses all 64 eval cases (49 train / 15 val) with a `gemini-3.5-flash` judge and rubric-based metrics.
+**When to use:** After baseline eval shows room for improvement. Uses all 64 eval cases (49 train / 15 val) with rubric-based metrics. The judge comes from the `sampler_config.json` you point at — currently `gemini-2.5-flash`, which [retires 2026-10-16](docs/notes/model-lifecycle.md).
 
 ### Generating Traffic
 
@@ -523,13 +529,13 @@ Send test queries to populate OTel traces for online evaluators:
 
 ```bash
 # Send 15 default queries to one agent (1 query/sec)
-uv run python -m wrangler.traffic --agent-id <ENGINE_ID>
+uv run python -m wrangler.tools.traffic --agent-id <ENGINE_ID>
 
 # Round-robin across multiple agents
-uv run python -m wrangler.traffic --agent-id <ID1> <ID2> <ID3> --count 30 --interval 2
+uv run python -m wrangler.tools.traffic --agent-id <ID1> <ID2> <ID3> --count 30 --interval 2
 
 # Use the eval dataset as queries
-uv run python -m wrangler.traffic --agent-id <ENGINE_ID> \
+uv run python -m wrangler.tools.traffic --agent-id <ENGINE_ID> \
   --eval-data examples/multi_model_agents/eval_data/eval_cases.yaml
 ```
 
@@ -599,16 +605,42 @@ See [docs/online_eval_guide.md](docs/online_eval_guide.md) for details on evalua
 
 ## Supported Models
 
-| Model | Provider | Endpoint | Input $/M | Output $/M |
-|-------|----------|----------|----------|-----------|
-| `gemini-2.5-flash` | Google | Regional | — | — |
-| `gemini-3.1-flash-lite` | Google | Global (LiteLLM) | $0.25 | $1.50 |
-| `gemini-3.5-flash` | Google | Global (LiteLLM) | $1.50 | $9.00 |
-| `gemini-3.1-pro-preview` | Google | Global (LiteLLM) | $4.00 | $18.00 |
-| `claude-sonnet-4-6` | Anthropic | Global (LiteLLM) | $3.00 | $15.00 |
-| `claude-opus-4-6` | Anthropic | Global (LiteLLM) | $5.00 | $25.00 |
+`wrangler/core/models.py` is the single source of truth — this table is a snapshot of it,
+verified 2026-08-20. If the two disagree, the registry is right.
 
-*Source: [GEAP Model Pricing](https://cloud.google.com/gemini-enterprise-agent-platform/generative-ai/pricing)*
+| Model | Provider | Endpoint | Input $/M | Output $/M | RPM | Retires |
+|-------|----------|----------|----------|-----------|-----|---------|
+| `gemini-2.5-flash` | Google | Regional | $0.30 | $2.50 | 100 | 2026-10-16 |
+| `gemini-2.5-pro` | Google | Regional | $1.25 | $10.00 | 80 | 2026-10-16 |
+| `gemini-3.1-flash-lite` | Google | Global | $0.25 | $1.50 | 5 | 2027-05-07 |
+| `gemini-3.5-flash-lite` | Google | Global | $0.30 | $2.50 | 5 | — |
+| `gemini-3.5-flash` | Google | Global | $1.50 | $9.00 | 5 | 2027-05-19 |
+| `gemini-3.6-flash` | Google | Global | $0.75 | $3.75 | 5 | short-term † |
+| `gemini-3.1-pro-preview` | Google | Global | $4.00 | $18.00 | 5 | — |
+| `claude-sonnet-4-6` | Anthropic | Global | $3.00 | $15.00 | 2000 | 2027-02-17 |
+| `claude-sonnet-5` | Anthropic | Global | $2.00 | $10.00 | 2000 | 2027-06-30 ⚠ |
+| `claude-opus-4-6` | Anthropic | Global | $5.00 | $25.00 | 800 | 2027-02-05 |
+| `claude-opus-4-7` | Anthropic | Global | $5.00 | $25.00 | 800 | 2027-04-16 ⚠ |
+| `claude-opus-4-8` | Anthropic | Global | $5.00 | $25.00 | 800 | 2027-05-28 ⚠ |
+| `claude-opus-5` | Anthropic | Global | $5.00 | $25.00 | 800 | 2027-07-24 ⚠ |
+| `claude-fable-5` | Anthropic | Global | $10.00 | $50.00 | 800 | 2027-06-09 ⚠ |
+
+**⚠** — rejects `temperature`/`top_p`/`top_k`. Setting one returns a 400; steer these
+models through the system prompt instead. `PairFactory.load()` fails the manifest rather
+than letting it reach the API. The cutoff is the model generation, not the Opus tier.
+
+**†** — `gemini-3.6-flash` is on the short-term availability track: it retires 45 days
+after a replacement ships, with no date published in advance. Cheaper and newer than
+`gemini-3.5-flash`, but 3.5-flash is the stable pin and the framework default. Its price
+rises to $1.50 / $7.50 on 2027-01-01.
+
+Retirement dates are the earliest announced shutdown. Anthropic's are "not sooner than"
+and apply to Anthropic-operated platforms — Google Cloud sets its own schedule for
+partner models, so treat them as an early-warning floor rather than a contract.
+
+*Sources: [Gemini pricing](https://ai.google.dev/gemini-api/docs/pricing),
+[Claude pricing](https://platform.claude.com/docs/en/about-claude/pricing),
+[GEAP pricing](https://cloud.google.com/gemini-enterprise-agent-platform/generative-ai/pricing)*
 
 Gemini 2.x uses regional Vertex AI endpoints (passed as strings). Gemini 3.x uses the native `Gemini()` class and Claude uses the native `Claude()` class, both via `GOOGLE_CLOUD_LOCATION=global`.
 

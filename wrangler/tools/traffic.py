@@ -4,19 +4,19 @@ Creates a new session with a unique user ID per query to keep traces independent
 
 Usage:
     # Send all 30 eval cases to one agent
-    uv run python -m wrangler.traffic --agent-id 4981388556929859584
+    uv run python -m wrangler.tools.traffic --agent-id 4981388556929859584
 
     # Send to multiple agents
-    uv run python -m wrangler.traffic --agent-id 4981388556929859584 6589173623901126656
+    uv run python -m wrangler.tools.traffic --agent-id 4981388556929859584 6589173623901126656
 
     # Control rate and count
-    uv run python -m wrangler.traffic --agent-id 4981388556929859584 --count 10 --interval 5
+    uv run python -m wrangler.tools.traffic --agent-id 4981388556929859584 --count 10 --interval 5
 
     # Use custom eval data
-    uv run python -m wrangler.traffic --agent-id 4981388556929859584 --eval-data eval_data/my_cases.yaml
+    uv run python -m wrangler.tools.traffic --agent-id 4981388556929859584 --eval-data eval_data/my_cases.yaml
 
     # Steady state: 1 query every 3 seconds for 5 minutes
-    uv run python -m wrangler.traffic --agent-id 4981388556929859584 --count 100 --interval 3
+    uv run python -m wrangler.tools.traffic --agent-id 4981388556929859584 --count 100 --interval 3
 """
 
 import argparse

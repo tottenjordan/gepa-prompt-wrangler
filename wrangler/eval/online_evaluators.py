@@ -5,11 +5,11 @@ and custom LLM metrics. Results appear in the Observability tab, Cloud Logging,
 and Cloud Monitoring.
 
 Usage:
-    uv run python -m wrangler.online_evaluators list
-    uv run python -m wrangler.online_evaluators create
-    uv run python -m wrangler.online_evaluators verify
-    uv run python -m wrangler.online_evaluators delete <evaluator_id>
-    uv run python -m wrangler.online_evaluators cleanup
+    uv run python -m wrangler.eval.online_evaluators list
+    uv run python -m wrangler.eval.online_evaluators create
+    uv run python -m wrangler.eval.online_evaluators verify
+    uv run python -m wrangler.eval.online_evaluators delete <evaluator_id>
+    uv run python -m wrangler.eval.online_evaluators cleanup
 """
 
 import os
@@ -337,7 +337,7 @@ if __name__ == "__main__":
         load_dotenv(str(example_env), override=True)
 
     if len(sys.argv) < 2 or sys.argv[1] not in COMMANDS:
-        print("Usage: python -m wrangler.online_evaluators <command>")
+        print("Usage: python -m wrangler.eval.online_evaluators <command>")
         print(f"Commands: {', '.join(COMMANDS)}")
         sys.exit(1)
     COMMANDS[sys.argv[1]](sys.argv[2:])

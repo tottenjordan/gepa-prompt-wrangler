@@ -105,6 +105,25 @@ same day (369, 401). **Fixed by removing the number** rather than updating it â€
 enforces a count in prose, so quoting one guarantees it will be wrong. The same applies
 to any other figure a doc quotes about the code.
 
+## `wrangler run --max-concurrent` is silently ignored on the default path
+
+`cli.py` threads `max_concurrent` into `WranglerPipeline(...)`, and that constructor
+only runs on the legacy branch (`--resume-from` or `--from-phase > 0`). The default
+`run` path goes through `Experiment` + `stage_*` functions, which never see the value.
+So `wrangler run manifest.yaml -c 4` is accepted, prints nothing, and evaluates
+sequentially anyway.
+
+Click cannot warn about this â€” the option parses fine; it just lands in a variable
+nobody reads. The general shape: **an option that is only consumed inside one branch of
+the command body looks supported from `--help`.** Grep for the parameter name before
+trusting a flag; if it appears once in `cli.py` and once in a constructor that a
+conditional guards, it does nothing on the path you are on.
+
+Two other `run` options are in the same legacy-only category (`--resume-from`,
+`--from-phase`) but those *are* the branch condition, so they are self-evident.
+`--version`, `--name`, `--pair`, `--num-runs` and `--dry-run` all work on the default
+path. Documented in README's Options block as of 2026-08-20.
+
 ## `wrangler inspect` emits literal `TODO` strings
 
 `wrangler/tools/inspector.py:217-237` generates eval-case scaffolding whose `prompt`,

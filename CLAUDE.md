@@ -32,7 +32,7 @@ GEPA Prompt Wrangler optimizes ADK agent system prompts using Google's GEPA (Gen
 
 Six subpackages organized by domain:
 
-- **`core/`** — Config, manifest parsing, eval format conversion, agent deployment. Everything else depends on these.
+- **`core/`** — Model registry, config, manifest parsing, eval format conversion, agent deployment. Everything else depends on these.
 - **`eval/`** — Batch evaluation via Vertex AI Evaluation Service, online evaluators (OTel trace scoring), online monitors (health checks).
 - **`optimize/`** — GEPA optimizer wrapper with ADK patches, multi-judge ensemble.
 - **`reporting/`** — Chart generation (matplotlib + PaperBanana), markdown reports, per-pair analysis.
@@ -49,6 +49,36 @@ Manifest YAML → Deploy → Eval Before → Optimize (GEPA) → Redeploy → Ev
 Local workflow: `wrangler run manifest.yaml` (orchestration/stages.py)
 Pipeline workflow: `wrangler pipeline run manifest.yaml` (pipeline/deploy_pipeline.py)
 
+### Model Registry
+
+**`wrangler/core/models.py` is the single source of truth for every model id.** It holds
+a `ModelSpec` per model — provider, cost per 1M input/output tokens, requests-per-minute
+limit, retirement date, whether the model accepts sampling parameters, and a short alias
+— plus the named-role defaults (`DEFAULT_JUDGE_MODEL`, `DEFAULT_AGENT_MODEL`,
+`DEFAULT_JUDGE_ENSEMBLE`, and the two scaffold judges). `PROVIDERS`, `MODEL_MAP`, and
+`AGENT_ORDER` are derived from it, not hand-written.
+
+Rules the test suite enforces:
+
+- **No model id literals anywhere in `wrangler/` outside the registry.** `tests/test_models.py`
+  walks the AST of every module — docstrings and comments are exempt, so prose may name a
+  model but code may not. The one legitimate exemption is `pipeline/components.py`: KFP
+  serializes each `@dsl.component` body in isolation, so a component cannot import the
+  registry at runtime. Exemptions are listed with their reason in `LITERAL_EXCEPTIONS`.
+- **Every named-role default must be a registered model**, must be listed in the guard's
+  own `DEFAULT_ROLES` table, and must be more than 30 days from its retirement date. The
+  last one turns a vendor shutdown into a red build instead of a 404 mid-run.
+
+Retirement dates are the *earliest announced* shutdown. Anthropic's are "not sooner than"
+and apply to Anthropic-operated platforms — Google Cloud sets its own schedule for partner
+models, so treat them as an early-warning floor.
+
+`supports_sampling_params=False` marks Claude Opus 4.7 and later (plus Sonnet 5 and
+Fable 5), which return a 400 for a non-default `temperature`/`top_p`/`top_k`. The cutoff
+is the model generation, not the Opus tier. `PairFactory.load()` rejects a manifest that
+sets a temperature on one of these, naming the pair — steer those models through the
+system prompt instead.
+
 ### Model Resolution
 
 `core/config.py:resolve_model()` routes models to the correct ADK class:
@@ -57,6 +87,10 @@ Pipeline workflow: `wrangler pipeline run manifest.yaml` (pipeline/deploy_pipeli
 - Claude → `Claude()` from `google.adk.models.anthropic_llm`
 
 All non-2.x models use `GOOGLE_CLOUD_LOCATION=global`.
+
+Note `resolve_model()` returns an ADK model *object* for everything except Gemini 2.x.
+Anywhere a plain id string is needed — `deploy_agent_from_source(model=...)`, the build
+package — read it from config or the registry, not off a constructed agent.
 
 ### ADK Patches
 
