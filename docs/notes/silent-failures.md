@@ -124,5 +124,30 @@ check that the thing varying is A-vs-B and not time. An intermittent fault will 
 frame whichever variable you happened to change, and a small consecutive sample is exactly
 how it does that.
 
-**Blast radius:** batch eval goes through server-side `client.evals.run_inference`, which
-is unaffected. This hits anything driving a deployed engine from the client side.
+**Blast radius — larger than it first looked.** Batch eval goes through server-side
+`client.evals.run_inference`, which I initially assumed put it out of reach. It does not.
+The empty stream reaches eval as a four-layer cascade, and each layer is quiet:
+
+1. The agent run returns `[]`. The SDK cannot parse it and stores its own complaint **as
+   the response text**: `{"error": "Failed to parse agent run response [] to agent data:
+   list index out of range"}`. A non-empty string — so `_retry_failed_cases`, which
+   checked for a *dict* with an `error` key, waved it straight through.
+2. That row reaches scoring with no `agent_data`.
+3. The custom `tool_use_quality` LLMMetric's `prompt_template` references `{agent_data}`,
+   so it fails to render: `Variable agent_data is required but not provided`.
+4. That one per-metric error makes the whole `EvaluationItemResult` unparseable
+   (`extra='forbid'`, exactly as in defect 3), so the case is dropped from **every**
+   metric — including the four that scored fine.
+
+Net effect: on a 5-case smoke run, 2–3 cases were silently discarded and the reported
+score was an average over whichever cases happened to hit a warm worker. The run still
+said `SUCCEEDED`.
+
+Fixed with a shared `_is_failed_response()` in `wrangler/eval/evaluator.py` that also
+recognises an error payload stored as a JSON *string*, used by the failure detector, the
+recovery check (which had the same dict-only bug and counted a still-broken retry as
+recovered), and the pre-scoring row cleaner.
+
+**The lesson:** an error that has been serialised into a data field stops looking like an
+error. `"error" in response` is a type-dependent test, and the type changed somewhere up
+the stack without anyone deciding it should.

@@ -5,11 +5,13 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pandas as pd
+import pytest
 
 from wrangler.core.config import get_batch_config
 from wrangler.eval.evaluator import (
     EvalResult,
     _build_eval_dataset,
+    _is_failed_response,
     _resolve_resource_name,
     _retry_failed_cases,
     run_batch_eval_averaged,
@@ -225,6 +227,144 @@ class TestRetryFailedCases:
             "gemini-3.1-pro",
         )
         assert mock_batched.called
+
+    @patch("wrangler.eval.evaluator._run_batched_inference")
+    @patch("wrangler.eval.evaluator.time.sleep")
+    def test_detects_error_payload_stored_as_a_string(self, mock_sleep, mock_batched):
+        """GEAP's empty event stream arrives as an error JSON *string*, not a dict."""
+        empty_stream = (
+            '{"error": "Failed to parse agent run response [] to agent data: '
+            'list index out of range"}'
+        )
+        eval_df = pd.DataFrame({"prompt": ["q0", "q1"]})
+        inference_result = self._make_inference_result(["good", empty_stream])
+
+        retry_df = pd.DataFrame({"prompt": ["q1"], "response": ["recovered"]})
+        mock_batched.return_value = MagicMock(eval_dataset_df=retry_df)
+
+        result = _retry_failed_cases(
+            MagicMock(), "agent", eval_df, inference_result, "gemini-3.5-flash"
+        )
+        assert mock_batched.called
+        assert result.eval_dataset_df.iloc[1]["response"] == "recovered"
+
+    @patch("wrangler.eval.evaluator._run_batched_inference")
+    @patch("wrangler.eval.evaluator.time.sleep")
+    def test_recovers_rows_carrying_non_broadcastable_objects(self, mock_sleep, mock_batched):
+        """Splicing a recovered row must not go through pandas' row setitem.
+
+        The real frames mix ADK objects with typed columns, and assigning a
+        whole Series into `df.iloc[i]` makes pandas try to coerce each value to
+        the destination dtype. Live that surfaced as
+        `TypeError: object of type 'SessionInput' has no len()`; the `ts`
+        column below reproduces the same class of TypeError, and both are
+        avoided entirely by merging records.
+        """
+
+        class SessionInput:
+            """Mimics the ADK type: no __len__, no __iter__."""
+
+        eval_df = pd.DataFrame({"prompt": ["q0", "q1"]})
+        df = pd.DataFrame(
+            {
+                "prompt": ["q0", "q1"],
+                "response": ["good", '{"error": "empty"}'],
+                "request": [SessionInput(), SessionInput()],
+                "ts": pd.to_datetime(["2026-01-01", "2026-01-02"]),
+            }
+        )
+        inference_result = MagicMock(eval_dataset_df=df)
+
+        retry_df = pd.DataFrame(
+            {
+                "prompt": ["q1"],
+                "response": ["recovered"],
+                "request": [SessionInput()],
+                "ts": [SessionInput()],
+            }
+        )
+        mock_batched.return_value = MagicMock(eval_dataset_df=retry_df)
+
+        # Guard the premise: the old whole-row assignment really does blow up.
+        scratch = df.copy()
+        with pytest.raises(TypeError):
+            scratch.iloc[1] = retry_df.iloc[0]
+
+        result = _retry_failed_cases(
+            MagicMock(), "agent", eval_df, inference_result, "gemini-3.5-flash"
+        )
+        out = result.eval_dataset_df
+        assert out.iloc[1]["response"] == "recovered"
+        assert out.iloc[0]["response"] == "good"
+        assert list(out.columns) == ["prompt", "response", "request", "ts"]
+
+    @patch("wrangler.eval.evaluator._run_batched_inference")
+    @patch("wrangler.eval.evaluator.time.sleep")
+    def test_columns_missing_from_the_retry_frame_keep_their_value(self, mock_sleep, mock_batched):
+        eval_df = pd.DataFrame({"prompt": ["q0", "q1"]})
+        df = pd.DataFrame(
+            {
+                "prompt": ["q0", "q1"],
+                "response": ["good", '{"error": "empty"}'],
+                "reference": ["ref0", "ref1"],
+            }
+        )
+        inference_result = MagicMock(eval_dataset_df=df)
+
+        retry_df = pd.DataFrame({"prompt": ["q1"], "response": ["recovered"]})
+        mock_batched.return_value = MagicMock(eval_dataset_df=retry_df)
+
+        result = _retry_failed_cases(
+            MagicMock(), "agent", eval_df, inference_result, "gemini-3.5-flash"
+        )
+        assert result.eval_dataset_df.iloc[1]["reference"] == "ref1"
+
+    @patch("wrangler.eval.evaluator._run_batched_inference")
+    @patch("wrangler.eval.evaluator.time.sleep")
+    def test_a_retry_that_errors_again_is_not_counted_as_recovered(
+        self, mock_sleep, mock_batched, capsys
+    ):
+        eval_df = pd.DataFrame({"prompt": ["q0", "q1"]})
+        inference_result = self._make_inference_result(["good", '{"error": "empty"}'])
+
+        retry_df = pd.DataFrame({"prompt": ["q1"], "response": ['{"error": "empty again"}']})
+        mock_batched.return_value = MagicMock(eval_dataset_df=retry_df)
+
+        _retry_failed_cases(MagicMock(), "agent", eval_df, inference_result, "gemini-3.5-flash")
+        assert "Recovered 0/1" in capsys.readouterr().out
+
+
+class TestIsFailedResponse:
+    @pytest.mark.parametrize(
+        "value",
+        [
+            None,
+            "",
+            "   ",
+            float("nan"),
+            {"error": "boom"},
+            '{"error": "Failed to parse agent run response [] to agent data"}',
+        ],
+    )
+    def test_failures(self, value):
+        assert _is_failed_response(value) is True
+
+    @pytest.mark.parametrize(
+        "value",
+        [
+            "a normal answer",
+            "I found flight FL001 for you.",
+            {"text": "fine"},
+            # Prose that merely mentions an error is a real answer.
+            "The API returned an error, so I could not book that flight.",
+            # A JSON object response with no error key is fine.
+            '{"flights": ["FL001"]}',
+            # Malformed JSON is not an error payload — leave it to the SDK.
+            '{"error": ',
+        ],
+    )
+    def test_successes(self, value):
+        assert _is_failed_response(value) is False
 
 
 class TestDefaultMetricVersions:

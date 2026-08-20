@@ -1,0 +1,9 @@
+{
+  "sonnet": {
+    "engine_id": "5638288480409747456",
+    "model": "claude-sonnet-4-6",
+    "original_prompt": "You are a helpful assistant. Use the available tools to answer user questions.",
+    "source": "deployed",
+    "note": "recreated 2026-08-20 after the _proj source-rewrite bug; old engine 3066170143227772928 superseded"
+  }
+}

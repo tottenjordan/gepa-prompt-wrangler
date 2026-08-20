@@ -1,0 +1,22 @@
+experiment:
+  name: pipeline-smoke-test
+  description: "Fast pipeline validation \u2014 5 eval cases for quick e2e testing. Use the full eval_cases.yaml manifest\
+    \ for production runs.\n"
+  created: '2026-08-20T15:06:20+00:00'
+  version: wrangler_v1
+agent_module: examples/multi_model_agents/agents/sonnet_agent
+eval_data: examples/multi_model_agents/eval_data/eval_cases_smoke.yaml
+defaults:
+  num_runs: 3
+  judge_model: gemini-3.5-flash
+pairs:
+- id: sonnet
+  model: claude-sonnet-4-6
+  description: "Claude Sonnet \u2014 smoke test"
+  agent_module: examples/multi_model_agents/agents/sonnet_agent
+  engine_id: ''
+  system_prompt: You are a helpful assistant. Use the available tools to answer user questions.
+eval_config:
+  judge_model: gemini-3.5-flash
+  response_match_threshold: 0.5
+  safety_threshold: 0.8

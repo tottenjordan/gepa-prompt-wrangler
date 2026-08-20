@@ -2,6 +2,7 @@
 
 import contextlib
 import functools
+import json
 import math
 import statistics
 import time
@@ -379,6 +380,40 @@ def _run_batched_inference(
         _evals_common._execute_agent_run_with_retry = original_retry_fn
 
 
+def _is_failed_response(response) -> bool:
+    """Is this inference row a failure dressed up as a response?
+
+    The obvious cases are empty/NaN, and a dict carrying an "error" key. The
+    non-obvious one, and the reason this is a shared helper: when GEAP returns
+    an empty event stream the SDK cannot parse it and stores its complaint as
+    the response *text* --
+
+        '{"error": "Failed to parse agent run response [] to agent data: ...'
+
+    -- a perfectly non-empty string that is not a dict, so a dict-only check
+    waves it through. It then reaches scoring with no agent_data, the custom
+    tool_use_quality metric fails to render its template, and that single
+    per-metric error makes the whole EvaluationItemResult unparseable
+    (`extra='forbid'`), dropping the case from *every* metric. One empty
+    stream silently costs a whole case. See docs/notes/silent-failures.md.
+    """
+    if response is None or (not isinstance(response, dict) and pd.isna(response)):
+        return True
+    if isinstance(response, dict):
+        return "error" in response
+    if isinstance(response, str):
+        text = response.strip()
+        if not text:
+            return True
+        if text.startswith("{"):
+            try:
+                parsed = json.loads(text)
+            except ValueError:
+                return False
+            return isinstance(parsed, dict) and "error" in parsed
+    return False
+
+
 def _retry_failed_cases(
     client: Client,
     agent_resource: str,
@@ -389,20 +424,9 @@ def _retry_failed_cases(
 ) -> types.EvaluationDataset:
     """Detect failed inference cases and re-run them in micro-batches."""
     result_df = inference_result.eval_dataset_df
-    failed_indices = []
-
-    for idx, row in result_df.iterrows():
-        response = row.get("response")
-        if (
-            (
-                response is None
-                or (not isinstance(response, dict) and pd.isna(response))
-                or response == ""
-            )
-            or (isinstance(response, dict) and "error" in response)
-            or (isinstance(response, str) and response.strip() == "")
-        ):
-            failed_indices.append(idx)
+    failed_indices = [
+        idx for idx, row in result_df.iterrows() if _is_failed_response(row.get("response"))
+    ]
 
     if not failed_indices:
         return inference_result
@@ -425,21 +449,28 @@ def _retry_failed_cases(
         tag=f"{tag}retry ",
     )
 
+    # Splice recovered rows in as records rather than assigning a Series into
+    # `result_df.iloc[i]`. These frames carry ADK objects (`SessionInput` and
+    # friends) in object columns, and pandas' row setitem tries to broadcast
+    # the value -- `TypeError: object of type 'SessionInput' has no len()`.
+    # That crash was unreachable until the detector above learned to spot an
+    # error payload stored as a string, because nothing was ever recovered.
     recovered = 0
     retry_df = retry_result.eval_dataset_df
+    records = result_df.to_dict("records")
+    retry_records = retry_df.to_dict("records")
     for retry_idx, original_idx in enumerate(failed_indices):
-        if retry_idx < len(retry_df):
-            retry_response = retry_df.iloc[retry_idx].get("response")
-            if (
-                retry_response is not None
-                and retry_response != ""
-                and not (isinstance(retry_response, dict) and "error" in retry_response)
-            ):
-                result_df.iloc[original_idx] = retry_df.iloc[retry_idx]
+        if retry_idx < len(retry_records):
+            retry_row = retry_records[retry_idx]
+            if not _is_failed_response(retry_row.get("response")):
+                # Merge so a column the retry frame lacks keeps its original
+                # value instead of becoming NaN.
+                records[original_idx] = {**records[original_idx], **retry_row}
                 recovered += 1
 
     print(f"  {tag}Recovered {recovered}/{n_failed} failed cases", flush=True)
-    return types.EvaluationDataset(eval_dataset_df=result_df)
+    merged_df = pd.DataFrame(records, columns=result_df.columns)
+    return types.EvaluationDataset(eval_dataset_df=merged_df)
 
 
 def run_batch_eval(
@@ -502,13 +533,15 @@ def run_batch_eval(
     print(f"  {tag}Inference complete ({_fmt_elapsed(t0)})", flush=True)
 
     # Clean invalid rows before scoring — rows with NaN/float in response or
-    # agent_data cause ValidationError in the SDK
+    # agent_data cause ValidationError in the SDK. A row whose response is an
+    # error payload is dropped too: left in, it takes every other metric on
+    # that case down with it (see _is_failed_response).
     result_df = inference_result.eval_dataset_df
 
     def _is_invalid(val):
         return val is None or (isinstance(val, float) and pd.isna(val)) or val == ""
 
-    invalid_mask = result_df["response"].apply(_is_invalid)
+    invalid_mask = result_df["response"].apply(_is_failed_response)
     if "agent_data" in result_df.columns:
         invalid_mask = invalid_mask | result_df["agent_data"].apply(_is_invalid)
     n_invalid = invalid_mask.sum()
