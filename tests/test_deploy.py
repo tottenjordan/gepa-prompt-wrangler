@@ -239,6 +239,56 @@ class TestBuildSourcePackage:
         assert reqs == _SOURCE_REQUIREMENTS
 
 
+class TestInstanceScaling:
+    """GEAP scales to zero by default, and a request that lands on a booting
+    worker returns HTTP 200 with an empty body rather than an error."""
+
+    def test_absent_by_default(self):
+        from wrangler.core.deploy import _build_source_config
+
+        config = _build_source_config("_geap_build_pkg", "n")
+        assert "min_instances" not in config
+        assert "max_instances" not in config
+
+    def test_explicit_arguments(self):
+        from wrangler.core.deploy import _build_source_config
+
+        config = _build_source_config("_geap_build_pkg", "n", min_instances=2, max_instances=4)
+        assert config["min_instances"] == 2
+        assert config["max_instances"] == 4
+
+    def test_environment_fallback(self, monkeypatch):
+        from wrangler.core.deploy import _build_source_config
+
+        monkeypatch.setenv("GEAP_MIN_INSTANCES", "3")
+        monkeypatch.setenv("GEAP_CONTAINER_CONCURRENCY", "8")
+        config = _build_source_config("_geap_build_pkg", "n")
+        assert config["min_instances"] == 3
+        assert config["container_concurrency"] == 8
+
+    def test_explicit_argument_beats_environment(self, monkeypatch):
+        from wrangler.core.deploy import _build_source_config
+
+        monkeypatch.setenv("GEAP_MIN_INSTANCES", "3")
+        config = _build_source_config("_geap_build_pkg", "n", min_instances=1)
+        assert config["min_instances"] == 1
+
+    @patch("wrangler.core.deploy.vertexai")
+    @patch("wrangler.core.deploy._get_client")
+    def test_reaches_the_deploy_call(self, mock_client, mock_vertexai, tmp_path):
+        from wrangler.core.deploy import deploy_agent_from_source
+
+        mock_client.return_value.agent_engines.create.return_value = MagicMock(
+            resource_name="projects/p/locations/l/reasoningEngines/1"
+        )
+        deploy_agent_from_source(
+            _make_agent_tree(tmp_path), "gemini-3.5-flash", "P", "n", min_instances=2
+        )
+
+        config = mock_client.return_value.agent_engines.create.call_args.kwargs["config"]
+        assert config["min_instances"] == 2
+
+
 class TestDeployAgentFromSource:
     @patch("wrangler.core.deploy.vertexai")
     @patch("wrangler.core.deploy._get_client")

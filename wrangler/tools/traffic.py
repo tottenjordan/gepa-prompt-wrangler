@@ -20,6 +20,7 @@ Usage:
 """
 
 import argparse
+import asyncio
 import time
 import uuid
 from pathlib import Path
@@ -56,6 +57,53 @@ def _resolve_resource(engine_id: str) -> str:
     if engine_id.startswith("projects/"):
         return engine_id
     return f"projects/{GCP_PROJECT_ID}/locations/{GCP_REGION}/reasoningEngines/{engine_id}"
+
+
+# GEAP routes a request to a worker that has not finished booting, and that
+# request comes back HTTP 200 with an empty event stream -- no error, no trace.
+# Confirmed in the ReasoningEngine logs: a worker logged "Application startup
+# complete" and served "POST /api/stream_reasoning_engine 200 OK" in the same
+# second, while a warm worker handling the neighbouring request logged a real
+# rawPredict to the model. Startup here is ~8s: three MCP handshakes.
+#
+# A retry lands on a different (by then warm) worker. Setting GEAP_MIN_INSTANCES
+# on the deployment makes it rarer but cannot remove it -- scaling up under load
+# creates cold workers whatever the floor is.
+_EMPTY_STREAM_RETRIES = 2
+
+
+def _event_text(event) -> str:
+    """Pull the assistant text out of one ADK event.
+
+    Events come back as ``{"content": {"parts": [{"text": ...}, ...]}}`` — a
+    part may instead hold a ``function_call`` or ``function_response``, which
+    carry no text. Anything else (a bare object with ``.text``) is tolerated so
+    this keeps working if the SDK stops handing back plain dicts.
+    """
+    if isinstance(event, dict):
+        parts = event.get("content", {}).get("parts", [])
+        return "".join(p.get("text", "") for p in parts if isinstance(p, dict))
+    return getattr(event, "text", "") or ""
+
+
+async def _stream(agent, user_id: str, session_id: str, query: str) -> tuple[str, int]:
+    """Run one query and return (text, event_count).
+
+    Uses ``async_stream_query`` because ADK's class-methods list marks the sync
+    ``stream_query`` "Deprecated. Use async_stream_query instead." The two
+    behave identically against GEAP — measured, alternating, on one engine — so
+    this is future-proofing, not a workaround. See ``_EMPTY_STREAM_RETRIES``
+    for the failure the caller does have to handle.
+    """
+    events = [
+        event
+        async for event in agent.async_stream_query(
+            user_id=user_id,
+            session_id=session_id,
+            message=query,
+        )
+    ]
+    return "".join(_event_text(e) for e in events), len(events)
 
 
 def generate_traffic(
@@ -120,24 +168,29 @@ def generate_traffic(
         print(f"  [{query_num}/{total}] → {agent_short} ({complexity}) {query[:55]}")
 
         try:
-            # AgentEngine proxies the ADK class_methods list at runtime, so these
-            # attributes do not exist statically.
-            session = agent.create_session(user_id=user_id)  # ty: ignore[unresolved-attribute]
-            session_id = session["id"] if isinstance(session, dict) else session.id
+            for attempt in range(_EMPTY_STREAM_RETRIES + 1):
+                # AgentEngine proxies the ADK class_methods list at runtime, so
+                # these attributes do not exist statically. Each attempt gets a
+                # fresh session: the empty-stream worker may have consumed the
+                # old one.
+                session = agent.create_session(  # ty: ignore[unresolved-attribute]
+                    user_id=user_id
+                )
+                session_id = session["id"] if isinstance(session, dict) else session.id
 
-            response = agent.stream_query(  # ty: ignore[unresolved-attribute]
-                user_id=user_id,
-                session_id=session_id,
-                message=query,
-            )
-            full_response = ""
-            for chunk in response:
-                if hasattr(chunk, "text"):
-                    full_response += chunk.text
-                elif isinstance(chunk, dict) and "text" in chunk:
-                    full_response += chunk["text"]
+                full_response, event_count = asyncio.run(_stream(agent, user_id, session_id, query))
+                if event_count:
+                    break
+                if attempt < _EMPTY_STREAM_RETRIES:
+                    print("    ~ Empty stream (cold worker?) — retrying")
 
-            print(f"    -> {full_response[:80]}...")
+            # Zero events is a failure, not a quiet success. The point of this
+            # tool is to emit traces; an empty stream emits none.
+            if event_count == 0:
+                errors += 1
+                print(f"    x No events after {_EMPTY_STREAM_RETRIES + 1} attempts")
+            else:
+                print(f"    -> [{event_count} events] {full_response[:80]}...")
         except Exception as e:
             errors += 1
             print(f"    x Error: {e}")

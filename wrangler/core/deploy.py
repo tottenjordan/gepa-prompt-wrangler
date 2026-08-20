@@ -597,10 +597,39 @@ def mcp_env_from_environ() -> dict[str, str]:
     return {k: v for k, v in os.environ.items() if k.startswith(_MCP_ENV_PREFIXES) and v}
 
 
+def _scaling_from_environ() -> dict:
+    """Read GEAP instance-scaling settings from the environment.
+
+    `GEAP_MIN_INSTANCES` is the one that matters. GEAP will route a request to
+    a worker that has not finished booting, and that request comes back HTTP
+    200 with zero events instead of an error -- startup here is ~8s of MCP
+    handshakes. Raising the floor keeps warm workers around so fewer requests
+    land on a cold one.
+
+    It is a mitigation, not a fix: GEAP also spawns cold workers when scaling
+    *up*, which was observed mid-run under steady load, so callers still have
+    to treat an empty stream as retryable. See `wrangler/tools/traffic.py`.
+
+    Unset means "leave it to GEAP", so this stays a no-op until asked for.
+    """
+    scaling = {}
+    for key, field in (
+        ("GEAP_MIN_INSTANCES", "min_instances"),
+        ("GEAP_MAX_INSTANCES", "max_instances"),
+        ("GEAP_CONTAINER_CONCURRENCY", "container_concurrency"),
+    ):
+        raw = os.environ.get(key, "").strip()
+        if raw:
+            scaling[field] = int(raw)
+    return scaling
+
+
 def _build_source_config(
     build_dir: str,
     display_name: str,
     env_vars: dict | None = None,
+    min_instances: int | None = None,
+    max_instances: int | None = None,
 ) -> dict:
     """Build the config dict for source-based deployment."""
     pkg_name = Path(build_dir).name
@@ -611,7 +640,16 @@ def _build_source_config(
         rel_path = str(Path(build_dir).relative_to(Path.cwd()))
     except ValueError:
         rel_path = build_dir
+
+    # Explicit arguments win over the environment; both may be absent.
+    scaling = _scaling_from_environ()
+    if min_instances is not None:
+        scaling["min_instances"] = min_instances
+    if max_instances is not None:
+        scaling["max_instances"] = max_instances
+
     return {
+        **scaling,
         "staging_bucket": f"gs://{GCP_STAGING_BUCKET}",
         "source_packages": [rel_path],
         "requirements_file": f"{rel_path}/requirements.txt",
@@ -643,6 +681,8 @@ def deploy_agent_from_source(
     instruction: str,
     display_name: str | None = None,
     env_vars: dict | None = None,
+    min_instances: int | None = None,
+    max_instances: int | None = None,
 ) -> str:
     """Deploy a new agent to GEAP using source-based deployment. Returns engine_id.
 
@@ -667,6 +707,8 @@ def deploy_agent_from_source(
                 build_dir,
                 display_name=display_name or "gepa-agent",
                 env_vars=env_vars,
+                min_instances=min_instances,
+                max_instances=max_instances,
             )
             remote = _get_client().agent_engines.create(config=config)
             break
@@ -703,6 +745,8 @@ def update_agent_from_source(
     instruction: str,
     display_name: str | None = None,
     env_vars: dict | None = None,
+    min_instances: int | None = None,
+    max_instances: int | None = None,
 ) -> str:
     """Update an existing agent on GEAP using source-based deployment. Returns engine_id."""
     vertexai.init(
@@ -726,6 +770,8 @@ def update_agent_from_source(
                 build_dir,
                 display_name=display_name or "gepa-agent",
                 env_vars=env_vars,
+                min_instances=min_instances,
+                max_instances=max_instances,
             )
             remote = _get_client().agent_engines.update(name=engine_id, config=config)
             break
