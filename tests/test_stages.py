@@ -142,6 +142,47 @@ class TestSaveOptimizedPrompt:
         ]
         assert keys == ["wrangler_v5", "wrangler_v5_2"]
 
+    def test_prompts_dir_found_beside_agents_not_at_project_root(self, tmp_path):
+        """The real layout nests `agents/` and `prompts/` under an agent dir.
+
+        `_manifest_dir()` returns the *project root* — the dir the manifest's
+        relative paths resolve against — but `prompts/` lives beside `agents/`,
+        one level down. Resolving it against the root alone silently found
+        nothing and discarded the optimized prompt with a warning. The smoke
+        test on 2026-08-21 lost its GEPA result that way.
+        """
+        from wrangler.orchestration.experiment import Experiment
+        from wrangler.orchestration.stages import _save_optimized_prompt
+
+        (tmp_path / "zz_proj" / "agents" / "zz_test_agent").mkdir(parents=True)
+        prompts_file = tmp_path / "zz_proj" / "prompts" / "zz_test_prompts.py"
+        prompts_file.parent.mkdir()
+        prompts_file.write_text('GENERIC = ""\n\nOPTIMIZED = {\n}\n')
+
+        manifest_path = tmp_path / "manifest.yaml"
+        manifest_path.write_text(
+            yaml.dump(
+                {
+                    "name": "test-nested",
+                    "agent_module": "zz_proj/agents/zz_test_agent",
+                    "eval_data": "eval_data/test.yaml",
+                    "pairs": [{"id": "flash", "model": "gemini-3.5-flash", "system_prompt": "Hi"}],
+                }
+            )
+        )
+        exp = Experiment.create(
+            str(manifest_path),
+            name="test-nested",
+            base_dir=str(tmp_path / "experiments"),
+            version="wrangler_v5",
+        )
+
+        _save_optimized_prompt(exp, exp.manifest.pairs[0], "the optimized prompt")
+
+        namespace = {}
+        exec(compile(prompts_file.read_text(), str(prompts_file), "exec"), namespace)  # noqa: S102
+        assert namespace["OPTIMIZED"]["wrangler_v5"]["prompt"] == "the optimized prompt"
+
     def test_both_prompts_remain_loadable(self, tmp_path):
         from wrangler.orchestration.stages import _save_optimized_prompt
 

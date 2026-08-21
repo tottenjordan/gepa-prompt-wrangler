@@ -403,7 +403,12 @@ def _save_optimized_prompt(exp: Experiment, pair: AgentPromptPair, prompt: str) 
     mdir = _manifest_dir(exp)
     agent_ref = pair.agent_module or exp.manifest.agent_module
     stem = Path(agent_ref).stem.replace("_agent", "")
-    prompts_file = mdir / "prompts" / f"{stem}_prompts.py"
+    # `prompts/` sits beside `agents/`, not at the project root that
+    # _manifest_dir() returns — agent_ref is `<agent dir>/agents/<name>_agent`.
+    # Resolving this against mdir alone looked for `prompts/sonnet_prompts.py`
+    # at the repo root, never found it, and dropped every optimized prompt on
+    # the floor with a warning nobody was watching for.
+    prompts_file = mdir / Path(agent_ref).parent.parent / "prompts" / f"{stem}_prompts.py"
     if not prompts_file.exists():
         print(f"  [{pair.id}] Warning: prompts file not found at {prompts_file}")
         return
