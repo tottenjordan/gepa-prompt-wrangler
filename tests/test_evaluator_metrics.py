@@ -289,3 +289,101 @@ class TestLenientResultParsing:
         assert evaluator._scores_from_raw_result({}) == ({}, [])
         assert evaluator._scores_from_raw_result({"candidateResults": None}) == ({}, [])
         assert evaluator._scores_from_raw_result({"candidateResults": []}) == ({}, [])
+
+
+class _StubItem:
+    """An EvaluationItem whose response came back empty because the SDK's
+    loader could not parse the GCS file — the observable shape of defect #7."""
+
+    def __init__(self, gcs_uri, response=None):
+        self.gcs_uri = gcs_uri
+        self.evaluation_response = response
+
+
+class _StubEvals:
+    def __init__(self, items):
+        self._items = items
+        self.evaluation_items = list(items)
+
+    def get_evaluation_set(self, name):
+        return self
+
+    def get_evaluation_item(self, name):
+        return self._items[name]
+
+
+class _StubClient:
+    def __init__(self, items):
+        self.evals = _StubEvals(items)
+
+
+class _StubRunWithSet:
+    class evaluation_run_results:  # noqa: N801
+        evaluation_set = "projects/p/locations/l/evaluationSets/s"
+
+
+class TestPerCaseFallsBackToRawGcs:
+    """When the SDK hands back an empty item, go to the file it came from.
+
+    `EvaluationItem.gcs_uri` survives even when `evaluation_response` is the
+    empty object the failed parse produced, so the data is still reachable.
+    """
+
+    def test_recovers_scores_from_gcs_when_response_is_empty(self, monkeypatch):
+        raw = {
+            "candidateResults": [
+                {"metric": "safety_v1", "score": 1.0},
+                {"metric": "instruction_following_v1", "score": 0.0},
+                {"metric": "hallucination_v1", "error": {"code": 3, "message": "tool call"}},
+            ]
+        }
+        items = {"item-1": _StubItem("gs://bucket/result_1.json", types.EvaluationItemResult())}
+        monkeypatch.setattr(evaluator, "Client", lambda **kw: _StubClient(items))
+        monkeypatch.setattr(evaluator, "_read_raw_result", lambda client, uri: raw)
+
+        per_case = evaluator._extract_per_case_via_api(_StubRunWithSet())
+
+        assert per_case == [{"safety_v1": 1.0, "instruction_following_v1": 0.0}]
+
+    def test_does_not_touch_gcs_when_the_sdk_parsed_fine(self, monkeypatch):
+        """No extra read on the happy path — it is a per-item network call."""
+
+        class _Candidate:
+            metric, score = "safety_v1", 1.0
+
+        class _Response:
+            def __init__(self):
+                self.candidate_results = [_Candidate()]
+
+        items = {"item-1": _StubItem("gs://bucket/result_1.json", _Response())}
+        monkeypatch.setattr(evaluator, "Client", lambda **kw: _StubClient(items))
+
+        def _boom(client, uri):
+            raise AssertionError("read GCS despite a parsed response")
+
+        monkeypatch.setattr(evaluator, "_read_raw_result", _boom)
+
+        assert evaluator._extract_per_case_via_api(_StubRunWithSet()) == [{"safety_v1": 1.0}]
+
+    def test_one_unreadable_file_does_not_sink_the_other_cases(self, monkeypatch):
+        raw = {"candidateResults": [{"metric": "safety_v1", "score": 1.0}]}
+        items = {
+            "item-1": _StubItem("gs://bucket/a.json", types.EvaluationItemResult()),
+            "item-2": _StubItem("gs://bucket/b.json", types.EvaluationItemResult()),
+        }
+        monkeypatch.setattr(evaluator, "Client", lambda **kw: _StubClient(items))
+
+        def _read(client, uri):
+            if uri.endswith("a.json"):
+                raise OSError("403 on the bucket")
+            return raw
+
+        monkeypatch.setattr(evaluator, "_read_raw_result", _read)
+
+        per_case = evaluator._extract_per_case_via_api(_StubRunWithSet())
+        assert per_case == [{}, {"safety_v1": 1.0}]
+
+    def test_item_with_no_gcs_uri_is_simply_empty(self, monkeypatch):
+        items = {"item-1": _StubItem(None, types.EvaluationItemResult())}
+        monkeypatch.setattr(evaluator, "Client", lambda **kw: _StubClient(items))
+        assert evaluator._extract_per_case_via_api(_StubRunWithSet()) == [{}]

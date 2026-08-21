@@ -310,6 +310,20 @@ def _scores_from_raw_result(raw: dict) -> tuple[dict[str, float], list[str]]:
     return scores, errored
 
 
+def _read_raw_result(client, gcs_uri: str) -> dict:
+    """Read an evaluation result file from GCS as plain JSON.
+
+    Reuses the SDK's own GCS reader rather than taking a direct dependency on
+    google-cloud-storage, so credentials and path parsing behave identically to
+    the code path this is standing in for. Kept as a separate function so tests
+    can substitute it without patching the SDK internals.
+    """
+    from vertexai._genai import _gcs_utils
+
+    gcs = _gcs_utils.GcsUtils(api_client=client._api_client)
+    return json.loads(gcs.read_file_contents(gcs_uri))
+
+
 def _extract_per_case_via_api(evaluation_run) -> list[dict[str, float]]:
     """Fallback: fetch per-case scores directly from the Evaluation Management API."""
     per_case: list[dict[str, float]] = []
@@ -326,18 +340,36 @@ def _extract_per_case_via_api(evaluation_run) -> list[dict[str, float]]:
 
         for item_name in eval_set.evaluation_items:
             case_scores: dict[str, float] = {}
+            errored: list[str] = []
             # One unreadable item must not drop the scores for every other case;
             # it just contributes an empty dict.
             with contextlib.suppress(Exception):
                 item = client.evals.get_evaluation_item(name=item_name)
                 response = getattr(item, "evaluation_response", None)
-                if response:
-                    for candidate in getattr(response, "candidate_results", []):
-                        metric = getattr(candidate, "metric", "")
-                        score = getattr(candidate, "score", None)
-                        if metric and score is not None:
-                            short = metric.split("/")[-1] if "/" in metric else metric
-                            case_scores[short] = float(score)
+                candidates = getattr(response, "candidate_results", None) if response else None
+                for candidate in candidates or []:
+                    metric = getattr(candidate, "metric", "")
+                    score = getattr(candidate, "score", None)
+                    if metric and score is not None:
+                        short = metric.split("/")[-1] if "/" in metric else metric
+                        case_scores[short] = float(score)
+
+                # An empty response with a gcs_uri is the signature of defect #7:
+                # the SDK could not parse the file and handed back a blank
+                # EvaluationItemResult instead of raising, so `response` looks
+                # legitimately empty. The file itself is still readable and
+                # still holds every metric that did score. Only reached when the
+                # SDK gave us nothing, so the happy path costs no extra request.
+                if not case_scores and getattr(item, "gcs_uri", None):
+                    with contextlib.suppress(Exception):
+                        case_scores, errored = _scores_from_raw_result(
+                            _read_raw_result(client, item.gcs_uri)
+                        )
+                        if errored:
+                            print(
+                                f"  Recovered {len(case_scores)} metric(s) from GCS for a case "
+                                f"the SDK dropped; these metrics errored: {', '.join(errored)}"
+                            )
             per_case.append(case_scores)
     except Exception as e:
         print(f"  Warning in API fallback for per-case scores: {e}")
