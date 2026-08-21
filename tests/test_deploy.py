@@ -251,6 +251,55 @@ class TestBuildSourcePackage:
         assert reqs == _SOURCE_REQUIREMENTS
 
 
+class TestOtelSpanExport:
+    """Span batches were being dropped under load, taking online eval's input
+    with them. The tuning below is the only handle we have on the exporter --
+    the Vertex SDK builds it with no arguments, so env vars are the interface.
+    See docs/notes/silent-failures.md #8."""
+
+    def test_tuning_reaches_the_deploy_config(self):
+        from wrangler.core.deploy import _build_source_config
+
+        env = _build_source_config("_geap_build_pkg", "n")["env_vars"]
+
+        # Telemetry has to be on at all for any of the rest to matter.
+        assert env["GOOGLE_CLOUD_AGENT_ENGINE_ENABLE_TELEMETRY"] == "true"
+        # The exporter gives its first attempt the entire deadline, so this
+        # ceiling is what decides whether a slow export ever lands.
+        assert env["OTEL_EXPORTER_OTLP_TRACES_TIMEOUT"] == "30"
+        assert env["OTEL_BSP_SCHEDULE_DELAY"] == "2000"
+        assert env["OTEL_BSP_MAX_EXPORT_BATCH_SIZE"] == "128"
+
+    def test_processor_timeout_exceeds_exporter_timeout(self):
+        """The batch processor must not give up before the exporter does.
+
+        These are different units in the upstream SDK — the processor is in
+        milliseconds, the exporter in seconds — which is an easy way to set a
+        60s-looking value that is really 60ms, or to raise one and silently
+        invert the ordering.
+        """
+        from wrangler.core.deploy import _build_source_config
+
+        env = _build_source_config("_geap_build_pkg", "n")["env_vars"]
+        exporter_sec = float(env["OTEL_EXPORTER_OTLP_TRACES_TIMEOUT"])
+        processor_sec = float(env["OTEL_BSP_EXPORT_TIMEOUT"]) / 1000
+
+        assert processor_sec > exporter_sec, (
+            f"processor gives up at {processor_sec}s, exporter still trying until {exporter_sec}s"
+        )
+
+    def test_caller_env_vars_still_win(self):
+        """The pipeline passes overrides through `env_vars`; tuning must not
+        outrank them, or the localhost MCP overrides break."""
+        from wrangler.core.deploy import _build_source_config
+
+        env = _build_source_config(
+            "_geap_build_pkg", "n", env_vars={"OTEL_BSP_SCHEDULE_DELAY": "9999"}
+        )["env_vars"]
+
+        assert env["OTEL_BSP_SCHEDULE_DELAY"] == "9999"
+
+
 class TestInstanceScaling:
     """GEAP scales to zero by default, and a request that lands on a booting
     worker returns HTTP 200 with an empty body rather than an error."""

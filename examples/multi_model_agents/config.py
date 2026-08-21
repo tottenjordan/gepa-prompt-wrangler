@@ -36,11 +36,12 @@ MCP_SERVER_URLS = {
     EXPENSE_MCP_SERVER: EXPENSE_MCP_URL,
 }
 
-OTEL_ENV_VARS = {
-    "GOOGLE_CLOUD_AGENT_ENGINE_ENABLE_TELEMETRY": "true",
-    "OTEL_SEMCONV_STABILITY_OPT_IN": "gen_ai_latest_experimental",
-    "OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT": "EVENT_ONLY",
-}
+# The OTel settings that actually reach a deployed agent live in
+# `_OTEL_ENV_VARS` in wrangler/core/deploy.py, which is what builds the GEAP
+# env_vars. A copy used to sit here too, with nothing reading it — a dict that
+# reads like configuration but is not applied is how the un-tuned exporter
+# settings would have quietly outlived the fix in docs/notes/silent-failures.md
+# #8. Removed rather than synced, because a second copy only drifts again.
 
 AGENT_MODEL = os.environ.get("AGENT_MODEL", "gemini-3.5-flash")
 

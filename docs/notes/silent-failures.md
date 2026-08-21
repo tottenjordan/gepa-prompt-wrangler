@@ -306,7 +306,7 @@ array length, and the number it prints looks exactly like a number that means so
 three bugs; it is one brittle boundary that converts *any* per-item error into total data
 loss. Fix the boundary, not the latest thing to cross it.
 
-## 8. OTel spans are dropped under load, and online eval scores what survives — OPEN
+## 8. OTel spans are dropped under load, and online eval scores what survives
 
 **Symptom:** nothing. The run succeeds and the reports are written. Found only by reading
 the deployed engine's logs directly.
@@ -333,13 +333,78 @@ undercuts `wrangler/tools/traffic.py`, whose entire job is to generate traces.
 on an interval; a worker that boots, serves one request and is recycled (see #5 — 40 boots
 per 31 requests) may never reach a successful flush. The two defects compound.
 
-**Not fixed, and not obviously ours to fix** — the exporter is configured by the GEAP
-runtime, not by this repo. Before treating it as a platform issue, worth checking whether
-the SSL EOF flakes to `iam.googleapis.com/v1/projects/-/serviceAccounts/.../allowedLocations`
-in the same window (15 of them over two days, one reaching `total=0`) share a cause; both
-are egress from the same container to Google APIs, breaking the same way.
+### Cause: the exporter's retry loop is structurally dead
 
-**Minimum mitigation:** any online-eval result computed from a run with span-export errors
-in its window should be treated as a lower bound, not a measurement. There is currently no
-check for this, and the ERROR is invisible to `severity>=WARNING` queries because the
-container logs everything at DEFAULT.
+I first wrote this up as "not obviously ours to fix — the exporter is configured by the
+GEAP runtime." That was wrong in the way that matters. We do not *construct* it, but we
+control every setting it reads, and one of those settings is what decides the outcome.
+
+`AdkApp(enable_tracing=True)` makes the Vertex SDK
+(`vertexai/agent_engines/templates/adk.py:443`) build
+
+```python
+span_exporter = OTLPSpanExporter(session=AuthorizedSession(...), endpoint=..., headers=...)
+span_processor = BatchSpanProcessor(span_exporter=span_exporter)
+```
+
+— **no timeout, no batch settings on either**. So both fall through to the standard OTel
+env vars, which we already inject via `_build_source_config`. The endpoint is
+`https://telemetry.googleapis.com/v1/traces`, posted through a google-auth
+`AuthorizedSession`.
+
+Now the part that took reading the exporter source to see
+(`opentelemetry/exporter/otlp/proto/http/trace_exporter/__init__.py:196`):
+
+```python
+deadline_sec = time() + self._timeout          # default 10s
+for retry_num in range(_MAX_RETRYS):
+    backoff_seconds = 2**retry_num * random.uniform(0.8, 1.2)
+    resp = self._export(serialized_data, deadline_sec - time())   # <-- whole budget
+```
+
+**The first attempt is handed the entire deadline.** So if a POST hangs until the timeout,
+`backoff_seconds > deadline_sec - time()` is true immediately and the batch is discarded
+after exactly one try. The retry loop cannot execute. It is not that the retries failed —
+they never ran.
+
+The logs prove that is the path taken rather than a fast error: **zero**
+`Transient error ... retrying in Ns` warnings, zero `Failed to export span batch code: ...`
+(the non-retryable branch), zero `Exporter already shutdown`. Only the deadline branch,
+every time.
+
+**The SSL EOF flakes are a symptom of the same sick egress, not the cause.** They are on
+`/v1/projects/-/serviceAccounts/.../allowedLocations` — a google-auth *regional access
+boundary* lookup (`google/auth/_regional_access_boundary_utils.py`). That lookup runs on a
+background refresh thread and its failures are caught and logged at DEBUG, so it cannot
+raise into the export. It is visible only because that client is configured with
+`Retry(total=2)` and logs each attempt; the exporter's session has no such retries and so
+fails silently at the transport layer. Same weather, different instrument.
+
+### Fix
+
+`_OTEL_ENV_VARS` in `wrangler/core/deploy.py`, pinned by
+`tests/test_deploy.py::TestOtelSpanExport`:
+
+| Var | Was | Now | Why |
+| --- | --- | --- | --- |
+| `OTEL_EXPORTER_OTLP_TRACES_TIMEOUT` | 10s | **30s** | The budget one attempt gets. The only lever that lets a slow export land. |
+| `OTEL_BSP_EXPORT_TIMEOUT` | 30000ms | **60000ms** | Must stay above the exporter timeout or the processor abandons a live attempt. Note the unit differs from the line above. |
+| `OTEL_BSP_SCHEDULE_DELAY` | 5000ms | **2000ms** | Fewer spans queued when a short-lived worker is recycled (#5). |
+| `OTEL_BSP_MAX_EXPORT_BATCH_SIZE` | 512 | **128** | Smaller payloads post faster, which is what keeps an attempt inside the timeout. |
+
+Only the first is aimed at the proven mechanism; the other three shrink the exposure that
+feeds it. **Env vars apply at deploy time**, so an existing engine keeps its old settings
+until redeployed — which is also why the fix could be verified at all.
+
+A dead `OTEL_ENV_VARS` copy in `examples/multi_model_agents/config.py` was deleted rather
+than synced: nothing read it, and a second copy of settings that look applied but are not
+is precisely how the un-tuned values would have outlived this fix.
+
+**The lesson:** "configured by the platform" and "out of our control" are different
+claims, and I collapsed them. The object was built by someone else's code with no
+arguments — which made *every* parameter ours, through the environment. Check what a
+default constructor reads before concluding you cannot influence it.
+
+**Still true regardless:** any online-eval result computed from a run with span-export
+errors in its window is a lower bound, not a measurement, and the ERROR is invisible to
+`severity>=WARNING` queries because the container logs everything at DEFAULT.

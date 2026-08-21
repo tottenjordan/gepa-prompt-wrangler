@@ -37,6 +37,43 @@ _SOURCE_REQUIREMENTS = [
     "opentelemetry-instrumentation-httpx",
 ]
 
+# OTel settings shipped to the GEAP container. The first three turn telemetry on
+# and pick the semantic conventions; the rest keep span batches from being
+# dropped in flight. See docs/notes/silent-failures.md #8.
+#
+# `AdkApp(enable_tracing=True)` makes the Vertex SDK build an OTLP/HTTP exporter
+# to telemetry.googleapis.com and wrap it in a BatchSpanProcessor -- both with
+# *no* explicit arguments (vertexai/agent_engines/templates/adk.py), so every
+# knob below falls through to these env vars. That is the only handle we have on
+# them: we do not construct either object.
+#
+# Why the exporter timeout matters more than it looks. OTLPSpanExporter.export()
+# sets `deadline = now + timeout` and then hands the FIRST attempt the whole
+# remaining budget. So a POST that hangs to the timeout leaves nothing for a
+# retry and the batch is discarded after exactly one try -- the retry loop is
+# structurally dead. That is what the engine logs show: five "Failed to export
+# span batch due to timeout, max retries or shutdown" with zero preceding
+# "Transient error ... retrying" warnings. Raising the ceiling is the only way a
+# slow-but-working export ever lands.
+_OTEL_ENV_VARS = {
+    "GOOGLE_CLOUD_AGENT_ENGINE_ENABLE_TELEMETRY": "true",
+    "OTEL_SEMCONV_STABILITY_OPT_IN": "gen_ai_latest_experimental",
+    "OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT": "EVENT_ONLY",
+    # Seconds; SDK default 10. The budget one attempt gets, per above.
+    "OTEL_EXPORTER_OTLP_TRACES_TIMEOUT": "30",
+    # Milliseconds; SDK default 30000. Must stay above the exporter timeout, or
+    # the processor gives up while the attempt it is waiting on is still valid.
+    "OTEL_BSP_EXPORT_TIMEOUT": "60000",
+    # Milliseconds; SDK default 5000. Workers here are short-lived -- 40 boots
+    # against 31 requests in one eval window -- so a worker can be recycled
+    # holding up to a full interval of unflushed spans. Flush more often and
+    # fewer spans are in the queue when that happens.
+    "OTEL_BSP_SCHEDULE_DELAY": "2000",
+    # SDK default 512. Smaller payloads post faster, which is what keeps an
+    # attempt inside the timeout in the first place.
+    "OTEL_BSP_MAX_EXPORT_BATCH_SIZE": "128",
+}
+
 # Standard ADK class_methods for Agent Engine — copied from
 # google.adk.cli.cli_deploy._AGENT_ENGINE_CLASS_METHODS (ADK 2.2.0).
 _ADK_CLASS_METHODS = [
@@ -675,9 +712,7 @@ def _build_source_config(
             "GCP_REGION": GCP_REGION,
             "GOOGLE_CLOUD_LOCATION": "global",
             "GOOGLE_GENAI_USE_VERTEXAI": "1",
-            "GOOGLE_CLOUD_AGENT_ENGINE_ENABLE_TELEMETRY": "true",
-            "OTEL_SEMCONV_STABILITY_OPT_IN": "gen_ai_latest_experimental",
-            "OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT": "EVENT_ONLY",
+            **_OTEL_ENV_VARS,
             # MCP vars are a *default* layer: an explicit env_vars from the
             # caller (the pipeline passes its localhost overrides here) wins.
             **mcp_env_from_environ(),
