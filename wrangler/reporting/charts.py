@@ -9,7 +9,7 @@ import tempfile
 from pathlib import Path
 
 from ..core.config import MODEL_COSTS
-from ..core.models import AGENT_ORDER, MODEL_MAP, PROVIDERS
+from ..core.models import AGENT_ORDER, DEFAULT_FIGURE_VLM_MODEL, MODEL_MAP, PROVIDERS
 from ..core.models import blended_cost_for_report as blended_cost
 from .analysis import (
     METRIC_LABELS,
@@ -65,8 +65,10 @@ from .analysis import (
 #    are mutually exclusive, and this process needs the other one.
 _PB_TIMEOUT = 300
 _PB_ENV = {
+    # Image model kept as a literal and exempted in tests/test_models.py: it is a
+    # figure renderer, not an agent or judge, so it has no cost or RPM to register.
     "IMAGE_MODEL": "gemini-3.1-flash-image",
-    "VLM_MODEL": "gemini-3.5-flash",
+    "VLM_MODEL": DEFAULT_FIGURE_VLM_MODEL,
 }
 
 
