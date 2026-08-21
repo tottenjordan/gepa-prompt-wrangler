@@ -14,7 +14,7 @@ One topic per file. Keep this index under 200 lines — put detail in the topic 
 | [adk-judge-model.md](adk-judge-model.md) | Why only the GEPA path reads `judge_model` at all — batch eval cannot send one. Predicted the risks the judge A/B then measured. |
 | [toolchain-baseline.md](toolchain-baseline.md) | Measured lint/type/test baseline as of 2026-08-20, and what infrastructure does not exist yet. |
 | [repo-traps.md](repo-traps.md) | Non-obvious footguns: gitignored lockfile, duplicated config, why `GOOGLE_CLOUD_LOCATION` can't express the per-model location rule, Agent Registry services invisible to `gcloud run services list`, `TODO` goldens. |
-| [silent-failures.md](silent-failures.md) | Seven failures that reported success: MCP tools missing at deploy, startup checks that never ran, batch eval scoring 0 cases, a tool-use metric floored at ~0.42, GEAP returning 200 with an empty event stream from a booting worker, GEPA optimizing against a safety score pinned at zero, and (**open**) the autorater emitting a tool call so the case is dropped from every metric. |
+| [silent-failures.md](silent-failures.md) | Eight failures that reported success: MCP tools missing at deploy, startup checks that never ran, batch eval scoring 0 cases, a tool-use metric floored at ~0.42, GEAP returning 200 with an empty event stream from a booting worker, GEPA optimizing against a safety score pinned at zero, and two **open** ones — the autorater emitting a tool call so the case is dropped from every metric, and OTel span batches dropped under load beneath online eval. Also carries the log queries that found them. |
 
 ## Active Plans
 

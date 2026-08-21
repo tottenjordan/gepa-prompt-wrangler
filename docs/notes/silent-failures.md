@@ -1,11 +1,15 @@
 # Silent Failures
 
-**Verified on:** 2026-08-20, during the Task 3.4 smoke test. #7 added 2026-08-21.
+**Verified on:** 2026-08-20, during the Task 3.4 smoke test. #7 added 2026-08-21; #8 added
+2026-08-21 from a log audit of the deployed engine.
 
-Seven defects, six of them found in one sitting. None of them raised. Every one reported
+Eight defects, six of them found in one sitting. None of them raised. Every one reported
 success while producing worthless output — which is why they had survived so long. Grouped
 here because the *shape* is the transferable part, not the individual bugs. #1–#6 are
-fixed; **#7 is open.**
+fixed; **#7 and #8 are open.**
+
+#8 is the one that argues for auditing logs on a schedule rather than after a failure:
+every other defect here was found because something looked wrong, and #8 never will.
 
 Related: [repo-traps.md](repo-traps.md), [adk-patch-status.md](adk-patch-status.md).
 
@@ -167,6 +171,29 @@ back-to-back load (PIDs 956, 997, 1023, 1169, 1237 across two minutes), so
 stream as retryable.** `wrangler/tools/traffic.py` retries twice with a fresh session;
 that took one engine from 0/3 to 5/6 queries producing traces.
 
+**Measured from the engine's own logs, 2026-08-21.** Over the 11-minute `eval_after`
+window on engine `5638288480409747456`, the ReasoningEngine logged **40 `Application is
+starting up` events against 31 `POST /api/stream_reasoning_engine` requests** — the engine
+booted a worker slightly *more often* than it served a request. Over the full two-day
+window: 164 startups, 113 requests, 7 SIGTERMs. So worker creation is not a startup
+transient that settles; it is the steady state under this load pattern, and the exposure
+window is open for most of a run. No crash indicators anywhere in the logs (no traceback,
+no worker-exit, no OOM) — these are ordinary scale-ups, which is exactly why nothing
+surfaces them.
+
+Query to re-measure after changing `GEAP_MIN_INSTANCES`:
+
+```bash
+gcloud logging read 'resource.type="aiplatform.googleapis.com/ReasoningEngine"
+  AND resource.labels.reasoning_engine_id="ENGINE_ID"
+  AND textPayload:"Application is starting up"' \
+  --project=PROJECT --freshness=1d --limit=500 --format='value(timestamp)' | wc -l
+```
+
+Note the container logs everything at DEFAULT severity, so `severity>=WARNING` returns
+nothing at all and looks like a clean bill of health. Filter on `textPayload`, not
+severity.
+
 **A dead end worth not repeating:** this first looked like "sync `stream_query` is broken,
 `async_stream_query` works" — an early async call succeeded where three sync calls had
 failed. Alternating the two methods against one engine showed them identical
@@ -278,3 +305,41 @@ array length, and the number it prints looks exactly like a number that means so
 (#3 unsupported metric version, #5 empty agent stream, #7 rater tool call). It is not
 three bugs; it is one brittle boundary that converts *any* per-item error into total data
 loss. Fix the boundary, not the latest thing to cross it.
+
+## 8. OTel spans are dropped under load, and online eval scores what survives — OPEN
+
+**Symptom:** nothing. The run succeeds and the reports are written. Found only by reading
+the deployed engine's logs directly.
+
+**What the logs say.** Engine `5638288480409747456`, during the `eval_after` window on
+2026-08-21:
+
+```
+ERROR:    Failed to export span batch due to timeout, max retries or shutdown.
+```
+
+Five times in eleven minutes, from five different worker PIDs, interleaved with
+`Retrying (Retry(total=2 → 1 → 0)) after connection broken by 'SSLError(SSLEOFError(...))'`.
+This is the OTel `BatchSpanProcessor` giving up on a batch. The spans in it are gone.
+
+**Why it matters here specifically.** `wrangler/eval/` scores OTel traces in the online
+evaluator path — that is the whole mechanism. A dropped span batch is not a missing log
+line; it is missing *input data* for a scorer that has no way to tell "the agent did not
+do this" from "the export failed". It fails in the direction of a lower score, and it
+correlates with load, so the busiest runs lose the most evidence. It also silently
+undercuts `wrangler/tools/traffic.py`, whose entire job is to generate traces.
+
+**Note it is worst exactly when the worker is short-lived.** `BatchSpanProcessor` flushes
+on an interval; a worker that boots, serves one request and is recycled (see #5 — 40 boots
+per 31 requests) may never reach a successful flush. The two defects compound.
+
+**Not fixed, and not obviously ours to fix** — the exporter is configured by the GEAP
+runtime, not by this repo. Before treating it as a platform issue, worth checking whether
+the SSL EOF flakes to `iam.googleapis.com/v1/projects/-/serviceAccounts/.../allowedLocations`
+in the same window (15 of them over two days, one reaching `total=0`) share a cause; both
+are egress from the same container to Google APIs, breaking the same way.
+
+**Minimum mitigation:** any online-eval result computed from a run with span-export errors
+in its window should be treated as a lower bound, not a measurement. There is currently no
+check for this, and the ERROR is invisible to `severity>=WARNING` queries because the
+container logs everything at DEFAULT.
