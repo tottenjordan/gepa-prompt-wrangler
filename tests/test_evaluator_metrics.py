@@ -440,3 +440,144 @@ class TestMetricCoverage:
     def test_eval_result_coverage_defaults_empty(self):
         """Existing constructions must keep working untouched."""
         assert evaluator.EvalResult().coverage == {}
+
+
+class TestInferenceRetryBudget:
+    """Inference must spend attempts, because one is nowhere near enough.
+
+    GEAP drops ~75% of requests on booting workers (silent-failures.md #5,
+    measured unfixable from the client). A single retry recovers ~25% of
+    failures in expectation, which is why the PR #11 verification run logged
+    `Recovered 0/4` then `Recovered 0/5` and then died on a 500. Same lesson
+    PR #10 applied to the traffic generator: you cannot dodge this, so spend
+    attempts on it.
+    """
+
+    @staticmethod
+    def _frame(responses):
+        import pandas as pd
+
+        return pd.DataFrame(
+            {"prompt": [f"q{i}" for i in range(len(responses))], "response": responses}
+        )
+
+    @staticmethod
+    def _dataset(responses):
+        from vertexai import types
+
+        return types.EvaluationDataset(eval_dataset_df=TestInferenceRetryBudget._frame(responses))
+
+    def _run(self, monkeypatch, initial, script):
+        """`script` yields the response list each successive retry pass returns."""
+        from vertexai import types
+
+        from wrangler.eval import evaluator as ev
+
+        monkeypatch.setattr(ev.time, "sleep", lambda _s: None)
+        passes = []
+
+        def _fake_inference(client, agent_resource, df, **kwargs):
+            passes.append(len(df))
+            responses = script.pop(0) if script else ["" for _ in range(len(df))]
+            return types.EvaluationDataset(eval_dataset_df=self._frame(responses))
+
+        monkeypatch.setattr(ev, "_run_batched_inference", _fake_inference)
+        result = ev._retry_failed_cases(
+            client=None,
+            agent_resource="engines/1",
+            eval_df=self._frame(initial),
+            inference_result=self._dataset(initial),
+            model="m",
+        )
+        return result.eval_dataset_df, passes
+
+    def test_a_case_that_fails_twice_then_succeeds_is_recovered(self, monkeypatch):
+        """Today this is lost: the single retry pass fails and it gives up."""
+        df, passes = self._run(
+            monkeypatch,
+            initial=["", "ok-0"],
+            script=[[""], [""], ["recovered"]],
+        )
+        assert df["response"].tolist() == ["recovered", "ok-0"]
+        assert len(passes) == 3, f"expected 3 retry passes, made {len(passes)}"
+
+    def test_stops_at_the_budget(self, monkeypatch):
+        from wrangler.eval.evaluator import _INFERENCE_MAX_ATTEMPTS
+
+        _df, passes = self._run(monkeypatch, initial=[""], script=[])
+        # The initial inference is attempt 1; the retries make up the rest.
+        assert len(passes) == _INFERENCE_MAX_ATTEMPTS - 1
+
+    def test_a_case_that_never_succeeds_is_left_failed(self, monkeypatch):
+        df, _ = self._run(monkeypatch, initial=["", "ok-0"], script=[])
+        assert df["response"].tolist()[1] == "ok-0"
+        from wrangler.eval.evaluator import _is_failed_response
+
+        assert _is_failed_response(df["response"].tolist()[0])
+
+    def test_only_still_failed_rows_are_retried(self, monkeypatch):
+        """Each pass must shrink, or recovered cases get re-run and re-lost."""
+        _df, passes = self._run(
+            monkeypatch,
+            initial=["", "", ""],
+            script=[["fixed", "", ""], ["fixed2", ""], ["fixed3"]],
+        )
+        assert passes[:3] == [3, 2, 1], f"pass sizes {passes} should shrink as cases recover"
+
+    def test_no_failures_short_circuits(self, monkeypatch):
+        df, passes = self._run(monkeypatch, initial=["ok-0", "ok-1"], script=[])
+        assert passes == [], "should not call inference when nothing failed"
+        assert df["response"].tolist() == ["ok-0", "ok-1"]
+
+    def test_reports_attempts_and_recovery(self, monkeypatch, capsys):
+        self._run(monkeypatch, initial=["", "ok"], script=[[""], ["recovered"]])
+        out = capsys.readouterr().out
+        assert "Recovered 1/1" in out
+        assert "attempt" in out.lower()
+
+
+class TestEmptyEvalIsRefused:
+    """Submitting an all-failed inference set returns a 500 that explains nothing.
+
+    On 2026-08-21 a verification run lost every case to the cold-worker defect,
+    submitted the empty set anyway, and `create_evaluation_run` answered
+    `500 INTERNAL`. That error names no cause and cost the run. Say it here
+    instead, where the cause is known.
+    """
+
+    @staticmethod
+    def _df(responses):
+        import pandas as pd
+
+        return pd.DataFrame(
+            {
+                "prompt": [f"q{i}" for i in range(len(responses))],
+                "response": responses,
+                "agent_data": ["{}" for _ in responses],
+            }
+        )
+
+    def test_all_rows_failed_raises_before_submitting(self):
+        from wrangler.eval.evaluator import _assert_scorable
+
+        with pytest.raises(RuntimeError, match="0 of 3"):
+            _assert_scorable(self._df(["", "", ""]), tag="[sonnet] ")
+
+    def test_the_message_names_the_cause(self):
+        from wrangler.eval.evaluator import _assert_scorable
+
+        with pytest.raises(RuntimeError) as exc:
+            _assert_scorable(self._df([""]), tag="")
+        text = str(exc.value)
+        assert "silent-failures" in text, "must point at the known cause"
+        assert "500" in text, "must explain what it is preventing"
+
+    def test_a_partially_failed_set_still_submits(self):
+        from wrangler.eval.evaluator import _assert_scorable
+
+        _assert_scorable(self._df(["", "a real answer", ""]), tag="")
+
+    def test_a_fully_healthy_set_submits(self):
+        from wrangler.eval.evaluator import _assert_scorable
+
+        _assert_scorable(self._df(["one", "two"]), tag="")

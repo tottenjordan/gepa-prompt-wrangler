@@ -31,6 +31,13 @@ from ..core.config import (  # noqa: E402
 GCS_EVAL_DEST = f"gs://{GCP_STAGING_BUCKET}/eval-results"
 MAX_POLL_SECONDS = 2400
 
+# Attempts per eval case, initial inference included. GEAP drops ~3 of every 4
+# requests on a booting worker (silent-failures.md #5), so at p~0.25 a single
+# attempt lands ~25% of cases and two land ~44% -- which is why the old
+# one-retry behaviour recovered 0 of 9 on a real run. Six lands ~82%, matching
+# the value `wrangler/tools/traffic.py` arrived at by measurement.
+_INFERENCE_MAX_ATTEMPTS = 6
+
 # Explicit tool-use criteria, mirroring the GEPA sampler_config's
 # rubric_based_tool_use_quality_v1 rubrics (correct_tool_selection +
 # correct_parameters). See _tool_use_metric() for why the predefined
@@ -527,6 +534,30 @@ def _is_failed_response(response) -> bool:
     return False
 
 
+def _assert_scorable(result_df: pd.DataFrame, tag: str = "") -> None:
+    """Refuse to submit an inference set with nothing left to score.
+
+    `create_evaluation_run` answers `500 INTERNAL` when every row is a failed
+    response — an error that names no cause and reads like a service outage. It
+    is not: it is the cold-worker defect having eaten the whole run
+    (silent-failures.md #5), which is diagnosable here and nowhere downstream.
+
+    Raises rather than returning a sentinel: there is no useful eval to
+    continue with, and a caller that swallowed this would produce a score over
+    zero cases, which is the exact class of failure this file exists to stop.
+    """
+    if result_df.empty or result_df["response"].apply(_is_failed_response).all():
+        total = len(result_df)
+        raise RuntimeError(
+            f"{tag}Refusing to submit an evaluation run: 0 of {total} cases produced a "
+            f"usable response, so there is nothing to score. Submitting anyway returns "
+            f"a bare '500 INTERNAL' from create_evaluation_run. The cause is almost "
+            f"certainly GEAP dropping requests on booting workers — see "
+            f"docs/notes/silent-failures.md #5. Re-run when the engine is warm, or "
+            f"raise _INFERENCE_MAX_ATTEMPTS."
+        )
+
+
 def _retry_failed_cases(
     client: Client,
     agent_resource: str,
@@ -535,53 +566,81 @@ def _retry_failed_cases(
     model: str,
     tag: str = "",
 ) -> types.EvaluationDataset:
-    """Detect failed inference cases and re-run them in micro-batches."""
-    result_df = inference_result.eval_dataset_df
-    failed_indices = [
-        idx for idx, row in result_df.iterrows() if _is_failed_response(row.get("response"))
-    ]
+    """Detect failed inference cases and re-run them until they land or the
+    attempt budget runs out.
 
+    One retry is not enough and never was. GEAP drops roughly three of every
+    four requests on a booting worker (silent-failures.md #5, measured
+    unfixable from the client across session identity, pacing and warm-up), so
+    a single extra pass recovers ~25% of failures in expectation. The PR #11
+    verification run logged ``Recovered 0/4`` then ``Recovered 0/5`` and then
+    died on a 500 — which is the expected outcome of one retry, not bad luck.
+
+    This is the same conclusion ``wrangler/tools/traffic.py`` reached: you
+    cannot dodge the failure, so spend attempts on it. Each pass retries only
+    the cases still failing, so the work shrinks as cases land.
+    """
+    result_df = inference_result.eval_dataset_df
+    records = result_df.to_dict("records")
+
+    def _still_failing() -> list[int]:
+        return [i for i, row in enumerate(records) if _is_failed_response(row.get("response"))]
+
+    failed_indices = _still_failing()
     if not failed_indices:
         return inference_result
 
     n_failed = len(failed_indices)
     print(
-        f"  {tag}Detected {n_failed}/{len(result_df)} failed cases — waiting 30s for rate limit cooldown...",
+        f"  {tag}Detected {n_failed}/{len(records)} failed cases — waiting 30s for rate limit cooldown...",
         flush=True,
     )
+    # Cooldown once, not once per pass: the first failure may be rate limiting,
+    # but by the second pass we are just paying for the cold-worker lottery.
     time.sleep(30)
 
-    failed_eval_df = eval_df.iloc[failed_indices].reset_index(drop=True)
-    retry_result = _run_batched_inference(
-        client,
-        agent_resource,
-        failed_eval_df,
-        batch_size=2,
-        delay=20.0,
-        max_workers=2,
-        tag=f"{tag}retry ",
-    )
-
-    # Splice recovered rows in as records rather than assigning a Series into
-    # `result_df.iloc[i]`. These frames carry ADK objects (`SessionInput` and
-    # friends) in object columns, and pandas' row setitem tries to broadcast
-    # the value -- `TypeError: object of type 'SessionInput' has no len()`.
-    # That crash was unreachable until the detector above learned to spot an
-    # error payload stored as a string, because nothing was ever recovered.
     recovered = 0
-    retry_df = retry_result.eval_dataset_df
-    records = result_df.to_dict("records")
-    retry_records = retry_df.to_dict("records")
-    for retry_idx, original_idx in enumerate(failed_indices):
-        if retry_idx < len(retry_records):
-            retry_row = retry_records[retry_idx]
-            if not _is_failed_response(retry_row.get("response")):
-                # Merge so a column the retry frame lacks keeps its original
-                # value instead of becoming NaN.
-                records[original_idx] = {**records[original_idx], **retry_row}
-                recovered += 1
+    attempts = 0
+    for attempt in range(1, _INFERENCE_MAX_ATTEMPTS):
+        pending = _still_failing()
+        if not pending:
+            break
+        attempts = attempt
 
-    print(f"  {tag}Recovered {recovered}/{n_failed} failed cases", flush=True)
+        failed_eval_df = eval_df.iloc[pending].reset_index(drop=True)
+        retry_result = _run_batched_inference(
+            client,
+            agent_resource,
+            failed_eval_df,
+            batch_size=2,
+            delay=20.0,
+            max_workers=2,
+            tag=f"{tag}retry {attempt}/{_INFERENCE_MAX_ATTEMPTS - 1} ",
+        )
+
+        # Splice recovered rows in as records rather than assigning a Series
+        # into `result_df.iloc[i]`. These frames carry ADK objects
+        # (`SessionInput` and friends) in object columns, and pandas' row
+        # setitem tries to broadcast the value -- `TypeError: object of type
+        # 'SessionInput' has no len()`. That crash was unreachable until the
+        # detector learned to spot an error payload stored as a string,
+        # because nothing was ever recovered.
+        retry_records = retry_result.eval_dataset_df.to_dict("records")
+        for retry_idx, original_idx in enumerate(pending):
+            if retry_idx < len(retry_records):
+                retry_row = retry_records[retry_idx]
+                if not _is_failed_response(retry_row.get("response")):
+                    # Merge so a column the retry frame lacks keeps its
+                    # original value instead of becoming NaN.
+                    records[original_idx] = {**records[original_idx], **retry_row}
+                    recovered += 1
+
+    still_failed = len(_still_failing())
+    print(
+        f"  {tag}Recovered {recovered}/{n_failed} failed cases "
+        f"over {attempts} retry attempt(s); {still_failed} still failing",
+        flush=True,
+    )
     merged_df = pd.DataFrame(records, columns=result_df.columns)
     return types.EvaluationDataset(eval_dataset_df=merged_df)
 
@@ -664,6 +723,8 @@ def run_batch_eval(
         )
         clean_df = result_df[~invalid_mask].reset_index(drop=True)
         inference_result = types.EvaluationDataset(eval_dataset_df=clean_df)
+
+    _assert_scorable(inference_result.eval_dataset_df, tag)
 
     print(f"  {tag}Scoring: creating evaluation run ({len(metrics)} metrics)...", flush=True)
     eval_t0 = time.time()
