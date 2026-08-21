@@ -238,6 +238,14 @@ were quietly converting a 17% server-side success rate into a respectable-lookin
 count; the tool now says both numbers. First run after the change: 8/12 traces from 48
 attempts, printing `Attempt rate: 17%` and the warning.
 
+**It can block a whole eval run, and `_retry_failed_cases` does not save you.** On
+2026-08-21 an `eval_after` verification run logged `Detected 4/5 failed cases` then
+`Recovered 0/4`, and on the next run `5/5` then `Recovered 0/5` — nine retried cases, zero
+recovered. With every case empty, `create_evaluation_run` then returned `500 INTERNAL`
+rather than a useful error, so the run died at the API rather than reporting no data.
+Budget for this: a 5-case eval at a ~25% per-attempt reach rate will usually not complete,
+and the failure arrives as a server 500 that says nothing about the cause.
+
 Query to re-measure after changing `GEAP_MIN_INSTANCES`:
 
 ```bash
