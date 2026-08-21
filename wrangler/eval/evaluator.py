@@ -269,6 +269,47 @@ def _extract_per_case_scores(evaluation_run) -> list[dict[str, float]]:
     return per_case
 
 
+def _scores_from_raw_result(raw: dict) -> tuple[dict[str, float], list[str]]:
+    """Pull metric scores out of a raw result payload, skipping errored metrics.
+
+    Returns ``(scores, errored_metric_names)``.
+
+    This exists because the SDK's own loader cannot. ``types.CandidateResult``
+    has no ``error`` field and inherits ``extra='forbid'`` from
+    ``google.genai._common.BaseModel``, so a single per-metric error makes the
+    *entire* result file fail validation;
+    ``_evals_common._convert_gcs_to_evaluation_item_result`` catches that,
+    logs, and returns an empty ``EvaluationItemResult()``. The caller receives
+    a well-formed object containing nothing and has no way to tell the
+    difference between "this case scored nothing" and "this file would not
+    parse", so the case silently contributes to no metric at all.
+
+    Reading the JSON ourselves makes each metric independent, which is the
+    whole point: the same boundary has now destroyed scores three separate ways
+    (silent-failures #3 unsupported metric version, #5 empty agent stream, #7
+    autorater tool call). Fixing the boundary retires the class rather than the
+    latest instance.
+
+    A ``None`` score is dropped rather than coerced — see #6, where coercing a
+    missing score to 0.0 had GEPA optimize against a criterion nailed to zero.
+    """
+    scores: dict[str, float] = {}
+    errored: list[str] = []
+    for candidate in raw.get("candidateResults") or []:
+        if not isinstance(candidate, dict):
+            continue
+        metric = candidate.get("metric") or ""
+        short = metric.rsplit("/", 1)[-1] if metric else ""
+        if "error" in candidate:
+            if short:
+                errored.append(short)
+            continue
+        score = candidate.get("score")
+        if short and score is not None:
+            scores[_alias_tool_use_key(short)] = float(score)
+    return scores, errored
+
+
 def _extract_per_case_via_api(evaluation_run) -> list[dict[str, float]]:
     """Fallback: fetch per-case scores directly from the Evaluation Management API."""
     per_case: list[dict[str, float]] = []

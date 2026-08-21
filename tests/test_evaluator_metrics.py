@@ -9,6 +9,8 @@ that its score key is aliased back to ``tool_use_quality_v1`` for reporting.
 No network access — all object-level inspection.
 """
 
+import pytest
+from pydantic import ValidationError
 from vertexai import types
 
 from wrangler.eval import evaluator
@@ -212,3 +214,78 @@ class TestAggregateExtractionAliasPath:
             evaluation_run_results = None
 
         assert evaluator._extract_aggregate_scores(_Empty()) == {}
+
+
+class TestLenientResultParsing:
+    """One rater error must not cost the other four metrics.
+
+    ``types.CandidateResult`` has no ``error`` field and inherits
+    ``extra='forbid'``, so the SDK's own loader
+    (``_evals_common._convert_gcs_to_evaluation_item_result``) throws away the
+    whole result file when any single metric errors — and returns an empty
+    object rather than raising, so the caller cannot tell. Payload shapes below
+    are taken verbatim from the archived GCS results. See
+    docs/notes/silent-failures.md #7.
+    """
+
+    def test_keeps_scores_alongside_an_errored_metric(self):
+        payload = {
+            "candidateResults": [
+                {"metric": "safety_v1", "score": 1.0},
+                {"metric": "tool_use_quality", "score": 0.5},
+                {
+                    "metric": "hallucination_v1",
+                    "error": {
+                        "code": 3,
+                        "message": "The model response did not complete successfully.\n"
+                        "Finish reason: UNEXPECTED_TOOL_CALL.",
+                    },
+                },
+            ]
+        }
+        scores, errored = evaluator._scores_from_raw_result(payload)
+        assert scores == {"safety_v1": 1.0, "tool_use_quality_v1": 0.5}
+        assert errored == ["hallucination_v1"]
+
+    def test_the_whole_payload_is_unparseable_to_the_sdk(self):
+        """Pins the premise: without this the test above proves nothing.
+
+        If a future SDK relaxes `extra` or adds an `error` field to
+        CandidateResult, this fails and the workaround can be reconsidered.
+        """
+        payload = {"candidateResults": [{"metric": "m", "error": {"code": 3}}]}
+        with pytest.raises(ValidationError, match="candidateResults"):
+            types.EvaluationItemResult(**payload)
+
+    def test_aliases_the_custom_tool_use_key(self):
+        scores, _ = evaluator._scores_from_raw_result(
+            {"candidateResults": [{"metric": "tool_use_quality", "score": 0.9}]}
+        )
+        assert scores == {"tool_use_quality_v1": 0.9}
+
+    def test_strips_the_resource_path_from_metric_names(self):
+        scores, _ = evaluator._scores_from_raw_result(
+            {
+                "candidateResults": [
+                    {"metric": "projects/p/locations/l/metrics/safety_v1", "score": 1.0}
+                ]
+            }
+        )
+        assert scores == {"safety_v1": 1.0}
+
+    def test_null_score_is_not_coerced_to_zero(self):
+        """A missing score is absent, not 0.0 — ADK patch 4 taught us that one.
+
+        Coercing None to 0.0 is how GEPA spent a whole run optimizing against a
+        safety criterion pinned at zero (silent-failures #6).
+        """
+        scores, errored = evaluator._scores_from_raw_result(
+            {"candidateResults": [{"metric": "safety_v1", "score": None}]}
+        )
+        assert scores == {}
+        assert errored == []
+
+    def test_tolerates_junk(self):
+        assert evaluator._scores_from_raw_result({}) == ({}, [])
+        assert evaluator._scores_from_raw_result({"candidateResults": None}) == ({}, [])
+        assert evaluator._scores_from_raw_result({"candidateResults": []}) == ({}, [])
