@@ -6,7 +6,8 @@
 Eight defects, six of them found in one sitting. None of them raised. Every one reported
 success while producing worthless output — which is why they had survived so long. Grouped
 here because the *shape* is the transferable part, not the individual bugs. #1–#7 are
-fixed; **#8 is open.**
+fixed; **#8's export failures are fixed and #7's underlying rater flake is not** — see
+each entry for exactly what remains.
 
 #8 is the one that argues for auditing logs on a schedule rather than after a failure:
 every other defect here was found because something looked wrong, and #8 never will.
@@ -513,6 +514,32 @@ claims, and I collapsed them. The object was built by someone else's code with n
 arguments — which made *every* parameter ours, through the environment. Check what a
 default constructor reads before concluding you cannot influence it.
 
-**Still true regardless:** any online-eval result computed from a run with span-export
-errors in its window is a lower bound, not a measurement, and the ERROR is invisible to
-`severity>=WARNING` queries because the container logs everything at DEFAULT.
+### Verified, and now detectable
+
+**The fix holds.** Since the redeploy that applied it: **0 dropped batches across 260
+requests**, against 5 in 31 requests before. Same engine, same workload shape.
+
+**But the reason this survived so long was that nothing looked.** The export errors were
+real for months and invisible, because they are ERROR-level text logged at DEFAULT
+severity — `severity>=WARNING` returns nothing and reads as a clean engine. A fix with no
+detector just resets the clock.
+
+So `wrangler/eval/online_evaluators.py` gained `count_span_export_errors()` and a
+`trace-health` command:
+
+```bash
+uv run python -m wrangler.eval.online_evaluators trace-health 60
+```
+
+It exits non-zero when any engine dropped batches in the window, so it can gate a run
+rather than merely inform one. Validated against both sides of the fix on the same engine:
+a 700-minute window returns **6** (the five `eval_after` failures plus one from the
+rollout), a 300-minute window returns **0**. It reports `truncated` rather than quietly
+returning a page size as a total — the `--limit` trap from
+[repo-traps.md](repo-traps.md) applies to this query too.
+
+**Still true:** any online-eval number computed from a window with dropped batches is a
+lower bound, not a measurement. The difference now is that you can find out.
+
+**Not fixed:** the worker churn in #5 that made the exports fragile in the first place.
+That is server-side, and `GEAP_MIN_INSTANCES` was measured not to move it.
