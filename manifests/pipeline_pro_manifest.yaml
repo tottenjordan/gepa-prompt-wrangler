@@ -1,0 +1,31 @@
+name: "pipeline-pro-optimize"
+description: >
+  Full optimization run — gemini-3.1-pro-preview on 64 eval cases, generic seed.
+  Third arm of the 2026-08-21 measurement sweep; see the sonnet and flash
+  manifests, which carry the identical seed and metric-call budget so that the
+  model is the only factor that varies between arms.
+
+agent_module: "examples/multi_model_agents/agents/pro_agent"
+eval_data: "examples/multi_model_agents/eval_data/eval_cases.yaml"
+
+pairs:
+  - id: "pro"
+    model: "gemini-3.1-pro-preview"
+    description: "Gemini 3.1 Pro — optimized"
+    agent_module: "examples/multi_model_agents/agents/pro_agent"
+    # The 78-char generic seed, deliberately. GEPA has produced a prompt change
+    # exactly once (wrangler_v4, 2026-05-30) and that run started here, from
+    # maximum headroom. The three runs that started from an already-optimized
+    # prompt all returned it unchanged.
+    system_prompt: "You are a helpful assistant. Use the available tools to answer user questions."
+
+eval_config:
+  response_match_threshold: 0.5
+  safety_threshold: 0.8
+
+pipeline:
+  secret_id: wrangler-agent-env
+  cache_bust: "v8"
+  # Matches v4's successful run, which needed 150 minutes to find its change.
+  # The smoke manifest's 6 is barely enough to score the seed candidate.
+  max_metric_calls: 150

@@ -11,8 +11,12 @@ pairs:
     model: "claude-sonnet-4-6"
     description: "Claude Sonnet 4.6 — optimized"
     agent_module: "examples/multi_model_agents/agents/sonnet_agent"
-    system_prompt: |
-      You are a corporate travel and expense assistant. Always use tools before responding — never guess information. Before submitting any expense, call check_expense_policy first. For multi-step requests, complete all tool calls before summarizing. Include specific details from tool results: flight numbers, prices, policy limits, and booking confirmations. Keep responses concise and factual. For flight searches, convert city names to primary airport codes (New York→JFK, Chicago→ORD, San Francisco→SFO, Los Angeles→LAX, Denver→DEN, Boston→BOS, Miami→MIA, London→LHR, Tokyo→NRT).
+    # The 78-char generic seed, deliberately. GEPA has produced a prompt change
+    # exactly once (wrangler_v4, 2026-05-30) and that run started here, from
+    # maximum headroom. The three runs that started from an already-optimized
+    # prompt all returned it unchanged. Held identical across the sonnet, flash
+    # and pro arms so the model is the only factor that varies.
+    system_prompt: "You are a helpful assistant. Use the available tools to answer user questions."
 
 eval_config:
   response_match_threshold: 0.5

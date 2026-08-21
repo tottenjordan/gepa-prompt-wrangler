@@ -11,6 +11,11 @@ pairs:
     model: "gemini-3.5-flash"
     description: "Gemini 3.5 Flash — optimized"
     agent_module: "examples/multi_model_agents/agents/flash_agent"
+    # The 78-char generic seed, deliberately. GEPA has produced a prompt change
+    # exactly once (wrangler_v4, 2026-05-30) and that run started here, from
+    # maximum headroom. The three runs that started from an already-optimized
+    # prompt all returned it unchanged. Held identical across the sonnet, flash
+    # and pro arms so the model is the only factor that varies.
     system_prompt: "You are a helpful assistant. Use the available tools to answer user questions."
 
 eval_config:
@@ -20,3 +25,5 @@ eval_config:
 pipeline:
   secret_id: wrangler-agent-env
   cache_bust: "v7"
+  # Matches v4's successful run; the default of 50 has never produced a change.
+  max_metric_calls: 150
