@@ -24,20 +24,43 @@
       "completed_at": "2026-08-20T20:27:29+00:00"
     },
     "optimize": {
-      "status": "pending",
-      "pairs": {}
+      "status": "complete",
+      "pairs": {
+        "sonnet": {
+          "status": "complete",
+          "completed_at": "2026-08-21T00:24:15+00:00"
+        }
+      },
+      "completed_at": "2026-08-21T00:24:15+00:00"
     },
     "redeploy": {
-      "status": "pending",
-      "pairs": {}
+      "status": "complete",
+      "pairs": {
+        "sonnet": {
+          "status": "complete",
+          "completed_at": "2026-08-21T01:52:54+00:00"
+        }
+      },
+      "completed_at": "2026-08-21T01:52:54+00:00"
     },
     "eval_after": {
-      "status": "pending",
-      "pairs": {}
+      "status": "complete",
+      "pairs": {
+        "sonnet": {
+          "status": "complete",
+          "completed_at": "2026-08-21T02:13:35+00:00"
+        }
+      },
+      "completed_at": "2026-08-21T02:13:35+00:00"
     },
     "report": {
-      "status": "pending",
-      "pairs": {}
+      "status": "partial",
+      "pairs": {
+        "_all": {
+          "status": "complete",
+          "completed_at": "2026-08-21T03:04:59+00:00"
+        }
+      }
     },
     "analyze": {
       "status": "pending",
