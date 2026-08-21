@@ -56,16 +56,16 @@ _SERVERS = {
 # Expected tool-name coverage — guards against an introspection method that
 # silently returns nothing.
 _EXPECTED_TOOL_NAMES = {
-    "wrangler_search_mcp_search_flights",
-    "wrangler_search_mcp_search_hotels",
-    "wrangler_booking_mcp_book_flight",
-    "wrangler_booking_mcp_book_hotel",
-    "wrangler_booking_mcp_cancel_booking",
-    "wrangler_booking_mcp_get_booking_details",
-    "wrangler_booking_mcp_list_all_bookings",
-    "wrangler_expense_mcp_submit_expense",
-    "wrangler_expense_mcp_check_expense_policy",
-    "wrangler_expense_mcp_get_user_expenses",
+    "search_flights",
+    "search_hotels",
+    "book_flight",
+    "book_hotel",
+    "cancel_booking",
+    "get_booking_details",
+    "list_all_bookings",
+    "submit_expense",
+    "check_expense_policy",
+    "get_user_expenses",
 }
 
 
@@ -74,17 +74,23 @@ def _build_tool_registry():
 
     FastMCP 3.x: ``mcp.list_tools()`` is async and returns FunctionTool objects.
     Each exposes ``.name`` and ``.parameters`` (a JSON schema with ``properties``
-    and ``required``). We map the bare func name to the agent-facing tool name
-    ``wrangler_<server>_mcp_<func>`` using the server dir name.
+    and ``required``).
+
+    The agent-facing name is the bare tool name. This used to synthesize
+    ``wrangler_<server>_mcp_<func>``, which codified a prefix ADK never applies:
+    ``McpToolset`` is built without ``tool_name_prefix``, and the deployed
+    engine's startup log lists ``['search_flights', 'search_hotels']``. That one
+    line made this guard enforce the wrong convention, so the eval goldens and
+    every agent prompt drifted to names no tool has.
     """
     registry: dict[str, tuple[set, set]] = {}
-    for dirname, module in _SERVERS.items():
+    for module in _SERVERS.values():
         tools = asyncio.run(module.mcp.list_tools())
         for tool in tools:
             schema = tool.parameters or {}
             all_params = set(schema.get("properties", {}).keys())
             required = set(schema.get("required", []))
-            agent_name = f"wrangler_{dirname}_mcp_{tool.name}"
+            agent_name = tool.name
             registry[agent_name] = (all_params, required)
     return registry
 
@@ -131,7 +137,7 @@ def test_introspected_registry_covers_all_expected_tools():
         f"  unexpected: {sorted(extra)}"
     )
     # list_all_bookings must derive to zero params.
-    assert TOOL_REGISTRY["wrangler_booking_mcp_list_all_bookings"] == (set(), set())
+    assert TOOL_REGISTRY["list_all_bookings"] == (set(), set())
 
 
 def _case_label(idx, case):
@@ -185,7 +191,7 @@ def test_eval_cases_structural_integrity():
                 )
 
             # Check 4: list_all_bookings must have empty args.
-            if name == "wrangler_booking_mcp_list_all_bookings" and args != {}:
+            if name == "list_all_bookings" and args != {}:
                 violations.append(f"{label}: tool {name!r} must have empty args, got {args!r}")
 
             # Check 5: referenced-ID / enum existence.
@@ -204,7 +210,7 @@ def test_eval_cases_structural_integrity():
                         )
                     continue
                 # search_hotels city.
-                if name == "wrangler_search_mcp_search_hotels" and arg_name == "city":
+                if name == "search_hotels" and arg_name == "city":
                     if arg_value not in HOTEL_CITIES:
                         violations.append(
                             f"{label}: tool {name!r} arg city={arg_value!r} "
@@ -212,7 +218,7 @@ def test_eval_cases_structural_integrity():
                         )
                     continue
                 # search_flights origin/destination airport codes.
-                if name == "wrangler_search_mcp_search_flights" and arg_name in (
+                if name == "search_flights" and arg_name in (
                     "origin",
                     "destination",
                 ):
@@ -224,8 +230,8 @@ def test_eval_cases_structural_integrity():
                     continue
                 # expense category enum (submit_expense / check_expense_policy).
                 if arg_name == "category" and name in (
-                    "wrangler_expense_mcp_submit_expense",
-                    "wrangler_expense_mcp_check_expense_policy",
+                    "submit_expense",
+                    "check_expense_policy",
                 ):
                     if str(arg_value).lower() not in EXPENSE_CATEGORIES:
                         violations.append(
