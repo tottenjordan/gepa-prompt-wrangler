@@ -90,6 +90,43 @@ def test_prompt_names_only_real_tools(module, version, prompt):
     )
 
 
+def _real_parameters() -> set[str]:
+    """Every parameter name any tool accepts, from the AST."""
+    params: set[str] = set()
+    for server in sorted(MCP_SERVERS.glob("*/server.py")):
+        tree = ast.parse(server.read_text())
+        for node in ast.walk(tree):
+            if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                continue
+            for dec in node.decorator_list:
+                func = dec.func if isinstance(dec, ast.Call) else dec
+                if isinstance(func, ast.Attribute) and func.attr == "tool":
+                    params.update(a.arg for a in node.args.args)
+    return params
+
+
+def test_declared_arguments_exist():
+    """An `**Arguments:**` list must not invent parameters.
+
+    `pro_prompts.py` declared `search_flights` as taking `return_date`,
+    `min_price` and `airline` on top of the three real ones. A model told about
+    a parameter will try to pass it, and the call fails schema validation —
+    same failure class as naming a tool that does not exist, one level down.
+    """
+    real = _real_parameters()
+    offenders = []
+    for mod in sorted(PROMPTS.glob("*_prompts.py")):
+        for line in mod.read_text().splitlines():
+            if "**Arguments:**" not in line:
+                continue
+            offenders.extend(
+                f"{mod.name}: {name}"
+                for name in re.findall(r"`([a-z_]+)`", line)
+                if name not in real
+            )
+    assert not offenders, f"prompts declare parameters no tool accepts: {sorted(set(offenders))}"
+
+
 def test_no_server_prefixed_tool_names_anywhere():
     """The specific drift that caused this: a `<server>_mcp_` prefix on a tool.
 

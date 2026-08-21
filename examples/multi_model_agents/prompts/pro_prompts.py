@@ -165,7 +165,7 @@ Here are the guidelines for your interactions:
         *   **Relevant Response Fields to Extract:** `name`, `price_per_night`, `rating`. (You may also access `id`, `city`, `available_from`, `available_to` for context if needed, but only name, price, and rating are typically required for direct answers).
     *   **`search_flights`**
         *   **Purpose:** Search for flights based on origin, destination, dates, price range, and airline.
-        *   **Arguments:** `origin` (string), `destination` (string), `date` (string, YYYY-MM-DD), `return_date` (string, YYYY-MM-DD), `max_price` (float), `min_price` (float), `airline` (string).
+        *   **Arguments:** `origin` (string), `destination` (string), `date` (string, YYYY-MM-DD).
         *   **Relevant Response Fields to Extract:** `airline`, `flight_id`, `price`, `date`, `departure`, `arrival`. (These are crucial for general results and comparison queries).""",
         "source": "wrangler GEPA optimization (5 criteria, generic seed)",
         "eval_cases": 40,
@@ -214,7 +214,7 @@ Here are the guidelines for your interactions:
         *   **Relevant Response Fields to Extract:** `name`, `price_per_night`, `rating`. (You may also access `id`, `city`, `available_from`, `available_to` for context if needed, but only name, price, and rating are typically required for direct answers).
     *   **`search_flights`**
         *   **Purpose:** Search for flights based on origin, destination, dates, price range, and airline.
-        *   **Arguments:** `origin` (string), `destination` (string), `date` (string, YYYY-MM-DD), `return_date` (string, YYYY-MM-DD), `max_price` (float), `min_price` (float), `airline` (string).
+        *   **Arguments:** `origin` (string), `destination` (string), `date` (string, YYYY-MM-DD).
         *   **Relevant Response Fields to Extract:** `airline`, `flight_id`, `price`, `date`, `departure`, `arrival`. (These are crucial for general results and comparison queries).""",
         "source": "wrangler GEPA optimization",
         "eval_cases": 64,
@@ -260,7 +260,7 @@ Here are the guidelines for your interactions:
         *   **Relevant Response Fields to Extract:** `name`, `price_per_night`, `rating`. (You may also access `id`, `city`, `available_from`, `available_to` for context if needed, but only name, price, and rating are typically required for direct answers).
     *   **`search_flights`**
         *   **Purpose:** Search for flights based on origin, destination, dates, price range, and airline.
-        *   **Arguments:** `origin` (string), `destination` (string), `date` (string, YYYY-MM-DD), `return_date` (string, YYYY-MM-DD), `max_price` (float), `min_price` (float), `airline` (string).
+        *   **Arguments:** `origin` (string), `destination` (string), `date` (string, YYYY-MM-DD).
         *   **Relevant Response Fields to Extract:** `airline`, `flight_id`, `price`, `date`, `departure`, `arrival`. (These are crucial for general results and comparison queries).""",
         "source": "wrangler GEPA optimization",
         "eval_cases": 64,
@@ -306,7 +306,7 @@ Here are the guidelines for your interactions:
         *   **Relevant Response Fields to Extract:** `name`, `price_per_night`, `rating`. (You may also access `id`, `city`, `available_from`, `available_to` for context if needed, but only name, price, and rating are typically required for direct answers).
     *   **`search_flights`**
         *   **Purpose:** Search for flights based on origin, destination, dates, price range, and airline.
-        *   **Arguments:** `origin` (string), `destination` (string), `date` (string, YYYY-MM-DD), `return_date` (string, YYYY-MM-DD), `max_price` (float), `min_price` (float), `airline` (string).
+        *   **Arguments:** `origin` (string), `destination` (string), `date` (string, YYYY-MM-DD).
         *   **Relevant Response Fields to Extract:** `airline`, `flight_id`, `price`, `date`, `departure`, `arrival`. (These are crucial for general results and comparison queries).""",
         "source": "wrangler GEPA optimization",
         "eval_cases": 64,
