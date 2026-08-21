@@ -265,6 +265,14 @@ DEFAULT_JUDGE_ENSEMBLE = ["gemini-3.1-pro-preview", "gemini-3.5-flash"]
 DEFAULT_AGENT_MODEL = "gemini-3.5-flash"
 DEFAULT_AGENT_MODEL_ALT = "claude-sonnet-4-6"
 
+# PaperBanana's text/VLM stage — it plans the figure, then critiques the render.
+# Currently the same id as the judge, but a separate role on purpose: moving the
+# judge should not silently re-point figure generation. PaperBanana's own default
+# here is gemini-2.5-flash, so this must be set explicitly or charts run on it.
+# The matching *image* model is not registered — see LITERAL_EXCEPTIONS in
+# tests/test_models.py for why an image model has no cost or RPM to record.
+DEFAULT_FIGURE_VLM_MODEL = "gemini-3.5-flash"
+
 # --- Derived views -------------------------------------------------------
 
 # Vendor per model id, for grouping in reports.

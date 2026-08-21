@@ -7,6 +7,7 @@ import pytest
 from wrangler.core.models import (
     DEFAULT_AGENT_MODEL,
     DEFAULT_AGENT_MODEL_ALT,
+    DEFAULT_FIGURE_VLM_MODEL,
     DEFAULT_JUDGE_ENSEMBLE,
     DEFAULT_JUDGE_MODEL,
     DEFAULT_MANIFEST_JUDGE_MODEL,
@@ -83,6 +84,7 @@ DEFAULT_ROLES = {
     "DEFAULT_JUDGE_ENSEMBLE": DEFAULT_JUDGE_ENSEMBLE,
     "DEFAULT_AGENT_MODEL": [DEFAULT_AGENT_MODEL],
     "DEFAULT_AGENT_MODEL_ALT": [DEFAULT_AGENT_MODEL_ALT],
+    "DEFAULT_FIGURE_VLM_MODEL": [DEFAULT_FIGURE_VLM_MODEL],
 }
 
 # How much warning the deadline guard gives before a default stops working.
@@ -235,6 +237,12 @@ LITERAL_EXCEPTIONS = {
         "gemini-3.1-flash-image",
     ): "Same KFP isolation rule; also a PaperBanana image model rather than an "
     "agent or judge model, so it has no cost or RPM to register.",
+    (
+        "wrangler/reporting/charts.py",
+        "gemini-3.1-flash-image",
+    ): "A PaperBanana figure renderer, not an agent or judge model: no cost, RPM "
+    "or retirement date to register. Its VLM counterpart IS registered, as "
+    "DEFAULT_FIGURE_VLM_MODEL.",
 }
 
 # Ids allowed to be absent from MODELS. Only for models the framework never

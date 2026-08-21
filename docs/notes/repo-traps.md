@@ -195,3 +195,44 @@ path. Documented in README's Options block as of 2026-08-20.
 `expected_response`, and tool args are the literal string `"TODO"`. Intentional
 scaffolding, but a generated evalset will run and score against `"TODO"` goldens if
 nobody fills them in. Nothing validates that they were.
+
+## PaperBanana fails if you hand it this repo's environment
+
+**Verified 2026-08-21.** Every chart in every report had been matplotlib, not PaperBanana,
+because `_try_paperbanana` passed `os.environ.copy()` to the subprocess. Importing
+`wrangler.core.config` calls `load_dotenv()`, so the whole Vertex/GEAP configuration was in
+that copy — and PaperBanana talks to the Gemini **Developer** API with an API key, which
+`GOOGLE_GENAI_USE_VERTEXAI=1` makes impossible:
+
+```
+USE_VERTEXAI=1 -> ClientError: 401 UNAUTHENTICATED.
+                  API keys are not supported by this API.
+unset          -> OK
+```
+
+Measured directly with the same key and model. That 401 is what PaperBanana's planner was
+retrying — three tenacity attempts with exponential backoff, 6m32s, against a 180s timeout,
+so the caller only ever saw `TimeoutExpired` and silently fell back. **The error you see is
+the timeout; the error that matters is four layers down.**
+
+Popping just `GOOGLE_GENAI_USE_VERTEXAI` was *not* enough — something else in the inherited
+environment still broke it. The fix is to build the subprocess env from scratch (`PATH`,
+`HOME`, `GOOGLE_API_KEY`, `IMAGE_MODEL`, `VLM_MODEL`), which is exactly what the working MCP
+server passes in its `~/.claude.json` env block. Result: 71s and a real render.
+
+Three smaller things found alongside it, all in `wrangler/reporting/charts.py`:
+
+- **PaperBanana's own model defaults are the expensive ones** — `gemini-3-pro-image-preview`
+  and `gemini-2.5-flash` (its `core/config.py`). Set `IMAGE_MODEL=gemini-3.1-flash-image`
+  and `VLM_MODEL=gemini-3.5-flash` or you get the slow pro/preview path.
+- **`-n` is `--iterations`, not candidates** — refinement passes, each a visualizer→critic
+  round trip. The code passed `-n 3` and tripled every chart's runtime.
+- **The old run-dir glob could serve a stale chart.** It globbed the repo's shared
+  `outputs/run_*` and copied the newest `final_output.png`, so a run that produced nothing
+  could copy a *previous* chart and print "Generated (PaperBanana)". Now the subprocess runs
+  in a per-call temp dir and the glob is scoped to it.
+
+**The lesson:** an inherited environment is an argument you did not know you were passing.
+Two credential styles in one repo — ADC for Vertex, API key for the Developer API — and
+`CLAUDE.md` already carries the mirror-image rule for the pipeline (pop `GOOGLE_API_KEY` so
+it cannot override Vertex ADC). Same collision, opposite direction.
