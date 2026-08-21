@@ -9,6 +9,7 @@ from wrangler.tools.traffic import (
     _resolve_resource,
     _stream,
     generate_traffic,
+    summarize_run,
 )
 
 
@@ -58,6 +59,44 @@ class FakeAgent:
         self.calls += 1
         for event in events:
             yield event
+
+
+class ExplodingOnceAgent(FakeAgent):
+    """Raises on the first stream, then behaves. Models a transient blip."""
+
+    def __init__(self, answer):
+        super().__init__([answer])
+        self._exploded = False
+
+    async def async_stream_query(self, user_id, session_id, message):
+        if not self._exploded:
+            self._exploded = True
+            self.calls += 1
+            raise ConnectionError("connection reset by peer")
+        async for event in super().async_stream_query(user_id, session_id, message):
+            yield event
+
+
+class ConcurrencyTrackingAgent(FakeAgent):
+    """Records the high-water mark of simultaneous in-flight streams."""
+
+    def __init__(self, answer):
+        super().__init__([answer])
+        self.in_flight = 0
+        self.max_in_flight = 0
+
+    async def async_stream_query(self, user_id, session_id, message):
+        self.in_flight += 1
+        self.max_in_flight = max(self.max_in_flight, self.in_flight)
+        try:
+            # Yield control so other tasks can pile up — without an await here
+            # the coroutine runs to completion before any sibling starts and
+            # the high-water mark would read 1 no matter what.
+            await asyncio.sleep(0.01)
+            async for event in super().async_stream_query(user_id, session_id, message):
+                yield event
+        finally:
+            self.in_flight -= 1
 
 
 class TestEventText:
@@ -112,6 +151,40 @@ class TestStream:
         assert count == 0
 
 
+class TestSummarizeRun:
+    """The attempt rate is the number that must survive into the report.
+
+    Retries can carry the trace count to 100% while the engine is still eating
+    three of every four requests. A summary that showed only traces-per-query
+    would hide the very defect this tool exists to observe.
+    """
+
+    def test_reports_attempt_rate_not_just_traces(self):
+        lines = "\n".join(summarize_run(traces=10, queries=10, attempts=40))
+        assert "Traces emitted: 10" in lines
+        assert "Attempts spent: 40" in lines
+        assert "25%" in lines
+
+    def test_warns_when_attempt_rate_is_on_the_floor(self):
+        """Every query landed a trace, but only after four tries each."""
+        lines = "\n".join(summarize_run(traces=10, queries=10, attempts=40))
+        assert "Attempt rate below" in lines
+        assert "booting workers" in lines
+
+    def test_quiet_when_the_engine_is_healthy(self):
+        lines = "\n".join(summarize_run(traces=10, queries=10, attempts=11))
+        assert "Attempt rate below" not in lines
+        assert "NO trace" not in lines
+
+    def test_counts_queries_that_never_landed(self):
+        lines = "\n".join(summarize_run(traces=7, queries=10, attempts=50))
+        assert "3 queries produced NO trace" in lines
+
+    def test_no_division_by_zero_on_an_empty_run(self):
+        lines = "\n".join(summarize_run(traces=0, queries=0, attempts=0))
+        assert "0%" in lines
+
+
 class TestGenerateTraffic:
     """The whole point of this tool is emitting traces, so silence is a failure."""
 
@@ -128,23 +201,47 @@ class TestGenerateTraffic:
     def test_uses_async_stream_query(self, capsys):
         out = self._run(FakeAgent([ANSWER]), capsys, count=2)
         assert "an answer" in out
-        assert "Errors:        0" in out
+        assert "Traces emitted: 2" in out
 
     def test_empty_stream_is_retried(self, capsys):
         """A cold GEAP worker answers 200 with no events; the next one is warm."""
         agent = FakeAgent([EMPTY, ANSWER])
         out = self._run(agent, capsys, count=1)
-        assert "Empty stream" in out
         assert "an answer" in out
-        assert "Errors:        0" in out
+        assert "Traces emitted: 1" in out
+        assert "2 attempt(s)" in out
         assert agent.calls == 2
 
-    def test_persistently_empty_counts_as_an_error(self, capsys):
+    def test_spends_the_full_attempt_budget_before_giving_up(self, capsys):
+        """Six attempts, not three: at ~1-in-4 per attempt, three lands ~58%."""
         agent = FakeAgent([EMPTY])
         out = self._run(agent, capsys, count=1)
-        assert "No events after 3 attempts" in out
-        assert "Errors:        1" in out
-        assert agent.calls == 3
+        assert "no trace after 6 attempts" in out
+        assert "1 queries produced NO trace" in out
+        assert agent.calls == 6
+
+    def test_attempt_budget_is_configurable(self, capsys):
+        agent = FakeAgent([EMPTY])
+        self._run(agent, capsys, count=1, max_attempts=2)
+        assert agent.calls == 2
+
+    def test_a_transient_exception_does_not_abandon_the_query(self, capsys):
+        """The old code returned on the first exception, spending no more attempts.
+
+        The failure this tool exists around is itself transient, so one blip
+        should cost an attempt, not the trace.
+        """
+        agent = ExplodingOnceAgent(ANSWER)
+        out = self._run(agent, capsys, count=1)
+        assert "an answer" in out
+        assert "Traces emitted: 1" in out
+        assert agent.calls == 2
+
+    def test_concurrency_is_bounded(self, capsys):
+        agent = ConcurrencyTrackingAgent(ANSWER)
+        self._run(agent, capsys, count=12, concurrency=3)
+        assert agent.max_in_flight <= 3, f"ran {agent.max_in_flight} at once"
+        assert agent.max_in_flight > 1, "did not actually run concurrently"
 
     def test_each_attempt_gets_a_fresh_session(self, capsys):
         agent = FakeAgent([EMPTY, ANSWER])
@@ -161,7 +258,7 @@ class TestGenerateTraffic:
     def test_sync_stream_query_is_never_called(self, capsys):
         """FakeAgent.stream_query raises; a regression here surfaces as an error line."""
         out = self._run(FakeAgent([ANSWER]), capsys, count=1)
-        assert "x Error" not in out
+        assert "error:" not in out
 
 
 class TestDefaultQueries:

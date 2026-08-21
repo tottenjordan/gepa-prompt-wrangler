@@ -209,6 +209,35 @@ normally), while the traffic run did 75 and logged **19** (0.25). Same defect, b
 tool whose entire job is generating traces is the one most exposed to the thing that
 prevents them. Its two retries are load-bearing, not belt-and-braces.
 
+### No client-side design avoids it — three hypotheses, all refuted
+
+Measured 2026-08-21 against engine `5638288480409747456`. Every arm interleaved with
+rotating order, because consecutive blocks let an intermittent fault frame whichever
+variable you changed (the dead end above is the same lesson).
+
+| Hypothesis | Arms | Result |
+| --- | --- | --- |
+| Session identity decides routing | new user+session / same user / same session | 1/12, 2/12, 1/12 — **flat** |
+| Pacing: bursts find warm workers | sequential 1s apart vs concurrent | 5/30 (17%) vs 10/30 (33%), Fisher **p=0.23** |
+| A warm-up burst primes workers | cold burst vs discarded warm-up then burst | 5/18 (28%) vs 2/18 (11%) — **worse** |
+
+The concurrency arm looked like a 5× win at n=12 (5/12 vs 1/12) and collapsed to nothing
+at n=30. Worth remembering before acting on the first encouraging split you see.
+
+Why none of it works is visible in the logs: **37 worker boots for 36 requests.** GEAP
+starts a worker per request regardless of who is asking or how they pace it, and the
+request is consumed during the ~8s boot. Latency confirms it — empty responses take
+5–15s, i.e. they wait for the boot and then return nothing, rather than failing fast.
+
+**So the traffic generator was redesigned around the failure rather than against it**
+(`wrangler/tools/traffic.py`): bounded concurrency (wall-clock, since the rate is not made
+worse by it), 6 attempts instead of 3 (at ~1-in-4 per attempt, 3 lands ~58% and 6 lands
+~82%), retry on transient exceptions instead of abandoning the query, and — the part that
+matters — `summarize_run()` reports the **per-attempt rate** and warns below 50%. Retries
+were quietly converting a 17% server-side success rate into a respectable-looking trace
+count; the tool now says both numbers. First run after the change: 8/12 traces from 48
+attempts, printing `Attempt rate: 17%` and the warning.
+
 Query to re-measure after changing `GEAP_MIN_INSTANCES`:
 
 ```bash
