@@ -25,5 +25,8 @@ eval_config:
 pipeline:
   secret_id: wrangler-agent-env
   cache_bust: "v7"
-  # Matches v4's successful run; the default of 50 has never produced a change.
-  max_metric_calls: 150
+  # ~100 metric calls per generation on a 49-case train set (measured
+  # 2026-08-21: generation 1 used 102 calls in 602s). 800 buys roughly eight
+  # generations, i.e. an actual search. The previous 150 bought 1.5 -- one
+  # random draw of variants, which is why GEPA kept returning its seed.
+  max_metric_calls: 800
