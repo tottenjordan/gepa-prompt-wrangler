@@ -341,6 +341,11 @@ def stage_eval(
                 "num_runs": result.num_runs,
                 "elapsed": elapsed,
                 "token_usage": result.token_usage,
+                # Cases-per-metric. Persisted because comparing a before/after
+                # delta is only meaningful if both sides scored the same cases,
+                # and the printed warning scrolls past while the artifact is
+                # what anyone actually reads later. See silent-failures.md #7.
+                "coverage": result.coverage,
             },
         )
 

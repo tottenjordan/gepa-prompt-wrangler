@@ -218,3 +218,28 @@ class TestStageEvalGating:
 
         stage_eval(exp, phase="before")
         assert exp.read_stage("eval_before") == {}
+
+
+class TestCoveragePersisted:
+    """Coverage must survive into the artifact, not just the console.
+
+    `run_batch_eval` prints an UNEVEN METRIC COVERAGE warning, but the stage
+    record is what anyone reads afterwards — and comparing a before/after delta
+    is only meaningful if both sides scored the same cases. The first sweep run
+    recorded `coverage: None` because stage_eval did not persist the field.
+    """
+
+    def test_eval_stage_record_includes_coverage(self):
+        import inspect
+
+        from wrangler.orchestration import stages
+
+        src = inspect.getsource(stages.stage_eval)
+        assert '"coverage": result.coverage' in src, (
+            "stage_eval must persist result.coverage into the stage record"
+        )
+
+    def test_eval_result_exposes_coverage(self):
+        from wrangler.eval.evaluator import EvalResult
+
+        assert EvalResult(coverage={"safety_v1": 3}).coverage == {"safety_v1": 3}
