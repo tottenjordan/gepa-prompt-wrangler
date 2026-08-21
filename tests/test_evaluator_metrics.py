@@ -534,3 +534,50 @@ class TestInferenceRetryBudget:
         out = capsys.readouterr().out
         assert "Recovered 1/1" in out
         assert "attempt" in out.lower()
+
+
+class TestEmptyEvalIsRefused:
+    """Submitting an all-failed inference set returns a 500 that explains nothing.
+
+    On 2026-08-21 a verification run lost every case to the cold-worker defect,
+    submitted the empty set anyway, and `create_evaluation_run` answered
+    `500 INTERNAL`. That error names no cause and cost the run. Say it here
+    instead, where the cause is known.
+    """
+
+    @staticmethod
+    def _df(responses):
+        import pandas as pd
+
+        return pd.DataFrame(
+            {
+                "prompt": [f"q{i}" for i in range(len(responses))],
+                "response": responses,
+                "agent_data": ["{}" for _ in responses],
+            }
+        )
+
+    def test_all_rows_failed_raises_before_submitting(self):
+        from wrangler.eval.evaluator import _assert_scorable
+
+        with pytest.raises(RuntimeError, match="0 of 3"):
+            _assert_scorable(self._df(["", "", ""]), tag="[sonnet] ")
+
+    def test_the_message_names_the_cause(self):
+        from wrangler.eval.evaluator import _assert_scorable
+
+        with pytest.raises(RuntimeError) as exc:
+            _assert_scorable(self._df([""]), tag="")
+        text = str(exc.value)
+        assert "silent-failures" in text, "must point at the known cause"
+        assert "500" in text, "must explain what it is preventing"
+
+    def test_a_partially_failed_set_still_submits(self):
+        from wrangler.eval.evaluator import _assert_scorable
+
+        _assert_scorable(self._df(["", "a real answer", ""]), tag="")
+
+    def test_a_fully_healthy_set_submits(self):
+        from wrangler.eval.evaluator import _assert_scorable
+
+        _assert_scorable(self._df(["one", "two"]), tag="")

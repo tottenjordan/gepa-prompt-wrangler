@@ -534,6 +534,30 @@ def _is_failed_response(response) -> bool:
     return False
 
 
+def _assert_scorable(result_df: pd.DataFrame, tag: str = "") -> None:
+    """Refuse to submit an inference set with nothing left to score.
+
+    `create_evaluation_run` answers `500 INTERNAL` when every row is a failed
+    response — an error that names no cause and reads like a service outage. It
+    is not: it is the cold-worker defect having eaten the whole run
+    (silent-failures.md #5), which is diagnosable here and nowhere downstream.
+
+    Raises rather than returning a sentinel: there is no useful eval to
+    continue with, and a caller that swallowed this would produce a score over
+    zero cases, which is the exact class of failure this file exists to stop.
+    """
+    if result_df.empty or result_df["response"].apply(_is_failed_response).all():
+        total = len(result_df)
+        raise RuntimeError(
+            f"{tag}Refusing to submit an evaluation run: 0 of {total} cases produced a "
+            f"usable response, so there is nothing to score. Submitting anyway returns "
+            f"a bare '500 INTERNAL' from create_evaluation_run. The cause is almost "
+            f"certainly GEAP dropping requests on booting workers — see "
+            f"docs/notes/silent-failures.md #5. Re-run when the engine is warm, or "
+            f"raise _INFERENCE_MAX_ATTEMPTS."
+        )
+
+
 def _retry_failed_cases(
     client: Client,
     agent_resource: str,
@@ -699,6 +723,8 @@ def run_batch_eval(
         )
         clean_df = result_df[~invalid_mask].reset_index(drop=True)
         inference_result = types.EvaluationDataset(eval_dataset_df=clean_df)
+
+    _assert_scorable(inference_result.eval_dataset_df, tag)
 
     print(f"  {tag}Scoring: creating evaluation run ({len(metrics)} metrics)...", flush=True)
     eval_t0 = time.time()
