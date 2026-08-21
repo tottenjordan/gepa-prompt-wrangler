@@ -4,11 +4,12 @@ Automatically appends new optimization results to the agent's prompt file.
 """
 
 import importlib
-import json
 import os
 import sys
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
+
+from ..core.models import DEFAULT_SCAFFOLD_JUDGE_MODEL
 
 
 def save_optimized_prompt(
@@ -17,7 +18,7 @@ def save_optimized_prompt(
     version_name: str | None = None,
     source: str = "wrangler",
     eval_cases: int = 15,
-    judge_model: str = "gemini-2.5-pro",
+    judge_model: str = DEFAULT_SCAFFOLD_JUDGE_MODEL,
     notes: str = "",
     prompts_dir: str | None = None,
 ) -> str:
@@ -39,7 +40,9 @@ def save_optimized_prompt(
     if prompts_dir is None:
         prompts_dir = os.path.join(
             os.path.dirname(os.path.dirname(__file__)),
-            "examples", "multi_model_agents", "prompts",
+            "examples",
+            "multi_model_agents",
+            "prompts",
         )
 
     prompts_file = os.path.join(prompts_dir, f"{agent_name}_prompts.py")
@@ -48,7 +51,7 @@ def save_optimized_prompt(
 
     # Generate version name if not provided
     if version_name is None:
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        timestamp = datetime.now(tz=UTC).strftime("%Y%m%d_%H%M%S")
         version_name = f"{source}_v_{timestamp}"
 
     # Load existing module to get current OPTIMIZED dict
@@ -66,51 +69,51 @@ def save_optimized_prompt(
         "eval_cases": eval_cases,
         "judge_model": judge_model,
         "notes": notes,
-        "timestamp": datetime.now().isoformat(),
+        "timestamp": datetime.now(tz=UTC).isoformat(),
     }
 
     # Rebuild the file
     lines = [
         f'"""Prompt versions for the {agent_name} agent.',
-        '',
-        'Each version is stored with metadata about its source and optimization config.',
-        'Set ACTIVE to whichever prompt you want deployed.',
+        "",
+        "Each version is stored with metadata about its source and optimization config.",
+        "Set ACTIVE to whichever prompt you want deployed.",
         '"""',
-        '',
+        "",
         f'GENERIC = "{generic}"',
-        '',
-        'OPTIMIZED = {',
+        "",
+        "OPTIMIZED = {",
     ]
 
     for vname, meta in existing_optimized.items():
         prompt_text = meta["prompt"].replace('"""', "'''")
         lines.append(f'    "{vname}": {{')
-        lines.append(f'        "prompt": """')
-        lines.append(f'{prompt_text}')
-        lines.append(f'""",')
+        lines.append('        "prompt": """')
+        lines.append(f"{prompt_text}")
+        lines.append('""",')
         lines.append(f'        "source": "{meta.get("source", "")}",')
         lines.append(f'        "eval_cases": {meta.get("eval_cases", 15)},')
         lines.append(f'        "judge_model": "{meta.get("judge_model", "")}",')
         lines.append(f'        "notes": "{meta.get("notes", "")}",')
         if "timestamp" in meta:
             lines.append(f'        "timestamp": "{meta["timestamp"]}",')
-        lines.append(f'    }},')
+        lines.append("    },")
 
-    lines.append('}')
-    lines.append('')
+    lines.append("}")
+    lines.append("")
 
     # Determine what ACTIVE should point to
     if active == generic:
-        lines.append('# Which prompt to use for deployment')
-        lines.append('ACTIVE = GENERIC')
+        lines.append("# Which prompt to use for deployment")
+        lines.append("ACTIVE = GENERIC")
     else:
-        lines.append('# Which prompt to use for deployment')
-        lines.append('ACTIVE = GENERIC')
+        lines.append("# Which prompt to use for deployment")
+        lines.append("ACTIVE = GENERIC")
 
-    lines.append('')
+    lines.append("")
 
-    with open(prompts_file, 'w') as f:
-        f.write('\n'.join(lines))
+    with open(prompts_file, "w") as f:
+        f.write("\n".join(lines))
 
     # Also save raw text to outputs/prompts/
     outputs_dir = Path(os.path.dirname(os.path.dirname(prompts_dir))) / "outputs" / "prompts"
@@ -118,7 +121,9 @@ def save_optimized_prompt(
     raw_path = outputs_dir / f"{agent_name}_{version_name}.txt"
     raw_path.write_text(optimized_prompt)
 
-    print(f"  Saved to prompt registry: {agent_name} → {version_name} ({len(optimized_prompt)} chars)")
+    print(
+        f"  Saved to prompt registry: {agent_name} → {version_name} ({len(optimized_prompt)} chars)"
+    )
     print(f"  Raw text: {raw_path}")
 
     # Clean up sys.path
@@ -133,7 +138,9 @@ def list_versions(agent_name: str, prompts_dir: str | None = None) -> dict:
     if prompts_dir is None:
         prompts_dir = os.path.join(
             os.path.dirname(os.path.dirname(__file__)),
-            "examples", "multi_model_agents", "prompts",
+            "examples",
+            "multi_model_agents",
+            "prompts",
         )
 
     sys.path.insert(0, prompts_dir)

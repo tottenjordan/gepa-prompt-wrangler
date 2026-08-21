@@ -1,11 +1,33 @@
 """Tests for wrangler.prompt_registry — saving and loading optimized prompts."""
 
-import importlib
+import ast
 import sys
-import pytest
 from pathlib import Path
 
-from wrangler.tools.prompt_registry import save_optimized_prompt, list_versions
+import pytest
+
+from wrangler.tools.prompt_registry import list_versions, save_optimized_prompt
+
+PROMPT_FILES = sorted(Path("examples/multi_model_agents/prompts").glob("*_prompts.py"))
+
+
+@pytest.mark.parametrize("path", PROMPT_FILES, ids=lambda p: p.name)
+def test_no_duplicate_prompt_version_keys(path):
+    """Duplicate keys in OPTIMIZED silently discard optimized prompts.
+
+    Python keeps only the last value for a repeated dict key, so a repeated
+    version tag means earlier GEPA outputs are unreachable and the version
+    tag is ambiguous.
+    """
+    tree = ast.parse(path.read_text())
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Assign):
+            continue
+        if not any(isinstance(t, ast.Name) and t.id == "OPTIMIZED" for t in node.targets):
+            continue
+        keys = [k.value for k in node.value.keys if isinstance(k, ast.Constant)]
+        duplicates = {k for k in keys if keys.count(k) > 1}
+        assert not duplicates, f"{path.name}: duplicate version keys {duplicates}"
 
 
 def _cleanup_prompt_modules():
@@ -20,7 +42,8 @@ class TestSaveOptimizedPrompt:
         prompts_dir = prompt_module_dir("test")
         try:
             version = save_optimized_prompt(
-                "test", "New optimized prompt text",
+                "test",
+                "New optimized prompt text",
                 version_name="v1",
                 prompts_dir=prompts_dir,
             )
@@ -34,7 +57,8 @@ class TestSaveOptimizedPrompt:
         prompts_dir = prompt_module_dir("test")
         try:
             version = save_optimized_prompt(
-                "test", "Prompt text",
+                "test",
+                "Prompt text",
                 prompts_dir=prompts_dir,
             )
             assert version.startswith("wrangler_v_")
@@ -45,7 +69,8 @@ class TestSaveOptimizedPrompt:
         prompts_dir = prompt_module_dir("test")
         try:
             version = save_optimized_prompt(
-                "test", "Prompt text",
+                "test",
+                "Prompt text",
                 version_name="my_custom_v1",
                 prompts_dir=prompts_dir,
             )
@@ -57,7 +82,8 @@ class TestSaveOptimizedPrompt:
         prompts_dir = prompt_module_dir("test")
         try:
             save_optimized_prompt(
-                "test", "Prompt for raw file",
+                "test",
+                "Prompt for raw file",
                 version_name="v1",
                 prompts_dir=prompts_dir,
             )
@@ -71,7 +97,8 @@ class TestSaveOptimizedPrompt:
     def test_file_not_found_raises(self):
         with pytest.raises(FileNotFoundError):
             save_optimized_prompt(
-                "nonexistent", "Prompt",
+                "nonexistent",
+                "Prompt",
                 prompts_dir="/nonexistent/path/prompts",
             )
 
@@ -79,13 +106,15 @@ class TestSaveOptimizedPrompt:
         prompts_dir = prompt_module_dir("test")
         try:
             save_optimized_prompt(
-                "test", "First prompt",
+                "test",
+                "First prompt",
                 version_name="v1",
                 prompts_dir=prompts_dir,
             )
             _cleanup_prompt_modules()
             save_optimized_prompt(
-                "test", "Second prompt",
+                "test",
+                "Second prompt",
                 version_name="v2",
                 prompts_dir=prompts_dir,
             )
@@ -101,7 +130,8 @@ class TestSaveOptimizedPrompt:
         prompts_dir = prompt_module_dir("test")
         try:
             save_optimized_prompt(
-                "test", 'Prompt with """triple quotes""" inside',
+                "test",
+                'Prompt with """triple quotes""" inside',
                 version_name="v1",
                 prompts_dir=prompts_dir,
             )
@@ -124,7 +154,8 @@ class TestListVersions:
         prompts_dir = prompt_module_dir("test")
         try:
             save_optimized_prompt(
-                "test", "Saved prompt",
+                "test",
+                "Saved prompt",
                 version_name="v1",
                 prompts_dir=prompts_dir,
             )

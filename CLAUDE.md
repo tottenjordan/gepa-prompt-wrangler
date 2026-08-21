@@ -2,11 +2,21 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Code Standards — Read First
+
+**Always refer to [CODE_STANDARDS.md](CODE_STANDARDS.md) before writing code or making
+environment changes.** It is the authoritative source for tooling (`uv`, `ruff`, `ty`,
+`pytest`), commit conventions, dependency management, and secret handling. This file
+(CLAUDE.md) covers architecture and domain specifics; CODE_STANDARDS.md covers *how* we
+write and ship the code.
+
+Session notes and known traps live in [docs/notes/README.md](docs/notes/README.md).
+
 ## Build & Test Commands
 
 ```bash
 uv sync                          # Install dependencies
-uv run pytest tests/ -v           # Run all 316 tests
+uv run pytest tests/ -v           # Run the full suite (count intentionally not quoted here — it goes stale)
 uv run pytest tests/test_config.py -v  # Run single test file
 uv run pytest tests/test_config.py::TestResolveModel -v  # Run single test class
 uv run wrangler --help            # CLI entry point
@@ -22,7 +32,7 @@ GEPA Prompt Wrangler optimizes ADK agent system prompts using Google's GEPA (Gen
 
 Six subpackages organized by domain:
 
-- **`core/`** — Config, manifest parsing, eval format conversion, agent deployment. Everything else depends on these.
+- **`core/`** — Model registry, config, manifest parsing, eval format conversion, agent deployment. Everything else depends on these.
 - **`eval/`** — Batch evaluation via Vertex AI Evaluation Service, online evaluators (OTel trace scoring), online monitors (health checks).
 - **`optimize/`** — GEPA optimizer wrapper with ADK patches, multi-judge ensemble.
 - **`reporting/`** — Chart generation (matplotlib + PaperBanana), markdown reports, per-pair analysis.
@@ -39,24 +49,93 @@ Manifest YAML → Deploy → Eval Before → Optimize (GEPA) → Redeploy → Ev
 Local workflow: `wrangler run manifest.yaml` (orchestration/stages.py)
 Pipeline workflow: `wrangler pipeline run manifest.yaml` (pipeline/deploy_pipeline.py)
 
+### Model Registry
+
+**`wrangler/core/models.py` is the single source of truth for every model id.** It holds
+a `ModelSpec` per model — provider, cost per 1M input/output tokens, requests-per-minute
+limit, retirement date, whether the model accepts sampling parameters, and a short alias
+— plus the named-role defaults (`DEFAULT_JUDGE_MODEL`, `DEFAULT_AGENT_MODEL`,
+`DEFAULT_JUDGE_ENSEMBLE`, and the two scaffold judges). `PROVIDERS`, `MODEL_MAP`, and
+`AGENT_ORDER` are derived from it, not hand-written.
+
+Rules the test suite enforces:
+
+- **No model id literals anywhere in `wrangler/` outside the registry.** `tests/test_models.py`
+  walks the AST of every module — docstrings and comments are exempt, so prose may name a
+  model but code may not. The one legitimate exemption is `pipeline/components.py`: KFP
+  serializes each `@dsl.component` body in isolation, so a component cannot import the
+  registry at runtime. Exemptions are listed with their reason in `LITERAL_EXCEPTIONS`.
+- **Every named-role default must be a registered model**, must be listed in the guard's
+  own `DEFAULT_ROLES` table, and must be more than 30 days from its retirement date. The
+  last one turns a vendor shutdown into a red build instead of a 404 mid-run.
+
+Retirement dates are the *earliest announced* shutdown. Anthropic's are "not sooner than"
+and apply to Anthropic-operated platforms — Google Cloud sets its own schedule for partner
+models, so treat them as an early-warning floor.
+
+`supports_sampling_params=False` marks Claude Opus 4.7 and later (plus Sonnet 5 and
+Fable 5), which return a 400 for a non-default `temperature`/`top_p`/`top_k`. The cutoff
+is the model generation, not the Opus tier. `PairFactory.load()` rejects a manifest that
+sets a temperature on one of these, naming the pair — steer those models through the
+system prompt instead.
+
 ### Model Resolution
 
-`core/config.py:resolve_model()` routes models to the correct ADK class:
+`core/models.py:resolve_model()` (re-exported from `core/config.py`) routes models to the
+correct ADK class:
 - Gemini 2.x → plain string (regional endpoint)
 - Gemini 3.x → `Gemini()` from `google.adk.models.google_llm`
 - Claude → `Claude()` from `google.adk.models.anthropic_llm`
 
-All non-2.x models use `GOOGLE_CLOUD_LOCATION=global`.
+**The location rule.** `core/models.py:model_location()` is the single source of truth:
+
+| Model family | Location | Endpoint host |
+| --- | --- | --- |
+| Gemini 2.x (and `models/…`) | `GCP_REGION`, e.g. `us-central1` | `us-central1-aiplatform.googleapis.com` |
+| Gemini 3.x | `global` | `aiplatform.googleapis.com` |
+| Anthropic / Claude (all versions) | `global` | `aiplatform.googleapis.com` |
+
+Gemini 3.x and Claude are **not servable from a region**. Asking for one fails with
+`Publisher Model .../locations/us-central1/publishers/anthropic/models/claude-sonnet-4-6
+is not servable in region us-central1`.
+
+**Do not drive this off `GOOGLE_CLOUD_LOCATION`.** That variable is process-wide, but one
+process routes across five tiers at once (lite/flash/pro are Gemini 3.x, sonnet/opus are
+Claude), so no single value is right for all of them — and GEAP treats it as a restricted
+env var and can serve it back regionally regardless of the deployment config. Instead
+`resolve_model()` pins the location *into each model object*:
+
+- Claude gets a full resource name, `projects/{p}/locations/global/publishers/anthropic/models/{id}`.
+  ADK's `Claude._anthropic_client` parses project and location out of that path and ignores
+  the env var entirely.
+- Gemini 3.x gets `client_kwargs={"vertexai": True, "project": …, "location": "global"}`,
+  forwarded verbatim to `google.genai.Client`, which derives its endpoint host from it.
+
+`GOOGLE_CLOUD_LOCATION=global` stays in `.env` as the fallback for code paths that bypass
+`resolve_model()`. Setting it to `${GCP_REGION}` breaks every Claude and Gemini 3.x agent.
+
+Both `wrangler/core/models.py` and `examples/multi_model_agents/config.py` implement this —
+keep them in sync (see "Two config.py Files" below).
+
+Note `resolve_model()` returns an ADK model *object* for everything except Gemini 2.x.
+Anywhere a plain id string is needed — `deploy_agent_from_source(model=...)`, the build
+package — read it from config or the registry, not off a constructed agent.
 
 ### ADK Patches
 
-`optimize/optimizer.py:_patch_adk()` applies 5 monkey-patches to ADK internals required for GEPA to work. These compensate for ADK bugs (tracked in github.com/google/adk-python issues #5906, #6071, #6072). Do NOT remove patches without testing each one individually — ADK 2.2.0 still requires all of them.
+`optimize/optimizer.py:_patch_adk()` applies 5 monkey-patches to ADK internals required for GEPA to work. Patches 1–3 compensate for ADK bugs (github.com/google/adk-python issues #5906, #6071); patch 4 is local instrumentation; patch 6 pins the safety metric version. All the bug workarounds are still required at ADK 2.7.1 even though their issues are closed — the fixes are not in the release.
+
+**Patch 6 (added 2026-08-20)** — `SafetyEvaluatorV1` hands the eval facade the *unversioned* `PrebuiltMetric.SAFETY`, which the Vertex SDK resolves client-side to `safety_v3`; us-central1 does not serve v3, so every GEPA case returned `400 Unsupported predefined metric: safety_v3`, the score came back `None`, and patch 4 coerced it to `0.0`. GEPA kept running and optimized against a criterion pinned at zero. The version is chosen inside ADK — `sampler_config.json` correctly says `safety_v1` and cannot influence it.
+
+**Patch 5 was removed on 2026-08-20.** It overrode `rubric_based_evaluator._normalize_text` and `convert_auto_rater_response_to_score`. ADK 2.7.1 fixed issue #6072 and went further, adding `rubric_id`-based verdict matching and an empty-response guard; the override, written against ADK 2.2, did text-only matching and silently discarded both, corrupting the rubric scores GEPA optimizes against. A redundant patch is not harmless.
+
+Do NOT remove or add patches without re-running the per-patch probe in [docs/notes/adk-patch-status.md](docs/notes/adk-patch-status.md) against the installed ADK.
 
 ### Pipeline Architecture
 
 KFP v2 components in `pipeline/components.py` are self-contained (KFP serializes each function in isolation). Code is injected via GCS tarball, env vars from Secret Manager. Local MCP servers start inside the optimize container for reliable tool connections. The DAG in `pipeline/dag.py` uses `dsl.ParallelFor` with `parallelism=1` for rate-limited stages.
 
-Pre-built Docker image via Cloud Build, cached by `pyproject.toml` hash. Image tag = `md5(pyproject.toml)[:12]`.
+Pre-built Docker image via Cloud Build, cached by a dependency hash. Image tag = `md5(pyproject.toml + uv.lock + Dockerfile.pipeline)[:12]`.
 
 **Deploy/redeploy components** use source-based deployment (`deploy_agent_from_source` / `update_agent_from_source`). The pipeline container assembles a build package at `/app/_geap_build_pkg/`, the SDK tarballs and uploads it, and GEAP builds the agent container from source. No cloudpickle involved.
 
@@ -95,6 +174,7 @@ For multi-model agents: `SEARCH_MCP_SERVER`, `BOOKING_MCP_SERVER`, `EXPENSE_MCP_
 - **Run evals sequentially** (one pair at a time) to avoid 429 rate limit errors.
 - **Sampler configs** in `agents/*_opt/sampler_config.json` are the **single source of truth** for GEPA criteria and thresholds. When a sampler_config.json exists it is used verbatim — experiment/manifest thresholds do NOT override it. To tune what GEPA optimizes against, edit the sampler_config.json. The `eval_thresholds` flowing from manifests only (a) seed the fallback `_build_criteria()` when no sampler_config.json exists, and (b) drive report pass/fail marking — keep them in sync with the sampler config for accurate reports.
 - Agent `__init__.py` files must use absolute imports (e.g., `from agents.example_agent.agent import ...`) for GEAP deployment compatibility.
+- **Do not pin Agent Engine deployment ids** — no hardcoded ids in source, and nothing may *require* `*_ENGINE_ID` to be present in `.env`. An id names one deployment; whether a change means update, redeploy, or a brand-new engine is decided ad hoc at the time. Engine ids arrive at the call site (`--engine-id`, manifest `engine_id`, an env var read where it is used) and a missing one should skip or fail clearly, never fall back to a checked-in default. The example scripts write ids into `.env` as scratch space for their own `--update` flow; that is convenience, not configuration.
 
 ## Source-Based GEAP Deployment
 
@@ -129,17 +209,17 @@ For redeploy: `update_agent_from_source()` rebuilds the package with the new ins
 
 5. **Deployed agents use direct Cloud Run URLs with GoogleAuth** — the build package gets a generated `registry.py` that uses `McpToolset` with `httpx.AsyncClient(auth=GoogleAuth())`. The GEAP service account provides ADC credentials for Cloud Run invoker auth. Timeouts set to 60s connect / 180s read for cold starts. Requires both `*_MCP_SERVER` and `*_MCP_URL` env vars.
 
-6. **`config.py` MCP vars rewritten to safe defaults** — the original has `os.environ["SEARCH_MCP_SERVER"]` (crashes if unset). `build_source_package()` rewrites these to `os.environ.get("SEARCH_MCP_SERVER", "")` so the module loads cleanly. Actual values come via the `env_vars` config dict.
+6. **`config.py` MCP vars rewritten to safe defaults** — `build_source_package()` rewrites `os.environ["SEARCH_MCP_SERVER"]` to `os.environ.get("SEARCH_MCP_SERVER", "")` so the module loads cleanly when the var is unset. Actual values come via the `env_vars` config dict. As of 2026-08-20 the example config uses `.get()` at the source, so the rewrite is a no-op there; it remains as a safety net for third-party agent configs, which crash the GEAP container on import if they subscript a var the server does not set.
 
 7. **Cloud Run MCP services need IAM invoker + session affinity** — the GEAP service account (`service-{PROJECT_NUMBER}@gcp-sa-aiplatform-re.iam.gserviceaccount.com`) must have `roles/run.invoker` on each Cloud Run MCP service. Session affinity must be enabled so MCP sessions stick to the same instance (without it, follow-up tool calls get 404). Grant and configure with:
    ```bash
-   SA="service-934903580331@gcp-sa-aiplatform-re.iam.gserviceaccount.com"
+   SA="service-${PROJECT_NUMBER}@gcp-sa-aiplatform-re.iam.gserviceaccount.com"
    for SVC in wrangler-search-mcp wrangler-booking-mcp wrangler-expense-mcp; do
-     gcloud run services add-iam-policy-binding $SVC \
-       --region=us-central1 --project=hybrid-vertex \
+     gcloud run services add-iam-policy-binding "$SVC" \
+       --region="$GCP_REGION" --project="$GCP_PROJECT_ID" \
        --member="serviceAccount:$SA" --role="roles/run.invoker" --quiet
-     gcloud run services update $SVC \
-       --region=us-central1 --project=hybrid-vertex \
+     gcloud run services update "$SVC" \
+       --region="$GCP_REGION" --project="$GCP_PROJECT_ID" \
        --session-affinity --quiet
    done
    ```
@@ -159,9 +239,9 @@ config = {
 }
 ```
 
-### Legacy functions
+### There is no legacy path
 
-`deploy_agent()` and `update_agent()` (pickle-based) still exist in `deploy.py` but are not used by the pipeline or local workflow. They remain for backward compatibility only.
+`deploy_agent()` and `update_agent()` (pickle-based) were deleted. Every caller — the CLI, `WranglerPipeline`, the KFP components, and the example scripts — uses the source-based functions. `tests/test_deploy.py::test_cloudpickle_entrypoints_are_gone` fails if the names reappear on `wrangler.core.deploy` or `wrangler.core`.
 
 ## Pipeline Pitfalls (Learned the Hard Way)
 
@@ -177,7 +257,9 @@ os.environ.pop("GEMINI_API_KEY", None)
 ```
 
 ### MCP Tools in Pipeline Containers
-Cloud Run MCP servers drop idle HTTP connections within ~2 minutes — too short for GEPA's inter-generation gaps. The optimize component starts **local FastMCP servers** on localhost (ports 8001-8003) from the code in `examples/multi_model_agents/mcp_servers/`. MCP URLs are overridden to `http://localhost:{port}/mcp`. Per-generation session refresh closes and re-warms sessions between GEPA generations (~0.1s overhead).
+Cloud Run MCP servers were found to drop idle HTTP connections within ~2 minutes — too short for GEPA's inter-generation gaps. The optimize component starts **local FastMCP servers** on localhost (ports 8001-8003) from the code in `examples/multi_model_agents/mcp_servers/`. MCP URLs are overridden to `http://localhost:{port}/mcp`. Per-generation session refresh closes and re-warms sessions between GEPA generations (~0.1s overhead).
+
+**Caveat (2026-08-20):** the ~2 minute idle drop did **not** reproduce from a local CLI run — a session sat idle 150s against all three services and then listed tools fine. The services now run `minScale=3` with session affinity on, which may be why. Treat the number as "observed once from inside the pipeline container", not as a measured property. The failure that *does* reproduce is a session teardown race under concurrent `get_tools()`; see [docs/notes/silent-failures.md](docs/notes/silent-failures.md) §1b and the `tool_list_cache_ttl_seconds` fix in both `registry.py` files.
 
 ### Pipeline Caching
 KFP caches each component independently based on: **(1) component function body hash** and **(2) input parameter values**. Both must match for a cache hit.
@@ -195,7 +277,7 @@ KFP caches each component independently based on: **(1) component function body 
 `deploy_pipeline.py` packages the **full project tree** using an exclude-list (`.venv`, `.git`, `__pycache__`, `outputs`, `experiments`, `_geap_build_pkg`). Missing directories have caused multiple pipeline failures. If you add new directories the agents depend on, they'll be included automatically. The `_geap_build_pkg` directory is excluded because it's a transient build artifact created during deployment.
 
 ### Docker Image
-Pre-built via Cloud Build, tagged by `md5(pyproject.toml)[:12]`. Adding any dependency to `pyproject.toml` or `Dockerfile.pipeline` triggers a rebuild (~3 min). The image must include `fastmcp>=2.0.0` for local MCP servers.
+Pre-built via Cloud Build, tagged by `md5(pyproject.toml + uv.lock + Dockerfile.pipeline)[:12]` (`_compute_image_tag()` in `wrangler/pipeline/deploy_pipeline.py`). Adding a dependency to any of the three triggers a rebuild (~3 min). All three are needed: `pyproject.toml` holds ranges rather than resolved versions, and `Dockerfile.pipeline` installs from its own hardcoded `pip install` list — it copies `pyproject.toml` but does not install from it. The image must include `fastmcp>=2.0.0` for local MCP servers.
 
 ### reporter.REPORTS_DIR / CHARTS_DIR
 Must be `Path` objects, not strings. The reporter calls `.mkdir()` on them. When overriding in pipeline components, pass `Path(...)` not `str(...)`.
@@ -207,7 +289,12 @@ Rows with NaN/None/empty responses must be dropped from inference results before
 The MCP session manager passes `headers`, `timeout`, and other kwargs to `httpx_client_factory`. The factory must accept `**kwargs` and pop conflicting keys (`timeout`, `limits`) before passing to `httpx.AsyncClient()`.
 
 ### Two config.py Files
-`wrangler/core/config.py` and `examples/multi_model_agents/config.py` both have `resolve_model()`. Keep them in sync — the multi-model agents import from their local config, not wrangler's.
+`wrangler/core/models.py` (re-exported via `wrangler/core/config.py`) and
+`examples/multi_model_agents/config.py` both define `resolve_model()` / `model_location()`.
+Keep them in sync — the multi-model agents import from their **local** config, not
+wrangler's, and `build_source_package()` copies that local file into `_geap_build_pkg/`, so
+it is the version that actually runs on GEAP. A fix applied only to `wrangler/core/` will
+appear to work locally in the CLI and still ship broken to every deployed agent.
 
 ### Optimizer Prompt Flow
 
@@ -221,10 +308,8 @@ manifest system_prompt → deploy (instruction.txt) → eval-before (deployed ag
 
 The `_opt/__init__.py` files should NOT override `instruction` — the `initial_instruction` parameter handles prompt selection.
 
-### deploy.py Requirements Lists
-`wrangler/core/deploy.py` has two requirements lists:
-- `REQUIREMENTS` — legacy pickle-based deployment (includes `cloudpickle`). Not used by current workflow.
-- `_SOURCE_REQUIREMENTS` — source-based deployment. Written into `_geap_build_pkg/requirements.txt` and installed by GEAP. Must match the ADK version in `pyproject.toml` or agents will fail to start with import errors.
+### deploy.py Requirements List
+`_SOURCE_REQUIREMENTS` in `wrangler/core/deploy.py` is written into `_geap_build_pkg/requirements.txt` and installed by GEAP. Must match the ADK version in `pyproject.toml` or agents will fail to start with import errors.
 
 ## Testing Manifests
 

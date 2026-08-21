@@ -19,7 +19,7 @@ if [ -f "${EXAMPLE_DIR}/.env" ]; then
     set +a
 fi
 
-PROJECT_ID="${GCP_PROJECT_ID:-hybrid-vertex}"
+PROJECT_ID="${GCP_PROJECT_ID:?GCP_PROJECT_ID must be set — see .env.example}"
 DATASET="${DATASET_NAME:-gepa_wrangler_logs}"
 SINK="${SINK_NAME:-gepa-agent-traces}"
 

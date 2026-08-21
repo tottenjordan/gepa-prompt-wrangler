@@ -13,9 +13,9 @@ from vertexai import types
 
 from wrangler.eval import evaluator
 from wrangler.eval.evaluator import (
-    DEFAULT_METRICS,
     _TOOL_USE_METRIC_NAME,
     _TOOL_USE_REPORT_KEY,
+    DEFAULT_METRICS,
     _tool_use_metric,
 )
 
@@ -98,10 +98,7 @@ class TestDefaultMetrics:
             assert getattr(m, "prompt_template", None) in (None, "")
 
     def test_tool_use_is_explicit_llm_metric(self):
-        tool_use = [
-            m for m in DEFAULT_METRICS
-            if getattr(m, "name", None) == _TOOL_USE_METRIC_NAME
-        ]
+        tool_use = [m for m in DEFAULT_METRICS if getattr(m, "name", None) == _TOOL_USE_METRIC_NAME]
         assert len(tool_use) == 1
         assert isinstance(tool_use[0], types.LLMMetric)
 
@@ -180,15 +177,17 @@ class TestAggregateExtractionAliasPath:
         """Mirror a realistic summary_metrics payload: each metric carries an
         /AVERAGE entry (and often /STANDARD_DEVIATION, which must be ignored).
         Only the tool-use key is aliased; the rest pass through unchanged."""
-        run = _StubEvaluationRun({
-            "final_response_quality_v1/AVERAGE": 0.72,
-            "final_response_quality_v1/STANDARD_DEVIATION": 0.10,
-            "hallucination_v1/AVERAGE": 0.95,
-            "safety_v1/AVERAGE": 1.0,
-            "instruction_following_v1/AVERAGE": 0.68,
-            "tool_use_quality/AVERAGE": 0.81,
-            "tool_use_quality/STANDARD_DEVIATION": 0.05,
-        })
+        run = _StubEvaluationRun(
+            {
+                "final_response_quality_v1/AVERAGE": 0.72,
+                "final_response_quality_v1/STANDARD_DEVIATION": 0.10,
+                "hallucination_v1/AVERAGE": 0.95,
+                "safety_v1/AVERAGE": 1.0,
+                "instruction_following_v1/AVERAGE": 0.68,
+                "tool_use_quality/AVERAGE": 0.81,
+                "tool_use_quality/STANDARD_DEVIATION": 0.05,
+            }
+        )
         scores = evaluator._extract_aggregate_scores(run)
 
         assert scores == {

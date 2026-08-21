@@ -5,18 +5,34 @@ Falls back to Agent Registry lookup when direct URLs aren't configured.
 """
 
 import logging
-import os
 
 import httpx
+from config import AGENT_REGISTRY_LOCATION, GCP_PROJECT_ID, MCP_SERVER_URLS
 from google.adk.tools.mcp_tool import McpToolset
 from google.adk.tools.mcp_tool.mcp_session_manager import StreamableHTTPConnectionParams
-
-from config import GCP_PROJECT_ID, AGENT_REGISTRY_LOCATION, MCP_SERVER_URLS
 
 log = logging.getLogger(__name__)
 
 MCP_TIMEOUT_SECONDS = 120.0
 MCP_READ_TIMEOUT_SECONDS = 180.0
+
+# Serve `tools/list` from cache instead of re-listing on every get_tools() call.
+#
+# Without this, every agent invocation lists tools over the MCP session, and a
+# transient session failure costs that invocation its *entire toolset* — ADK
+# retries get_tools() once, then gives up and hands the agent zero tools. It does
+# not raise: the agent just answers toolless. Under GEPA that is scored as a bad
+# prompt, so a network blip becomes a data point. Measured on one optimize run:
+# 12 failed list attempts, 10 rescued by ADK's retry, 2 invocations left toolless.
+#
+# The cost is staleness — ADK does not subscribe to notifications/tools/list_changed,
+# so a tool the server adds or removes goes unnoticed until the entry expires. These
+# three servers have a fixed tool set (search 2, booking 5, expense 3), and five
+# minutes is well under any redeploy-to-use gap.
+#
+# The cache lives on the toolset *instance*. That works here because GEPA's
+# `agent.clone()` is a shallow copy: every candidate shares these objects.
+MCP_TOOL_LIST_CACHE_TTL_SECONDS = 300.0
 
 
 def _create_pooled_client(**kwargs):
@@ -34,17 +50,44 @@ def get_mcp_tools(server_name: str):
     url = MCP_SERVER_URLS.get(server_name)
     if url:
         log.info("Using direct URL for %s: %s", server_name, url)
-        return McpToolset(connection_params=StreamableHTTPConnectionParams(
-            url=url,
-            timeout=MCP_TIMEOUT_SECONDS,
-            sse_read_timeout=MCP_READ_TIMEOUT_SECONDS,
-            terminate_on_close=False,
-            httpx_client_factory=_create_pooled_client,
-        ))
+        return McpToolset(
+            connection_params=StreamableHTTPConnectionParams(
+                url=url,
+                timeout=MCP_TIMEOUT_SECONDS,
+                sse_read_timeout=MCP_READ_TIMEOUT_SECONDS,
+                terminate_on_close=False,
+                httpx_client_factory=_create_pooled_client,
+            ),
+            tool_list_cache_ttl_seconds=MCP_TOOL_LIST_CACHE_TTL_SECONDS,
+        )
 
     log.info("No direct URL for %s — trying Agent Registry", server_name)
     from google.adk.integrations.agent_registry import AgentRegistry
-    registry = AgentRegistry(
-        project_id=GCP_PROJECT_ID, location=AGENT_REGISTRY_LOCATION
+
+    registry = AgentRegistry(project_id=GCP_PROJECT_ID, location=AGENT_REGISTRY_LOCATION)
+    return registry.get_mcp_toolset(_resolve_registry_name(registry, server_name))
+
+
+def _resolve_registry_name(registry, server_name: str) -> str:
+    """Map a `*_MCP_SERVER` value to a real Agent Registry resource name.
+
+    The registry's own names look like
+    ``projects/P/locations/L/mcpServers/agentregistry-<uuid>`` — an opaque id
+    you cannot construct, only look up. The `*_MCP_SERVER` values in `.env` are
+    Cloud Run service paths (``.../services/wrangler-search-mcp``), which the
+    direct-URL path above uses purely as dict keys. Passing one straight to
+    ``get_mcp_toolset`` 404s, so match on displayName instead.
+    """
+    if "/mcpServers/" in server_name:
+        return server_name
+
+    display_name = server_name.rstrip("/").rsplit("/", 1)[-1]
+    for server in registry.list_mcp_servers().get("mcpServers", []):
+        if server.get("displayName") == display_name:
+            return server["name"]
+
+    raise ValueError(
+        f"No MCP server named {display_name!r} in the Agent Registry "
+        f"({GCP_PROJECT_ID}/{AGENT_REGISTRY_LOCATION}), and no direct URL "
+        f"configured for {server_name!r}. Set the matching *_MCP_URL."
     )
-    return registry.get_mcp_toolset(server_name)

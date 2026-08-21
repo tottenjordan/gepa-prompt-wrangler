@@ -1,9 +1,8 @@
 """Tests for eval data format conversion."""
 
 import json
-import pytest
-from pathlib import Path
 
+import pytest
 import yaml
 
 
@@ -56,6 +55,7 @@ class TestConverter:
 
     def test_missing_file_raises(self, tmp_path):
         from wrangler.core.converter import load_eval_file
+
         with pytest.raises((FileNotFoundError, OSError)):
             load_eval_file(str(tmp_path / "nonexistent.yaml"))
 
@@ -128,7 +128,11 @@ class TestGepaEvalsetGeneration:
             },
         ]
         evalset_path = generate_gepa_evalset(
-            cases, str(tmp_path), eval_set_id="test", app_name="test_opt", count=1,
+            cases,
+            str(tmp_path),
+            eval_set_id="test",
+            app_name="test_opt",
+            count=1,
         )
         with open(evalset_path) as f:
             data = json.load(f)
@@ -150,7 +154,11 @@ class TestGepaEvalsetGeneration:
             },
         ]
         evalset_path = generate_gepa_evalset(
-            cases, str(tmp_path), eval_set_id="test", app_name="test_opt", count=1,
+            cases,
+            str(tmp_path),
+            eval_set_id="test",
+            app_name="test_opt",
+            count=1,
         )
         with open(evalset_path) as f:
             data = json.load(f)
@@ -169,7 +177,11 @@ class TestGepaEvalsetGeneration:
             },
         ]
         evalset_path = generate_gepa_evalset(
-            cases, str(tmp_path), eval_set_id="test", app_name="test_opt", count=1,
+            cases,
+            str(tmp_path),
+            eval_set_id="test",
+            app_name="test_opt",
+            count=1,
         )
         with open(evalset_path) as f:
             data = json.load(f)
@@ -214,11 +226,23 @@ class TestSamplerConfig:
         assert criteria["hallucinations_v1"] == 0.95
 
     def test_default_judge_model(self):
+        """The converter's default judge comes from the registry, not a literal.
+
+        Asserting the id itself is what made this test fail the 2026-08-20 judge
+        migration for no good reason. What is worth pinning is that the value
+        tracks DEFAULT_JUDGE_MODEL and names a model the registry knows about —
+        a re-hardcoded literal in converter.py would drift from both.
+        """
         from wrangler.core.converter import generate_sampler_config
+        from wrangler.core.models import DEFAULT_JUDGE_MODEL, MODELS
 
         config = generate_sampler_config("test_opt")
         criteria = config["eval_config"]["criteria"]
-        assert criteria["rubric_based_final_response_quality_v1"]["judge_model_options"]["judge_model"] == "gemini-2.5-flash"
+        judge = criteria["rubric_based_final_response_quality_v1"]["judge_model_options"][
+            "judge_model"
+        ]
+        assert judge == DEFAULT_JUDGE_MODEL
+        assert judge in MODELS, f"{judge} is not in the model registry"
 
     def test_judge_model_propagated(self):
         from wrangler.core.converter import generate_sampler_config
@@ -226,8 +250,14 @@ class TestSamplerConfig:
         config = generate_sampler_config("test_opt", judge_model="gemini-2.5-flash")
         criteria = config["eval_config"]["criteria"]
 
-        assert criteria["rubric_based_tool_use_quality_v1"]["judge_model_options"]["judge_model"] == "gemini-2.5-flash"
-        assert criteria["rubric_based_final_response_quality_v1"]["judge_model_options"]["judge_model"] == "gemini-2.5-flash"
+        assert (
+            criteria["rubric_based_tool_use_quality_v1"]["judge_model_options"]["judge_model"]
+            == "gemini-2.5-flash"
+        )
+        assert (
+            criteria["rubric_based_final_response_quality_v1"]["judge_model_options"]["judge_model"]
+            == "gemini-2.5-flash"
+        )
 
     def test_multi_judge_enabled(self):
         from wrangler.core.converter import generate_sampler_config
@@ -248,7 +278,7 @@ class TestSamplerConfig:
     def test_writes_to_disk(self, tmp_path):
         from wrangler.core.converter import generate_sampler_config
 
-        config = generate_sampler_config("test_opt", output_dir=str(tmp_path))
+        generate_sampler_config("test_opt", output_dir=str(tmp_path))
         config_path = tmp_path / "sampler_config.json"
         assert config_path.exists()
 

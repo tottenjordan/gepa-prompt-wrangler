@@ -11,9 +11,11 @@ import logging
 import os
 from typing import Any
 
+from ..core.models import DEFAULT_JUDGE_ENSEMBLE
+
 log = logging.getLogger(__name__)
 
-DEFAULT_JUDGE_MODELS = ["gemini-2.5-pro", "gemini-2.5-flash"]
+DEFAULT_JUDGE_MODELS = list(DEFAULT_JUDGE_ENSEMBLE)
 
 _QUALITY_PROMPT = """Evaluate the agent's response to the user's query.
 
@@ -53,12 +55,13 @@ def _call_judge(model: str, prompt: str) -> float:
         model=model,
         contents=prompt,
     )
-    text = response.text.strip()
+    text = (response.text or "").strip()
     try:
         score = float(text)
         return max(0.0, min(1.0, score))
     except ValueError:
         import re
+
         match = re.search(r"(\d+\.?\d*)", text)
         if match:
             return max(0.0, min(1.0, float(match.group(1))))

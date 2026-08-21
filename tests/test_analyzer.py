@@ -1,22 +1,25 @@
 """Tests for wrangler.reporting.analyzer — experiment analysis and report generation."""
 
-import pytest
-
 from wrangler.reporting.analyzer import (
-    PairAnalysis,
     ExperimentAnalysis,
-    _prompt_diff_summary,
-    _find_removed_content,
-    _analyze_tool_keywords,
-    format_analysis_report,
     GepaRunStats,
+    PairAnalysis,
+    _analyze_tool_keywords,
+    _find_removed_content,
     _format_tool_audit,
-    METRIC_LABELS,
+    _prompt_diff_summary,
+    format_analysis_report,
 )
 
 
-def _make_pair(pair_id="flash", model="gemini-3.5-flash", before=None, after=None,
-               original="Be helpful.", optimized="Be very helpful and thorough."):
+def _make_pair(
+    pair_id="flash",
+    model="gemini-3.5-flash",
+    before=None,
+    after=None,
+    original="Be helpful.",
+    optimized="Be very helpful and thorough.",
+):
     return PairAnalysis(
         pair_id=pair_id,
         model=model,
@@ -98,7 +101,8 @@ class TestPromptDiffSummary:
         orig = "line1\nline2\nline3"
         opt = "line1\nmodified\nline3\nnew line"
         result = _prompt_diff_summary(orig, opt)
-        assert "+" in result and "-" in result
+        assert "+" in result
+        assert "-" in result
 
 
 class TestFindRemovedContent:
@@ -144,12 +148,14 @@ class TestAnalyzeToolKeywords:
 class TestFormatAnalysisReport:
     def _make_analysis(self):
         p1 = _make_pair(
-            pair_id="flash", model="gemini-3.5-flash",
+            pair_id="flash",
+            model="gemini-3.5-flash",
             before={"final_response_quality_v1": 0.7, "safety_v1": 0.9},
             after={"final_response_quality_v1": 0.85, "safety_v1": 0.88},
         )
         p2 = _make_pair(
-            pair_id="sonnet", model="claude-sonnet-4-6",
+            pair_id="sonnet",
+            model="claude-sonnet-4-6",
             before={"final_response_quality_v1": 0.8, "safety_v1": 0.95},
             after={"final_response_quality_v1": 0.82, "safety_v1": 0.93},
         )
@@ -210,10 +216,14 @@ class TestFormatToolAudit:
         analysis = ExperimentAnalysis(experiment_name="test", pairs=[p])
         stats = {
             "flash": GepaRunStats(
-                pair_id="flash", app_name="flash_opt",
-                log_exists=True, total_lines=100,
-                error_count=5, warning_count=10,
-                timeout_count=2, tool_failure_count=1,
+                pair_id="flash",
+                app_name="flash_opt",
+                log_exists=True,
+                total_lines=100,
+                error_count=5,
+                warning_count=10,
+                timeout_count=2,
+                tool_failure_count=1,
             )
         }
         lines = _format_tool_audit(analysis, stats)
@@ -230,7 +240,9 @@ class TestFormatToolAudit:
         assert "No GEPA run logs found" in text
 
     def test_tool_keyword_preservation_table(self):
-        p = _make_pair(original="Use the search tool.", optimized="Search for flights and book them.")
+        p = _make_pair(
+            original="Use the search tool.", optimized="Search for flights and book them."
+        )
         analysis = ExperimentAnalysis(experiment_name="test", pairs=[p])
         stats = {"flash": GepaRunStats(pair_id="flash", app_name="flash_opt")}
         lines = _format_tool_audit(analysis, stats)

@@ -11,13 +11,14 @@ tests and compilation checks only.
 
 from kfp import dsl
 
+from ..core.models import DEFAULT_JUDGE_MODEL
 from .components import (
     archive_agent_code,
     deploy_single_agent,
     eval_single_agent,
+    generate_analysis,
     optimize_single_agent,
     redeploy_single_agent,
-    generate_analysis,
 )
 
 
@@ -28,17 +29,18 @@ def _make_heavy_components(image_uri: str):
     To swap the image, we rebuild the component specs from the existing
     function bodies using ``dsl.component()`` as a function call.
     """
-    common = dict(
-        base_image=image_uri,
-        packages_to_install=[],
-    )
+
+    # Passed explicitly rather than splatted from a dict: a heterogeneous
+    # **kwargs dict collapses every parameter to the union of its value types.
+    def _rebuild(func):
+        return dsl.component(base_image=image_uri, packages_to_install=[])(func)
 
     return {
-        "deploy": dsl.component(**common)(deploy_single_agent.python_func),
-        "eval": dsl.component(**common)(eval_single_agent.python_func),
-        "optimize": dsl.component(**common)(optimize_single_agent.python_func),
-        "redeploy": dsl.component(**common)(redeploy_single_agent.python_func),
-        "analysis": dsl.component(**common)(generate_analysis.python_func),
+        "deploy": _rebuild(deploy_single_agent.python_func),
+        "eval": _rebuild(eval_single_agent.python_func),
+        "optimize": _rebuild(optimize_single_agent.python_func),
+        "redeploy": _rebuild(redeploy_single_agent.python_func),
+        "analysis": _rebuild(generate_analysis.python_func),
     }
 
 
@@ -58,7 +60,7 @@ def build_pipeline(image_uri: str):
         agent_module: str,
         eval_data_path: str,
         num_runs: int = 1,
-        judge_model: str = "gemini-2.5-flash",
+        judge_model: str = DEFAULT_JUDGE_MODEL,
         secret_id: str = "",
         max_metric_calls: int = 50,
         cache_bust: str = "",
@@ -85,7 +87,7 @@ def build_pipeline(image_uri: str):
             )
             deploy_task.set_caching_options(enable_caching=True)
             deploy_task.after(archive_task)
-            deploy_task.set_display_name(f"Deploy Agents")
+            deploy_task.set_display_name("Deploy Agents")
 
         with dsl.ParallelFor(pairs_json, parallelism=1) as pair_config:
             eval_before_task = comps["eval"](
@@ -173,7 +175,7 @@ def build_pipeline(image_uri: str):
         )
         analysis_task.set_caching_options(enable_caching=True)
         analysis_task.after(eval_after_task)
-        analysis_task.set_display_name(f"Generate Analysis")
+        analysis_task.set_display_name("Generate Analysis")
 
     return _pipeline
 

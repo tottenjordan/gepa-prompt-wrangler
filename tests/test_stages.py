@@ -1,12 +1,9 @@
 """Tests for wrangler.orchestration.stages — modular pipeline stage functions."""
 
-import json
 import pytest
 import yaml
-from unittest.mock import patch, MagicMock
-from pathlib import Path
 
-from wrangler.core.factory import Manifest, AgentPromptPair
+from wrangler.core.factory import AgentPromptPair, Manifest
 from wrangler.orchestration.stages import _filter_pairs, _resolve_eval_path
 
 
@@ -17,8 +14,11 @@ def _make_manifest(pairs=None):
             AgentPromptPair(id="sonnet", model="claude-sonnet-4-6", system_prompt="Be thorough."),
         ]
     return Manifest(
-        name="test", description="", agent_module="agents/example_agent",
-        eval_data="eval_data/test.yaml", pairs=pairs,
+        name="test",
+        description="",
+        agent_module="agents/example_agent",
+        eval_data="eval_data/test.yaml",
+        pairs=pairs,
     )
 
 
@@ -67,13 +67,19 @@ class TestStageDeployWithExperiment:
             "agent_module": "agents/example_agent",
             "eval_data": "eval_data/test.yaml",
             "pairs": [
-                {"id": "flash", "model": "gemini-3.5-flash",
-                 "system_prompt": "Be helpful.", "engine_id": "existing-123"},
+                {
+                    "id": "flash",
+                    "model": "gemini-3.5-flash",
+                    "system_prompt": "Be helpful.",
+                    "engine_id": "existing-123",
+                },
             ],
         }
         manifest_path = tmp_path / "manifest.yaml"
         manifest_path.write_text(yaml.dump(manifest_data))
-        return Experiment.create(str(manifest_path), name="test-deploy", base_dir=str(tmp_path / "experiments"))
+        return Experiment.create(
+            str(manifest_path), name="test-deploy", base_dir=str(tmp_path / "experiments")
+        )
 
     def test_reuses_existing_engine_id(self, tmp_path):
         from wrangler.orchestration.stages import stage_deploy
@@ -84,6 +90,113 @@ class TestStageDeployWithExperiment:
         deploy_data = exp.read_stage("deploy")
         assert deploy_data["flash"]["engine_id"] == "existing-123"
         assert deploy_data["flash"]["source"] == "config"
+
+
+class TestSaveOptimizedPrompt:
+    """The save path appends text, so it must not emit a key that already exists."""
+
+    def _setup(self, tmp_path):
+        from wrangler.orchestration.experiment import Experiment
+
+        # An agent_module name that does not exist at the repo root, so
+        # _manifest_dir() resolves to tmp_path rather than the real project.
+        (tmp_path / "agents" / "zz_test_agent").mkdir(parents=True)
+        prompts_file = tmp_path / "prompts" / "zz_test_prompts.py"
+        prompts_file.parent.mkdir()
+        prompts_file.write_text('GENERIC = ""\n\nOPTIMIZED = {\n}\n')
+
+        manifest_data = {
+            "name": "test-save",
+            "agent_module": "agents/zz_test_agent",
+            "eval_data": "eval_data/test.yaml",
+            "pairs": [{"id": "flash", "model": "gemini-3.5-flash", "system_prompt": "Hi"}],
+        }
+        manifest_path = tmp_path / "manifest.yaml"
+        manifest_path.write_text(yaml.dump(manifest_data))
+        exp = Experiment.create(
+            str(manifest_path),
+            name="test-save",
+            base_dir=str(tmp_path / "experiments"),
+            version="wrangler_v5",
+        )
+        return exp, prompts_file
+
+    def test_repeated_version_does_not_duplicate_key(self, tmp_path):
+        import ast
+
+        from wrangler.orchestration.stages import _save_optimized_prompt
+
+        exp, prompts_file = self._setup(tmp_path)
+        pair = exp.manifest.pairs[0]
+
+        _save_optimized_prompt(exp, pair, "first prompt")
+        _save_optimized_prompt(exp, pair, "second prompt")
+
+        tree = ast.parse(prompts_file.read_text())
+        keys = [
+            k.value
+            for node in ast.walk(tree)
+            if isinstance(node, ast.Assign)
+            and any(isinstance(t, ast.Name) and t.id == "OPTIMIZED" for t in node.targets)
+            for k in node.value.keys
+        ]
+        assert keys == ["wrangler_v5", "wrangler_v5_2"]
+
+    def test_prompts_dir_found_beside_agents_not_at_project_root(self, tmp_path):
+        """The real layout nests `agents/` and `prompts/` under an agent dir.
+
+        `_manifest_dir()` returns the *project root* — the dir the manifest's
+        relative paths resolve against — but `prompts/` lives beside `agents/`,
+        one level down. Resolving it against the root alone silently found
+        nothing and discarded the optimized prompt with a warning. The smoke
+        test on 2026-08-21 lost its GEPA result that way.
+        """
+        from wrangler.orchestration.experiment import Experiment
+        from wrangler.orchestration.stages import _save_optimized_prompt
+
+        (tmp_path / "zz_proj" / "agents" / "zz_test_agent").mkdir(parents=True)
+        prompts_file = tmp_path / "zz_proj" / "prompts" / "zz_test_prompts.py"
+        prompts_file.parent.mkdir()
+        prompts_file.write_text('GENERIC = ""\n\nOPTIMIZED = {\n}\n')
+
+        manifest_path = tmp_path / "manifest.yaml"
+        manifest_path.write_text(
+            yaml.dump(
+                {
+                    "name": "test-nested",
+                    "agent_module": "zz_proj/agents/zz_test_agent",
+                    "eval_data": "eval_data/test.yaml",
+                    "pairs": [{"id": "flash", "model": "gemini-3.5-flash", "system_prompt": "Hi"}],
+                }
+            )
+        )
+        exp = Experiment.create(
+            str(manifest_path),
+            name="test-nested",
+            base_dir=str(tmp_path / "experiments"),
+            version="wrangler_v5",
+        )
+
+        _save_optimized_prompt(exp, exp.manifest.pairs[0], "the optimized prompt")
+
+        namespace = {}
+        exec(compile(prompts_file.read_text(), str(prompts_file), "exec"), namespace)  # noqa: S102
+        assert namespace["OPTIMIZED"]["wrangler_v5"]["prompt"] == "the optimized prompt"
+
+    def test_both_prompts_remain_loadable(self, tmp_path):
+        from wrangler.orchestration.stages import _save_optimized_prompt
+
+        exp, prompts_file = self._setup(tmp_path)
+        pair = exp.manifest.pairs[0]
+
+        _save_optimized_prompt(exp, pair, "first prompt")
+        _save_optimized_prompt(exp, pair, "second prompt")
+
+        namespace = {}
+        exec(compile(prompts_file.read_text(), str(prompts_file), "exec"), namespace)  # noqa: S102
+        optimized = namespace["OPTIMIZED"]
+        assert optimized["wrangler_v5"]["prompt"] == "first prompt"
+        assert optimized["wrangler_v5_2"]["prompt"] == "second prompt"
 
 
 class TestStageEvalGating:
@@ -99,7 +212,9 @@ class TestStageEvalGating:
         }
         manifest_path = tmp_path / "manifest.yaml"
         manifest_path.write_text(yaml.dump(manifest_data))
-        exp = Experiment.create(str(manifest_path), name="test-gate", base_dir=str(tmp_path / "experiments"))
+        exp = Experiment.create(
+            str(manifest_path), name="test-gate", base_dir=str(tmp_path / "experiments")
+        )
 
         stage_eval(exp, phase="before")
         assert exp.read_stage("eval_before") == {}

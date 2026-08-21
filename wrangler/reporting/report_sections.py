@@ -4,10 +4,14 @@ import json
 from collections import defaultdict
 from pathlib import Path
 
-from ..core.config import MODEL_COSTS, REPORTS_DIR, blended_cost
+from ..core.config import MODEL_COSTS, REPORTS_DIR
+from ..core.models import AGENT_ORDER, PROVIDERS
+from ..core.models import blended_cost_for_report as blended_cost
 from .analysis import (
-    METRIC_LABELS, PROVIDERS, AGENT_ORDER, MODEL_MAP, TIER_ORDER,
-    normalize_agent_keys, compute_tier_scores,
+    METRIC_LABELS,
+    TIER_ORDER,
+    compute_tier_scores,
+    normalize_agent_keys,
 )
 
 
@@ -22,9 +26,11 @@ def _eval_dataset_section(case_metadata: list[dict] | None) -> list[str]:
             tier_counts[m.get("tier", "unknown")] += 1
             cat_counts[m.get("category", "unknown")] += 1
         lines.append(f"- **Total cases:** {len(case_metadata)}")
-        for tier in TIER_ORDER:
-            if tier in tier_counts:
-                lines.append(f"- **{tier.title()} complexity:** {tier_counts[tier]} cases")
+        lines.extend(
+            f"- **{tier.title()} complexity:** {tier_counts[tier]} cases"
+            for tier in TIER_ORDER
+            if tier in tier_counts
+        )
         lines.append(f"- **Categories:** {', '.join(sorted(cat_counts.keys()))}")
     else:
         lines.append("- See eval_cases.yaml for case details")
@@ -128,8 +134,10 @@ def _prompt_evolution_summary(original: str, optimized: str) -> list[str]:
     """Generate a human-readable summary of what GEPA changed."""
     lines = []
     lines.append("## Prompt Evolution Summary\n")
-    lines.append(f"GEPA expanded the prompt from **{len(original)} chars** to **{len(optimized)} chars** "
-                 f"({len(optimized)/max(len(original),1):.0f}x expansion).\n")
+    lines.append(
+        f"GEPA expanded the prompt from **{len(original)} chars** to **{len(optimized)} chars** "
+        f"({len(optimized) / max(len(original), 1):.0f}x expansion).\n"
+    )
 
     keywords = {
         "tool": "Tool-specific guidance",
@@ -153,8 +161,7 @@ def _prompt_evolution_summary(original: str, optimized: str) -> list[str]:
 
     if added:
         lines.append("**Key additions by GEPA:**\n")
-        for a in added:
-            lines.append(f"- {a}")
+        lines.extend(f"- {a}" for a in added)
         lines.append("")
 
     return lines
@@ -172,26 +179,32 @@ def _cost_benefit_section(model: str, before_scores: dict, after_scores: dict) -
     avg_after = sum(after_scores.values()) / max(len(after_scores), 1)
     improvement = avg_after - avg_before
 
-    lines.append(f"| Metric | Value |")
-    lines.append(f"|--------|-------|")
+    lines.append("| Metric | Value |")
+    lines.append("|--------|-------|")
     lines.append(f"| Input cost | ${cost['input']:.2f}/M tokens |")
     lines.append(f"| Output cost | ${cost['output']:.2f}/M tokens |")
     lines.append(f"| Blended cost (4:1 in:out) | ${blend:.2f}/M tokens |")
     lines.append(f"| Avg quality (before) | {avg_before:.2f} |")
     lines.append(f"| Avg quality (after) | {avg_after:.2f} |")
-    lines.append(f"| Quality gain | {improvement:+.2f} ({improvement/max(avg_before,0.01)*100:+.1f}%) |")
+    lines.append(
+        f"| Quality gain | {improvement:+.2f} ({improvement / max(avg_before, 0.01) * 100:+.1f}%) |"
+    )
 
     quality_per_dollar = avg_after / max(blend, 0.01)
     lines.append(f"| Quality per $/M tokens | {quality_per_dollar:.3f} |")
     lines.append("")
 
     if improvement > 0:
-        lines.append(f"GEPA optimization improved average quality by **{improvement/max(avg_before,0.01)*100:+.1f}%** "
-                     f"at **${cost['input']:.2f}** input / **${cost['output']:.2f}** output per M tokens. "
-                     f"The quality gain comes at zero additional inference cost — only the system prompt changed.\n")
+        lines.append(
+            f"GEPA optimization improved average quality by **{improvement / max(avg_before, 0.01) * 100:+.1f}%** "
+            f"at **${cost['input']:.2f}** input / **${cost['output']:.2f}** output per M tokens. "
+            f"The quality gain comes at zero additional inference cost — only the system prompt changed.\n"
+        )
     else:
-        lines.append(f"GEPA optimization resulted in a **{improvement:+.2f}** change in average quality. "
-                     f"Consider re-running with a different evalset or more iterations.\n")
+        lines.append(
+            f"GEPA optimization resulted in a **{improvement:+.2f}** change in average quality. "
+            f"Consider re-running with a different evalset or more iterations.\n"
+        )
 
     return lines
 
@@ -212,8 +225,8 @@ def generate_agent_report(
     after_std: dict[str, float] | None = None,
 ) -> str:
     """Generate a per-agent analysis markdown file. Returns the file path."""
-    output_dir = Path(output_dir or REPORTS_DIR) / "agents"
-    output_dir.mkdir(parents=True, exist_ok=True)
+    out_dir = Path(output_dir or REPORTS_DIR) / "agents"
+    out_dir.mkdir(parents=True, exist_ok=True)
 
     cost = MODEL_COSTS.get(model, {"input": 0, "output": 0})
     provider = PROVIDERS.get(model, "Unknown")
@@ -269,10 +282,12 @@ def generate_agent_report(
             b = before_scores.get(key, 0)
             a = after_scores.get(key, 0)
             delta = a - b
-            pct = f"{delta/b*100:+.0f}%" if b > 0 else "N/A"
+            pct = f"{delta / b * 100:+.0f}%" if b > 0 else "N/A"
             if after_std:
                 sd = after_std.get(key, 0)
-                lines.append(f"| {METRIC_LABELS[key]} | {b:.2f} | {a:.2f} | {sd:.3f} | {delta:+.2f} | {pct} |")
+                lines.append(
+                    f"| {METRIC_LABELS[key]} | {b:.2f} | {a:.2f} | {sd:.3f} | {delta:+.2f} | {pct} |"
+                )
             else:
                 lines.append(f"| {METRIC_LABELS[key]} | {b:.2f} | {a:.2f} | {delta:+.2f} | {pct} |")
         lines.append("")
@@ -282,7 +297,9 @@ def generate_agent_report(
         avg_before = sum(before_scores.values()) / max(len(before_scores), 1)
         avg_after = sum(after_scores.values()) / max(len(after_scores), 1)
         lines.append("## Key Observations\n")
-        lines.append(f"- Average score changed from **{avg_before:.2f}** to **{avg_after:.2f}** ({(avg_after-avg_before)/avg_before*100:+.1f}%)")
+        lines.append(
+            f"- Average score changed from **{avg_before:.2f}** to **{avg_after:.2f}** ({(avg_after - avg_before) / avg_before * 100:+.1f}%)"
+        )
 
         improved = [k for k in METRIC_LABELS if after_scores.get(k, 0) > before_scores.get(k, 0)]
         regressed = [k for k in METRIC_LABELS if after_scores.get(k, 0) < before_scores.get(k, 0)]
@@ -300,7 +317,7 @@ def generate_agent_report(
     phase_label = "Post-Optimization" if after_per_case else "Baseline"
     lines.extend(_category_section(best_per_case or [], case_metadata, phase_label))
 
-    report_path = output_dir / f"{agent_name}_analysis.md"
+    report_path = out_dir / f"{agent_name}_analysis.md"
     with open(report_path, "w") as f:
         f.write("\n".join(lines))
 
@@ -373,7 +390,7 @@ def _category_heatmap_section(
     if not has_per_case:
         return []
 
-    all_cats = sorted(set(m.get("category", "") for m in case_metadata if m.get("category")))
+    all_cats = sorted({m.get("category", "") for m in case_metadata if m.get("category")})
     if not all_cats:
         return []
 
@@ -479,15 +496,24 @@ def _interpretation_section(
     regressed = [n for n in ordered if agent_deltas[n] < -0.005]
     stable = [n for n in ordered if abs(agent_deltas[n]) <= 0.005]
 
-    metrics_up = {k: sum(v)/len(v) for k, v in metric_deltas.items() if sum(v)/len(v) > 0.01}
-    metrics_down = {k: sum(v)/len(v) for k, v in metric_deltas.items() if sum(v)/len(v) < -0.01}
+    metrics_up = {k: sum(v) / len(v) for k, v in metric_deltas.items() if sum(v) / len(v) > 0.01}
+    metrics_down = {k: sum(v) / len(v) for k, v in metric_deltas.items() if sum(v) / len(v) < -0.01}
 
     best_value_name = ranked[0]
-    best_quality_name = max(ordered, key=lambda n: (
-        sum(all_results[n].get("after", {}).values()) / max(len(all_results[n].get("after", {})), 1)
-    ) if all_results[n].get("after") else 0)
+    best_quality_name = max(
+        ordered,
+        key=lambda n: (
+            (
+                sum(all_results[n].get("after", {}).values())
+                / max(len(all_results[n].get("after", {})), 1)
+            )
+            if all_results[n].get("after")
+            else 0
+        ),
+    )
     best_quality = sum(all_results[best_quality_name].get("after", {}).values()) / max(
-        len(all_results[best_quality_name].get("after", {})), 1)
+        len(all_results[best_quality_name].get("after", {})), 1
+    )
 
     # --- Interpretation ---
     lines.append("## Interpretation\n")
@@ -496,9 +522,11 @@ def _interpretation_section(
     if len(improved) == len(ordered):
         lines.append("GEPA optimization improved average quality across all agents.\n")
     elif len(regressed) == len(ordered):
-        lines.append("GEPA optimization reduced average quality across all agents, "
-                     "suggesting the optimized prompts traded gains in some metrics for "
-                     "losses in others.\n")
+        lines.append(
+            "GEPA optimization reduced average quality across all agents, "
+            "suggesting the optimized prompts traded gains in some metrics for "
+            "losses in others.\n"
+        )
     else:
         parts = []
         if improved:
@@ -518,29 +546,33 @@ def _interpretation_section(
             lines.append("**Metrics that improved:**\n")
             for k, avg in sorted(metrics_up.items(), key=lambda x: -x[1]):
                 best_agent = max(ordered, key=lambda n: metric_deltas[k][ordered.index(n)])
-                best_val = metric_deltas[k][ordered.index(best_agent)]
                 before_val = all_results[best_agent].get("before", {}).get(k, 0)
                 after_val = all_results[best_agent].get("after", {}).get(k, 0)
-                lines.append(f"- **{METRIC_LABELS[k]}** ({avg:+.3f} avg) — "
-                             f"largest gain in {best_agent.title()} ({before_val:.2f} → {after_val:.2f})")
+                lines.append(
+                    f"- **{METRIC_LABELS[k]}** ({avg:+.3f} avg) — "
+                    f"largest gain in {best_agent.title()} ({before_val:.2f} → {after_val:.2f})"
+                )
             lines.append("")
 
         if metrics_down:
             lines.append("**Metrics that declined:**\n")
             for k, avg in sorted(metrics_down.items(), key=lambda x: x[1]):
                 worst_agent = min(ordered, key=lambda n: metric_deltas[k][ordered.index(n)])
-                worst_val = metric_deltas[k][ordered.index(worst_agent)]
                 before_val = all_results[worst_agent].get("before", {}).get(k, 0)
                 after_val = all_results[worst_agent].get("after", {}).get(k, 0)
-                lines.append(f"- **{METRIC_LABELS[k]}** ({avg:+.3f} avg) — "
-                             f"largest drop in {worst_agent.title()} ({before_val:.2f} → {after_val:.2f})")
+                lines.append(
+                    f"- **{METRIC_LABELS[k]}** ({avg:+.3f} avg) — "
+                    f"largest drop in {worst_agent.title()} ({before_val:.2f} → {after_val:.2f})"
+                )
             lines.append("")
 
-        lines.append("This tradeoff is expected: GEPA optimizes toward the eval criteria "
-                     "in `sampler_config.json` (response match, safety, tool use). Metrics "
-                     "not included as optimization targets — like instruction following and "
-                     "response quality — may shift as the prompt is reshaped to maximize "
-                     "target metrics.\n")
+        lines.append(
+            "This tradeoff is expected: GEPA optimizes toward the eval criteria "
+            "in `sampler_config.json` (response match, safety, tool use). Metrics "
+            "not included as optimization targets — like instruction following and "
+            "response quality — may shift as the prompt is reshaped to maximize "
+            "target metrics.\n"
+        )
 
     # Per-agent insights
     lines.append("### Per-Agent Insights\n")
@@ -565,39 +597,55 @@ def _interpretation_section(
 
     # Cost-quality insight
     lines.append("### Cost-Quality Assessment\n")
-    lines.append(f"**Best value: {best_value_name.title()}** delivers the most quality per dollar. "
-                 f"**Best absolute quality: {best_quality_name.title()}** at {best_quality:.2f} average.\n")
+    lines.append(
+        f"**Best value: {best_value_name.title()}** delivers the most quality per dollar. "
+        f"**Best absolute quality: {best_quality_name.title()}** at {best_quality:.2f} average.\n"
+    )
 
     top_blend = blended_cost(all_results[ordered[-1]].get("model", ""))
     lite_blend = blended_cost(all_results[ordered[0]].get("model", ""))
     if lite_blend > 0 and top_blend > 0:
         lite_quality = sum(all_results[ordered[0]].get("after", {}).values()) / max(
-            len(all_results[ordered[0]].get("after", {})), 1)
+            len(all_results[ordered[0]].get("after", {})), 1
+        )
         top_quality = sum(all_results[ordered[-1]].get("after", {}).values()) / max(
-            len(all_results[ordered[-1]].get("after", {})), 1)
-        lines.append(f"The most expensive model ({ordered[-1].title()} at ${top_blend:.2f}/M blended) costs "
-                     f"**{top_blend/lite_blend:.0f}x more** than the cheapest ({ordered[0].title()} at "
-                     f"${lite_blend:.2f}/M blended) but scores {top_quality:.2f} vs {lite_quality:.2f} — "
-                     f"{'a marginal' if abs(top_quality - lite_quality) < 0.05 else 'a meaningful'} "
-                     f"quality difference.\n")
+            len(all_results[ordered[-1]].get("after", {})), 1
+        )
+        lines.append(
+            f"The most expensive model ({ordered[-1].title()} at ${top_blend:.2f}/M blended) costs "
+            f"**{top_blend / lite_blend:.0f}x more** than the cheapest ({ordered[0].title()} at "
+            f"${lite_blend:.2f}/M blended) but scores {top_quality:.2f} vs {lite_quality:.2f} — "
+            f"{'a marginal' if abs(top_quality - lite_quality) < 0.05 else 'a meaningful'} "
+            f"quality difference.\n"
+        )
 
     # Recommendations
     lines.append("### Recommendations\n")
-    lines.append(f"1. **For cost-sensitive workloads:** Use **{best_value_name.title()}** "
-                 f"(`{all_results[best_value_name].get('model', '')}`) — best quality-per-dollar ratio.\n")
-    lines.append(f"2. **For quality-critical workloads:** Use **{best_quality_name.title()}** "
-                 f"(`{all_results[best_quality_name].get('model', '')}`) — highest absolute quality.\n")
+    lines.append(
+        f"1. **For cost-sensitive workloads:** Use **{best_value_name.title()}** "
+        f"(`{all_results[best_value_name].get('model', '')}`) — best quality-per-dollar ratio.\n"
+    )
+    lines.append(
+        f"2. **For quality-critical workloads:** Use **{best_quality_name.title()}** "
+        f"(`{all_results[best_quality_name].get('model', '')}`) — highest absolute quality.\n"
+    )
 
     if metrics_down:
-        worst_metric = min(metrics_down, key=metrics_down.get)
-        lines.append(f"3. **Re-optimize with expanded criteria.** The decline in "
-                     f"{METRIC_LABELS[worst_metric]} ({metrics_down[worst_metric]:+.3f} avg) "
-                     f"suggests adding it as an explicit optimization target in `sampler_config.json`.\n")
+        worst_metric = min(metrics_down, key=metrics_down.__getitem__)
+        lines.append(
+            f"3. **Re-optimize with expanded criteria.** The decline in "
+            f"{METRIC_LABELS[worst_metric]} ({metrics_down[worst_metric]:+.3f} avg) "
+            f"suggests adding it as an explicit optimization target in `sampler_config.json`.\n"
+        )
 
-    lines.append(f"4. **Prompt cost is zero.** Optimization only changes the system prompt — "
-                 f"no additional inference cost. Even mixed results are worth iterating on.\n")
-    lines.append(f"5. **Monitor with online evaluators** after deployment to catch regressions "
-                 f"on real traffic beyond the eval dataset.\n")
+    lines.append(
+        "4. **Prompt cost is zero.** Optimization only changes the system prompt — "
+        "no additional inference cost. Even mixed results are worth iterating on.\n"
+    )
+    lines.append(
+        "5. **Monitor with online evaluators** after deployment to catch regressions "
+        "on real traffic beyond the eval dataset.\n"
+    )
 
     return lines
 
@@ -608,6 +656,7 @@ def _detect_version(all_results: dict[str, dict]) -> str:
     if version:
         return version
     import re
+
     for data in all_results.values():
         if isinstance(data, dict) and data.get("optimized_prompt"):
             for key in data:
@@ -624,8 +673,8 @@ def generate_comparison_report(
     version: str | None = None,
 ) -> str:
     """Generate a cross-model comparison report with cost-benefit and recommendations."""
-    output_dir = Path(output_dir or REPORTS_DIR)
-    output_dir.mkdir(parents=True, exist_ok=True)
+    out_dir = Path(output_dir or REPORTS_DIR)
+    out_dir.mkdir(parents=True, exist_ok=True)
     version_label = version or _detect_version(all_results)
 
     lines = []
@@ -637,7 +686,9 @@ def generate_comparison_report(
     # --- Prompt Evolution Summary ---
     lines.append("## Prompt Evolution Summary\n")
     lines.append("All agents started with the same generic 78-character prompt:\n")
-    lines.append("```\nYou are a helpful assistant. Use the available tools to answer user questions.\n```\n")
+    lines.append(
+        "```\nYou are a helpful assistant. Use the available tools to answer user questions.\n```\n"
+    )
     lines.append("GEPA expanded this into specialized, model-tailored instructions:\n")
     lines.append("| Agent | Model | Before | After | Expansion |")
     lines.append("|-------|-------|--------|-------|-----------|")
@@ -650,8 +701,10 @@ def generate_comparison_report(
         opt = data.get("optimized_prompt", "")
         orig_len = len(orig)
         opt_len = len(opt) if opt else orig_len
-        expansion = f"{opt_len/max(orig_len,1):.0f}x" if opt else "—"
-        lines.append(f"| {name.title()} | `{model}` | {orig_len} chars | {opt_len} chars | {expansion} |")
+        expansion = f"{opt_len / max(orig_len, 1):.0f}x" if opt else "—"
+        lines.append(
+            f"| {name.title()} | `{model}` | {orig_len} chars | {opt_len} chars | {expansion} |"
+        )
     lines.append("")
 
     lines.append("![Before/After Overview](diagrams/before_after_overview.png)\n")
@@ -723,8 +776,12 @@ def generate_comparison_report(
     # --- Cost-Benefit Analysis ---
     lines.append("## Cost-Benefit Analysis\n")
     lines.append("### Per-Model Cost and Quality\n")
-    lines.append("| Agent | Model | Input $/M | Output $/M | Blended $/M | Avg Quality (Before) | Avg Quality (After) | Quality Gain | Quality/$ |")
-    lines.append("|-------|-------|-----------|------------|-------------|---------------------|--------------------|--------------|-----------:|")
+    lines.append(
+        "| Agent | Model | Input $/M | Output $/M | Blended $/M | Avg Quality (Before) | Avg Quality (After) | Quality Gain | Quality/$ |"
+    )
+    lines.append(
+        "|-------|-------|-----------|------------|-------------|---------------------|--------------------|--------------|-----------:|"
+    )
     for name in ordered:
         data = all_results[name]
         model = data.get("model", "unknown")
@@ -736,21 +793,31 @@ def generate_comparison_report(
         avg_a = sum(after.values()) / max(len(after), 1) if after else 0
         gain = avg_a - avg_b
         qpd = avg_a / max(blend, 0.01)
-        lines.append(f"| {name.title()} | `{model}` | ${cost['input']:.2f} | ${cost['output']:.2f} | ${blend:.2f} | {avg_b:.2f} | {avg_a:.2f} | {gain:+.02f} | {qpd:.3f} |")
+        lines.append(
+            f"| {name.title()} | `{model}` | ${cost['input']:.2f} | ${cost['output']:.2f} | ${blend:.2f} | {avg_b:.2f} | {avg_a:.2f} | {gain:+.02f} | {qpd:.3f} |"
+        )
     lines.append("")
 
     lines.append("### Cost-Quality Tradeoff\n")
     lines.append("![Cost-Quality Tradeoff](charts/cost_quality.png)\n")
 
-    lines.append("*Blended $/M = weighted average assuming 4:1 input:output token ratio. "
-                 "Quality/$ = avg quality / blended cost. Higher is better.*\n")
+    lines.append(
+        "*Blended $/M = weighted average assuming 4:1 input:output token ratio. "
+        "Quality/$ = avg quality / blended cost. Higher is better.*\n"
+    )
 
     # Rank by quality per dollar
-    ranked = sorted(ordered, key=lambda n: (
-        sum((all_results[n].get("after") or all_results[n].get("before", {})).values()) /
-        max(len((all_results[n].get("after") or all_results[n].get("before", {}))), 1)
-    ) / max(blended_cost(all_results[n].get("model", "")), 0.01),
-        reverse=True)
+    ranked = sorted(
+        ordered,
+        key=lambda n: (
+            (
+                sum((all_results[n].get("after") or all_results[n].get("before", {})).values())
+                / max(len((all_results[n].get("after") or all_results[n].get("before", {}))), 1)
+            )
+            / max(blended_cost(all_results[n].get("model", "")), 0.01)
+        ),
+        reverse=True,
+    )
 
     lines.append("**Ranked by Quality/$:**\n")
     for i, name in enumerate(ranked, 1):
@@ -759,7 +826,9 @@ def generate_comparison_report(
         after = all_results[name].get("after") or all_results[name].get("before", {})
         avg = sum(after.values()) / max(len(after), 1)
         qpd = avg / max(blend, 0.01)
-        lines.append(f"{i}. **{name.title()}** — {qpd:.3f} quality/$ (avg {avg:.2f} at ${blend:.2f}/M blended)")
+        lines.append(
+            f"{i}. **{name.title()}** — {qpd:.3f} quality/$ (avg {avg:.2f} at ${blend:.2f}/M blended)"
+        )
     lines.append("")
 
     # --- Charts ---
@@ -770,7 +839,7 @@ def generate_comparison_report(
         lines.append("### Optimization Impact\n")
         lines.append("![Improvement Delta](charts/improvement_delta.png)\n")
 
-    charts_dir = Path(output_dir) / "charts"
+    charts_dir = out_dir / "charts"
     if (charts_dir / "tier_breakdown.png").exists():
         lines.append("### Tier Breakdown\n")
         lines.append("![Tier Breakdown](charts/tier_breakdown.png)\n")
@@ -787,11 +856,12 @@ def generate_comparison_report(
 
     # --- Per-Agent Reports ---
     lines.append("## Per-Agent Reports\n")
-    for name in ordered:
-        lines.append(f"- [{name.title()} Agent Analysis](agents/{name}_analysis.md)")
+    lines.extend(
+        f"- [{name.title()} Agent Analysis](agents/{name}_analysis.md)" for name in ordered
+    )
     lines.append("")
 
-    report_path = output_dir / "comparison_report.md"
+    report_path = out_dir / "comparison_report.md"
     with open(report_path, "w") as f:
         f.write("\n".join(lines))
 

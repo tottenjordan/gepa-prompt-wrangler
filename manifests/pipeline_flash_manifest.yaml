@@ -19,4 +19,4 @@ eval_config:
 
 pipeline:
   secret_id: wrangler-agent-env
-  cache_bust: "v6"
+  cache_bust: "v7"

@@ -1,14 +1,16 @@
 """GEPA optimization — wraps the ADK GEPARootAgentPromptOptimizer with patches."""
 
 import asyncio
+import contextlib
 import importlib.util
 import json
 import logging
 import os
 import sys
-import tempfile
 import time
 from pathlib import Path
+
+from ..core.models import DEFAULT_JUDGE_MODEL
 
 log = logging.getLogger(__name__)
 
@@ -21,9 +23,53 @@ def _fmt_elapsed(t0: float) -> str:
     return f"{m}m {s:02d}s"
 
 
+class _ToolsetFailureCounter(logging.Handler):
+    """Counts the one ADK warning that means "this case ran with no tools".
+
+    `llm_agent._convert_tool_union_to_tools` catches *every* exception from
+    `toolset.get_tools()`, logs this warning, and returns `[]`. The agent then
+    answers without its tools and GEPA scores the result as a bad prompt — a
+    network blip becomes evidence about the instruction. Nothing raises and the
+    run does not slow down, so watching the log is the only way to know.
+
+    Counted rather than escalated: one lost toolset in a 100-call budget is
+    noise worth reporting, not a reason to throw away the run. The judgement of
+    how much is too much belongs to whoever reads the summary.
+    """
+
+    def __init__(self):
+        super().__init__(level=logging.WARNING)
+        self.count = 0
+
+    def emit(self, record):
+        if record.getMessage().startswith("Failed to get tools from toolset"):
+            self.count += 1
+
+
 def _patch_adk():
-    """Apply ADK patches for GEPA compatibility."""
-    from google.adk.evaluation import eval_case as _ec, eval_set as _es
+    """Apply ADK patches for GEPA compatibility.
+
+    Verified against google-adk 2.7.1 on 2026-08-20.
+
+    Patch 1/2 — eval_case/eval_set extra="forbid" (issue #5906). Issue is
+        CLOSED but extra="forbid" is still present on 8 classes at 2.7.1.
+        Still required.
+    Patch 3 — LocalEvalService null guard (issue #6071). Issue CLOSED
+        2026-08-06 but the fix is NOT in the 2.7.1 release. Still required;
+        re-check at 2.8.x.
+    Patch 4 — LocalEvalSampler score coercion + logging. Local
+        instrumentation, not an upstream workaround.
+    Patch 5 — REMOVED. Upstream fixed #6072 in 2.7.1 and went further
+        (rubric_id matching). Keeping it was a regression.
+    Patch 6 — SafetyEvaluatorV1 metric version pin. ADK asks for the
+        *unversioned* safety metric; the SDK resolves that client-side to
+        safety_v3, which us-central1 does not serve. Still required.
+
+    Re-run the probe in docs/notes/adk-patch-status.md on every ADK bump.
+    """
+    from google.adk.evaluation import eval_case as _ec
+    from google.adk.evaluation import eval_set as _es
+
     for _mod in (_ec, _es):
         for _name in dir(_mod):
             _cls = getattr(_mod, _name)
@@ -38,17 +84,19 @@ def _patch_adk():
         for _name in dir(_mod):
             _cls = getattr(_mod, _name)
             if isinstance(_cls, type) and hasattr(_cls, "model_rebuild"):
-                try:
+                # Not every ADK model can be rebuilt; the ones that can't are
+                # already resolved, so a failure here is not actionable.
+                with contextlib.suppress(Exception):
                     _cls.model_rebuild(force=True)
-                except Exception:
-                    pass
 
     from google.adk.evaluation import local_eval_service as les
+
     _orig = les.LocalEvalService._evaluate_single_inference_result
 
     async def _patched(self, inference_result, evaluate_config):
         if inference_result.inferences is None:
             from google.adk.evaluation.eval_result import EvalCaseResult, EvalStatus
+
             return inference_result, EvalCaseResult(
                 eval_id=inference_result.eval_case_id,
                 eval_set_id=inference_result.eval_set_id,
@@ -62,6 +110,7 @@ def _patch_adk():
     les.LocalEvalService._evaluate_single_inference_result = _patched
 
     from google.adk.optimization import local_eval_sampler as sampler_mod
+
     _orig_extract = sampler_mod.LocalEvalSampler._extract_eval_data
 
     def _patched_extract(self, eval_set_id, eval_results):
@@ -82,7 +131,7 @@ def _patch_adk():
 
         if metric_totals:
             breakdown = " | ".join(
-                f"{n.split('/')[-1][:25]}={metric_totals[n]/metric_counts[n]:.2f}"
+                f"{n.split('/')[-1][:25]}={metric_totals[n] / metric_counts[n]:.2f}"
                 for n in sorted(metric_totals)
             )
             log.info("Eval batch (%d cases): %s", len(eval_results), breakdown)
@@ -91,91 +140,67 @@ def _patch_adk():
             for metric, count in rubric_failures.items():
                 log.warning(
                     "RUBRIC MATCH FAILURE: %s had %d/%d cases with no rubric scores",
-                    metric, count, len(eval_results),
+                    metric,
+                    count,
+                    len(eval_results),
                 )
 
         return _orig_extract(self, eval_set_id, eval_results)
 
     sampler_mod.LocalEvalSampler._extract_eval_data = _patched_extract
 
-    # Patch 5: Fuzzy rubric text matching — ADK's _normalize_text only does
-    # .lower().strip(), so judge-garbled text (markdown bullets, non-ASCII)
-    # causes exact match failures.  We also override
-    # convert_auto_rater_response_to_score with a substring fallback.
-    import re as _re
-    from google.adk.evaluation import rubric_based_evaluator as _rbe
+    # Patch 6 — pin GEPA's safety metric to v1.
+    #
+    # SafetyEvaluatorV1.evaluate_invocations() asks the Vertex eval SDK for the
+    # *unversioned* PrebuiltMetric.SAFETY. The SDK resolves that client-side
+    # through METRIC_LATEST_SPEC_NAME, which maps "safety" -> "safety_v3" — a
+    # version us-central1 does not serve. Every case then comes back
+    # `400 INVALID_ARGUMENT: Unsupported predefined metric: safety_v3`, the
+    # score lands as None, and patch 4 coerces it to 0.0. GEPA does not fail;
+    # it optimizes against a criterion that is pinned at zero.
+    #
+    # Same client-ahead-of-server mismatch as silent failure #3 in
+    # docs/notes/silent-failures.md. Batch eval was pinned to v1 when that was
+    # found; GEPA's criteria were not, because the version is chosen inside ADK
+    # and never appears in sampler_config.json (which correctly says
+    # "safety_v1"). `PrebuiltMetric.SAFETY_V1` falls through the loader's
+    # __getattr__ to a bare-name lookup and resolves to "safety_v1", so no
+    # private SDK import is needed.
+    from google.adk.dependencies.vertexai import vertexai as _vertexai
+    from google.adk.evaluation import safety_evaluator as safety_mod
+    from google.adk.evaluation import vertex_ai_eval_facade as facade_mod
 
-    import unicodedata as _ud
+    _pinned_safety = _vertexai.types.PrebuiltMetric.SAFETY_V1
+    try:
+        _resolved = _pinned_safety._get_api_metric_spec_name()
+    except AttributeError:  # the SDK reorganised its metric loader
+        _resolved = None
 
-    _SMART_CHARS = {
-        0x2018: "'", 0x2019: "'",
-        0x201C: '"', 0x201D: '"',
-        0x2013: "-", 0x2014: "-",
-        0x2026: "...",
-    }
+    if _resolved == "safety_v1":
 
-    def _fuzzy_normalize(text: str) -> str:
-        if not isinstance(text, str):
-            return ""
-        text = _ud.normalize('NFKC', text)
-        text = text.translate(_SMART_CHARS)
-        text = _re.sub(r'^[\s*•\-"\']+', '', text)
-        text = _re.sub(r'[\s*•\-"\']+$', '', text)
-        text = _re.sub(r'\s+', ' ', text)
-        return text.lower().strip()
+        def _patched_safety(
+            self, actual_invocations, expected_invocations=None, conversation_scenario=None
+        ):
+            # Resolved off the module, not captured at patch time, so the
+            # facade stays substitutable (and follows ADK if it swaps the
+            # class out).
+            return facade_mod._SingleTurnVertexAiEvalFacade(
+                threshold=self._threshold,
+                metric_name=_pinned_safety,
+            ).evaluate_invocations(actual_invocations, expected_invocations, conversation_scenario)
 
-    _rbe._normalize_text = _fuzzy_normalize
-
-    _orig_convert = _rbe.RubricBasedEvaluator.convert_auto_rater_response_to_score
-
-    def _patched_convert(self, auto_rater_response):
-        from google.adk.evaluation.rubric_based_evaluator import (
-            get_text_from_content, RubricScore, AutoRaterScore,
-            get_average_rubric_score,
+        safety_mod.SafetyEvaluatorV1.evaluate_invocations = _patched_safety
+    else:
+        # Pinning to a name the SDK cannot resolve would be worse than leaving
+        # ADK alone, so bail out loudly instead.
+        log.warning(
+            "Patch 6 skipped: PrebuiltMetric.SAFETY_V1 resolves to %r, not 'safety_v1'. "
+            "safety_v1 criteria may fail with 'Unsupported predefined metric'. "
+            "Re-run the probe in docs/notes/adk-patch-status.md.",
+            _resolved,
         )
-        response_text = get_text_from_content(auto_rater_response.content)
-        rubric_responses = self._auto_rater_response_parser.parse(response_text)
-        rubric_scores = []
 
-        normalized_map = {}
-        for r in self.get_effective_rubrics_list():
-            normalized_map[_fuzzy_normalize(r.rubric_content.text_property)] = r
-
-        for rubric_response in rubric_responses:
-            norm_text = _fuzzy_normalize(rubric_response.property_text)
-            rubric = normalized_map.get(norm_text)
-
-            if not rubric and norm_text:
-                candidates = [
-                    r for ct, r in normalized_map.items()
-                    if ct and (ct in norm_text or norm_text in ct)
-                ]
-                if len(candidates) == 1:
-                    rubric = candidates[0]
-                    log.debug(
-                        "Rubric substring fallback: '%s' → '%s'",
-                        rubric_response.property_text[:60],
-                        rubric.rubric_id,
-                    )
-
-            if rubric:
-                rubric_scores.append(RubricScore(
-                    rubric_id=rubric.rubric_id,
-                    rationale=rubric_response.rationale,
-                    score=rubric_response.score,
-                ))
-            else:
-                log.warning(
-                    "Rubric not matched (even with fuzzy): '%s'",
-                    rubric_response.property_text[:80],
-                )
-
-        aggregated_score = get_average_rubric_score(rubric_scores)
-        return AutoRaterScore(score=aggregated_score, rubric_scores=rubric_scores)
-
-    _rbe.RubricBasedEvaluator.convert_auto_rater_response_to_score = _patched_convert
-
-    log.info("ADK patches applied (including fuzzy rubric matching)")
+    log.info("ADK patches applied (1-4, 6; patch 5 removed — upstream #6072 fixed in ADK 2.7.1)")
 
 
 def _create_wrapper_module(agent_module_path: str, temp_dir: str) -> str:
@@ -204,6 +229,7 @@ async def _prewarm_mcp_toolsets(agent, tag: str = "  ", max_retries: int = 3) ->
     Returns the number of toolsets successfully warmed.
     """
     from google.adk.tools.base_toolset import BaseToolset
+
     mcp_toolsets = [t for t in agent.tools if isinstance(t, BaseToolset)]
     warmed = 0
     for ts in mcp_toolsets:
@@ -215,29 +241,40 @@ async def _prewarm_mcp_toolsets(agent, tag: str = "  ", max_retries: int = 3) ->
                 break
             except Exception as exc:
                 if attempt < max_retries - 1:
-                    wait = 2 ** attempt
-                    log.warning("MCP pre-warm attempt %d/%d failed, retrying in %ds: %s",
-                                attempt + 1, max_retries, wait, exc)
+                    wait = 2**attempt
+                    log.warning(
+                        "MCP pre-warm attempt %d/%d failed, retrying in %ds: %s",
+                        attempt + 1,
+                        max_retries,
+                        wait,
+                        exc,
+                    )
                     await asyncio.sleep(wait)
                 else:
-                    log.error("MCP pre-warm failed after %d attempts for %s: %s",
-                              max_retries, type(ts).__name__, exc)
+                    log.exception(
+                        "MCP pre-warm failed after %d attempts for %s",
+                        max_retries,
+                        type(ts).__name__,
+                    )
     if mcp_toolsets:
         print(f"{tag}  Pre-warmed {warmed}/{len(mcp_toolsets)} MCP toolset(s)", flush=True)
         if warmed < len(mcp_toolsets):
-            print(f"{tag}  WARNING: {len(mcp_toolsets) - warmed} toolset(s) failed — "
-                  f"optimization will proceed with reduced tool context", flush=True)
+            print(
+                f"{tag}  WARNING: {len(mcp_toolsets) - warmed} toolset(s) failed — "
+                f"optimization will proceed with reduced tool context",
+                flush=True,
+            )
     return warmed
 
 
 def optimize(
     agent_module_path: str,
-    evalset_path: str = None,
-    sampler_config_path: str = None,
-    eval_data_path: str = None,
+    evalset_path: str | None = None,
+    sampler_config_path: str | None = None,
+    eval_data_path: str | None = None,
     agent_name: str = "",
     eval_thresholds: dict[str, float] | None = None,
-    judge_model: str = "gemini-2.5-flash",
+    judge_model: str = DEFAULT_JUDGE_MODEL,
     max_metric_calls: int | None = None,
     initial_instruction: str | None = None,
 ) -> str:
@@ -259,7 +296,9 @@ def optimize(
     _patch_adk()
 
     import vertexai
+
     from ..core.config import GCP_PROJECT_ID, GCP_REGION, GCP_STAGING_BUCKET
+
     vertexai.init(
         project=GCP_PROJECT_ID,
         location=GCP_REGION,
@@ -287,6 +326,8 @@ def optimize(
         )
 
     spec = importlib.util.spec_from_file_location("agent_mod", init_file)
+    if spec is None or spec.loader is None:
+        raise ImportError(f"Cannot load a Python module from {init_file}")
     module = importlib.util.module_from_spec(spec)
     sys.modules["agent_mod"] = module
     try:
@@ -315,9 +356,15 @@ def optimize(
 
     if initial_instruction:
         root_agent.instruction = initial_instruction
-        print(f"{tag}  Instruction override: {len(initial_instruction)} chars (from manifest)", flush=True)
+        print(
+            f"{tag}  Instruction override: {len(initial_instruction)} chars (from manifest)",
+            flush=True,
+        )
     else:
-        print(f"{tag}  Instruction: {len(root_agent.instruction)} chars (from _opt module)", flush=True)
+        print(
+            f"{tag}  Instruction: {len(root_agent.instruction)} chars (from _opt module)",
+            flush=True,
+        )
     print(f"{tag}  Agent: {root_agent.name}", flush=True)
 
     app_name = os.path.basename(agent_module_path)
@@ -328,13 +375,14 @@ def optimize(
         # and thresholds. It is used verbatim — experiment eval_thresholds do NOT
         # override it (they only seed the fallback criteria below when no file exists).
         import json as _json
+
         with open(sampler_config_path) as f:
             sampler_config = _json.load(f)
     else:
         from ..core.converter import build_gepa_criteria
+
         evalset_stem = Path(evalset_path).stem if evalset_path else "eval_set"
-        if evalset_stem.endswith(".evalset"):
-            evalset_stem = evalset_stem[:-len(".evalset")]
+        evalset_stem = evalset_stem.removesuffix(".evalset")
         sampler_config = {
             "eval_config": {
                 "criteria": build_gepa_criteria(eval_thresholds, judge_model),
@@ -356,10 +404,18 @@ def optimize(
         sampler_cfg.app_name = app_name
 
     evalset_dir = os.path.join(agents_dir, app_name)
-    evalset_files = [f for f in os.listdir(evalset_dir) if f.endswith(".evalset.json")] if os.path.isdir(evalset_dir) else []
+    evalset_files = (
+        [f for f in os.listdir(evalset_dir) if f.endswith(".evalset.json")]
+        if os.path.isdir(evalset_dir)
+        else []
+    )
     if not evalset_files and eval_data_path:
-        print(f"{tag}  No evalset files in {evalset_dir} — auto-generating from {eval_data_path}", flush=True)
-        from ..core.converter import load_eval_file, generate_gepa_evalset, generate_sampler_config
+        print(
+            f"{tag}  No evalset files in {evalset_dir} — auto-generating from {eval_data_path}",
+            flush=True,
+        )
+        from ..core.converter import generate_gepa_evalset, generate_sampler_config, load_eval_file
+
         cases = load_eval_file(eval_data_path)
         eval_set_id = f"{app_name}_eval_set"
         generate_gepa_evalset(cases, evalset_dir, eval_set_id=eval_set_id, app_name=app_name)
@@ -375,14 +431,18 @@ def optimize(
     elif not evalset_files:
         log.warning(f"No .evalset.json files found in {evalset_dir}. GEPA may fail.")
         print(f"{tag}  WARNING: No evalset files in {evalset_dir}", flush=True)
-        print(f"{tag}  Run: wrangler generate-evalset --from <eval.yaml> --output {evalset_dir}", flush=True)
+        print(
+            f"{tag}  Run: wrangler generate-evalset --from <eval.yaml> --output {evalset_dir}",
+            flush=True,
+        )
 
     run_dir = os.path.join("outputs", "gepa_runs", app_name)
     os.makedirs(run_dir, exist_ok=True)
-    opt_kwargs = {"run_dir": run_dir}
-    if max_metric_calls is not None:
-        opt_kwargs["max_metric_calls"] = max_metric_calls
-    optimizer_config = GEPARootAgentPromptOptimizerConfig(**opt_kwargs)
+    optimizer_config = (
+        GEPARootAgentPromptOptimizerConfig(run_dir=run_dir, max_metric_calls=max_metric_calls)
+        if max_metric_calls is not None
+        else GEPARootAgentPromptOptimizerConfig(run_dir=run_dir)
+    )
     eval_sets_manager = LocalEvalSetsManager(agents_dir=agents_dir)
     sampler = LocalEvalSampler(sampler_cfg, eval_sets_manager)
     optimizer = GEPARootAgentPromptOptimizer(optimizer_config)
@@ -391,18 +451,28 @@ def optimize(
     val_count = len(sampler.get_validation_example_ids())
     max_calls = optimizer_config.max_metric_calls
     print(f"{tag}[3/3] Running GEPA optimization...", flush=True)
-    print(f"{tag}  Train: {train_count} cases, Val: {val_count} cases, Max metric calls: {max_calls}", flush=True)
+    print(
+        f"{tag}  Train: {train_count} cases, Val: {val_count} cases, Max metric calls: {max_calls}",
+        flush=True,
+    )
     print(f"{tag}  Optimizer model: {optimizer_config.optimizer_model}", flush=True)
     print(f"{tag}  Run dir: {run_dir}", flush=True)
 
     t0 = time.time()
+    # ADK downgrades "the agent lost its toolset" to a warning and carries on,
+    # so hook the logger it warns through for the duration of the run.
+    toolset_failures = _ToolsetFailureCounter()
+    adk_agent_log = logging.getLogger("google_adk.google.adk.agents.llm_agent")
+    adk_agent_log.addHandler(toolset_failures)
     try:
+
         async def _run_with_warmup():
             await _prewarm_mcp_toolsets(root_agent, tag)
 
             # Patch sampler to refresh MCP sessions before each generation.
             # Sessions die between generations due to Cloud Run idle timeouts.
             from google.adk.tools.base_toolset import BaseToolset
+
             _orig_sample = sampler.sample_and_score
             _gen_count = [0]
 
@@ -413,16 +483,22 @@ def optimize(
                 mcp_count = sum(1 for t in root_agent.tools if isinstance(t, BaseToolset))
 
                 if gen > 1 and mcp_count > 0:
-                    print(f"{tag}  Generation {gen}: closing {mcp_count} stale MCP session(s)...", flush=True)
+                    print(
+                        f"{tag}  Generation {gen}: closing {mcp_count} stale MCP session(s)...",
+                        flush=True,
+                    )
                     for tool in root_agent.tools:
                         if isinstance(tool, BaseToolset):
-                            try:
+                            # Closing a stale session is best-effort: the point is
+                            # to re-warm below, and a dead session raises on close.
+                            with contextlib.suppress(Exception):
                                 await tool.close()
-                            except Exception:
-                                pass
                     warmed = await _prewarm_mcp_toolsets(root_agent, tag, max_retries=2)
                     refresh_elapsed = time.time() - gen_t0
-                    print(f"{tag}  Generation {gen}: re-warmed {warmed}/{mcp_count} in {refresh_elapsed:.1f}s", flush=True)
+                    print(
+                        f"{tag}  Generation {gen}: re-warmed {warmed}/{mcp_count} in {refresh_elapsed:.1f}s",
+                        flush=True,
+                    )
                 else:
                     print(f"{tag}  Generation {gen}: evaluating candidate...", flush=True)
 
@@ -431,7 +507,8 @@ def optimize(
                 print(f"{tag}  Generation {gen}: scored in {gen_elapsed:.1f}s", flush=True)
                 return result
 
-            sampler.sample_and_score = _refreshed_sample
+            # ADK patch: wraps the bound method with per-generation MCP refresh.
+            sampler.sample_and_score = _refreshed_sample  # ty: ignore[invalid-assignment]
 
             return await optimizer.optimize(root_agent, sampler)
 
@@ -447,8 +524,17 @@ def optimize(
                 f"    - Run: wrangler inspect <agent_dir> to see correct tool names"
             ) from e
         raise
+    finally:
+        adk_agent_log.removeHandler(toolset_failures)
 
-    elapsed = time.time() - t0
+    if toolset_failures.count:
+        print(
+            f"{tag}  WARNING: {toolset_failures.count} agent invocation(s) ran with a "
+            f"missing toolset and were scored anyway — those cases judged a toolless "
+            f"agent, not the prompt",
+            flush=True,
+        )
+
     best_idx = optimization_result.gepa_result["best_idx"]
     best_agent = optimization_result.optimized_agents[best_idx]
     optimized_instruction = best_agent.optimized_agent.instruction
@@ -458,7 +544,9 @@ def optimize(
     scores_summary = ""
     for i, agent_with_score in enumerate(optimization_result.optimized_agents):
         marker = " <-- best" if i == best_idx else ""
-        scores_summary += f"\n{tag}    variant {i}: score={agent_with_score.overall_score:.3f}{marker}"
+        scores_summary += (
+            f"\n{tag}    variant {i}: score={agent_with_score.overall_score:.3f}{marker}"
+        )
 
     print(f"{tag}  Optimization complete ({_fmt_elapsed(t0)})", flush=True)
     print(f"{tag}  Candidates: {n_candidates}, Total metric calls: {total_calls}", flush=True)
@@ -468,9 +556,12 @@ def optimize(
     stderr_path = os.path.join(run_dir, "run_log_stderr.txt")
     if os.path.exists(stderr_path):
         with open(stderr_path) as f:
-            rubric_warnings = [l for l in f if "not found in the rubrics" in l]
+            rubric_warnings = [line for line in f if "not found in the rubrics" in line]
         if rubric_warnings:
-            print(f"{tag}  WARNING: {len(rubric_warnings)} rubric match failures during optimization", flush=True)
+            print(
+                f"{tag}  WARNING: {len(rubric_warnings)} rubric match failures during optimization",
+                flush=True,
+            )
             seen = set()
             for w in rubric_warnings:
                 short = w.strip()[:120]

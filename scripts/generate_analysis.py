@@ -7,27 +7,27 @@ Usage:
 
 import argparse
 import json
+import sys
 from pathlib import Path
 
-import sys
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from wrangler.core.config import REPORTS_DIR, OUTPUTS_DIR
-from wrangler.analysis import (
-    generate_agent_report, generate_comparison_report, normalize_agent_keys,
-    generate_all_charts,
-    METRIC_LABELS, AGENT_ORDER,
-)
+from wrangler.core.config import OUTPUTS_DIR, REPORTS_DIR
+from wrangler.core.models import AGENT_ORDER
+from wrangler.reporting.analysis import generate_all_charts, normalize_agent_keys
+from wrangler.reporting.report_sections import generate_agent_report, generate_comparison_report
 
 CHARTS_DIR = Path(REPORTS_DIR) / "charts"
 AGENTS_DIR = Path(REPORTS_DIR) / "agents"
 
 
-def load_results(input_path: str = None) -> dict:
+def load_results(input_path: str | None = None) -> dict:
     if input_path:
         with open(input_path) as f:
             return json.load(f)
-    files = sorted(Path(OUTPUTS_DIR).glob("demo_*.json")) + sorted(Path(OUTPUTS_DIR).glob("results_*.json"))
+    files = sorted(Path(OUTPUTS_DIR).glob("demo_*.json")) + sorted(
+        Path(OUTPUTS_DIR).glob("results_*.json")
+    )
     if not files:
         raise FileNotFoundError("No results files found in outputs/")
     with open(files[-1]) as f:
@@ -45,7 +45,7 @@ def _get_case_metadata(results: dict) -> list[dict] | None:
     return None
 
 
-def main(input_path: str = None):
+def main(input_path: str | None = None):
     print("Loading results...")
     results = normalize_agent_keys(load_results(input_path))
     case_metadata = _get_case_metadata(results)

@@ -1,12 +1,15 @@
 """Search MCP server — exposes flight and hotel search tools over StreamableHTTP."""
 
 import logging
+
 logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 try:
     from otel_setup import setup_opentelemetry
+
     setup_opentelemetry("search-mcp")
 except Exception as e:
-    logging.warning("OTel setup failed: %s", e)
+    logger.warning("OTel setup failed: %s", e)
 
 from fastmcp import FastMCP
 
@@ -28,9 +31,9 @@ def search_flights(origin: str, destination: str, date: str | None = None) -> li
         date: Optional date filter (YYYY-MM-DD)
     """
     results = [
-        f for f in FLIGHTS
-        if f["origin"].upper() == origin.upper()
-        and f["destination"].upper() == destination.upper()
+        f
+        for f in FLIGHTS
+        if f["origin"].upper() == origin.upper() and f["destination"].upper() == destination.upper()
     ]
     if date:
         results = [f for f in results if f["date"] == date]

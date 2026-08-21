@@ -14,8 +14,9 @@ EVAL_DATA_DIR = EXAMPLE_ROOT / "eval_data"
 AGENTS_DIR = EXAMPLE_ROOT / "agents"
 
 sys.path.insert(0, str(EXAMPLE_ROOT))
-from mcp_servers.search.mock_db import FLIGHTS, HOTELS
-from mcp_servers.expense.mock_db import POLICY_LIMITS
+# E402 below is deliberate: the example package is only importable after
+# the sys.path insert above.
+from mcp_servers.search.mock_db import FLIGHTS, HOTELS  # noqa: E402
 
 YAML_PATH = EVAL_DATA_DIR / "eval_cases.yaml"
 MODELS = ["lite", "flash", "pro", "sonnet", "opus"]
@@ -25,8 +26,7 @@ MODELS = ["lite", "flash", "pro", "sonnet", "opus"]
 # a variant that reuses the opus agent + eval_set_id "opus_eval_set" with a
 # distinct filename/app_name, so it cannot be derived from the MODELS pattern.
 EVALSET_FILES = [
-    (f"{model}_opt", f"{model}_eval_set.evalset.json", f"{model}_eval_set")
-    for model in MODELS
+    (f"{model}_opt", f"{model}_eval_set.evalset.json", f"{model}_eval_set") for model in MODELS
 ] + [
     ("opus48_opt", "opus_eval_set.evalset.json", "opus_eval_set"),
 ]
@@ -42,11 +42,16 @@ def _load_yaml_cases():
 # of the YAML→JSON conversion. EXAMPLE_ROOT is already on sys.path above.
 from scripts.generate_evalsets import (  # noqa: E402
     EVALSET_TARGETS as GEN_EVALSET_TARGETS,
+)
+from scripts.generate_evalsets import (  # noqa: E402
     build_eval_case as _gen_build_eval_case,
+)
+from scripts.generate_evalsets import (  # noqa: E402
     load_yaml_cases as _gen_load_yaml_cases,
+)
+from scripts.generate_evalsets import (  # noqa: E402
     select_cases as _gen_select_cases,
 )
-
 
 FLIGHT_ID_RE = re.compile(r"^FL\d{3}$")
 HOTEL_ID_RE = re.compile(r"^HT\d{3}$")
@@ -67,7 +72,9 @@ class TestEvalCasesYaml:
     def test_all_cases_have_required_fields(self):
         for case in _load_yaml_cases():
             assert "prompt" in case, f"Missing 'prompt' in case: {case}"
-            assert "expected_response" in case, f"Missing 'expected_response' in: {case['prompt'][:50]}"
+            assert "expected_response" in case, (
+                f"Missing 'expected_response' in: {case['prompt'][:50]}"
+            )
             assert "expected_tools" in case, f"Missing 'expected_tools' in: {case['prompt'][:50]}"
 
     def test_expected_tools_have_name(self):
@@ -81,20 +88,29 @@ class TestEvalCasesYaml:
 
     def test_all_cases_have_tier(self):
         for case in _load_yaml_cases():
-            assert "tier" in case and case["tier"] in {"low", "medium", "high"}, (
-                f"Missing or invalid 'tier' in case: {case['prompt'][:50]}"
+            assert "tier" in case, f"Missing 'tier' in case: {case['prompt'][:50]}"
+            assert case["tier"] in {"low", "medium", "high"}, (
+                f"Invalid 'tier' in case: {case['prompt'][:50]}"
             )
 
     def test_all_cases_have_category(self):
-        valid = {"search", "policy", "booking", "expense", "planning",
-                 "cancellation", "boundary", "error_handling"}
+        valid = {
+            "search",
+            "policy",
+            "booking",
+            "expense",
+            "planning",
+            "cancellation",
+            "boundary",
+            "error_handling",
+        }
         for case in _load_yaml_cases():
-            assert "category" in case and case["category"] in valid, (
-                f"Missing or invalid 'category' in case: {case['prompt'][:50]}"
-            )
+            assert "category" in case, f"Missing 'category' in case: {case['prompt'][:50]}"
+            assert case["category"] in valid, f"Invalid 'category' in case: {case['prompt'][:50]}"
 
     def test_tier_distribution(self):
         from collections import Counter
+
         counts = Counter(c["tier"] for c in _load_yaml_cases())
         assert counts["low"] == 33, f"Expected 33 low, got {counts['low']}"
         assert counts["medium"] == 22, f"Expected 22 medium, got {counts['medium']}"
@@ -108,9 +124,12 @@ class TestTierEvalCases:
     @pytest.fixture(autouse=True)
     def _load(self):
         from eval_data.tier_eval_cases import (
-            LOW_COMPLEXITY_CASES, MEDIUM_COMPLEXITY_CASES,
-            HIGH_COMPLEXITY_CASES, TIER_EVAL_CASES,
+            HIGH_COMPLEXITY_CASES,
+            LOW_COMPLEXITY_CASES,
+            MEDIUM_COMPLEXITY_CASES,
+            TIER_EVAL_CASES,
         )
+
         self.low = LOW_COMPLEXITY_CASES
         self.medium = MEDIUM_COMPLEXITY_CASES
         self.high = HIGH_COMPLEXITY_CASES
@@ -120,11 +139,20 @@ class TestTierEvalCases:
         assert set(self.tiers.keys()) == {"low", "medium", "high"}
 
     def test_cases_have_required_fields(self):
-        required = {"prompt", "reference", "category", "expected_tool", "expected_signals", "description"}
+        required = {
+            "prompt",
+            "reference",
+            "category",
+            "expected_tool",
+            "expected_signals",
+            "description",
+        }
         for tier_name, cases in self.tiers.items():
             for case in cases:
                 missing = required - set(case.keys())
-                assert not missing, f"Tier {tier_name} case missing {missing}: {case['prompt'][:50]}"
+                assert not missing, (
+                    f"Tier {tier_name} case missing {missing}: {case['prompt'][:50]}"
+                )
 
     def test_flight_id_signals_exist_in_mock_data(self):
         for tier_name, cases in self.tiers.items():
@@ -144,9 +172,14 @@ class TestAgentEvalConfigs:
     @pytest.fixture(autouse=True)
     def _load(self):
         from eval_data.agent_eval_configs import (
-            TRAVEL_EVAL_CASES, EXPENSE_EVAL_CASES, ROUTER_EVAL_CASES,
-            STANDALONE_EVAL_CASES, get_eval_cases, get_metrics,
+            EXPENSE_EVAL_CASES,
+            ROUTER_EVAL_CASES,
+            STANDALONE_EVAL_CASES,
+            TRAVEL_EVAL_CASES,
+            get_eval_cases,
+            get_metrics,
         )
+
         self.travel = TRAVEL_EVAL_CASES
         self.expense = EXPENSE_EVAL_CASES
         self.router = ROUTER_EVAL_CASES
@@ -161,8 +194,19 @@ class TestAgentEvalConfigs:
         assert len(self.standalone) > 0
 
     def test_cases_have_required_fields(self):
-        required = {"prompt", "reference", "category", "expected_tool", "expected_signals", "description"}
-        for name, cases in [("travel", self.travel), ("expense", self.expense), ("router", self.router)]:
+        required = {
+            "prompt",
+            "reference",
+            "category",
+            "expected_tool",
+            "expected_signals",
+            "description",
+        }
+        for name, cases in [
+            ("travel", self.travel),
+            ("expense", self.expense),
+            ("router", self.router),
+        ]:
             for case in cases:
                 missing = required - set(case.keys())
                 assert not missing, f"{name} case missing {missing}: {case['prompt'][:50]}"
@@ -172,8 +216,15 @@ class TestAgentEvalConfigs:
 
     def test_get_eval_cases_returns_for_all_agents(self):
         agents = [
-            "coordinator_agent", "travel_agent", "expense_agent", "router_agent",
-            "lite_agent", "flash_agent", "pro_agent", "sonnet_agent", "opus_agent",
+            "coordinator_agent",
+            "travel_agent",
+            "expense_agent",
+            "router_agent",
+            "lite_agent",
+            "flash_agent",
+            "pro_agent",
+            "sonnet_agent",
+            "opus_agent",
         ]
         for agent in agents:
             cases = self.get_eval_cases(agent)
@@ -237,7 +288,9 @@ class TestEvalsetJsonFiles:
                 data = json.load(f)
             for case in data["eval_cases"]:
                 si = case["session_input"]
-                assert "category" in si, f"{dir_name}: {case['eval_id']} missing category in session_input"
+                assert "category" in si, (
+                    f"{dir_name}: {case['eval_id']} missing category in session_input"
+                )
                 assert "tier" in si, f"{dir_name}: {case['eval_id']} missing tier in session_input"
 
     def test_evalset_session_input_app_name_matches_dir(self):
@@ -267,6 +320,7 @@ class TestEvalsetJsonFiles:
 class TestMockDataConsistency:
     def test_flight_ids_referenced_in_evals_exist(self):
         from eval_data.tier_eval_cases import TIER_EVAL_CASES
+
         for tier_name, cases in TIER_EVAL_CASES.items():
             for case in cases:
                 for signal in case["expected_signals"]:
@@ -278,19 +332,32 @@ class TestMockDataConsistency:
 
     def test_hotel_names_referenced_in_evals_exist(self):
         from eval_data.tier_eval_cases import TIER_EVAL_CASES
+
         for tier_name, cases in TIER_EVAL_CASES.items():
             for case in cases:
                 for signal in case["expected_signals"]:
                     if any(signal in name for name in ALL_HOTEL_NAMES):
                         continue
-                    if signal.startswith(("Grand", "Budget", "Fontainebleau", "Palmer",
-                                         "Ritz", "Claridge", "Park Hotel", "Crawford", "Liberty")):
+                    if signal.startswith(
+                        (
+                            "Grand",
+                            "Budget",
+                            "Fontainebleau",
+                            "Palmer",
+                            "Ritz",
+                            "Claridge",
+                            "Park Hotel",
+                            "Crawford",
+                            "Liberty",
+                        )
+                    ):
                         assert any(signal in name for name in ALL_HOTEL_NAMES), (
                             f"Hotel signal '{signal}' in tier {tier_name} not in mock HOTELS"
                         )
 
     def test_cities_referenced_in_hotel_evals_have_data(self):
         from eval_data.agent_eval_configs import TRAVEL_EVAL_CASES
+
         for case in TRAVEL_EVAL_CASES:
             if case["expected_tool"] == "search_mcp_search_hotels":
                 for signal in case["expected_signals"]:
@@ -353,7 +420,7 @@ class TestYamlEvalsetParity:
                 f"YAML derives {len(expected_cases)} — regenerate evalsets"
             )
 
-            for exp, got in zip(expected_cases, committed_cases):
+            for exp, got in zip(expected_cases, committed_cases, strict=False):
                 assert got["eval_id"] == exp["eval_id"], (
                     f"{target['dir_name']}: eval_id drift "
                     f"{got['eval_id']!r} != {exp['eval_id']!r} — regenerate evalsets"

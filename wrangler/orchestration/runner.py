@@ -7,19 +7,23 @@ import warnings
 from collections import Counter
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from contextlib import contextmanager
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 
 os.environ.setdefault("ADK_SUPPRESS_GEMINI_LITELLM_WARNINGS", "true")
 warnings.filterwarnings("ignore", message=".*EXPERIMENTAL.*")
 warnings.filterwarnings("ignore", message=".*GEMINI_VIA_LITELLM.*")
 
-from ..core.factory import PairFactory, AgentPromptPair, Manifest
-from ..core.converter import load_eval_file
-from ..eval.evaluator import run_batch_eval_averaged, EvalResult
-from ..optimize.optimizer import optimize
-from ..reporting.reporter import generate_report
-from ..core import deploy as deployer
+# E402 below is deliberate: the filterwarnings() calls above must execute
+# before the ADK/Vertex imports, or their import-time warnings escape.
+
+from ..core import deploy as deployer  # noqa: E402
+from ..core.converter import load_eval_file  # noqa: E402
+from ..core.factory import AgentPromptPair, PairFactory  # noqa: E402
+from ..core.models import DEFAULT_MANIFEST_JUDGE_MODEL  # noqa: E402
+from ..eval.evaluator import EvalResult, run_batch_eval_averaged  # noqa: E402
+from ..optimize.optimizer import optimize  # noqa: E402
+from ..reporting.reporter import generate_report  # noqa: E402
 
 
 def _fmt_duration(seconds: float) -> str:
@@ -31,7 +35,13 @@ def _fmt_duration(seconds: float) -> str:
 
 
 class WranglerPipeline:
-    def __init__(self, manifest_path: str, max_concurrent: int = 1, version: str | None = None, num_runs: int = 1):
+    def __init__(
+        self,
+        manifest_path: str,
+        max_concurrent: int = 1,
+        version: str | None = None,
+        num_runs: int = 1,
+    ):
         self.manifest = PairFactory.load(manifest_path)
         self.manifest_dir = Path(manifest_path).parent
         self.results: dict[str, dict] = {}
@@ -50,8 +60,10 @@ class WranglerPipeline:
         elapsed = time.time() - t0
         self._phase_times.append((name, elapsed))
         total = time.time() - self._pipeline_start
-        print(f"\n  >> {name} complete ({_fmt_duration(elapsed)}) "
-              f"[total elapsed: {_fmt_duration(total)}]")
+        print(
+            f"\n  >> {name} complete ({_fmt_duration(elapsed)}) "
+            f"[total elapsed: {_fmt_duration(total)}]"
+        )
 
     def load_results(self, results_path: str):
         """Load previous results JSON to resume from a later phase."""
@@ -78,6 +90,7 @@ class WranglerPipeline:
         prompts_dir = self.manifest_dir / "prompts"
         if prompts_dir.exists():
             import re
+
             for py_file in prompts_dir.glob("*_prompts.py"):
                 for match in re.finditer(r"wrangler_v(\d+)", py_file.read_text()):
                     max_ver = max(max_ver, int(match.group(1)))
@@ -89,55 +102,36 @@ class WranglerPipeline:
             eval_path = Path(self.manifest.eval_data)
         return load_eval_file(str(eval_path))
 
-    def _load_agent(self, pair: AgentPromptPair):
-        """Import and instantiate the agent with the pair's model and prompt."""
-        import importlib.util
-        import sys
+    def _agent_module_path(self, pair: AgentPromptPair) -> str:
+        """Resolve a pair's agent module to a filesystem path for the build package.
 
+        Tries the manifest-relative path first, then the reference as written —
+        manifests in the wild use both, and the loader this replaced accepted
+        both too.
+        """
         module_ref = pair.agent_module or self.manifest.agent_module
         agent_path = self.manifest_dir / module_ref
         if not agent_path.exists():
-            agent_path = Path(module_ref)
+            return module_ref
+        return str(agent_path)
 
-        if agent_path.is_file():
-            init_file = agent_path
-        elif not agent_path.suffix and (agent_path.with_suffix(".py")).is_file():
-            init_file = agent_path.with_suffix(".py")
-        else:
-            init_file = agent_path / "__init__.py"
-            if not init_file.exists():
-                for py_file in agent_path.glob("*.py"):
-                    init_file = py_file
-                    break
+    def _deploy_pair(self, pair: AgentPromptPair) -> str:
+        """Deploy one pair to GEAP from source. Returns the engine id."""
+        return deployer.deploy_agent_from_source(
+            agent_module=self._agent_module_path(pair),
+            model=pair.model,
+            instruction=pair.system_prompt,
+            display_name=pair.id,
+        )
 
-        spec = importlib.util.spec_from_file_location(f"_agent_{pair.id}", str(init_file))
-        module = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(module)
-
-        from ..core.config import resolve_model
-
-        if hasattr(module, "create_agent"):
-            return module.create_agent(pair.model, pair.system_prompt)
-
-        agent = None
-        if hasattr(module, "agent") and hasattr(module.agent, "root_agent"):
-            agent = module.agent.root_agent
-        elif hasattr(module, "root_agent"):
-            agent = module.root_agent
-
-        if agent is not None:
-            agent.model = resolve_model(pair.model)
-            agent.instruction = pair.system_prompt
-            return agent
-
-        exports = [k for k in dir(module) if not k.startswith("_")]
-        raise ValueError(
-            f"Could not load agent from {agent_path}.\n"
-            f"  Module exports: {exports}\n"
-            f"  Expected one of:\n"
-            f"    1. create_agent(model, instruction) — factory function (recommended)\n"
-            f"    2. agent.root_agent — SimpleNamespace wrapping an LlmAgent\n"
-            f"    3. root_agent — LlmAgent directly"
+    def _redeploy_pair(self, pair: AgentPromptPair, engine_id: str) -> str:
+        """Redeploy one pair in place with its current (post-GEPA) prompt."""
+        return deployer.update_agent_from_source(
+            engine_id=engine_id,
+            agent_module=self._agent_module_path(pair),
+            model=pair.model,
+            instruction=pair.system_prompt,
+            display_name=pair.id,
         )
 
     def _resolve_optimize_module(self, pair: AgentPromptPair) -> Path:
@@ -152,7 +146,7 @@ class WranglerPipeline:
         stem = agent_path.stem.replace("_agent", "")
         opt_dir = agent_path.parent / f"{stem}_opt"
 
-        for base in [self.manifest_dir, Path(".")]:
+        for base in [self.manifest_dir, Path()]:
             candidate = base / opt_dir
             if candidate.is_dir() and (candidate / "__init__.py").exists():
                 return candidate
@@ -162,7 +156,9 @@ class WranglerPipeline:
             fallback = Path(self.manifest.agent_module)
         return fallback
 
-    def _save_optimized_prompt(self, pair: AgentPromptPair, prompt: str, version: str | None = None):
+    def _save_optimized_prompt(
+        self, pair: AgentPromptPair, prompt: str, version: str | None = None
+    ):
         """Save optimized prompt to the agent's prompts.py file."""
         agent_ref = pair.agent_module or self.manifest.agent_module
         stem = Path(agent_ref).stem.replace("_agent", "")
@@ -172,18 +168,19 @@ class WranglerPipeline:
             return
 
         version = version or self._next_version()
-        judge = self.manifest.eval_config.get("judge_model", "gemini-3.5-flash")
+        judge = self.manifest.eval_config.get("judge_model", DEFAULT_MANIFEST_JUDGE_MODEL)
         case_count = self.results.get("_eval_metadata", {}).get("case_count", 0)
         entry = {
             "prompt": prompt,
             "source": "wrangler GEPA optimization",
             "eval_cases": case_count,
             "judge_model": judge,
-            "timestamp": datetime.now().isoformat(),
+            "timestamp": datetime.now(tz=UTC).isoformat(),
         }
 
         content = prompts_file.read_text()
         import ast
+
         tree = ast.parse(content)
         optimized_node = None
         for node in ast.walk(tree):
@@ -196,7 +193,9 @@ class WranglerPipeline:
             print(f"  [{pair.id}] Warning: OPTIMIZED dict not found in {prompts_file}", flush=True)
             return
 
-        optimized_dict = ast.literal_eval(content[content.index("OPTIMIZED =") + len("OPTIMIZED ="):])
+        optimized_dict = ast.literal_eval(
+            content[content.index("OPTIMIZED =") + len("OPTIMIZED =") :]
+        )
         optimized_dict[version] = entry
 
         lines = [f'    "{version}": {{']
@@ -253,7 +252,9 @@ class WranglerPipeline:
         def _eval_one(pair: AgentPromptPair) -> tuple[str, EvalResult, float]:
             engine_id = self.results[pair.id]["engine_id"]
             t0 = time.time()
-            result = run_batch_eval_averaged(engine_id, eval_cases, num_runs=self.num_runs, agent_name=pair.id)
+            result = run_batch_eval_averaged(
+                engine_id, eval_cases, num_runs=self.num_runs, agent_name=pair.id
+            )
             elapsed = time.time() - t0
             return pair.id, result, elapsed
 
@@ -280,10 +281,13 @@ class WranglerPipeline:
                 _record(pair_id, result, elapsed)
         else:
             for batch_start in range(0, len(pairs), mc):
-                batch = pairs[batch_start:batch_start + mc]
+                batch = pairs[batch_start : batch_start + mc]
                 batch_num = batch_start // mc + 1
                 total_batches = (len(pairs) + mc - 1) // mc
-                print(f"\n  --- Batch {batch_num}/{total_batches} ({len(batch)} agents) ---", flush=True)
+                print(
+                    f"\n  --- Batch {batch_num}/{total_batches} ({len(batch)} agents) ---",
+                    flush=True,
+                )
 
                 with ThreadPoolExecutor(max_workers=mc) as pool:
                     futures = {pool.submit(_eval_one, pair): pair for pair in batch}
@@ -308,7 +312,7 @@ class WranglerPipeline:
         if missing_cat:
             raise ValueError(f"Cases missing 'category' field at indices: {missing_cat[:5]}")
 
-        print(f"  Pre-flight: PASSED")
+        print("  Pre-flight: PASSED")
 
     def run(self, from_phase: int = 0) -> dict:
         """Execute the full pipeline with progress tracking.
@@ -319,7 +323,7 @@ class WranglerPipeline:
         self._pipeline_start = time.time()
 
         print(f"{'=' * 60}")
-        print(f"GEPA PROMPT WRANGLER")
+        print("GEPA PROMPT WRANGLER")
         print(f"{'=' * 60}")
         print(f"  Experiment: {self.manifest.name}")
         print(f"  Pairs:      {len(self.manifest.pairs)}")
@@ -331,17 +335,24 @@ class WranglerPipeline:
         n_pairs = len(self.manifest.pairs)
 
         for pair in self.manifest.pairs:
-            self.results.setdefault(pair.id, {
-                "model": pair.model,
-                "original_prompt": pair.system_prompt,
-            })
+            self.results.setdefault(
+                pair.id,
+                {
+                    "model": pair.model,
+                    "original_prompt": pair.system_prompt,
+                },
+            )
 
         self.results["_eval_metadata"] = {
             "version": self._next_version(),
             "num_runs": self.num_runs,
             "case_count": len(eval_cases),
             "cases": [
-                {"tier": c.get("tier", ""), "category": c.get("category", ""), "prompt": c.get("prompt", "")}
+                {
+                    "tier": c.get("tier", ""),
+                    "category": c.get("category", ""),
+                    "prompt": c.get("prompt", ""),
+                }
                 for c in eval_cases
             ],
         }
@@ -354,13 +365,14 @@ class WranglerPipeline:
             with self._phase("Phase 1: Deploy to GEAP"):
                 for i, pair in enumerate(self.manifest.pairs, 1):
                     if pair.engine_id:
-                        print(f"  [{pair.id}] ({i}/{n_pairs}) Using existing engine: {pair.engine_id}")
+                        print(
+                            f"  [{pair.id}] ({i}/{n_pairs}) Using existing engine: {pair.engine_id}"
+                        )
                         self.results[pair.id]["engine_id"] = pair.engine_id
                     else:
                         print(f"  [{pair.id}] ({i}/{n_pairs}) Deploying...", end="", flush=True)
                         t0 = time.time()
-                        agent = self._load_agent(pair)
-                        engine_id = deployer.deploy_agent(agent, display_name=pair.id)
+                        engine_id = self._deploy_pair(pair)
                         self.results[pair.id]["engine_id"] = engine_id
                         print(f" {_fmt_duration(time.time() - t0)}")
 
@@ -378,8 +390,7 @@ class WranglerPipeline:
                     print(f"  [{pair.id}] ({i}/{n_pairs}) Redeploying...", end="", flush=True)
                     t0 = time.time()
                     engine_id = self.results[pair.id]["engine_id"]
-                    agent = self._load_agent(pair)
-                    deployer.update_agent(agent, engine_id, display_name=pair.id)
+                    self._redeploy_pair(pair, engine_id)
                     print(f" {_fmt_duration(time.time() - t0)}")
 
         if from_phase <= 5:
@@ -390,7 +401,9 @@ class WranglerPipeline:
             generate_report(self.results, self.manifest.name)
 
         # Save raw results
-        output_path = Path("outputs") / f"results_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+        output_path = (
+            Path("outputs") / f"results_{datetime.now(tz=UTC).strftime('%Y%m%d_%H%M%S')}.json"
+        )
         output_path.parent.mkdir(parents=True, exist_ok=True)
         with open(output_path, "w") as f:
             json.dump(self.results, f, indent=2, default=str)

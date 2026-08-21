@@ -24,11 +24,15 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "examples", "mu
 os.environ.setdefault("ADK_SUPPRESS_GEMINI_LITELLM_WARNINGS", "true")
 
 import warnings
+
 warnings.filterwarnings("ignore", message=".*EXPERIMENTAL.*")
 warnings.filterwarnings("ignore", message=".*GEMINI_VIA_LITELLM.*")
 warnings.filterwarnings("ignore", category=DeprecationWarning, module="vertexai")
 
-LITE_ENGINE_ID = "4981388556929859584"
+# Supplied per run (--engine-id or LITE_ENGINE_ID), never hardcoded: the id names
+# one deployment, and a checked-in default points at whatever engine happened to
+# exist the day it was written. Test 3 skips itself when there is nothing to point at.
+LITE_ENGINE_ID = os.environ.get("LITE_ENGINE_ID", "")
 MANIFEST_PATH = "examples/multi_model_agents/manifest.yaml"
 EVAL_DATA_PATH = "examples/multi_model_agents/eval_data/eval_cases.yaml"
 LITE_OPT_DIR = "examples/multi_model_agents/agents/lite_opt"
@@ -53,9 +57,9 @@ SMOKE_CASES = [
 
 
 def _header(msg):
-    print(f"\n{'='*60}")
+    print(f"\n{'=' * 60}")
     print(f"  {msg}")
-    print(f"{'='*60}")
+    print(f"{'=' * 60}")
 
 
 def _pass(msg):
@@ -70,7 +74,7 @@ def test_mcp_connectivity():
     """Test 1: Can we load MCP toolsets from all 3 servers via Agent Registry?"""
     _header("Test 1: MCP Server Connectivity")
 
-    from config import SEARCH_MCP_SERVER, BOOKING_MCP_SERVER, EXPENSE_MCP_SERVER
+    from config import BOOKING_MCP_SERVER, EXPENSE_MCP_SERVER, SEARCH_MCP_SERVER
     from registry import get_mcp_tools
 
     servers = {
@@ -83,7 +87,7 @@ def test_mcp_connectivity():
     for name, server in servers.items():
         t0 = time.time()
         try:
-            toolset = get_mcp_tools(server)
+            _toolset = get_mcp_tools(server)
             elapsed = time.time() - t0
             _pass(f"{name} MCP server loaded ({elapsed:.1f}s) — {server}")
         except Exception as e:
@@ -99,7 +103,9 @@ def test_sampler_config():
     _header("Test 2: Sampler Config Validation")
 
     import json
+
     from wrangler.optimize.optimizer import _patch_adk
+
     _patch_adk()
 
     from google.adk.optimization.local_eval_sampler import LocalEvalSamplerConfig
@@ -109,8 +115,10 @@ def test_sampler_config():
 
     try:
         cfg = LocalEvalSamplerConfig.model_validate(config)
-        _pass(f"LocalEvalSamplerConfig validated — app_name={cfg.app_name}, "
-              f"train_eval_set={cfg.train_eval_set}")
+        _pass(
+            f"LocalEvalSamplerConfig validated — app_name={cfg.app_name}, "
+            f"train_eval_set={cfg.train_eval_set}"
+        )
 
         criteria = config.get("eval_config", {}).get("criteria", {})
         for k, v in criteria.items():
@@ -120,23 +128,28 @@ def test_sampler_config():
             else:
                 print(f"    {k}: {v} (scalar)")
 
-        return True
     except Exception as e:
         _fail(f"Sampler config validation failed: {e}")
         traceback.print_exc()
         return False
+    else:
+        return True
 
 
-def test_single_eval():
+def test_single_eval(engine_id):
     """Test 3: Run a real eval with 2 cases against the lite agent engine."""
     _header("Test 3: Single-Agent Eval (2 cases)")
+
+    if not engine_id:
+        print("  SKIP: no engine id — pass --engine-id or set LITE_ENGINE_ID")
+        return True
 
     from wrangler.eval.evaluator import run_batch_eval
 
     t0 = time.time()
     try:
         result = run_batch_eval(
-            engine_id=LITE_ENGINE_ID,
+            engine_id=engine_id,
             eval_cases=SMOKE_CASES,
             agent_name="smoke-test-lite",
         )
@@ -150,12 +163,13 @@ def test_single_eval():
         _pass(f"Eval complete ({elapsed:.0f}s) — {len(result.scores)} metrics, avg={avg:.2f}")
         for m, s in sorted(result.scores.items()):
             print(f"    {m:40s} {s:.2f}")
-        return True
     except Exception as e:
         elapsed = time.time() - t0
         _fail(f"Eval failed ({elapsed:.0f}s): {e}")
         traceback.print_exc()
         return False
+    else:
+        return True
 
 
 def test_agent_load():
@@ -195,11 +209,12 @@ def test_agent_load():
             tname = getattr(t, "name", type(t).__name__)
             print(f"      - {tname}")
 
-        return True
     except Exception as e:
         _fail(f"Agent load failed: {e}")
         traceback.print_exc()
         return False
+    else:
+        return True
 
 
 def test_gepa_optimize():
@@ -207,8 +222,11 @@ def test_gepa_optimize():
     _header("Test 5: GEPA Optimization (minimal)")
 
     import json
+
     import vertexai
+
     from wrangler.core.config import GCP_PROJECT_ID, GCP_REGION, GCP_STAGING_BUCKET
+
     vertexai.init(
         project=GCP_PROJECT_ID,
         location=GCP_REGION,
@@ -216,7 +234,11 @@ def test_gepa_optimize():
     )
 
     from wrangler.optimize.optimizer import _patch_adk
+
     _patch_adk()
+
+    import asyncio
+    import importlib.util
 
     from google.adk.evaluation.local_eval_sets_manager import LocalEvalSetsManager
     from google.adk.optimization.gepa_root_agent_prompt_optimizer import (
@@ -227,8 +249,6 @@ def test_gepa_optimize():
         LocalEvalSampler,
         LocalEvalSamplerConfig,
     )
-    import asyncio
-    import importlib.util
 
     agent_path = os.path.abspath(LITE_OPT_DIR)
     agents_dir = os.path.dirname(agent_path)
@@ -278,26 +298,34 @@ def test_gepa_optimize():
         best_idx = result.gepa_result["best_idx"]
         best = result.optimized_agents[best_idx]
         prompt = best.optimized_agent.instruction
-        _pass(f"GEPA complete ({elapsed:.0f}s) — best variant {best_idx}, "
-              f"score={best.overall_score:.3f}, prompt={len(prompt)} chars")
-        return True
+        _pass(
+            f"GEPA complete ({elapsed:.0f}s) — best variant {best_idx}, "
+            f"score={best.overall_score:.3f}, prompt={len(prompt)} chars"
+        )
     except Exception as e:
         elapsed = time.time() - t0
         _fail(f"GEPA failed ({elapsed:.0f}s): {e}")
         traceback.print_exc()
         return False
+    else:
+        return True
 
 
 def main():
     parser = argparse.ArgumentParser(description="Pipeline smoke test")
-    parser.add_argument("--skip-optimize", action="store_true",
-                        help="Skip the GEPA optimization test (slowest)")
-    parser.add_argument("--skip-eval", action="store_true",
-                        help="Skip the batch eval test")
+    parser.add_argument(
+        "--skip-optimize", action="store_true", help="Skip the GEPA optimization test (slowest)"
+    )
+    parser.add_argument("--skip-eval", action="store_true", help="Skip the batch eval test")
+    parser.add_argument(
+        "--engine-id",
+        default=LITE_ENGINE_ID,
+        help="Agent Engine to eval against (default: $LITE_ENGINE_ID; test 3 skips if unset)",
+    )
     args = parser.parse_args()
 
     print("GEPA Prompt Wrangler — Smoke Test")
-    print(f"  Engine: {LITE_ENGINE_ID}")
+    print(f"  Engine: {args.engine_id or '(none — test 3 will skip)'}")
     print(f"  Manifest: {MANIFEST_PATH}")
 
     results = {}
@@ -307,7 +335,7 @@ def main():
     results["sampler"] = test_sampler_config()
 
     if not args.skip_eval:
-        results["eval"] = test_single_eval()
+        results["eval"] = test_single_eval(args.engine_id)
 
     results["agent_load"] = test_agent_load()
 
@@ -325,9 +353,9 @@ def main():
         print(f"  {status}: {name}")
 
     if all_pass:
-        print(f"\n  All tests passed. Safe to run the full pipeline.")
+        print("\n  All tests passed. Safe to run the full pipeline.")
     else:
-        print(f"\n  Some tests FAILED. Fix issues before running the pipeline.")
+        print("\n  Some tests FAILED. Fix issues before running the pipeline.")
 
     return 0 if all_pass else 1
 

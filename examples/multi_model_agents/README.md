@@ -158,7 +158,7 @@ uv run python -m wrangler.online_monitors $LITE_ENGINE_ID
 
 Query eval results in BigQuery:
 ```sql
-SELECT * FROM `hybrid-vertex.gepa_wrangler_logs.online_eval_results`
+SELECT * FROM `YOUR_PROJECT_ID.gepa_wrangler_logs.online_eval_results`
 WHERE timestamp > TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 24 HOUR)
 ```
 

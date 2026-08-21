@@ -26,8 +26,8 @@ if [ -f "${EXAMPLE_DIR}/.env" ]; then
     set +a
 fi
 
-PROJECT_ID="${GCP_PROJECT_ID:-hybrid-vertex}"
-PROJECT_NUMBER="${PROJECT_NUMBER:-934903580331}"
+PROJECT_ID="${GCP_PROJECT_ID:?GCP_PROJECT_ID must be set — see .env.example}"
+PROJECT_NUMBER="${PROJECT_NUMBER:?PROJECT_NUMBER must be set — see .env.example}"
 REGION="${GCP_REGION:-us-central1}"
 APP_NAME="${APPHUB_APP_NAME:-gepa-wrangler}"
 

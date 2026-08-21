@@ -1,8 +1,8 @@
 """Tests for wrangler.multi_judge — multi-judge ensemble scoring."""
 
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 
-from wrangler.optimize.multi_judge import evaluate, _get_judge_models, DEFAULT_JUDGE_MODELS
+from wrangler.optimize.multi_judge import DEFAULT_JUDGE_MODELS, _get_judge_models, evaluate
 
 
 class TestGetJudgeModels:

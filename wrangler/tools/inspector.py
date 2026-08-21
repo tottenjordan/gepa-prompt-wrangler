@@ -1,14 +1,15 @@
 """Agent introspection — auto-discover tools and generate YAML scaffold."""
 
+import contextlib
 import importlib.util
 import inspect
-import os
-import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 import yaml
+
+from ..core.models import DEFAULT_SCAFFOLD_JUDGE_MODEL
 
 
 @dataclass
@@ -105,6 +106,8 @@ class AgentInspector:
                     break
 
         spec = importlib.util.spec_from_file_location("_inspect_agent", str(init_file))
+        if spec is None or spec.loader is None:
+            raise ImportError(f"Cannot load a Python module from {init_file}")
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
 
@@ -118,35 +121,41 @@ class AgentInspector:
             raise ValueError(f"Could not find root_agent in {agent_module_path}")
 
         tools = []
-        for tool in (agent.tools or []):
-            try:
-                if callable(tool) and not hasattr(tool, "func") and not hasattr(tool, "agent"):
-                    tools.append(_inspect_function_tool(tool))
-                elif hasattr(tool, "func"):
+        for tool in agent.tools or []:
+            # Introspection is advisory: an unrecognised tool shape should not
+            # abort the whole agent spec.
+            with contextlib.suppress(Exception):
+                if (
+                    callable(tool) and not hasattr(tool, "func") and not hasattr(tool, "agent")
+                ) or hasattr(tool, "func"):
                     tools.append(_inspect_function_tool(tool))
                 elif hasattr(tool, "agent"):
-                    tools.append(ToolSpec(
-                        name=tool.agent.name,
-                        description=getattr(tool.agent, "description", ""),
-                        tool_type="agent_tool",
-                    ))
+                    tools.append(
+                        ToolSpec(
+                            name=tool.agent.name,
+                            description=getattr(tool.agent, "description", ""),
+                            tool_type="agent_tool",
+                        )
+                    )
                 elif hasattr(tool, "connection_params"):
                     mcp_prefix = _detect_mcp_eval_name(tool)
                     tool_name = getattr(tool, "name", type(tool).__name__)
-                    tools.append(ToolSpec(
-                        name=tool_name,
-                        description=f"MCP toolset ({tool_name})",
-                        tool_type="mcp_toolset",
-                        eval_name=mcp_prefix or tool_name,
-                    ))
+                    tools.append(
+                        ToolSpec(
+                            name=tool_name,
+                            description=f"MCP toolset ({tool_name})",
+                            tool_type="mcp_toolset",
+                            eval_name=mcp_prefix or tool_name,
+                        )
+                    )
                 else:
-                    tools.append(ToolSpec(
-                        name=str(type(tool).__name__),
-                        description="Auto-discovered tool",
-                        tool_type="unknown",
-                    ))
-            except Exception:
-                pass
+                    tools.append(
+                        ToolSpec(
+                            name=str(type(tool).__name__),
+                            description="Auto-discovered tool",
+                            tool_type="unknown",
+                        )
+                    )
 
         model_str = str(agent.model) if agent.model else "unknown"
         if hasattr(agent.model, "model"):
@@ -197,7 +206,7 @@ class AgentInspector:
                 },
             ],
             "eval_config": {
-                "judge_model": "gemini-2.5-pro",
+                "judge_model": DEFAULT_SCAFFOLD_JUDGE_MODEL,
                 "response_match_threshold": 0.5,
                 "safety_threshold": 0.8,
             },
@@ -210,32 +219,38 @@ class AgentInspector:
         function_tools = [t for t in spec.tools if t.tool_type == "function"]
         mcp_tools = [t for t in spec.tools if t.tool_type == "mcp_toolset"]
 
-        for i, tool in enumerate(function_tools[:count]):
+        for _i, tool in enumerate(function_tools[:count]):
             param_names = list(tool.parameters.keys())
             param_example = ", ".join(f"{p}=..." for p in param_names[:2])
-            cases.append({
-                "prompt": f"TODO: Write a query that triggers {tool.name}({param_example})",
-                "expected_response": "TODO: Expected agent response",
-                "expected_tools": [
-                    {"name": tool.eval_name, "args": {p: "TODO" for p in param_names[:2]}},
-                ],
-            })
+            cases.append(
+                {
+                    "prompt": f"TODO: Write a query that triggers {tool.name}({param_example})",
+                    "expected_response": "TODO: Expected agent response",
+                    "expected_tools": [
+                        {"name": tool.eval_name, "args": dict.fromkeys(param_names[:2], "TODO")},
+                    ],
+                }
+            )
 
-        for tool in mcp_tools[:max(count - len(cases), 1)]:
-            cases.append({
+        cases.extend(
+            {
                 "prompt": f"TODO: Write a query that uses the {tool.name} MCP toolset",
                 "expected_response": "TODO: Expected agent response",
                 "expected_tools": [
                     {"name": f"{tool.eval_name}_TOOL_NAME", "args": {}},
                 ],
                 "_note": f"MCP tools are prefixed: {tool.eval_name}_<tool_function_name>",
-            })
+            }
+            for tool in mcp_tools[: max(count - len(cases), 1)]
+        )
 
         if not cases:
-            cases.append({
-                "prompt": "TODO: Write a test query for your agent",
-                "expected_response": "TODO: Expected agent response",
-                "expected_tools": [],
-            })
+            cases.append(
+                {
+                    "prompt": "TODO: Write a test query for your agent",
+                    "expected_response": "TODO: Expected agent response",
+                    "expected_tools": [],
+                }
+            )
 
         return cases

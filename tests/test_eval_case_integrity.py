@@ -33,12 +33,14 @@ EVAL_DATA_DIR = EXAMPLE_ROOT / "eval_data"
 YAML_PATH = EVAL_DATA_DIR / "eval_cases.yaml"
 
 sys.path.insert(0, str(EXAMPLE_ROOT))
-from mcp_servers.search import server as search_server
-from mcp_servers.booking import server as booking_server
-from mcp_servers.expense import server as expense_server
-from mcp_servers.search.mock_db import FLIGHTS, HOTELS
-from mcp_servers.booking.mock_db import bookings as BOOKINGS
-from mcp_servers.expense.mock_db import POLICY_LIMITS
+# E402 below is deliberate: the example package is only importable after
+# the sys.path insert above.
+from mcp_servers.booking import server as booking_server  # noqa: E402
+from mcp_servers.booking.mock_db import bookings as BOOKINGS  # noqa: E402, N812
+from mcp_servers.expense import server as expense_server  # noqa: E402
+from mcp_servers.expense.mock_db import POLICY_LIMITS  # noqa: E402
+from mcp_servers.search import server as search_server  # noqa: E402
+from mcp_servers.search.mock_db import FLIGHTS, HOTELS  # noqa: E402
 
 # Sentinel for arg values only knowable at execution time (e.g. the flight_id of
 # "the cheapest flight just searched"). Task 3 references this constant.
@@ -100,10 +102,9 @@ BOOKING_IDS = set(BOOKINGS.keys())
 EXPENSE_CATEGORIES = set(POLICY_LIMITS.keys())
 # User IDs: union of booking owners and (would-be) expense owners. The booking
 # mock_db alone covers EMP001-EMP004; union with expense_db owners for safety.
-from mcp_servers.expense.mock_db import expenses as _EXPENSES
-USER_IDS = {b["user_id"] for b in BOOKINGS.values()} | {
-    e["user_id"] for e in _EXPENSES.values()
-}
+from mcp_servers.expense.mock_db import expenses as _EXPENSES  # noqa: E402, N812
+
+USER_IDS = {b["user_id"] for b in BOOKINGS.values()} | {e["user_id"] for e in _EXPENSES.values()}
 
 # Per-arg existence rules: arg name -> (valid set, label).
 _EXISTENCE_RULES = {
@@ -123,7 +124,8 @@ def test_introspected_registry_covers_all_expected_tools():
     """Sanity-check the introspection path before relying on it."""
     missing = _EXPECTED_TOOL_NAMES - VALID_TOOL_NAMES
     extra = VALID_TOOL_NAMES - _EXPECTED_TOOL_NAMES
-    assert not missing and not extra, (
+    assert not missing, f"Introspected tool registry is missing: {sorted(missing)}"
+    assert not extra, (
         f"Introspected tool registry does not match expected set.\n"
         f"  missing: {sorted(missing)}\n"
         f"  unexpected: {sorted(extra)}"
@@ -158,8 +160,7 @@ def test_eval_cases_structural_integrity():
             # Check 1: tool name is known.
             if name not in VALID_TOOL_NAMES:
                 violations.append(
-                    f"{label}: unknown tool name {name!r} "
-                    f"(not in {sorted(VALID_TOOL_NAMES)})"
+                    f"{label}: unknown tool name {name!r} (not in {sorted(VALID_TOOL_NAMES)})"
                 )
                 # Can't check args against an unknown signature.
                 continue
@@ -185,9 +186,7 @@ def test_eval_cases_structural_integrity():
 
             # Check 4: list_all_bookings must have empty args.
             if name == "wrangler_booking_mcp_list_all_bookings" and args != {}:
-                violations.append(
-                    f"{label}: tool {name!r} must have empty args, got {args!r}"
-                )
+                violations.append(f"{label}: tool {name!r} must have empty args, got {args!r}")
 
             # Check 5: referenced-ID / enum existence.
             if is_error_handling:

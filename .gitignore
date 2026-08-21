@@ -38,9 +38,6 @@ outputs/reports/diagrams/run_*/
 examples/outputs/
 eval_outputs/
 
-# uv
-uv.lock
-
 # Jupyter
 .ipynb_checkpoints/
 

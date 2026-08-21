@@ -8,17 +8,16 @@ import subprocess
 import tempfile
 from pathlib import Path
 
+from ..core.config import MODEL_COSTS
+from ..core.models import AGENT_ORDER, MODEL_MAP, PROVIDERS
+from ..core.models import blended_cost_for_report as blended_cost
 from .analysis import (
+    METRIC_LABELS,
     generate_comparison_chart,
     generate_cost_quality_chart,
     generate_improvement_chart,
     generate_radar_chart,
-    METRIC_LABELS,
-    AGENT_ORDER,
-    MODEL_MAP,
-    PROVIDERS,
 )
-from ..core.config import MODEL_COSTS, blended_cost
 
 
 def _try_paperbanana(
@@ -36,7 +35,7 @@ def _try_paperbanana(
     """
     env = os.environ.copy()
     if not env.get("GOOGLE_API_KEY"):
-        print(f"  PaperBanana skipped (no GOOGLE_API_KEY), using matplotlib")
+        print("  PaperBanana skipped (no GOOGLE_API_KEY), using matplotlib")
         fallback_fn(**fallback_kwargs)
         return False
 
@@ -44,27 +43,35 @@ def _try_paperbanana(
     for attempt in range(max_attempts):
         data_path = None
         try:
-            with tempfile.NamedTemporaryFile(
-                mode="w", suffix=".json", delete=False
-            ) as tmp:
+            with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as tmp:
                 json.dump(data, tmp)
                 data_path = tmp.name
 
             result = subprocess.run(
                 [
-                    "uv", "run", "paperbanana", "plot",
-                    "--data", data_path,
-                    "--intent", intent,
-                    "-n", "3",
+                    "uv",
+                    "run",
+                    "paperbanana",
+                    "plot",
+                    "--data",
+                    data_path,
+                    "--intent",
+                    intent,
+                    "-n",
+                    "3",
                 ],
                 capture_output=True,
                 text=True,
                 timeout=timeout,
                 env=env,
+                check=False,
             )
 
+            # Both raises below deliberately funnel into this function's own
+            # `except` so the attempt loop can retry them uniformly.
             if result.returncode != 0:
-                raise RuntimeError(result.stderr[-300:] if result.stderr else "unknown error")
+                msg = result.stderr[-300:] if result.stderr else "unknown error"
+                raise RuntimeError(msg)  # noqa: TRY301
 
             run_dirs = sorted(glob.glob("outputs/run_*"), reverse=True)
             for run_dir in run_dirs:
@@ -75,7 +82,8 @@ def _try_paperbanana(
                     print(f"  Generated (PaperBanana): {output_path.name}")
                     return True
 
-            raise FileNotFoundError("PaperBanana output not found in run directories")
+            msg = "PaperBanana output not found in run directories"
+            raise FileNotFoundError(msg)  # noqa: TRY301
 
         except Exception as e:
             last_error = e
@@ -86,7 +94,9 @@ def _try_paperbanana(
             if data_path and os.path.exists(data_path):
                 os.unlink(data_path)
 
-    print(f"  PaperBanana failed after {max_attempts} attempts ({type(last_error).__name__}), using matplotlib")
+    print(
+        f"  PaperBanana failed after {max_attempts} attempts ({type(last_error).__name__}), using matplotlib"
+    )
     fallback_fn(**fallback_kwargs)
     return False
 
@@ -96,7 +106,9 @@ def _get_agents(results: dict) -> list[str]:
 
 
 def generate_comparison_chart_pb(
-    results: dict, charts_dir: Path | None = None, use_paperbanana: bool = True,
+    results: dict,
+    charts_dir: Path | None = None,
+    use_paperbanana: bool = True,
 ):
     charts_dir = Path(charts_dir or "outputs/reports/charts")
     if not use_paperbanana:
@@ -109,9 +121,7 @@ def generate_comparison_chart_pb(
         "metrics": {},
     }
     for metric, label in METRIC_LABELS.items():
-        data["metrics"][label] = [
-            results[a].get("before", {}).get(metric, 0) for a in agents
-        ]
+        data["metrics"][label] = [results[a].get("before", {}).get(metric, 0) for a in agents]
 
     intent = (
         "Grouped bar chart comparing baseline evaluation scores for AI agent models "
@@ -121,14 +131,18 @@ def generate_comparison_chart_pb(
     )
 
     _try_paperbanana(
-        data, intent, charts_dir / "comparison.png",
+        data,
+        intent,
+        charts_dir / "comparison.png",
         fallback_fn=generate_comparison_chart,
         fallback_kwargs={"results": results, "charts_dir": charts_dir},
     )
 
 
 def generate_improvement_chart_pb(
-    results: dict, charts_dir: Path | None = None, use_paperbanana: bool = True,
+    results: dict,
+    charts_dir: Path | None = None,
+    use_paperbanana: bool = True,
 ):
     charts_dir = Path(charts_dir or "outputs/reports/charts")
     agents = _get_agents(results)
@@ -162,14 +176,18 @@ def generate_improvement_chart_pb(
     )
 
     _try_paperbanana(
-        data, intent, charts_dir / "improvement_delta.png",
+        data,
+        intent,
+        charts_dir / "improvement_delta.png",
         fallback_fn=generate_improvement_chart,
         fallback_kwargs={"results": results, "charts_dir": charts_dir},
     )
 
 
 def generate_cost_quality_chart_pb(
-    results: dict, charts_dir: Path | None = None, use_paperbanana: bool = True,
+    results: dict,
+    charts_dir: Path | None = None,
+    use_paperbanana: bool = True,
 ):
     charts_dir = Path(charts_dir or "outputs/reports/charts")
     if not use_paperbanana:
@@ -188,15 +206,17 @@ def generate_cost_quality_chart_pb(
         avg_after = sum(after.values()) / max(len(after), 1) if after else 0
         provider = PROVIDERS.get(model, "Unknown")
 
-        data["agents"].append({
-            "name": a.title(),
-            "blended_cost_per_million": round(blend, 2),
-            "input_cost_per_million": round(cost_info["input"], 2),
-            "output_cost_per_million": round(cost_info["output"], 2),
-            "before_quality": round(avg_before, 4),
-            "after_quality": round(avg_after, 4),
-            "provider": provider,
-        })
+        data["agents"].append(
+            {
+                "name": a.title(),
+                "blended_cost_per_million": round(blend, 2),
+                "input_cost_per_million": round(cost_info["input"], 2),
+                "output_cost_per_million": round(cost_info["output"], 2),
+                "before_quality": round(avg_before, 4),
+                "after_quality": round(avg_after, 4),
+                "provider": provider,
+            }
+        )
 
     intent = (
         "Scatter plot of model cost vs average quality score with Pareto frontier. "
@@ -209,14 +229,18 @@ def generate_cost_quality_chart_pb(
     )
 
     _try_paperbanana(
-        data, intent, charts_dir / "cost_quality.png",
+        data,
+        intent,
+        charts_dir / "cost_quality.png",
         fallback_fn=generate_cost_quality_chart,
         fallback_kwargs={"results": results, "charts_dir": charts_dir},
     )
 
 
 def generate_radar_chart_pb(
-    results: dict, charts_dir: Path | None = None, use_paperbanana: bool = True,
+    results: dict,
+    charts_dir: Path | None = None,
+    use_paperbanana: bool = True,
 ):
     charts_dir = Path(charts_dir or "outputs/reports/charts")
     if not use_paperbanana:
@@ -242,7 +266,9 @@ def generate_radar_chart_pb(
     )
 
     _try_paperbanana(
-        data, intent, charts_dir / "radar.png",
+        data,
+        intent,
+        charts_dir / "radar.png",
         fallback_fn=generate_radar_chart,
         fallback_kwargs={"results": results, "charts_dir": charts_dir},
     )

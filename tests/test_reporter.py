@@ -1,9 +1,8 @@
 """Tests for wrangler.reporter — report generation, and wrangler.analysis — chart generation."""
 
 import subprocess
-import pytest
-from pathlib import Path
-from unittest.mock import patch, MagicMock, call
+from typing import ClassVar
+from unittest.mock import MagicMock, patch
 
 
 class TestGenerateComparisonChart:
@@ -13,6 +12,7 @@ class TestGenerateComparisonChart:
         mock_plt.cm.Set2 = MagicMock(return_value=[(0, 0, 0, 1)] * 6)
 
         from wrangler.reporting.analysis import generate_comparison_chart
+
         results = {"lite": {"before": {"final_response_quality_v1": 0.9}}}
         generate_comparison_chart(results, charts_dir=tmp_path)
         mock_plt.savefig.assert_called_once()
@@ -23,6 +23,7 @@ class TestGenerateComparisonChart:
         mock_plt.cm.Set2 = MagicMock(return_value=[(0, 0, 0, 1)] * 6)
 
         from wrangler.reporting.analysis import generate_comparison_chart
+
         results = {"lite": {"before": {"final_response_quality_v1": 0.5}}}
         generate_comparison_chart(results, charts_dir=tmp_path)
 
@@ -32,6 +33,7 @@ class TestGenerateComparisonChart:
         mock_plt.cm.Set2 = MagicMock(return_value=[(0, 0, 0, 1)] * 6)
 
         from wrangler.reporting.analysis import generate_comparison_chart
+
         results = {"lite": {"before": {}}}
         generate_comparison_chart(results, charts_dir=tmp_path)
 
@@ -43,6 +45,7 @@ class TestGenerateImprovementChart:
         mock_plt.cm.Set2 = MagicMock(return_value=[(0, 0, 0, 1)] * 6)
 
         from wrangler.reporting.analysis import generate_improvement_chart
+
         results = {
             "lite": {
                 "before": {"final_response_quality_v1": 0.5},
@@ -58,6 +61,7 @@ class TestGenerateImprovementChart:
         mock_plt.cm.Set2 = MagicMock(return_value=[(0, 0, 0, 1)] * 6)
 
         from wrangler.reporting.analysis import generate_improvement_chart
+
         results = {"lite": {"before": {}, "after": {}}}
         generate_improvement_chart(results, charts_dir=tmp_path)
 
@@ -75,6 +79,7 @@ class TestGenerateReport:
         mock_plt.cm.Set2 = MagicMock(return_value=[(0, 0, 0, 1)] * 6)
 
         from wrangler.reporting.reporter import generate_report
+
         results = {
             "lite": {
                 "model": "gemini-3.1-flash-lite",
@@ -98,9 +103,18 @@ class TestGenerateReport:
         mock_plt.cm.Set2 = MagicMock(return_value=[(0, 0, 0, 1)] * 6)
 
         from wrangler.reporting.reporter import generate_report
+
         results = {
-            "pair_alpha": {"model": "m", "before": {"final_response_quality_v1": 0.5}, "after": {"final_response_quality_v1": 0.8}},
-            "pair_beta": {"model": "m", "before": {"final_response_quality_v1": 0.6}, "after": {"final_response_quality_v1": 0.9}},
+            "pair_alpha": {
+                "model": "m",
+                "before": {"final_response_quality_v1": 0.5},
+                "after": {"final_response_quality_v1": 0.8},
+            },
+            "pair_beta": {
+                "model": "m",
+                "before": {"final_response_quality_v1": 0.6},
+                "after": {"final_response_quality_v1": 0.9},
+            },
         }
         generate_report(results, "test", use_paperbanana=False)
         content = (tmp_path / "experiment_report.md").read_text()
@@ -119,7 +133,14 @@ class TestGenerateReport:
         mock_plt.cm.Set2 = MagicMock(return_value=[(0, 0, 0, 1)] * 6)
 
         from wrangler.reporting.reporter import generate_report
-        results = {"test": {"model": "m", "before": {"final_response_quality_v1": 0.50}, "after": {"final_response_quality_v1": 0.70}}}
+
+        results = {
+            "test": {
+                "model": "m",
+                "before": {"final_response_quality_v1": 0.50},
+                "after": {"final_response_quality_v1": 0.70},
+            }
+        }
         generate_report(results, "test", use_paperbanana=False)
         content = (tmp_path / "experiment_report.md").read_text()
         assert "0.50" in content
@@ -138,22 +159,27 @@ class TestGenerateReport:
         mock_plt.cm.Set2 = MagicMock(return_value=[(0, 0, 0, 1)] * 6)
 
         from wrangler.reporting.reporter import generate_report
-        results = {"test": {
-            "model": "m",
-            "before": {"tool_use_quality_v1": 0.40, "safety_v1": 0.97},
-            "after": {"tool_use_quality_v1": 0.45, "safety_v1": 0.97},
-            "thresholds": {"tool_use_quality_v1": 0.5, "safety_v1": 0.95},
-        }}
+
+        results = {
+            "test": {
+                "model": "m",
+                "before": {"tool_use_quality_v1": 0.40, "safety_v1": 0.97},
+                "after": {"tool_use_quality_v1": 0.45, "safety_v1": 0.97},
+                "thresholds": {"tool_use_quality_v1": 0.5, "safety_v1": 0.95},
+            }
+        }
         generate_report(results, "test", use_paperbanana=False)
         content = (tmp_path / "experiment_report.md").read_text()
         assert "GEPA Threshold Alignment" in content
         assert "BELOW" in content  # tool_use after 0.45 < 0.50
-        assert "PASS" in content   # safety 0.97 >= 0.95
+        assert "PASS" in content  # safety 0.97 >= 0.95
 
     @patch("wrangler.reporting.analysis.plt")
     @patch("wrangler.reporting.reporter.CHARTS_DIR")
     @patch("wrangler.reporting.reporter.REPORTS_DIR")
-    def test_threshold_section_absent_without_thresholds(self, mock_reports, mock_charts, mock_plt, tmp_path):
+    def test_threshold_section_absent_without_thresholds(
+        self, mock_reports, mock_charts, mock_plt, tmp_path
+    ):
         mock_reports.__truediv__ = lambda s, x: tmp_path / x
         mock_reports.mkdir = MagicMock()
         mock_charts.__truediv__ = lambda s, x: tmp_path / "charts" / x
@@ -162,7 +188,10 @@ class TestGenerateReport:
         mock_plt.cm.Set2 = MagicMock(return_value=[(0, 0, 0, 1)] * 6)
 
         from wrangler.reporting.reporter import generate_report
-        results = {"test": {"model": "m", "before": {"safety_v1": 0.9}, "after": {"safety_v1": 0.9}}}
+
+        results = {
+            "test": {"model": "m", "before": {"safety_v1": 0.9}, "after": {"safety_v1": 0.9}}
+        }
         generate_report(results, "test", use_paperbanana=False)
         content = (tmp_path / "experiment_report.md").read_text()
         assert "GEPA Threshold Alignment" not in content
@@ -179,7 +208,15 @@ class TestGenerateReport:
         mock_plt.cm.Set2 = MagicMock(return_value=[(0, 0, 0, 1)] * 6)
 
         from wrangler.reporting.reporter import generate_report
-        results = {"test": {"model": "m", "optimized_prompt": "Be very helpful.", "before": {}, "after": {}}}
+
+        results = {
+            "test": {
+                "model": "m",
+                "optimized_prompt": "Be very helpful.",
+                "before": {},
+                "after": {},
+            }
+        }
         generate_report(results, "test", use_paperbanana=False)
         content = (tmp_path / "experiment_report.md").read_text()
         assert "Be very helpful." in content
@@ -197,7 +234,14 @@ class TestGenerateReport:
         mock_plt.cm.Set2 = MagicMock(return_value=[(0, 0, 0, 1)] * 6)
 
         from wrangler.reporting.reporter import generate_report
-        results = {"test": {"model": "m", "before": {"final_response_quality_v1": 0}, "after": {"final_response_quality_v1": 0.5}}}
+
+        results = {
+            "test": {
+                "model": "m",
+                "before": {"final_response_quality_v1": 0},
+                "after": {"final_response_quality_v1": 0.5},
+            }
+        }
         generate_report(results, "test", use_paperbanana=False)
         content = (tmp_path / "experiment_report.md").read_text()
         assert "0.50" in content
@@ -205,24 +249,31 @@ class TestGenerateReport:
 
 
 class TestPaperBananaFallback:
-    RESULTS = {
+    RESULTS: ClassVar[dict] = {
         "lite": {
             "model": "gemini-3.1-flash-lite",
             "before": {"final_response_quality_v1": 0.7},
         }
     }
 
-    @patch("wrangler.reporting.charts.subprocess.run", side_effect=FileNotFoundError("uv not found"))
+    @patch(
+        "wrangler.reporting.charts.subprocess.run", side_effect=FileNotFoundError("uv not found")
+    )
     @patch("wrangler.reporting.charts.generate_comparison_chart")
     def test_falls_back_on_subprocess_error(self, mock_mpl, mock_run, tmp_path):
         from wrangler.reporting.charts import generate_comparison_chart_pb
+
         generate_comparison_chart_pb(self.RESULTS, tmp_path)
         mock_mpl.assert_called_once()
 
-    @patch("wrangler.reporting.charts.subprocess.run", side_effect=subprocess.TimeoutExpired(cmd="pb", timeout=180))
+    @patch(
+        "wrangler.reporting.charts.subprocess.run",
+        side_effect=subprocess.TimeoutExpired(cmd="pb", timeout=180),
+    )
     @patch("wrangler.reporting.charts.generate_comparison_chart")
     def test_falls_back_on_timeout(self, mock_mpl, mock_run, tmp_path):
         from wrangler.reporting.charts import generate_comparison_chart_pb
+
         generate_comparison_chart_pb(self.RESULTS, tmp_path)
         mock_mpl.assert_called_once()
 
@@ -230,6 +281,7 @@ class TestPaperBananaFallback:
     @patch("wrangler.reporting.charts.generate_comparison_chart")
     def test_no_paperbanana_flag_skips(self, mock_mpl, mock_run, tmp_path):
         from wrangler.reporting.charts import generate_comparison_chart_pb
+
         generate_comparison_chart_pb(self.RESULTS, tmp_path, use_paperbanana=False)
         mock_run.assert_not_called()
         mock_mpl.assert_called_once()

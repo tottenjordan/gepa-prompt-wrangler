@@ -1,6 +1,8 @@
 """Batch evaluation — runs inference + evaluation against deployed agents on GEAP."""
 
+import contextlib
 import functools
+import json
 import math
 import statistics
 import time
@@ -11,12 +13,20 @@ warnings.filterwarnings("ignore", category=DeprecationWarning, module="vertexai"
 warnings.filterwarnings("ignore", message=".*ExperimentalWarning.*")
 warnings.filterwarnings("ignore", message=".*experimental.*")
 
-import pandas as pd
-import vertexai
-from vertexai import Client, types
-from vertexai._genai import _evals_common
+# E402 below is deliberate: the filterwarnings() calls above must execute
+# before vertexai is imported, or its import-time warnings escape.
 
-from ..core.config import GCP_PROJECT_ID, GCP_REGION, GCP_STAGING_BUCKET, get_batch_config
+import pandas as pd  # noqa: E402
+import vertexai  # noqa: E402
+from vertexai import Client, types  # noqa: E402
+from vertexai._genai import _evals_common  # noqa: E402
+
+from ..core.config import (  # noqa: E402
+    GCP_PROJECT_ID,
+    GCP_REGION,
+    GCP_STAGING_BUCKET,
+    get_batch_config,
+)
 
 GCS_EVAL_DEST = f"gs://{GCP_STAGING_BUCKET}/eval-results"
 MAX_POLL_SECONDS = 2400
@@ -114,12 +124,25 @@ def _tool_use_metric() -> "types.LLMMetric":
     )
 
 
+# Metric versions are PINNED deliberately. An unversioned RubricMetric resolves
+# client-side through the SDK's METRIC_LATEST_SPEC_NAME table, which in
+# google-cloud-aiplatform 1.165.1 points at hallucination_v2 / safety_v3 /
+# instruction_following_v2 — versions the us-central1 eval service does not yet
+# serve. It rejects them per-metric with "Unsupported predefined metric: <name>",
+# and because the SDK's own CandidateResult model has no `error` field and is
+# extra='forbid', that per-metric error makes the ENTIRE result file fail to
+# parse. The SDK swallows the exception and returns an empty result, so a single
+# unsupported metric silently zeroes out every per-case score in the run.
+#
+# Pinning v1 keeps us on versions the service actually serves. Revisit when the
+# service catches up (symptom of over-pinning is the opposite error: the service
+# reporting the v1 name as retired).
 DEFAULT_METRICS = [
-    types.RubricMetric.FINAL_RESPONSE_QUALITY,
-    types.RubricMetric.HALLUCINATION,
-    types.RubricMetric.SAFETY,
+    types.RubricMetric.FINAL_RESPONSE_QUALITY(version="v1"),
+    types.RubricMetric.HALLUCINATION(version="v1"),
+    types.RubricMetric.SAFETY(version="v1"),
     _tool_use_metric(),
-    types.RubricMetric.INSTRUCTION_FOLLOWING,
+    types.RubricMetric.INSTRUCTION_FOLLOWING(version="v1"),
 ]
 
 
@@ -212,7 +235,9 @@ def _extract_per_case_scores(evaluation_run) -> list[dict[str, float]]:
         if item_results is None:
             per_case = _extract_per_case_via_api(evaluation_run)
             if not per_case:
-                print("  Warning: evaluation_item_results is None and API fallback returned no results")
+                print(
+                    "  Warning: evaluation_item_results is None and API fallback returned no results"
+                )
             return per_case
 
         case_results = getattr(item_results, "eval_case_results", None)
@@ -226,10 +251,16 @@ def _extract_per_case_scores(evaluation_run) -> list[dict[str, float]]:
             if candidates:
                 metric_results = getattr(candidates[0], "metric_results", None)
                 if metric_results:
-                    items_dict = metric_results if isinstance(metric_results, dict) else dict(metric_results)
+                    items_dict = (
+                        metric_results if isinstance(metric_results, dict) else dict(metric_results)
+                    )
                     for metric_key, metric_val in items_dict.items():
                         short = metric_key.split("/")[-1] if "/" in metric_key else metric_key
-                        score = getattr(metric_val, "score", None) if not isinstance(metric_val, (int, float)) else metric_val
+                        score = (
+                            getattr(metric_val, "score", None)
+                            if not isinstance(metric_val, (int, float))
+                            else metric_val
+                        )
                         if score is not None:
                             case_scores[short] = float(score)
             per_case.append(case_scores)
@@ -254,7 +285,9 @@ def _extract_per_case_via_api(evaluation_run) -> list[dict[str, float]]:
 
         for item_name in eval_set.evaluation_items:
             case_scores: dict[str, float] = {}
-            try:
+            # One unreadable item must not drop the scores for every other case;
+            # it just contributes an empty dict.
+            with contextlib.suppress(Exception):
                 item = client.evals.get_evaluation_item(name=item_name)
                 response = getattr(item, "evaluation_response", None)
                 if response:
@@ -264,8 +297,6 @@ def _extract_per_case_via_api(evaluation_run) -> list[dict[str, float]]:
                         if metric and score is not None:
                             short = metric.split("/")[-1] if "/" in metric else metric
                             case_scores[short] = float(score)
-            except Exception:
-                pass
             per_case.append(case_scores)
     except Exception as e:
         print(f"  Warning in API fallback for per-case scores: {e}")
@@ -317,13 +348,15 @@ def _run_batched_inference(
     original_retry_fn = _evals_common._execute_agent_run_with_retry
 
     try:
-        _evals_common.AGENT_MAX_WORKERS = min(max_workers, batch_size)
+        # Deliberate monkey-patch: ty infers Literal[20] from the module constant.
+        _evals_common.AGENT_MAX_WORKERS = min(max_workers, batch_size)  # ty: ignore[invalid-assignment]
 
         @functools.wraps(original_retry_fn)
         def _patched_retry(*args, max_retries=6, **kwargs):
             return original_retry_fn(*args, max_retries=max_retries, **kwargs)
 
-        _evals_common._execute_agent_run_with_retry = _patched_retry
+        # Deliberate monkey-patch: the functools.wraps wrapper is not the same type.
+        _evals_common._execute_agent_run_with_retry = _patched_retry  # ty: ignore[invalid-assignment]
 
         all_dfs = []
         for i in range(n_batches):
@@ -347,6 +380,40 @@ def _run_batched_inference(
         _evals_common._execute_agent_run_with_retry = original_retry_fn
 
 
+def _is_failed_response(response) -> bool:
+    """Is this inference row a failure dressed up as a response?
+
+    The obvious cases are empty/NaN, and a dict carrying an "error" key. The
+    non-obvious one, and the reason this is a shared helper: when GEAP returns
+    an empty event stream the SDK cannot parse it and stores its complaint as
+    the response *text* --
+
+        '{"error": "Failed to parse agent run response [] to agent data: ...'
+
+    -- a perfectly non-empty string that is not a dict, so a dict-only check
+    waves it through. It then reaches scoring with no agent_data, the custom
+    tool_use_quality metric fails to render its template, and that single
+    per-metric error makes the whole EvaluationItemResult unparseable
+    (`extra='forbid'`), dropping the case from *every* metric. One empty
+    stream silently costs a whole case. See docs/notes/silent-failures.md.
+    """
+    if response is None or (not isinstance(response, dict) and pd.isna(response)):
+        return True
+    if isinstance(response, dict):
+        return "error" in response
+    if isinstance(response, str):
+        text = response.strip()
+        if not text:
+            return True
+        if text.startswith("{"):
+            try:
+                parsed = json.loads(text)
+            except ValueError:
+                return False
+            return isinstance(parsed, dict) and "error" in parsed
+    return False
+
+
 def _retry_failed_cases(
     client: Client,
     agent_resource: str,
@@ -357,42 +424,53 @@ def _retry_failed_cases(
 ) -> types.EvaluationDataset:
     """Detect failed inference cases and re-run them in micro-batches."""
     result_df = inference_result.eval_dataset_df
-    failed_indices = []
-
-    for idx, row in result_df.iterrows():
-        response = row.get("response")
-        if response is None or (not isinstance(response, dict) and pd.isna(response)) or response == "":
-            failed_indices.append(idx)
-        elif isinstance(response, dict) and "error" in response:
-            failed_indices.append(idx)
-        elif isinstance(response, str) and response.strip() == "":
-            failed_indices.append(idx)
+    failed_indices = [
+        idx for idx, row in result_df.iterrows() if _is_failed_response(row.get("response"))
+    ]
 
     if not failed_indices:
         return inference_result
 
     n_failed = len(failed_indices)
-    print(f"  {tag}Detected {n_failed}/{len(result_df)} failed cases — waiting 30s for rate limit cooldown...", flush=True)
+    print(
+        f"  {tag}Detected {n_failed}/{len(result_df)} failed cases — waiting 30s for rate limit cooldown...",
+        flush=True,
+    )
     time.sleep(30)
 
     failed_eval_df = eval_df.iloc[failed_indices].reset_index(drop=True)
     retry_result = _run_batched_inference(
-        client, agent_resource, failed_eval_df,
-        batch_size=2, delay=20.0, max_workers=2, tag=f"{tag}retry ",
+        client,
+        agent_resource,
+        failed_eval_df,
+        batch_size=2,
+        delay=20.0,
+        max_workers=2,
+        tag=f"{tag}retry ",
     )
 
+    # Splice recovered rows in as records rather than assigning a Series into
+    # `result_df.iloc[i]`. These frames carry ADK objects (`SessionInput` and
+    # friends) in object columns, and pandas' row setitem tries to broadcast
+    # the value -- `TypeError: object of type 'SessionInput' has no len()`.
+    # That crash was unreachable until the detector above learned to spot an
+    # error payload stored as a string, because nothing was ever recovered.
     recovered = 0
     retry_df = retry_result.eval_dataset_df
+    records = result_df.to_dict("records")
+    retry_records = retry_df.to_dict("records")
     for retry_idx, original_idx in enumerate(failed_indices):
-        if retry_idx < len(retry_df):
-            retry_response = retry_df.iloc[retry_idx].get("response")
-            if retry_response is not None and retry_response != "":
-                if not (isinstance(retry_response, dict) and "error" in retry_response):
-                    result_df.iloc[original_idx] = retry_df.iloc[retry_idx]
-                    recovered += 1
+        if retry_idx < len(retry_records):
+            retry_row = retry_records[retry_idx]
+            if not _is_failed_response(retry_row.get("response")):
+                # Merge so a column the retry frame lacks keeps its original
+                # value instead of becoming NaN.
+                records[original_idx] = {**records[original_idx], **retry_row}
+                recovered += 1
 
     print(f"  {tag}Recovered {recovered}/{n_failed} failed cases", flush=True)
-    return types.EvaluationDataset(eval_dataset_df=result_df)
+    merged_df = pd.DataFrame(records, columns=result_df.columns)
+    return types.EvaluationDataset(eval_dataset_df=merged_df)
 
 
 def run_batch_eval(
@@ -420,36 +498,57 @@ def run_batch_eval(
     batch_size, delay, max_workers = get_batch_config(model)
 
     if batch_size < len(eval_cases):
-        print(f"  {tag}Inference: sending {len(eval_cases)} cases in batches of {batch_size} "
-              f"({max_workers} workers, {delay}s delay) to engine {engine_id}...", flush=True)
+        print(
+            f"  {tag}Inference: sending {len(eval_cases)} cases in batches of {batch_size} "
+            f"({max_workers} workers, {delay}s delay) to engine {engine_id}...",
+            flush=True,
+        )
     else:
-        print(f"  {tag}Inference: sending {len(eval_cases)} cases to engine {engine_id}...", flush=True)
+        print(
+            f"  {tag}Inference: sending {len(eval_cases)} cases to engine {engine_id}...",
+            flush=True,
+        )
 
     t0 = time.time()
     inference_result = _run_batched_inference(
-        client, agent_resource, eval_df, batch_size, delay, max_workers, tag,
+        client,
+        agent_resource,
+        eval_df,
+        batch_size,
+        delay,
+        max_workers,
+        tag,
     )
 
     if retry_failed:
         inference_result = _retry_failed_cases(
-            client, agent_resource, eval_df, inference_result, model, tag,
+            client,
+            agent_resource,
+            eval_df,
+            inference_result,
+            model,
+            tag,
         )
 
     print(f"  {tag}Inference complete ({_fmt_elapsed(t0)})", flush=True)
 
     # Clean invalid rows before scoring — rows with NaN/float in response or
-    # agent_data cause ValidationError in the SDK
+    # agent_data cause ValidationError in the SDK. A row whose response is an
+    # error payload is dropped too: left in, it takes every other metric on
+    # that case down with it (see _is_failed_response).
     result_df = inference_result.eval_dataset_df
 
     def _is_invalid(val):
         return val is None or (isinstance(val, float) and pd.isna(val)) or val == ""
 
-    invalid_mask = result_df["response"].apply(_is_invalid)
+    invalid_mask = result_df["response"].apply(_is_failed_response)
     if "agent_data" in result_df.columns:
         invalid_mask = invalid_mask | result_df["agent_data"].apply(_is_invalid)
     n_invalid = invalid_mask.sum()
     if n_invalid > 0:
-        print(f"  {tag}Dropped {n_invalid}/{len(result_df)} rows with invalid agent_data", flush=True)
+        print(
+            f"  {tag}Dropped {n_invalid}/{len(result_df)} rows with invalid agent_data", flush=True
+        )
         clean_df = result_df[~invalid_mask].reset_index(drop=True)
         inference_result = types.EvaluationDataset(eval_dataset_df=clean_df)
 
@@ -467,6 +566,7 @@ def run_batch_eval(
 
     poll_start = time.time()
     poll_count = 0
+    state = ""
     while time.time() - poll_start < MAX_POLL_SECONDS:
         evaluation_run = client.evals.get_evaluation_run(name=evaluation_run.name)
         state = str(getattr(evaluation_run, "state", ""))
@@ -485,7 +585,9 @@ def run_batch_eval(
         return EvalResult()
 
     if "SUCCEEDED" not in state:
-        print(f"  {tag}ERROR: Eval run timed out after {MAX_POLL_SECONDS}s (state={state}). Re-run this pair.")
+        print(
+            f"  {tag}ERROR: Eval run timed out after {MAX_POLL_SECONDS}s (state={state}). Re-run this pair."
+        )
         return EvalResult()
 
     print(f"  {tag}Fetching per-case results...", flush=True)
@@ -500,11 +602,16 @@ def run_batch_eval(
     for case_scores in per_case:
         # Same single-tool-use-metric clobber assumption as above.
         if _TOOL_USE_METRIC_NAME in case_scores:
-            case_scores[_alias_tool_use_key(_TOOL_USE_METRIC_NAME)] = case_scores.pop(_TOOL_USE_METRIC_NAME)
+            case_scores[_alias_tool_use_key(_TOOL_USE_METRIC_NAME)] = case_scores.pop(
+                _TOOL_USE_METRIC_NAME
+            )
     token_usage = _estimate_token_usage(inference_result.eval_dataset_df)
 
-    print(f"  {tag}Eval complete — total: {_fmt_elapsed(t0)}, {len(scores)} metrics, {len(per_case)} cases, "
-          f"~{token_usage['input_tokens']:,} in / ~{token_usage['output_tokens']:,} out tokens (est.)", flush=True)
+    print(
+        f"  {tag}Eval complete — total: {_fmt_elapsed(t0)}, {len(scores)} metrics, {len(per_case)} cases, "
+        f"~{token_usage['input_tokens']:,} in / ~{token_usage['output_tokens']:,} out tokens (est.)",
+        flush=True,
+    )
     return EvalResult(scores=scores, per_case=per_case, token_usage=token_usage)
 
 
@@ -519,22 +626,37 @@ def run_batch_eval_averaged(
 ) -> EvalResult:
     """Run batch eval N times and return averaged scores with std dev."""
     if num_runs <= 1:
-        return run_batch_eval(engine_id, eval_cases, metrics=metrics, agent_name=agent_name,
-                              model=model, retry_failed=retry_failed)
+        return run_batch_eval(
+            engine_id,
+            eval_cases,
+            metrics=metrics,
+            agent_name=agent_name,
+            model=model,
+            retry_failed=retry_failed,
+        )
 
     tag = f"[{agent_name}] " if agent_name else ""
     all_results: list[EvalResult] = []
 
     for i in range(num_runs):
         print(f"  {tag}Run {i + 1}/{num_runs}...", flush=True)
-        result = run_batch_eval(engine_id, eval_cases, metrics=metrics, agent_name=agent_name,
-                                model=model, retry_failed=retry_failed)
+        result = run_batch_eval(
+            engine_id,
+            eval_cases,
+            metrics=metrics,
+            agent_name=agent_name,
+            model=model,
+            retry_failed=retry_failed,
+        )
         if result.scores:
             all_results.append(result)
             avg = sum(result.scores.values()) / max(len(result.scores), 1)
             print(f"  {tag}Run {i + 1}/{num_runs} avg: {avg:.3f}", flush=True)
         else:
-            print(f"  {tag}Run {i + 1}/{num_runs} returned no scores (skipping from average)", flush=True)
+            print(
+                f"  {tag}Run {i + 1}/{num_runs} returned no scores (skipping from average)",
+                flush=True,
+            )
 
     if not all_results:
         print(f"  {tag}WARNING: All {num_runs} runs returned no scores", flush=True)
@@ -573,7 +695,10 @@ def run_batch_eval_averaged(
     successful = len(all_results)
     skipped = num_runs - successful
     skip_note = f" ({skipped} skipped — timeout/failure)" if skipped else ""
-    print(f"  {tag}Averaged {successful}/{num_runs} runs — overall: {overall:.3f}{skip_note}", flush=True)
+    print(
+        f"  {tag}Averaged {successful}/{num_runs} runs — overall: {overall:.3f}{skip_note}",
+        flush=True,
+    )
 
     return EvalResult(
         scores=avg_scores,
@@ -592,20 +717,20 @@ def save_eval_results(
 ) -> str:
     """Save eval results to JSON. Returns the file path."""
     import json
-    from datetime import datetime
+    from datetime import UTC, datetime
     from pathlib import Path
 
-    output_dir = Path(output_dir or "outputs")
-    output_dir.mkdir(parents=True, exist_ok=True)
+    out_dir = Path(output_dir or "outputs")
+    out_dir.mkdir(parents=True, exist_ok=True)
 
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    timestamp = datetime.now(tz=UTC).strftime("%Y%m%d_%H%M%S")
     filename = f"eval_{agent_name}_{phase}_{timestamp}.json"
-    path = output_dir / filename
+    path = out_dir / filename
 
     data = {
         "agent": agent_name,
         "phase": phase,
-        "timestamp": datetime.now().isoformat(),
+        "timestamp": datetime.now(tz=UTC).isoformat(),
         "scores": scores,
     }
     with open(path, "w") as f:

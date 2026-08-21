@@ -8,12 +8,12 @@ Usage:
 import argparse
 import os
 import subprocess
+import sys
 from pathlib import Path
 
-import sys
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from wrangler.core.config import PAPERBANANA_PROJECT, PAPERBANANA_LOCATION, DIAGRAMS_DIR
+from wrangler.core.config import DIAGRAMS_DIR, PAPERBANANA_LOCATION, PAPERBANANA_PROJECT
 
 DIAGRAM_SOURCES_DIR = Path("docs/diagram_sources")
 
@@ -24,7 +24,7 @@ DIAGRAMS = {
 }
 
 
-def generate_diagram(source_path: str, caption: str, output_dir: str = None):
+def generate_diagram(source_path: str, caption: str, output_dir: str | None = None):
     """Generate a diagram using PaperBanana CLI."""
     output_dir = output_dir or DIAGRAMS_DIR
     Path(output_dir).mkdir(parents=True, exist_ok=True)
@@ -36,18 +36,28 @@ def generate_diagram(source_path: str, caption: str, output_dir: str = None):
     env["GOOGLE_CLOUD_LOCATION"] = PAPERBANANA_LOCATION
 
     cmd = [
-        "uv", "run", "paperbanana", "generate",
-        "-i", source_path,
-        "-c", caption,
-        "-o", str(dest),
-        "--vlm-provider", "gemini",
-        "--image-provider", "google_imagen",
-        "--image-model", "gemini-3-pro-image",
-        "-n", "2",
+        "uv",
+        "run",
+        "paperbanana",
+        "generate",
+        "-i",
+        source_path,
+        "-c",
+        caption,
+        "-o",
+        str(dest),
+        "--vlm-provider",
+        "gemini",
+        "--image-provider",
+        "google_imagen",
+        "--image-model",
+        "gemini-3-pro-image",
+        "-n",
+        "2",
     ]
 
     print(f"  Generating: {Path(source_path).stem}...")
-    result = subprocess.run(cmd, env=env, capture_output=True, text=True, timeout=600)
+    result = subprocess.run(cmd, env=env, capture_output=True, text=True, timeout=600, check=False)
 
     if result.returncode != 0:
         print(f"    Error: {result.stderr[-200:]}")
@@ -56,11 +66,13 @@ def generate_diagram(source_path: str, caption: str, output_dir: str = None):
     # PaperBanana may write to a run-specific dir instead of -o path
     if not dest.exists():
         import glob
+
         run_dirs = sorted(glob.glob(str(Path(output_dir) / "run_*")), reverse=True)
         for run_dir in run_dirs:
             final = Path(run_dir) / "final_output.png"
             if final.exists():
                 import shutil
+
                 shutil.copy2(str(final), str(dest))
                 break
 
@@ -72,7 +84,7 @@ def generate_diagram(source_path: str, caption: str, output_dir: str = None):
     return None
 
 
-def main(source: str = None):
+def main(source: str | None = None):
     Path(DIAGRAMS_DIR).mkdir(parents=True, exist_ok=True)
 
     if source:

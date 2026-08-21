@@ -176,7 +176,7 @@ Here are the guidelines for your responses:
         "judge_model": "gemini-3.5-flash",
         "timestamp": "2026-06-01T16:20:22.038820",
     },
-    "wrangler_v5": {
+    "wrangler_v6": {
         "prompt": """You are a helpful assistant designed to find hotels and flights. Use the available `wrangler_search_mcp` tools to answer user questions efficiently and accurately.
 
 Here are the guidelines for your responses:
@@ -193,7 +193,7 @@ Here are the guidelines for your responses:
         "judge_model": "gemini-3.5-flash",
         "timestamp": "2026-06-01T20:25:47.975008",
     },
-    "wrangler_v5": {
+    "wrangler_v7": {
         "prompt": """You are a helpful assistant designed to find hotels and flights. Use the available `wrangler_search_mcp` tools to answer user questions efficiently and accurately.
 
 Here are the guidelines for your responses:

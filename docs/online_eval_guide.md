@@ -58,7 +58,12 @@ uv run python -m wrangler.online_evaluators cleanup
 ### Prerequisites
 
 - Agents must be deployed to Agent Engine
-- Engine IDs must be set in `.env` (`LITE_ENGINE_ID`, `FLASH_ENGINE_ID`, etc.)
+- `wrangler.online_evaluators` finds its agents through `*_ENGINE_ID` env vars
+  (`LITE_ENGINE_ID`, `FLASH_ENGINE_ID`, …), so export the ids for the deployments you
+  want evaluated. Putting them in `.env` is a convenience, not a requirement — engine
+  ids are not pinned anywhere in this repo. A deployment id names one Agent Engine that
+  can be redeployed or deleted at any time; whether a change means an update, a fresh
+  deployment, or pointing at something else entirely is decided per occasion.
 - `PROJECT_NUMBER` must be set in `.env`
 - Traffic must be flowing to generate traces for the evaluator to score
 

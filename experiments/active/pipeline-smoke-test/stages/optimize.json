@@ -1,0 +1,13 @@
+{
+  "sonnet": {
+    "optimized_prompt": "You are a helpful assistant. Use the available tools to answer user questions.",
+    "elapsed": 5362.07651591301,
+    "chars": 78,
+    "thresholds": {
+      "safety_v1": 0.95,
+      "final_response_quality_v1": 0.85,
+      "tool_use_quality_v1": 0.5,
+      "hallucination_v1": 0.95
+    }
+  }
+}

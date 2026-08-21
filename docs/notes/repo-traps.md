@@ -1,0 +1,197 @@
+# Repo Traps
+
+**Verified on:** 2026-08-20.
+
+Non-obvious footguns — things that look fine, or look documented, but bite. Each one
+cost real investigation time to find.
+
+Related: [toolchain-baseline.md](toolchain-baseline.md),
+[model-lifecycle.md](model-lifecycle.md), [adk-patch-status.md](adk-patch-status.md).
+
+---
+
+## `uv.lock` is gitignored
+
+`.gitignore` line: `uv.lock`. `git ls-files uv.lock` returns nothing.
+
+The 918 KB lockfile in the working tree is **local only**. Consequences:
+
+- No reproducible install anywhere — CI, the pipeline Docker image, a fresh clone, or a
+  teammate all re-resolve from the loose floors in `pyproject.toml`.
+- This is how fastmcp 2.x→3.x, pandas 2.x→3.x, and pytest 8→9 arrived without anyone
+  deciding to take them.
+- The Docker image tag is `md5(pyproject.toml)[:12]`, so **the image cache key does not
+  change when resolved dependency versions change.** Two builds with the same tag can
+  contain different packages.
+
+Committing the lockfile also fixes that last one implicitly — but the cache key should
+be `md5(pyproject.toml + uv.lock)` to be correct.
+
+## `wrangler deploy` used the deployment path CLAUDE.md calls broken (fixed 2026-08-20)
+
+**Fixed** — the cloudpickle functions are deleted, all call sites use
+`deploy_agent_from_source()` / `update_agent_from_source()`, and
+`tests/test_deploy.py::test_cloudpickle_entrypoints_are_gone` fails if the names come
+back. Kept here for the pattern, which is the actually transferable part.
+
+CLAUDE.md said `deploy_agent()` / `update_agent()` "remain for backward compatibility
+only" and were "not used by the pipeline or local workflow." That last part was wrong:
+the `wrangler deploy manifest.yaml` branch of the CLI and both the deploy and redeploy
+phases of `WranglerPipeline.run()` all called them. Only the *experiment-directory*
+branch of `wrangler deploy` (via `stage_deploy`) reached the working path — so
+`wrangler deploy manifest.yaml` took the broken route while `wrangler run
+manifest.yaml` worked, with no hint from the CLI.
+
+**The pattern:** a doc that says "legacy, kept for compatibility" is a claim about
+call sites, and nothing enforces it. When a working replacement lands beside a broken
+original, the original does not stop being called just because the docs stop
+mentioning it. Delete it, or add a test that asserts it is unreachable.
+
+Two things the migration turned up that the phrase "swap the call" hides:
+
+- The redeploy path used to carry the optimized prompt by mutating `agent.instruction`
+  on a freshly imported agent object. Source-based deployment passes the text as an
+  argument instead, so it is now possible to redeploy the *seed* prompt and get
+  after-scores that silently mean nothing. Pinned by
+  `test_redeploy_pair_sends_the_optimized_prompt`.
+- `examples/multi_model_agents/` reads the model off `config.py` rather than off the
+  imported agent, because the agent holds the model **resolved** to an ADK
+  `Gemini()`/`Claude()` object while the build package wants the plain id string.
+
+## Two `config.py` files that have drifted
+
+CLAUDE.md flags that `wrangler/core/config.py` and `examples/multi_model_agents/config.py`
+both define `resolve_model()` and must be kept in sync. What it does not say is **how far
+apart they already are** — they diverge from line 1. The examples copy additionally:
+
+- defaults the staging bucket to `-geap-staging`, not `-wrangler-staging` — **still
+  true**, and the reason a run can write artifacts to a bucket you did not expect
+- ~~hardcodes `GCP_PROJECT_ID` default to `"hybrid-vertex"`~~ — **fixed 2026-08-20.**
+  The default is now `""`, and `tests/test_config.py::test_no_hardcoded_project_identifiers`
+  fails the build if a real project id or number reappears in any tracked `.py`, `.sh`,
+  `.yaml` or `.yml`. Markdown is deliberately exempt, so prose can still name a project
+  when describing a real run.
+- ~~reads `os.environ["SEARCH_MCP_SERVER"]` with bare subscript access~~ — **fixed
+  2026-08-20.** These are `.get(..., "")` at the source now. The `build_source_package()`
+  rewrite stays as a safety net for third-party agent configs.
+
+The trap that generalizes: the deploy-time rewrite in `build_source_package()` made the
+subscript bug invisible, because the only path anyone exercised was deployment. A bug
+that a build step silently papers over is one nobody reports.
+
+## `GOOGLE_CLOUD_LOCATION` could never have expressed the location rule
+
+**Recurred and then fixed properly on 2026-08-20.** It was first "fixed" by correcting
+`.env.example` from `${GCP_REGION}` to `global`. Within the same day the working `.env`
+was back to `${GCP_REGION}`, and Claude broke again with
+
+```
+Publisher Model .../locations/us-central1/publishers/anthropic/models/claude-sonnet-4-6
+is not servable in region us-central1
+```
+
+That recurrence is the finding. **A single process-wide env var cannot encode a
+per-model fact.** This repo routes five tiers in one process — lite/flash/pro are Gemini
+3.x (global-only), sonnet/opus are Claude (global-only), and Gemini 2.x wants a region.
+No one value of `GOOGLE_CLOUD_LOCATION` is right for all of them, so any correct setting
+is one edit away from being wrong, and nothing catches the edit. Worse, GEAP treats the
+variable as **restricted** and can serve it back regionally regardless of what the
+deployment config asked for — so even a correct `.env` did not survive deployment.
+
+The durable form is `wrangler/core/models.py:model_location()`, which pins the location
+*into each model object* (Claude: a full `locations/global` resource path, which ADK
+parses in preference to the env var; Gemini 3.x: `client_kwargs={"location": ...}`,
+forwarded to `google.genai.Client`). The env var remains only as a fallback for paths
+that bypass `resolve_model()`.
+
+Two things worth carrying forward:
+
+- The failure is **silent at import**. Nothing complains until the first inference call,
+  which in a pipeline can be twenty minutes in.
+- `deploy.py` had already worked around this for Claude by rewriting bare ids to a global
+  resource path on the way into the build package. A workaround at one call site is a
+  signal the rule belongs in the resolver, not evidence the problem is handled — Gemini
+  3.x had no equivalent cover and was quietly exposed the whole time.
+
+`.env.example` was also missing `SEARCH_MCP_SERVER`, `BOOKING_MCP_SERVER`,
+`EXPENSE_MCP_SERVER` and their `_URL` variants (fixed 2026-08-20).
+
+## `head -20` on a 22-line list is how I "proved" three live services were deleted
+
+The `wrangler-search-mcp` / `-booking-mcp` / `-expense-mcp` services back the multi-model
+agents' MCP tools. They are ordinary Cloud Run services deployed by
+`examples/multi_model_agents/scripts/deploy_mcp_servers.sh`, and
+`gcloud run services list` shows them perfectly well.
+
+I ran that list piped through `head -20`. The project has 22 services, sorted
+alphabetically, and `wrangler-*` sorts **last**. I read the truncation as absence,
+concluded the `.env` URLs pointed at deleted hosts, and rewrote both `.env` files to
+target services that did not exist — breaking a working setup, then writing a note
+here confidently explaining that "Agent Registry manages them so they are invisible to
+gcloud." All of that was fabricated to explain an artifact of my own `head`.
+
+Corrected 2026-08-20. Two things worth keeping:
+
+- **A truncating pipe turns a listing into evidence of nothing.** `head`, `--limit`,
+  and default page sizes all silently cap output. If a name is missing from a list, grep
+  the *untruncated* list for it before believing the absence.
+- **Before concluding a resource is gone, get a positive signal.** For these,
+  `curl` the URL: a bare `GET` returns **406**, not 404 — a healthy MCP endpoint
+  refusing a non-MCP request. For a real check, POST an MCP `initialize` and look for
+  `serverInfo`.
+
+The same class of mistake bit twice in one session — see
+[silent-failures.md](silent-failures.md), where "no logs after the model call" was a
+Cloud Logging ingestion delay, not an absence of logs. **Absence observed through a
+tool with a cap or a lag is not absence.**
+
+**The `--limit` on `gcloud logging read` is the same trap with a worse failure mode**
+(2026-08-21). Here the cap does not hide a row you were looking for — it hands you a full
+result set drawn entirely from the *wrong* resource. One crash-looping engine in
+`hybrid-vertex` was emitting ~450,000 log entries a day; a 2,000-row query scoped to a
+different engine came back completely full, every row belonging to the noisy neighbour,
+with nothing marking the truncation. The first read of that output was "our engine is
+quiet" — the exact opposite of the truth.
+
+Two habits that would have caught it:
+
+- **When a scoped log query comes back at exactly the limit, assume truncation.** Compare
+  the oldest returned timestamp against the window you asked for: 2,000 rows spanning six
+  minutes of a two-day query is the tell.
+- **Aggregate before reading.** `--format='value(resource.labels.reasoning_engine_id)' |
+  sort | uniq -c | sort -rn` shows who is actually producing the volume in one line, and
+  is how the crash loop was found at all. It was deleted the same day; the engine had
+  served zero requests in 30 days and nothing referenced it.
+
+## Test count in CLAUDE.md was stale (fixed 2026-08-20)
+
+CLAUDE.md said 316; the suite was 356. Corrected, then it went stale twice more in the
+same day (369, 401). **Fixed by removing the number** rather than updating it — nothing
+enforces a count in prose, so quoting one guarantees it will be wrong. The same applies
+to any other figure a doc quotes about the code.
+
+## `wrangler run --max-concurrent` is silently ignored on the default path
+
+`cli.py` threads `max_concurrent` into `WranglerPipeline(...)`, and that constructor
+only runs on the legacy branch (`--resume-from` or `--from-phase > 0`). The default
+`run` path goes through `Experiment` + `stage_*` functions, which never see the value.
+So `wrangler run manifest.yaml -c 4` is accepted, prints nothing, and evaluates
+sequentially anyway.
+
+Click cannot warn about this — the option parses fine; it just lands in a variable
+nobody reads. The general shape: **an option that is only consumed inside one branch of
+the command body looks supported from `--help`.** Grep for the parameter name before
+trusting a flag; if it appears once in `cli.py` and once in a constructor that a
+conditional guards, it does nothing on the path you are on.
+
+Two other `run` options are in the same legacy-only category (`--resume-from`,
+`--from-phase`) but those *are* the branch condition, so they are self-evident.
+`--version`, `--name`, `--pair`, `--num-runs` and `--dry-run` all work on the default
+path. Documented in README's Options block as of 2026-08-20.
+
+## `wrangler inspect` emits literal `TODO` strings
+
+`wrangler/tools/inspector.py:217-237` generates eval-case scaffolding whose `prompt`,
+`expected_response`, and tool args are the literal string `"TODO"`. Intentional
+scaffolding, but a generated evalset will run and score against `"TODO"` goldens if
+nobody fills them in. Nothing validates that they were.

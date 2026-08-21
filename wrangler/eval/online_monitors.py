@@ -6,15 +6,14 @@ every 10 minutes, Online Monitors let you trigger evaluations explicitly and
 store results for trend analysis.
 
 Usage:
-    uv run python -m wrangler.online_monitors <engine-id>
-    uv run python -m wrangler.online_monitors <engine-id> --cases 10
+    uv run python -m wrangler.eval.online_monitors <engine-id>
+    uv run python -m wrangler.eval.online_monitors <engine-id> --cases 10
 """
 
 import json
-import os
 import sys
 import time
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 
 import vertexai
@@ -50,11 +49,11 @@ def _resolve_agent_resource(agent_id: str) -> str:
     return f"projects/{GCP_PROJECT_ID}/locations/{GCP_REGION}/reasoningEngines/{agent_id}"
 
 
-def run_quick_eval(agent_id: str, num_cases: int = None) -> dict:
+def run_quick_eval(agent_id: str, num_cases: int | None = None) -> dict:
     """Run a quick evaluation against a deployed agent."""
     agent_resource = _resolve_agent_resource(agent_id)
     cases = QUICK_EVAL_CASES[:num_cases] if num_cases else QUICK_EVAL_CASES
-    run_id = f"monitor_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+    run_id = f"monitor_{datetime.now(tz=UTC).strftime('%Y%m%d_%H%M%S')}"
 
     vertexai.init(
         project=GCP_PROJECT_ID,
@@ -68,30 +67,30 @@ def run_quick_eval(agent_id: str, num_cases: int = None) -> dict:
     print(f"  Cases:  {len(cases)}")
 
     import pandas as pd
+
     session_inputs = types.evals.SessionInput(user_id="monitor-user", state={})
-    eval_df = pd.DataFrame([
-        {"prompt": case, "session_inputs": session_inputs}
-        for case in cases
-    ])
+    eval_df = pd.DataFrame([{"prompt": case, "session_inputs": session_inputs} for case in cases])
 
     print("  Running inference...", end="", flush=True)
     t0 = time.time()
     inference_result = client.evals.run_inference(
-        agent=agent_resource, src=eval_df,
+        agent=agent_resource,
+        src=eval_df,
     )
     print(f" {time.time() - t0:.0f}s")
 
     print("  Creating evaluation run...", end="", flush=True)
-    GCS_DEST = f"gs://{GCP_STAGING_BUCKET}/monitor-results/"
+    gcs_dest = f"gs://{GCP_STAGING_BUCKET}/monitor-results/"
     evaluation_run = client.evals.create_evaluation_run(
         dataset=inference_result,
         agent=agent_resource,
         metrics=EVAL_METRICS,
-        dest=GCS_DEST,
+        dest=gcs_dest,
         labels={"solution": "promp-wrangler"},
     )
 
     poll_start = time.time()
+    state = ""
     while time.time() - poll_start < 600:
         evaluation_run = client.evals.get_evaluation_run(name=evaluation_run.name)
         state = str(getattr(evaluation_run, "state", ""))
@@ -119,7 +118,7 @@ def run_quick_eval(agent_id: str, num_cases: int = None) -> dict:
     except Exception as e:
         print(f"  Warning: {e}")
 
-    print(f"\n  Results:")
+    print("\n  Results:")
     for m, s in sorted(scores.items()):
         print(f"    {m:40s} {s:.2f}")
 
@@ -129,7 +128,7 @@ def run_quick_eval(agent_id: str, num_cases: int = None) -> dict:
     result = {
         "agent_id": agent_id,
         "run_id": run_id,
-        "timestamp": datetime.now().isoformat(),
+        "timestamp": datetime.now(tz=UTC).isoformat(),
         "num_cases": len(cases),
         "scores": scores,
     }
@@ -142,8 +141,9 @@ def run_quick_eval(agent_id: str, num_cases: int = None) -> dict:
 
 
 if __name__ == "__main__":
-    from dotenv import load_dotenv
     from pathlib import Path
+
+    from dotenv import load_dotenv
 
     load_dotenv()
     example_env = Path(__file__).parent.parent / "examples" / "multi_model_agents" / ".env"
@@ -151,7 +151,7 @@ if __name__ == "__main__":
         load_dotenv(str(example_env), override=True)
 
     if len(sys.argv) < 2:
-        print("Usage: python -m wrangler.online_monitors <engine-id> [--cases N]")
+        print("Usage: python -m wrangler.eval.online_monitors <engine-id> [--cases N]")
         sys.exit(1)
 
     agent_id = sys.argv[1]

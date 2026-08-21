@@ -8,6 +8,12 @@ from typing import Any
 
 import yaml
 
+from .models import MODELS
+
+# The API default. Setting temperature to anything else is what trips the
+# sampling-parameter deprecation; leaving it here is not.
+DEFAULT_TEMPERATURE = 1.0
+
 
 @dataclass
 class AgentPromptPair:
@@ -16,7 +22,9 @@ class AgentPromptPair:
     id: str
     model: str
     system_prompt: str
-    temperature: float = 1.0
+    # Currently parsed and carried but not passed to any deployed agent. Kept
+    # because manifests document it; see the validation in PairFactory.load.
+    temperature: float = DEFAULT_TEMPERATURE
     description: str = ""
     tags: list[str] = field(default_factory=list)
     engine_id: str = ""
@@ -66,7 +74,9 @@ class PairFactory:
             raw = yaml.safe_load(f)
 
         if not isinstance(raw, dict):
-            raise ValueError("Manifest must be a YAML mapping at the top level.")
+            raise ValueError(  # noqa: TRY004  (file content, not a call argument)
+                "Manifest must be a YAML mapping at the top level."
+            )
 
         # Required fields
         for key in ("name", "agent_module", "pairs"):
@@ -81,6 +91,18 @@ class PairFactory:
             if "system_prompt" not in entry:
                 raise ValueError(f"Pair {pair_id!r} is missing required field: 'system_prompt'")
 
+            temperature = float(entry.get("temperature", DEFAULT_TEMPERATURE))
+            spec = MODELS.get(entry["model"])
+            if temperature != DEFAULT_TEMPERATURE and spec and not spec.supports_sampling_params:
+                # Claude Opus 4.7 and later return a 400 for a non-default
+                # temperature/top_p/top_k. Fail here, where the message can name
+                # the pair, rather than mid-run behind an SDK stack trace.
+                raise ValueError(
+                    f"Pair {pair_id!r} sets temperature={temperature}, but "
+                    f"{entry['model']} rejects sampling parameters. Remove the field "
+                    f"and steer the model through the system prompt instead."
+                )
+
             raw_costs = entry.get("costs")
             costs = None
             if isinstance(raw_costs, dict) and "input" in raw_costs and "output" in raw_costs:
@@ -91,7 +113,7 @@ class PairFactory:
                     id=pair_id,
                     model=entry["model"],
                     system_prompt=entry["system_prompt"],
-                    temperature=float(entry.get("temperature", 1.0)),
+                    temperature=temperature,
                     description=entry.get("description", ""),
                     tags=entry.get("tags", []),
                     engine_id=entry.get("engine_id", ""),

@@ -1,6 +1,5 @@
 """Per-agent evaluation configs — test cases, AgentInfo builders, and metric selectors."""
 
-import json
 from pathlib import Path
 
 import yaml
@@ -568,13 +567,6 @@ def _build_standalone_info(agent_name: str) -> types.evals.AgentInfo:
 
 
 STANDALONE_EVAL_CASES = TRAVEL_EVAL_CASES + EXPENSE_EVAL_CASES
-
-from .tier_eval_cases import (
-    LOW_COMPLEXITY_CASES,
-    MEDIUM_COMPLEXITY_CASES,
-    HIGH_COMPLEXITY_CASES,
-    TIER_EVAL_CASES,
-)
 
 
 # ---------------------------------------------------------------------------

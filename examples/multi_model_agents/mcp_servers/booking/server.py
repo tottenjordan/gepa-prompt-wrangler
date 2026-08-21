@@ -1,19 +1,24 @@
 """Booking MCP server — exposes flight and hotel booking tools over StreamableHTTP."""
 
 import logging
+
 logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 try:
     from otel_setup import setup_opentelemetry
+
     setup_opentelemetry("booking-mcp")
 except Exception as e:
-    logging.warning("OTel setup failed: %s", e)
+    logger.warning("OTel setup failed: %s", e)
 
 from fastmcp import FastMCP
 
 try:
-    from .mock_db import create_booking, cancel_booking as _cancel, get_booking, list_bookings
+    from .mock_db import cancel_booking as _cancel
+    from .mock_db import create_booking, get_booking, list_bookings
 except ImportError:
-    from mock_db import create_booking, cancel_booking as _cancel, get_booking, list_bookings
+    from mock_db import cancel_booking as _cancel
+    from mock_db import create_booking, get_booking, list_bookings
 
 mcp = FastMCP("booking-mcp", instructions="Book and manage flight and hotel reservations.")
 
@@ -39,11 +44,15 @@ def book_hotel(hotel_id: str, guest_name: str, checkin: str, checkout: str) -> d
         checkin: Check-in date (YYYY-MM-DD)
         checkout: Check-out date (YYYY-MM-DD)
     """
-    return create_booking("hotel", hotel_id, {
-        "guest_name": guest_name,
-        "checkin": checkin,
-        "checkout": checkout,
-    })
+    return create_booking(
+        "hotel",
+        hotel_id,
+        {
+            "guest_name": guest_name,
+            "checkin": checkin,
+            "checkout": checkout,
+        },
+    )
 
 
 @mcp.tool()

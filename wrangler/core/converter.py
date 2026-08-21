@@ -8,6 +8,7 @@ from typing import Any
 
 import yaml
 
+from .models import DEFAULT_JUDGE_MODEL
 
 # ---------------------------------------------------------------------------
 # Loading
@@ -79,22 +80,26 @@ def _load_simplified_yaml(path: Path) -> list[dict[str, Any]]:
     if isinstance(data, dict) and "eval_cases" in data:
         data = data["eval_cases"]
     if not isinstance(data, list):
-        raise ValueError(f"Expected a YAML list of eval cases, got {type(data).__name__}")
+        raise ValueError(  # noqa: TRY004  (file content, not a call argument)
+            f"Expected a YAML list of eval cases, got {type(data).__name__}"
+        )
 
     cases = []
     for item in data:
         prompt = item.get("prompt") or item.get("query", "")
         reference = item.get("expected_response") or item.get("reference", "")
-        cases.append({
-            "prompt": prompt,
-            "reference": reference,
-            "expected_tool": item.get("expected_tool", ""),
-            "expected_tools": item.get("expected_tools", []),
-            "description": item.get("description", ""),
-            "tier": item.get("tier", ""),
-            "category": item.get("category", ""),
-            "tags": item.get("tags", []),
-        })
+        cases.append(
+            {
+                "prompt": prompt,
+                "reference": reference,
+                "expected_tool": item.get("expected_tool", ""),
+                "expected_tools": item.get("expected_tools", []),
+                "description": item.get("description", ""),
+                "tier": item.get("tier", ""),
+                "category": item.get("category", ""),
+                "tags": item.get("tags", []),
+            }
+        )
     return cases
 
 
@@ -123,15 +128,15 @@ def _load_adk_json(path: Path) -> list[dict[str, Any]]:
 
     cases = []
     for item in data:
-        tools = [
-            t["tool_name"] for t in item.get("expected_tool_use", [])
-        ]
-        cases.append({
-            "query": item["query"],
-            "expected_response": item.get("reference", ""),
-            "expected_tools": tools,
-            "tags": item.get("tags", []),
-        })
+        tools = [t["tool_name"] for t in item.get("expected_tool_use", [])]
+        cases.append(
+            {
+                "query": item["query"],
+                "expected_response": item.get("reference", ""),
+                "expected_tools": tools,
+                "tags": item.get("tags", []),
+            }
+        )
     return cases
 
 
@@ -180,6 +185,7 @@ def _sample_balanced(cases: list[dict], count: int, seed: int = 42) -> list[dict
     Otherwise distribute evenly by position (first third = low, etc.).
     """
     import random
+
     rng = random.Random(seed)
 
     has_complexity = any(c.get("complexity") for c in cases)
@@ -193,15 +199,15 @@ def _sample_balanced(cases: list[dict], count: int, seed: int = 42) -> list[dict
         third = max(len(cases) // 3, 1)
         buckets = {
             "low": cases[:third],
-            "medium": cases[third:2*third],
-            "high": cases[2*third:],
+            "medium": cases[third : 2 * third],
+            "high": cases[2 * third :],
         }
 
     per_bucket = max(count // len(buckets), 1)
     remainder = count - per_bucket * len(buckets)
 
     sampled = []
-    for i, (level, bucket) in enumerate(sorted(buckets.items())):
+    for i, (_level, bucket) in enumerate(sorted(buckets.items())):
         n = per_bucket + (1 if i < remainder else 0)
         n = min(n, len(bucket))
         sampled.extend(rng.sample(bucket, n))
@@ -217,10 +223,12 @@ def _case_to_gepa_conversation(case: dict, app_name: str) -> dict:
     tool_uses = []
     for tool in case.get("expected_tools", []):
         if isinstance(tool, dict):
-            tool_uses.append({
-                "name": tool.get("name", ""),
-                "args": tool.get("args", {}),
-            })
+            tool_uses.append(
+                {
+                    "name": tool.get("name", ""),
+                    "args": tool.get("args", {}),
+                }
+            )
         elif isinstance(tool, str):
             tool_uses.append({"name": tool, "args": {}})
 
@@ -276,31 +284,33 @@ def generate_gepa_evalset(
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    if balanced and len(cases) > count:
-        selected = _sample_balanced(cases, count)
-    else:
-        selected = cases[:count]
+    selected = _sample_balanced(cases, count) if balanced and len(cases) > count else cases[:count]
 
     eval_cases = []
     for i, case in enumerate(selected):
         tier = case.get("tier", "") or case.get("complexity", "")
         category = case.get("category", "")
         if tier and category:
-            eval_id = f"case_{i+1}_{tier}_{category}"
+            eval_id = f"case_{i + 1}_{tier}_{category}"
         elif tier:
-            eval_id = f"case_{i+1}_{tier}"
+            eval_id = f"case_{i + 1}_{tier}"
         else:
-            eval_id = f"case_{i+1}"
+            eval_id = f"case_{i + 1}"
         conversation = _case_to_gepa_conversation(case, app_name)
-        session_input = conversation.pop("session_input", {
-            "app_name": app_name,
-            "user_id": "eval_user",
-        })
-        eval_cases.append({
-            "eval_id": eval_id,
-            "conversation": [conversation],
-            "session_input": session_input,
-        })
+        session_input = conversation.pop(
+            "session_input",
+            {
+                "app_name": app_name,
+                "user_id": "eval_user",
+            },
+        )
+        eval_cases.append(
+            {
+                "eval_id": eval_id,
+                "conversation": [conversation],
+                "session_input": session_input,
+            }
+        )
 
     evalset = {
         "eval_set_id": eval_set_id,
@@ -326,7 +336,7 @@ _DEFAULT_THRESHOLDS = {
 
 def build_gepa_criteria(
     thresholds: dict[str, float] | None = None,
-    judge_model: str = "gemini-2.5-flash",
+    judge_model: str = DEFAULT_JUDGE_MODEL,
 ) -> dict:
     """Build the GEPA ``eval_config.criteria`` dict with calibrated thresholds.
 
@@ -367,16 +377,12 @@ def build_gepa_criteria(
             "rubrics": [
                 {
                     "rubric_id": "correct_tool_selection",
-                    "rubric_content": {
-                        "text_property": "Correct tools selected."
-                    },
+                    "rubric_content": {"text_property": "Correct tools selected."},
                     "type": "TOOL_USE_QUALITY",
                 },
                 {
                     "rubric_id": "correct_parameters",
-                    "rubric_content": {
-                        "text_property": "Accurate tool parameters provided."
-                    },
+                    "rubric_content": {"text_property": "Accurate tool parameters provided."},
                     "type": "TOOL_USE_QUALITY",
                 },
             ],
@@ -387,7 +393,7 @@ def build_gepa_criteria(
 def generate_sampler_config(
     app_name: str,
     eval_set_name: str = "eval_set",
-    judge_model: str = "gemini-2.5-flash",
+    judge_model: str = DEFAULT_JUDGE_MODEL,
     output_dir: str | Path | None = None,
     train_eval_case_ids: list[str] | None = None,
     validation_eval_case_ids: list[str] | None = None,

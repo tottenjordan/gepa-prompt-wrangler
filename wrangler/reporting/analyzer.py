@@ -3,14 +3,15 @@
 from __future__ import annotations
 
 import difflib
-import textwrap
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING
 
-from ..core.config import blended_cost
-from ..orchestration.experiment import Experiment
+from ..core.models import blended_cost_for_report as blended_cost
+
+if TYPE_CHECKING:
+    from ..orchestration.experiment import Experiment
 
 METRIC_LABELS = {
     "final_response_quality_v1": "Quality",
@@ -100,9 +101,7 @@ def analyze_experiment(exp: Experiment) -> ExperimentAnalysis:
         thresholds=thresholds,
     )
 
-    pair_descriptions = {
-        p["id"]: p.get("description", "") for p in exp.config.get("pairs", [])
-    }
+    pair_descriptions = {p["id"]: p.get("description", "") for p in exp.config.get("pairs", [])}
 
     for pair_id in exp.pair_ids:
         before_data = eval_before.get(pair_id, {})
@@ -135,23 +134,38 @@ def _prompt_diff_summary(original: str, optimized: str) -> str:
 
     orig_lines = original.splitlines(keepends=True)
     opt_lines = optimized.splitlines(keepends=True)
-    diff = list(difflib.unified_diff(orig_lines, opt_lines, fromfile="original", tofile="optimized", n=2))
+    diff = list(
+        difflib.unified_diff(orig_lines, opt_lines, fromfile="original", tofile="optimized", n=2)
+    )
 
     if not diff:
         return "(prompts are identical)"
 
-    added = sum(1 for l in diff if l.startswith("+") and not l.startswith("+++"))
-    removed = sum(1 for l in diff if l.startswith("-") and not l.startswith("---"))
+    added = sum(1 for line in diff if line.startswith("+") and not line.startswith("+++"))
+    removed = sum(1 for line in diff if line.startswith("-") and not line.startswith("---"))
     return f"+{added} lines / -{removed} lines"
 
 
-def _find_removed_content(original: str, optimized: str, keywords: list[str] | None = None) -> list[str]:
+def _find_removed_content(
+    original: str, optimized: str, keywords: list[str] | None = None
+) -> list[str]:
     """Identify significant content removed from the original prompt."""
     if not original or not optimized:
         return []
 
     if keywords is None:
-        keywords = ["$", "policy", "limit", "maximum", "threshold", "must", "require", "tool", "always", "never"]
+        keywords = [
+            "$",
+            "policy",
+            "limit",
+            "maximum",
+            "threshold",
+            "must",
+            "require",
+            "tool",
+            "always",
+            "never",
+        ]
 
     opt_lower = optimized.lower()
     removed = []
@@ -159,9 +173,10 @@ def _find_removed_content(original: str, optimized: str, keywords: list[str] | N
         line_stripped = line.strip()
         if not line_stripped or len(line_stripped) < 10:
             continue
-        if line_stripped.lower() not in opt_lower:
-            if any(kw in line_stripped.lower() for kw in keywords):
-                removed.append(line_stripped)
+        if line_stripped.lower() not in opt_lower and any(
+            kw in line_stripped.lower() for kw in keywords
+        ):
+            removed.append(line_stripped)
     return removed
 
 
@@ -169,8 +184,18 @@ def _find_removed_content(original: str, optimized: str, keywords: list[str] | N
 
 
 TOOL_KEYWORDS = [
-    "search", "book", "cancel", "expense", "hotel", "flight",
-    "policy", "submit", "lookup", "check", "tool", "mcp",
+    "search",
+    "book",
+    "cancel",
+    "expense",
+    "hotel",
+    "flight",
+    "policy",
+    "submit",
+    "lookup",
+    "check",
+    "tool",
+    "mcp",
 ]
 
 
@@ -233,6 +258,7 @@ def _extract_gepa_run_stats(exp: Experiment) -> dict[str, GepaRunStats]:
 
 def _analyze_tool_keywords(original: str, optimized: str) -> dict:
     """Compare tool-related keyword presence between original and optimized prompts."""
+
     def find_keywords(text: str) -> set[str]:
         lower = text.lower()
         return {kw for kw in TOOL_KEYWORDS if kw in lower}
@@ -248,7 +274,9 @@ def _analyze_tool_keywords(original: str, optimized: str) -> dict:
     }
 
 
-def _format_tool_audit(analysis: ExperimentAnalysis, run_stats: dict[str, GepaRunStats]) -> list[str]:
+def _format_tool_audit(
+    analysis: ExperimentAnalysis, run_stats: dict[str, GepaRunStats]
+) -> list[str]:
     """Generate markdown lines for the MCP tool audit section."""
     lines: list[str] = []
     lines.append("## MCP Tool Usage Audit\n")
@@ -308,7 +336,7 @@ def format_analysis_report(
     """Generate a markdown analysis report."""
     lines: list[str] = []
     lines.append(f"# Analysis Report — {analysis.experiment_name}\n")
-    lines.append(f"Generated: {datetime.now().isoformat(timespec='seconds')}\n")
+    lines.append(f"Generated: {datetime.now(tz=UTC).isoformat(timespec='seconds')}\n")
 
     # --- Aggregate summary ---
     lines.append("## Summary\n")
@@ -359,9 +387,10 @@ def format_analysis_report(
 
         removed = _find_removed_content(p.original_prompt, p.optimized_prompt)
         if removed:
-            lines.append(f"\n**Removed content with policy/tool keywords** ({len(removed)} lines):\n")
-            for r in removed[:10]:
-                lines.append(f"  - `{r[:120]}`")
+            lines.append(
+                f"\n**Removed content with policy/tool keywords** ({len(removed)} lines):\n"
+            )
+            lines.extend(f"  - `{r[:120]}`" for r in removed[:10])
         lines.append("")
 
     # --- Degradation diagnosis ---
@@ -370,11 +399,13 @@ def format_analysis_report(
         lines.append("## Degradation Diagnosis\n")
         for p in degraded_pairs:
             lines.append(f"### {p.pair_id}\n")
-            lines.append(f"Degraded metrics: {', '.join(METRIC_LABELS.get(m, m) for m in p.degraded_metrics)}\n")
+            lines.append(
+                f"Degraded metrics: {', '.join(METRIC_LABELS.get(m, m) for m in p.degraded_metrics)}\n"
+            )
             for m in p.degraded_metrics:
                 d = p.deltas[m]
                 b = p.before.get(m, 0)
-                pct = f" ({d/b*100:+.0f}%)" if b > 0 else ""
+                pct = f" ({d / b * 100:+.0f}%)" if b > 0 else ""
                 lines.append(f"- **{METRIC_LABELS.get(m, m)}**: {d:+.3f}{pct}")
             lines.append("")
 
@@ -425,7 +456,9 @@ def format_analysis_report(
                 lines.append("")
     else:
         lines.append("## Per-Case Analysis\n")
-        lines.append("*Per-case scores not available for this experiment. Future runs with updated eval")
+        lines.append(
+            "*Per-case scores not available for this experiment. Future runs with updated eval"
+        )
         lines.append("extraction will enable per-case degradation tracking.*\n")
 
     # --- MCP tool audit ---
@@ -458,12 +491,13 @@ def format_analysis_report(
     rec_num = 1
 
     no_threshold_metrics = [
-        m for m in all_metrics
-        if m not in analysis.thresholds and m != "response_match_score"
+        m for m in all_metrics if m not in analysis.thresholds and m != "response_match_score"
     ]
     if no_threshold_metrics:
         lines.append(f"{rec_num}. **Add thresholds for**: {', '.join(no_threshold_metrics)}")
-        lines.append("   Metrics without thresholds default to 0.0 in GEPA — no optimization pressure.\n")
+        lines.append(
+            "   Metrics without thresholds default to 0.0 in GEPA — no optimization pressure.\n"
+        )
         rec_num += 1
 
     heavy_compression = [p for p in analysis.pairs if p.prompt_char_pct < -30]
@@ -478,8 +512,12 @@ def format_analysis_report(
         if p.before and p.after and set(p.before) != set(p.after):
             mismatched |= set(p.before).symmetric_difference(set(p.after))
     if mismatched:
-        lines.append(f"{rec_num}. **Investigate metric name alignment** — before/after use different metric keys: {', '.join(sorted(mismatched))}")
-        lines.append("   Mismatched names mean GEPA optimizes for different metrics than cloud reports.\n")
+        lines.append(
+            f"{rec_num}. **Investigate metric name alignment** — before/after use different metric keys: {', '.join(sorted(mismatched))}"
+        )
+        lines.append(
+            "   Mismatched names mean GEPA optimizes for different metrics than cloud reports.\n"
+        )
         rec_num += 1
 
     if rec_num == 1:
@@ -506,9 +544,9 @@ def run_analysis(exp: Experiment) -> Path:
 
 def _print_summary(analysis: ExperimentAnalysis) -> None:
     """Print a concise terminal summary."""
-    print(f"\n  {'='*60}")
+    print(f"\n  {'=' * 60}")
     print(f"  Analysis: {analysis.experiment_name}")
-    print(f"  {'='*60}")
+    print(f"  {'=' * 60}")
     for p in analysis.pairs:
         delta = p.avg_after - p.avg_before
         icon = "+" if delta > 0.005 else "-" if delta < -0.005 else "="

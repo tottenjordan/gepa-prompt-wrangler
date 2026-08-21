@@ -2,6 +2,7 @@
 
 import os
 import warnings
+
 from dotenv import load_dotenv
 
 warnings.filterwarnings("ignore", message=".*EXPERIMENTAL.*")
@@ -9,7 +10,7 @@ warnings.filterwarnings("ignore", message=".*EXPERIMENTAL.*")
 load_dotenv()
 load_dotenv(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env"))
 
-GCP_PROJECT_ID = os.environ.get("GCP_PROJECT_ID", "hybrid-vertex")
+GCP_PROJECT_ID = os.environ.get("GCP_PROJECT_ID", "")
 PROJECT_NUMBER = os.environ.get("PROJECT_NUMBER", "")
 GCP_REGION = os.environ.get("GCP_REGION", "us-central1")
 GCP_STAGING_BUCKET = os.environ.get("GCP_STAGING_BUCKET", f"{GCP_PROJECT_ID}-geap-staging")
@@ -22,9 +23,11 @@ EXPENSE_MCP_URL = os.environ.get("EXPENSE_MCP_URL", "http://localhost:8003/mcp")
 
 # Agent Registry — MCP server resource names (global location)
 AGENT_REGISTRY_LOCATION = os.environ.get("AGENT_REGISTRY_LOCATION", "us-central1")
-SEARCH_MCP_SERVER = os.environ["SEARCH_MCP_SERVER"]
-BOOKING_MCP_SERVER = os.environ["BOOKING_MCP_SERVER"]
-EXPENSE_MCP_SERVER = os.environ["EXPENSE_MCP_SERVER"]
+# Default to "" rather than subscripting: importing this module must not require
+# the MCP env, or tests and any local `import config` fail where deployment works.
+SEARCH_MCP_SERVER = os.environ.get("SEARCH_MCP_SERVER", "")
+BOOKING_MCP_SERVER = os.environ.get("BOOKING_MCP_SERVER", "")
+EXPENSE_MCP_SERVER = os.environ.get("EXPENSE_MCP_SERVER", "")
 
 # Fallback: map Agent Registry server names → Cloud Run URLs
 MCP_SERVER_URLS = {
@@ -33,28 +36,74 @@ MCP_SERVER_URLS = {
     EXPENSE_MCP_SERVER: EXPENSE_MCP_URL,
 }
 
-OTEL_ENV_VARS = {
-    "OTEL_SEMCONV_STABILITY_OPT_IN": "gen_ai_latest_experimental",
-    "OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT": "EVENT_ONLY",
-}
+# The OTel settings that actually reach a deployed agent live in
+# `_OTEL_ENV_VARS` in wrangler/core/deploy.py, which is what builds the GEAP
+# env_vars. A copy used to sit here too, with nothing reading it — a dict that
+# reads like configuration but is not applied is how the un-tuned exporter
+# settings would have quietly outlived the fix in docs/notes/silent-failures.md
+# #8. Removed rather than synced, because a second copy only drifts again.
 
 AGENT_MODEL = os.environ.get("AGENT_MODEL", "gemini-3.5-flash")
+
+
+GLOBAL_LOCATION = "global"
+_VERTEX_TRUTHY = {"1", "true", "True", "TRUE"}
+
+
+def is_regional_model(model_str: str) -> bool:
+    """True if `model_str` is served from a regional Vertex AI endpoint."""
+    return model_str.startswith(("gemini-2", "models/"))
+
+
+def model_location(model_str: str) -> str:
+    """Return the Vertex AI location that serves `model_str`.
+
+    Gemini 2.x → regional (GCP_REGION). Gemini 3.x and every Anthropic
+    (Claude) model → "global"; they are not servable from a region, and
+    asking for one fails with "Publisher Model ... is not servable in region
+    us-central1".
+
+    Kept in sync with wrangler/core/models.py:model_location — see that
+    docstring for why this cannot be driven by GOOGLE_CLOUD_LOCATION.
+    """
+    return GCP_REGION if is_regional_model(model_str) else GLOBAL_LOCATION
 
 
 def resolve_model(model_str: str):
     """Resolve model string to an ADK-compatible model.
 
-    Gemini 2.x models work in regional endpoints — pass as plain strings.
-    Gemini 3.x uses the native Gemini class, Claude uses the native Claude
-    class. Both read GOOGLE_CLOUD_LOCATION from env (set to "global").
+    Gemini 2.x passes through as a plain string. Gemini 3.x and Claude get
+    their location from `model_location` pinned into the model object, so a
+    stale or platform-imposed GOOGLE_CLOUD_LOCATION cannot break them.
     """
-    if model_str.startswith(("gemini-2", "models/")):
+    if is_regional_model(model_str):
         return model_str
+
+    location = model_location(model_str)
+    project = GCP_PROJECT_ID or os.environ.get("GOOGLE_CLOUD_PROJECT", "")
+
     if model_str.startswith("claude"):
         from google.adk.models.anthropic_llm import Claude
-        return Claude(model=model_str)
+
+        if not project:
+            return Claude(model=model_str)
+        # ADK's Claude reads project + location out of a full resource path
+        # and ignores GOOGLE_CLOUD_LOCATION when one is given.
+        return Claude(
+            model=f"projects/{project}/locations/{location}/publishers/anthropic/models/{model_str}"
+        )
+
     from google.adk.models.google_llm import Gemini
-    return Gemini(model=model_str)
+
+    if not project or os.environ.get("GOOGLE_GENAI_USE_VERTEXAI", "") not in _VERTEX_TRUTHY:
+        return Gemini(model=model_str)
+    # client_kwargs is forwarded to google.genai.Client, which picks its
+    # endpoint host from `location`.
+    return Gemini(
+        model=model_str,
+        client_kwargs={"vertexai": True, "project": project, "location": location},
+    )
+
 
 # Multi-model router (5-tier: lite → flash → pro → sonnet → opus)
 LITE_MODEL = os.environ.get("LITE_MODEL", "gemini-3.1-flash-lite")
@@ -64,13 +113,18 @@ SONNET_MODEL = os.environ.get("SONNET_MODEL", "claude-sonnet-4-6")
 OPUS_MODEL = os.environ.get("OPUS_MODEL", "claude-opus-4-6")
 COMPLEXITY_THRESHOLD_HIGH = float(os.environ.get("COMPLEXITY_THRESHOLD_HIGH", "0.65"))
 CLASSIFIER_MODEL = os.environ.get("CLASSIFIER_MODEL", "gemini-3.1-flash-lite")
-SIMULATOR_MODEL = os.environ.get("SIMULATOR_MODEL", "gemini-2.5-flash")
+SIMULATOR_MODEL = os.environ.get("SIMULATOR_MODEL", "gemini-3.5-flash")
 
 # Evaluation
 EVAL_OUTPUT_DIR = os.environ.get("EVAL_OUTPUT_DIR", "eval_outputs")
 BQ_EVAL_DATASET = os.environ.get("BQ_EVAL_DATASET", "geap_workshop_logs")
-AGENT_ENGINE_ID = os.environ.get("AGENT_ENGINE_ID", "2479350891879071744")
-ROUTER_ENGINE_ID = os.environ.get("ROUTER_ENGINE_ID", "6023683798619652096")
+
+# No engine ids here on purpose. A deployment id is not configuration — it names
+# one particular Agent Engine that may since have been redeployed or deleted, and
+# a stale default sends every caller that forgets to set the env var at a resource
+# that is not theirs. Pass the id in at the call site (CLI flag, manifest
+# `engine_id`, or an env var read where it is used) and decide redeploy-vs-new per
+# deployment.
 
 
 def disable_pyopenssl():
@@ -82,7 +136,8 @@ def disable_pyopenssl():
     all guarded methods back to their originals via __wrapped__.
     """
     try:
-        import OpenSSL.SSL as _ssl
+        import OpenSSL.SSL as _ssl  # noqa: N811  # ty: ignore[unresolved-import]
+
         for attr in dir(_ssl.Context):
             method = getattr(_ssl.Context, attr, None)
             if callable(method) and hasattr(method, "__wrapped__"):

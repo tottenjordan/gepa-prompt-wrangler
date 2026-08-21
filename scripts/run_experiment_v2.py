@@ -31,7 +31,7 @@ def run_step(name: str, cmd: list[str], step_times: list) -> bool:
     print(f"  {name}")
     print(f"{'=' * 60}")
     t0 = time.time()
-    result = subprocess.run(cmd, timeout=7200)
+    result = subprocess.run(cmd, timeout=7200, check=False)
     elapsed = time.time() - t0
     step_times.append((name, elapsed))
     ok = result.returncode == 0
@@ -42,21 +42,27 @@ def run_step(name: str, cmd: list[str], step_times: list) -> bool:
 
 def main():
     parser = argparse.ArgumentParser(description="Run the full GEPA experiment pipeline")
-    parser.add_argument("--manifest", default="examples/multi_model_agents/manifest.yaml",
-                        help="Path to manifest.yaml")
-    parser.add_argument("--skip-diagrams", action="store_true",
-                        help="Skip PaperBanana diagram generation")
-    parser.add_argument("--max-concurrent", type=int, default=1,
-                        help="Max parallel evals (default: 1 = sequential)")
-    parser.add_argument("--version", default=None,
-                        help="Version tag for saved prompts (e.g. wrangler_v5)")
+    parser.add_argument(
+        "--manifest",
+        default="examples/multi_model_agents/manifest.yaml",
+        help="Path to manifest.yaml",
+    )
+    parser.add_argument(
+        "--skip-diagrams", action="store_true", help="Skip PaperBanana diagram generation"
+    )
+    parser.add_argument(
+        "--max-concurrent", type=int, default=1, help="Max parallel evals (default: 1 = sequential)"
+    )
+    parser.add_argument(
+        "--version", default=None, help="Version tag for saved prompts (e.g. wrangler_v5)"
+    )
     args = parser.parse_args()
 
     pipeline_start = time.time()
     step_times: list[tuple[str, float]] = []
 
     print(f"{'=' * 60}")
-    print(f"GEPA EXPERIMENT v2 — Enhanced Pipeline")
+    print("GEPA EXPERIMENT v2 — Enhanced Pipeline")
     print(f"{'=' * 60}")
     print(f"  Manifest: {args.manifest}")
     print(f"  Time:     {time.strftime('%Y-%m-%d %H:%M:%S')}")
@@ -82,8 +88,15 @@ def main():
         return
 
     # Step 3: Run the full pipeline (deploy → eval → optimize → redeploy → eval → report)
-    run_cmd = ["uv", "run", "wrangler", "run", args.manifest,
-               "--max-concurrent", str(args.max_concurrent)]
+    run_cmd = [
+        "uv",
+        "run",
+        "wrangler",
+        "run",
+        args.manifest,
+        "--max-concurrent",
+        str(args.max_concurrent),
+    ]
     if args.version:
         run_cmd.extend(["--version", args.version])
     ok = run_step(
@@ -110,11 +123,11 @@ def main():
             step_times,
         )
     else:
-        print(f"\n  Step 5: Skipping diagrams (--skip-diagrams)")
+        print("\n  Step 5: Skipping diagrams (--skip-diagrams)")
 
     # Step 6: Assemble full report
     print(f"\n{'=' * 60}")
-    print(f"  Step 6: Assemble Full Report")
+    print("  Step 6: Assemble Full Report")
     print(f"{'=' * 60}")
     t0 = time.time()
 

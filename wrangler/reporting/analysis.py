@@ -4,12 +4,15 @@ import json
 from collections import defaultdict
 from pathlib import Path
 
-import matplotlib
-matplotlib.use("Agg")
+import matplotlib as mpl
+
+mpl.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 
-from ..core.config import MODEL_COSTS, REPORTS_DIR, blended_cost
+from ..core.config import REPORTS_DIR
+from ..core.models import AGENT_ORDER, MODEL_MAP
+from ..core.models import blended_cost_for_report as blended_cost
 
 METRIC_LABELS = {
     "final_response_quality_v1": "Response Quality",
@@ -19,29 +22,10 @@ METRIC_LABELS = {
     "instruction_following_v1": "Instruction Following",
 }
 
-PROVIDERS = {
-    "gemini-3.1-flash-lite": "Google",
-    "gemini-3.5-flash": "Google",
-    "gemini-3.1-pro-preview": "Google",
-    "claude-sonnet-4-6": "Anthropic",
-    "claude-opus-4-6": "Anthropic",
-    "claude-opus-4-7": "Anthropic",
-    "claude-opus-4-8": "Anthropic",
-    "claude-fable-5": "Anthropic",
-}
-
-AGENT_ORDER = ["lite", "flash", "pro", "sonnet", "opus", "opus47", "opus48", "fable"]
-
-MODEL_MAP = {
-    "lite": "gemini-3.1-flash-lite",
-    "flash": "gemini-3.5-flash",
-    "pro": "gemini-3.1-pro-preview",
-    "sonnet": "claude-sonnet-4-6",
-    "opus": "claude-opus-4-6",
-    "opus47": "claude-opus-4-7",
-    "opus48": "claude-opus-4-8",
-    "fable": "claude-fable-5",
-}
+# PROVIDERS, MODEL_MAP, and AGENT_ORDER used to be hand-written here. They now
+# live in wrangler/core/models.py, derived from the registry; the consumers in
+# this package import them from there directly. Keeping a second copy next to
+# the registry is exactly how the two drifted apart.
 
 
 def normalize_agent_keys(results: dict) -> dict:
@@ -66,6 +50,7 @@ def normalize_agent_keys(results: dict) -> dict:
             normalized[key] = value
     return normalized
 
+
 TIER_ORDER = ["low", "medium", "high"]
 
 CHARTS_DIR = Path(REPORTS_DIR) / "charts"
@@ -74,6 +59,7 @@ CHARTS_DIR = Path(REPORTS_DIR) / "charts"
 # ---------------------------------------------------------------------------
 # Chart generation functions
 # ---------------------------------------------------------------------------
+
 
 def _get_agents(results: dict) -> list[str]:
     return [a for a in AGENT_ORDER if a in results]
@@ -87,7 +73,7 @@ def generate_comparison_chart(results: dict, charts_dir: Path | None = None):
     metrics = list(METRIC_LABELS.keys())
     n = len(agents)
 
-    fig, ax = plt.subplots(figsize=(14, 7))
+    _fig, ax = plt.subplots(figsize=(14, 7))
     x = np.arange(n)
     width = 0.12
     colors = plt.cm.Set2(np.linspace(0, 1, len(metrics)))
@@ -108,7 +94,7 @@ def generate_comparison_chart(results: dict, charts_dir: Path | None = None):
     plt.tight_layout()
     plt.savefig(charts_dir / "comparison.png", dpi=150)
     plt.close()
-    print(f"  Generated: comparison.png")
+    print("  Generated: comparison.png")
 
 
 def generate_cost_quality_chart(results: dict, charts_dir: Path | None = None):
@@ -116,7 +102,7 @@ def generate_cost_quality_chart(results: dict, charts_dir: Path | None = None):
     charts_dir = Path(charts_dir or CHARTS_DIR)
     charts_dir.mkdir(parents=True, exist_ok=True)
     has_after = any(results[a].get("after") for a in results if not a.startswith("_"))
-    fig, ax = plt.subplots(figsize=(12, 7))
+    _fig, ax = plt.subplots(figsize=(12, 7))
 
     pareto_points = []
 
@@ -130,22 +116,54 @@ def generate_cost_quality_chart(results: dict, charts_dir: Path | None = None):
         before_scores = data.get("before", {})
         avg_before = np.mean(list(before_scores.values())) if before_scores else 0
         before_color = "#93C5FD" if is_gemini else "#FDBA74"
-        ax.scatter(cost, avg_before, s=160, c=before_color, zorder=4,
-                   edgecolors="black", linewidth=0.5, marker="o")
+        ax.scatter(
+            cost,
+            avg_before,
+            s=160,
+            c=before_color,
+            zorder=4,
+            edgecolors="black",
+            linewidth=0.5,
+            marker="o",
+        )
         label_offset = (-45, -15) if has_after else (10, 5)
-        ax.annotate(agent_name.title(), (cost, avg_before),
-                    textcoords="offset points", xytext=label_offset, fontsize=8, color="gray")
+        ax.annotate(
+            agent_name.title(),
+            (cost, avg_before),
+            textcoords="offset points",
+            xytext=label_offset,
+            fontsize=8,
+            color="gray",
+        )
 
         if has_after and data.get("after"):
             after_scores = data["after"]
             avg_after = np.mean(list(after_scores.values())) if after_scores else 0
             after_color = "#2563EB" if is_gemini else "#EA580C"
-            ax.scatter(cost, avg_after, s=220, c=after_color, zorder=5,
-                       edgecolors="black", linewidth=0.5, marker="D")
-            ax.annotate(agent_name.title(), (cost, avg_after),
-                        textcoords="offset points", xytext=(10, 5), fontsize=9, fontweight="bold")
-            ax.annotate("", xy=(cost, avg_after), xytext=(cost, avg_before),
-                        arrowprops=dict(arrowstyle="->", color="gray", lw=1.2, ls="--"))
+            ax.scatter(
+                cost,
+                avg_after,
+                s=220,
+                c=after_color,
+                zorder=5,
+                edgecolors="black",
+                linewidth=0.5,
+                marker="D",
+            )
+            ax.annotate(
+                agent_name.title(),
+                (cost, avg_after),
+                textcoords="offset points",
+                xytext=(10, 5),
+                fontsize=9,
+                fontweight="bold",
+            )
+            ax.annotate(
+                "",
+                xy=(cost, avg_after),
+                xytext=(cost, avg_before),
+                arrowprops={"arrowstyle": "->", "color": "gray", "lw": 1.2, "ls": "--"},
+            )
             pareto_points.append((cost, avg_after, agent_name))
         else:
             pareto_points.append((cost, avg_before, agent_name))
@@ -153,7 +171,7 @@ def generate_cost_quality_chart(results: dict, charts_dir: Path | None = None):
     if pareto_points:
         pareto_points.sort(key=lambda p: p[0])
         frontier = []
-        for cost_val, quality, name in pareto_points:
+        for cost_val, quality, _name in pareto_points:
             dominated = any(
                 fc <= cost_val and fq >= quality and (fc < cost_val or fq > quality)
                 for fc, fq, _ in pareto_points
@@ -162,24 +180,69 @@ def generate_cost_quality_chart(results: dict, charts_dir: Path | None = None):
                 frontier.append((cost_val, quality))
         frontier.sort(key=lambda p: p[0])
         if frontier:
-            fx, fy = zip(*frontier)
+            fx, fy = zip(*frontier, strict=False)
             if len(frontier) >= 2:
                 ax.plot(fx, fy, color="#10B981", ls="-", lw=2.5, alpha=0.7, zorder=3)
-            ax.scatter(fx, fy, s=80, c="#10B981", zorder=6, marker="s", edgecolors="black", linewidth=0.5)
+            ax.scatter(
+                fx, fy, s=80, c="#10B981", zorder=6, marker="s", edgecolors="black", linewidth=0.5
+            )
 
     from matplotlib.lines import Line2D
+
     legend_items = [
-        Line2D([0], [0], marker="o", color="w", markerfacecolor="#93C5FD",
-               markeredgecolor="black", markersize=10, label="Gemini (Before)"),
-        Line2D([0], [0], marker="D", color="w", markerfacecolor="#2563EB",
-               markeredgecolor="black", markersize=10, label="Gemini (After)"),
-        Line2D([0], [0], marker="o", color="w", markerfacecolor="#FDBA74",
-               markeredgecolor="black", markersize=10, label="Claude (Before)"),
-        Line2D([0], [0], marker="D", color="w", markerfacecolor="#EA580C",
-               markeredgecolor="black", markersize=10, label="Claude (After)"),
+        Line2D(
+            [0],
+            [0],
+            marker="o",
+            color="w",
+            markerfacecolor="#93C5FD",
+            markeredgecolor="black",
+            markersize=10,
+            label="Gemini (Before)",
+        ),
+        Line2D(
+            [0],
+            [0],
+            marker="D",
+            color="w",
+            markerfacecolor="#2563EB",
+            markeredgecolor="black",
+            markersize=10,
+            label="Gemini (After)",
+        ),
+        Line2D(
+            [0],
+            [0],
+            marker="o",
+            color="w",
+            markerfacecolor="#FDBA74",
+            markeredgecolor="black",
+            markersize=10,
+            label="Claude (Before)",
+        ),
+        Line2D(
+            [0],
+            [0],
+            marker="D",
+            color="w",
+            markerfacecolor="#EA580C",
+            markeredgecolor="black",
+            markersize=10,
+            label="Claude (After)",
+        ),
         Line2D([0], [0], color="gray", ls="--", lw=1.2, label="GEPA improvement"),
-        Line2D([0], [0], color="#10B981", ls="-", lw=2.5, marker="s", markersize=6,
-               markerfacecolor="#10B981", markeredgecolor="black", label="Pareto frontier"),
+        Line2D(
+            [0],
+            [0],
+            color="#10B981",
+            ls="-",
+            lw=2.5,
+            marker="s",
+            markersize=6,
+            markerfacecolor="#10B981",
+            markeredgecolor="black",
+            label="Pareto frontier",
+        ),
     ]
     ax.legend(handles=legend_items, loc="lower left", fontsize=8)
     ax.set_xlabel("Blended Cost ($/M tokens, 4:1 in:out)")
@@ -190,7 +253,7 @@ def generate_cost_quality_chart(results: dict, charts_dir: Path | None = None):
     plt.tight_layout()
     plt.savefig(charts_dir / "cost_quality.png", dpi=150)
     plt.close()
-    print(f"  Generated: cost_quality.png")
+    print("  Generated: cost_quality.png")
 
 
 def generate_improvement_chart(results: dict, charts_dir: Path | None = None):
@@ -204,17 +267,27 @@ def generate_improvement_chart(results: dict, charts_dir: Path | None = None):
 
     metrics = list(METRIC_LABELS.keys())
     n = len(agents)
-    fig, ax = plt.subplots(figsize=(14, 7))
+    _fig, ax = plt.subplots(figsize=(14, 7))
     x = np.arange(n)
     width = 0.12
     colors = plt.cm.Set2(np.linspace(0, 1, len(metrics)))
 
     has_std = any(results[a].get("after_std") for a in agents)
     for i, metric in enumerate(metrics):
-        deltas = [results[a].get("after", {}).get(metric, 0) - results[a].get("before", {}).get(metric, 0) for a in agents]
+        deltas = [
+            results[a].get("after", {}).get(metric, 0) - results[a].get("before", {}).get(metric, 0)
+            for a in agents
+        ]
         yerr = [results[a].get("after_std", {}).get(metric, 0) for a in agents] if has_std else None
-        ax.bar(x + i * width, deltas, width, label=METRIC_LABELS[metric], color=colors[i],
-               yerr=yerr, capsize=2 if yerr else 0)
+        ax.bar(
+            x + i * width,
+            deltas,
+            width,
+            label=METRIC_LABELS[metric],
+            color=colors[i],
+            yerr=yerr,
+            capsize=2 if yerr else 0,
+        )
 
     ax.set_xlabel("Agent")
     ax.set_ylabel("Score Change")
@@ -227,10 +300,12 @@ def generate_improvement_chart(results: dict, charts_dir: Path | None = None):
     plt.tight_layout()
     plt.savefig(charts_dir / "improvement_delta.png", dpi=150)
     plt.close()
-    print(f"  Generated: improvement_delta.png")
+    print("  Generated: improvement_delta.png")
 
 
-def generate_tier_breakdown_chart(results: dict, case_metadata: list[dict] | None, charts_dir: Path | None = None):
+def generate_tier_breakdown_chart(
+    results: dict, case_metadata: list[dict] | None, charts_dir: Path | None = None
+):
     """Grouped bar chart: tier x agent, colored by provider."""
     if not case_metadata:
         print("  Skipping tier breakdown chart (no case metadata)")
@@ -260,9 +335,9 @@ def generate_tier_breakdown_chart(results: dict, case_metadata: list[dict] | Non
                 scores = tier_scores.get(tier, {})
                 tier_avgs[name][tier] = sum(scores.values()) / max(len(scores), 1) if scores else 0
         else:
-            tier_avgs[name] = {t: 0 for t in tiers_present}
+            tier_avgs[name] = dict.fromkeys(tiers_present, 0)
 
-    fig, ax = plt.subplots(figsize=(12, 7))
+    _fig, ax = plt.subplots(figsize=(12, 7))
     x = np.arange(len(tiers_present))
     n_agents = len(agents)
     width = 0.15
@@ -274,8 +349,16 @@ def generate_tier_breakdown_chart(results: dict, case_metadata: list[dict] | Non
         color = "#2563EB" if is_gemini else "#EA580C"
         alpha = 0.5 + 0.1 * i
         values = [tier_avgs[name].get(t, 0) for t in tiers_present]
-        ax.bar(x + offset + i * width, values, width, label=name.title(),
-               color=color, alpha=min(alpha, 1.0), edgecolor="black", linewidth=0.5)
+        ax.bar(
+            x + offset + i * width,
+            values,
+            width,
+            label=name.title(),
+            color=color,
+            alpha=min(alpha, 1.0),
+            edgecolor="black",
+            linewidth=0.5,
+        )
 
     ax.set_xlabel("Complexity Tier")
     ax.set_ylabel("Average Score")
@@ -288,10 +371,12 @@ def generate_tier_breakdown_chart(results: dict, case_metadata: list[dict] | Non
     plt.tight_layout()
     plt.savefig(charts_dir / "tier_breakdown.png", dpi=150)
     plt.close()
-    print(f"  Generated: tier_breakdown.png")
+    print("  Generated: tier_breakdown.png")
 
 
-def generate_category_heatmap(results: dict, case_metadata: list[dict] | None, charts_dir: Path | None = None):
+def generate_category_heatmap(
+    results: dict, case_metadata: list[dict] | None, charts_dir: Path | None = None
+):
     """Heatmap: category x agent, cell value = average score."""
     if not case_metadata:
         print("  Skipping category heatmap (no case metadata)")
@@ -307,7 +392,7 @@ def generate_category_heatmap(results: dict, case_metadata: list[dict] | None, c
         print("  Skipping category heatmap (no per-case scores)")
         return
 
-    categories = sorted(set(m.get("category", "") for m in case_metadata if m.get("category")))
+    categories = sorted({m.get("category", "") for m in case_metadata if m.get("category")})
     if not categories:
         return
 
@@ -339,10 +424,14 @@ def generate_category_heatmap(results: dict, case_metadata: list[dict] | None, c
     plt.tight_layout()
     plt.savefig(charts_dir / "category_heatmap.png", dpi=150)
     plt.close()
-    print(f"  Generated: category_heatmap.png")
+    print("  Generated: category_heatmap.png")
 
 
-def generate_run_comparison_chart(results: dict, previous_path: str = "outputs/results_all_agents.json", charts_dir: Path | None = None):
+def generate_run_comparison_chart(
+    results: dict,
+    previous_path: str = "outputs/results_all_agents.json",
+    charts_dir: Path | None = None,
+):
     """Side-by-side bars: previous run vs current run per agent."""
     prev_file = Path(previous_path)
     if not prev_file.exists():
@@ -367,12 +456,28 @@ def generate_run_comparison_chart(results: dict, previous_path: str = "outputs/r
         prev_avgs.append(sum(ps.values()) / max(len(ps), 1) if ps else 0)
         curr_avgs.append(sum(cs.values()) / max(len(cs), 1) if cs else 0)
 
-    fig, ax = plt.subplots(figsize=(12, 7))
+    _fig, ax = plt.subplots(figsize=(12, 7))
     x = np.arange(len(agents))
     width = 0.35
 
-    ax.bar(x - width/2, prev_avgs, width, label="Previous Run", color="#93C5FD", edgecolor="black", linewidth=0.5)
-    ax.bar(x + width/2, curr_avgs, width, label="Current Run", color="#2563EB", edgecolor="black", linewidth=0.5)
+    ax.bar(
+        x - width / 2,
+        prev_avgs,
+        width,
+        label="Previous Run",
+        color="#93C5FD",
+        edgecolor="black",
+        linewidth=0.5,
+    )
+    ax.bar(
+        x + width / 2,
+        curr_avgs,
+        width,
+        label="Current Run",
+        color="#2563EB",
+        edgecolor="black",
+        linewidth=0.5,
+    )
 
     ax.set_xlabel("Agent")
     ax.set_ylabel("Average Score")
@@ -385,7 +490,7 @@ def generate_run_comparison_chart(results: dict, previous_path: str = "outputs/r
     plt.tight_layout()
     plt.savefig(charts_dir / "run_comparison.png", dpi=150)
     plt.close()
-    print(f"  Generated: run_comparison.png")
+    print("  Generated: run_comparison.png")
 
 
 def generate_radar_chart(results: dict, charts_dir: Path | None = None):
@@ -401,14 +506,14 @@ def generate_radar_chart(results: dict, charts_dir: Path | None = None):
     angles = np.linspace(0, 2 * np.pi, n_metrics, endpoint=False).tolist()
     angles += angles[:1]
 
-    fig, ax = plt.subplots(figsize=(10, 10), subplot_kw=dict(polar=True))
+    _fig, ax = plt.subplots(figsize=(10, 10), subplot_kw={"polar": True})
     gemini_cmap = plt.cm.Blues
     claude_cmap = plt.cm.Oranges
 
     gemini_agents = [a for a in agents if "gemini" in results[a].get("model", "")]
     claude_agents = [a for a in agents if a not in gemini_agents]
 
-    for idx, name in enumerate(agents):
+    for _idx, name in enumerate(agents):
         scores = results[name].get(phase, results[name].get("before", {}))
         values = [scores.get(m, 0) for m in metrics]
         values += values[:1]
@@ -432,10 +537,12 @@ def generate_radar_chart(results: dict, charts_dir: Path | None = None):
     plt.tight_layout()
     plt.savefig(charts_dir / "radar.png", dpi=150, bbox_inches="tight")
     plt.close()
-    print(f"  Generated: radar.png")
+    print("  Generated: radar.png")
 
 
-def generate_tier_improvement_heatmap(results: dict, case_metadata: list[dict] | None, charts_dir: Path | None = None):
+def generate_tier_improvement_heatmap(
+    results: dict, case_metadata: list[dict] | None, charts_dir: Path | None = None
+):
     """Heatmap: rows=tiers, cols=models, cells=avg improvement delta. Red-white-green."""
     if not case_metadata:
         print("  Skipping tier improvement heatmap (no case metadata)")
@@ -448,7 +555,9 @@ def generate_tier_improvement_heatmap(results: dict, case_metadata: list[dict] |
         print("  Skipping tier improvement heatmap (no after scores)")
         return
 
-    has_per_case = any(results[a].get("before_per_case") and results[a].get("after_per_case") for a in agents)
+    has_per_case = any(
+        results[a].get("before_per_case") and results[a].get("after_per_case") for a in agents
+    )
     if not has_per_case:
         print("  Skipping tier improvement heatmap (no per-case scores)")
         return
@@ -484,14 +593,23 @@ def generate_tier_improvement_heatmap(results: dict, case_metadata: list[dict] |
         for j in range(len(agents)):
             val = matrix[i, j]
             color = "white" if abs(val) > vmax * 0.6 else "black"
-            ax.text(j, i, f"{val:+.3f}", ha="center", va="center", color=color, fontsize=10, fontweight="bold")
+            ax.text(
+                j,
+                i,
+                f"{val:+.3f}",
+                ha="center",
+                va="center",
+                color=color,
+                fontsize=10,
+                fontweight="bold",
+            )
 
     ax.set_title("GEPA Optimization Impact by Tier (After - Before)")
     fig.colorbar(im, ax=ax, shrink=0.8, label="Avg Score Delta")
     plt.tight_layout()
     plt.savefig(charts_dir / "tier_improvement_heatmap.png", dpi=150)
     plt.close()
-    print(f"  Generated: tier_improvement_heatmap.png")
+    print("  Generated: tier_improvement_heatmap.png")
 
 
 def generate_all_charts(
@@ -507,6 +625,7 @@ def generate_all_charts(
         generate_improvement_chart_pb,
         generate_radar_chart_pb,
     )
+
     generate_comparison_chart_pb(results, charts_dir, use_paperbanana=use_paperbanana)
     generate_cost_quality_chart_pb(results, charts_dir, use_paperbanana=use_paperbanana)
     generate_improvement_chart_pb(results, charts_dir, use_paperbanana=use_paperbanana)
@@ -545,4 +664,3 @@ def compute_tier_scores(
             avg[metric] = sum(values) / len(values) if values else 0.0
         result[group] = avg
     return result
-

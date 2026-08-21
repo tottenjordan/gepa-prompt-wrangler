@@ -160,7 +160,7 @@ Here's how you should operate:
         "judge_model": "gemini-3.5-flash",
         "timestamp": "2026-06-01T16:37:07.257858",
     },
-    "wrangler_v5": {
+    "wrangler_v6": {
         "prompt": """You are a helpful, concise, and factual assistant that uses available tools to answer user questions.
 
 **Tool Usage Guidelines:**
@@ -180,7 +180,7 @@ Here's how you should operate:
         "judge_model": "gemini-3.5-flash",
         "timestamp": "2026-06-01T20:43:57.220912",
     },
-    "wrangler_v5": {
+    "wrangler_v7": {
         "prompt": """You are a helpful, concise, and factual assistant that uses available tools to answer user questions.
 
 **Tool Usage Guidelines:**

@@ -4,16 +4,20 @@ from __future__ import annotations
 
 import importlib.util
 import time
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
+from typing import TYPE_CHECKING
 
-from .experiment import Experiment
-from ..core.factory import AgentPromptPair, Manifest
+from ..core import deploy as deployer
 from ..core.converter import load_eval_file
-from ..eval.evaluator import run_batch_eval_averaged, EvalResult
+from ..core.models import DEFAULT_JUDGE_MODEL, DEFAULT_MANIFEST_JUDGE_MODEL
+from ..eval.evaluator import run_batch_eval_averaged
 from ..optimize.optimizer import optimize
 from ..reporting.reporter import generate_report as _generate_report
-from ..core import deploy as deployer
+
+if TYPE_CHECKING:
+    from ..core.factory import AgentPromptPair, Manifest
+    from .experiment import Experiment
 
 
 def _fmt_duration(seconds: float) -> str:
@@ -40,6 +44,7 @@ def thresholds_from_sampler_config(sampler_cfg_path: Path) -> dict[str, float]:
     'threshold' key. Returns {} if the file is missing/unreadable.
     """
     import json
+
     try:
         with open(sampler_cfg_path) as f:
             cfg = json.load(f)
@@ -64,6 +69,7 @@ def _validate_sampler_config(
 ) -> None:
     """Warn about sampler config / judge-model misalignment before optimization."""
     import json
+
     try:
         with open(sampler_cfg_path) as f:
             cfg = json.load(f)
@@ -78,8 +84,10 @@ def _validate_sampler_config(
         if isinstance(val, dict) and "judge_model_options" in val:
             cfg_judge = val["judge_model_options"].get("judge_model", "")
             if cfg_judge and cfg_judge != judge_model:
-                print(f"  [{pair_id}] Warning: sampler_config — judge model mismatch: "
-                      f"{key} uses '{cfg_judge}', experiment uses '{judge_model}'")
+                print(
+                    f"  [{pair_id}] Warning: sampler_config — judge model mismatch: "
+                    f"{key} uses '{cfg_judge}', experiment uses '{judge_model}'"
+                )
 
 
 def _post_eval_sanity_check(
@@ -89,13 +97,13 @@ def _post_eval_sanity_check(
 ) -> None:
     """Warn about common eval data issues after all pairs complete."""
     all_per_case_empty = all(
-        not stage_data.get(p.id, {}).get("per_case")
-        for p in pairs
-        if p.id in stage_data
+        not stage_data.get(p.id, {}).get("per_case") for p in pairs if p.id in stage_data
     )
     if all_per_case_empty and stage_data:
         print(f"\n  WARNING: All per_case arrays are empty in {stage_name}.")
-        print(f"  Tier/category analysis will be unavailable. Check _extract_per_case_scores() field mapping.")
+        print(
+            "  Tier/category analysis will be unavailable. Check _extract_per_case_scores() field mapping."
+        )
 
     for p in pairs:
         scores = stage_data.get(p.id, {}).get("scores", {})
@@ -113,7 +121,7 @@ def _load_agent(manifest: Manifest, pair: AgentPromptPair, manifest_dir: Path | 
     need to instantiate the agent locally.
     """
     module_ref = pair.agent_module or manifest.agent_module
-    search_bases = [Path(".")] if manifest_dir is None else [manifest_dir, Path(".")]
+    search_bases = [Path()] if manifest_dir is None else [manifest_dir, Path()]
 
     agent_path = None
     for base in search_bases:
@@ -136,6 +144,8 @@ def _load_agent(manifest: Manifest, pair: AgentPromptPair, manifest_dir: Path | 
                 break
 
     spec = importlib.util.spec_from_file_location(f"_agent_{pair.id}", str(init_file))
+    if spec is None or spec.loader is None:
+        raise ImportError(f"Cannot load a Python module from {init_file}")
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
 
@@ -163,14 +173,16 @@ def _load_agent(manifest: Manifest, pair: AgentPromptPair, manifest_dir: Path | 
     )
 
 
-def _resolve_optimize_module(manifest: Manifest, pair: AgentPromptPair, manifest_dir: Path | None = None) -> Path:
+def _resolve_optimize_module(
+    manifest: Manifest, pair: AgentPromptPair, manifest_dir: Path | None = None
+) -> Path:
     """Resolve the GEPA-compatible optimization directory for a pair."""
     agent_ref = pair.agent_module or manifest.agent_module
     agent_path = Path(agent_ref)
     stem = agent_path.stem.replace("_agent", "")
     opt_dir = agent_path.parent / f"{stem}_opt"
 
-    search_bases = [Path(".")] if manifest_dir is None else [manifest_dir, Path(".")]
+    search_bases = [Path()] if manifest_dir is None else [manifest_dir, Path()]
     for base in search_bases:
         candidate = base / opt_dir
         if candidate.is_dir() and (candidate / "__init__.py").exists():
@@ -186,7 +198,7 @@ def _resolve_optimize_module(manifest: Manifest, pair: AgentPromptPair, manifest
 
 def _resolve_eval_path(manifest: Manifest, manifest_dir: Path | None = None) -> Path:
     """Resolve eval data file, checking manifest_dir first."""
-    search_bases = [Path(".")] if manifest_dir is None else [manifest_dir, Path(".")]
+    search_bases = [Path()] if manifest_dir is None else [manifest_dir, Path()]
     for base in search_bases:
         candidate = base / manifest.eval_data
         if candidate.exists():
@@ -208,10 +220,10 @@ def _manifest_dir(exp: Experiment) -> Path:
     the project root that contains these paths.
     """
     agent_module = exp.config.get("agent_module", "")
-    for base in [Path("."), exp.dir, exp.dir.parent, exp.dir.parent.parent]:
+    for base in [Path(), exp.dir, exp.dir.parent, exp.dir.parent.parent]:
         if (base / agent_module).exists():
             return base
-    return Path(".")
+    return Path()
 
 
 # ── Stage functions ────────────────────────────────────────────
@@ -231,12 +243,16 @@ def stage_deploy(exp: Experiment, pair_id: str | None = None) -> None:
         tag = f"[{pair.id}] ({i}/{len(pairs)})"
         if pair.engine_id:
             print(f"  {tag} Using existing engine: {pair.engine_id}")
-            exp.merge_pair("deploy", pair.id, {
-                "engine_id": pair.engine_id,
-                "model": pair.model,
-                "original_prompt": pair.system_prompt,
-                "source": "config",
-            })
+            exp.merge_pair(
+                "deploy",
+                pair.id,
+                {
+                    "engine_id": pair.engine_id,
+                    "model": pair.model,
+                    "original_prompt": pair.system_prompt,
+                    "source": "config",
+                },
+            )
         elif pair.id in deploy_data and deploy_data[pair.id].get("engine_id"):
             eid = deploy_data[pair.id]["engine_id"]
             print(f"  {tag} Already deployed: {eid}")
@@ -253,12 +269,16 @@ def stage_deploy(exp: Experiment, pair_id: str | None = None) -> None:
                 display_name=display,
             )
             print(f" {_fmt_duration(time.time() - t0)}")
-            exp.merge_pair("deploy", pair.id, {
-                "engine_id": engine_id,
-                "model": pair.model,
-                "original_prompt": pair.system_prompt,
-                "source": "deployed",
-            })
+            exp.merge_pair(
+                "deploy",
+                pair.id,
+                {
+                    "engine_id": engine_id,
+                    "model": pair.model,
+                    "original_prompt": pair.system_prompt,
+                    "source": "deployed",
+                },
+            )
 
 
 def stage_eval(
@@ -294,8 +314,12 @@ def stage_eval(
         print(f"\n  [{pair.id}] ({i}/{len(pairs)}) Evaluating ({phase})...", flush=True)
         t0 = time.time()
         result = run_batch_eval_averaged(
-            engine_id, eval_cases, num_runs=num_runs, agent_name=pair.id,
-            model=model, retry_failed=retry_failed,
+            engine_id,
+            eval_cases,
+            num_runs=num_runs,
+            agent_name=pair.id,
+            model=model,
+            retry_failed=retry_failed,
         )
         elapsed = time.time() - t0
 
@@ -307,14 +331,18 @@ def stage_eval(
             std_str = f" +/- {std:.3f}" if std else ""
             print(f"    {m:40s} {s:.2f}{std_str}")
 
-        exp.merge_pair(stage_name, pair.id, {
-            "scores": result.scores,
-            "per_case": result.per_case,
-            "scores_std": result.scores_std,
-            "num_runs": result.num_runs,
-            "elapsed": elapsed,
-            "token_usage": result.token_usage,
-        })
+        exp.merge_pair(
+            stage_name,
+            pair.id,
+            {
+                "scores": result.scores,
+                "per_case": result.per_case,
+                "scores_std": result.scores_std,
+                "num_runs": result.num_runs,
+                "elapsed": elapsed,
+                "token_usage": result.token_usage,
+            },
+        )
 
     # Post-eval sanity checks
     stage_data = exp.read_stage(stage_name)
@@ -333,7 +361,7 @@ def stage_optimize(exp: Experiment, pair_id: str | None = None) -> None:
 
     eval_path = _resolve_eval_path(manifest, mdir)
 
-    judge = exp.config.get("eval_config", {}).get("judge_model", "gemini-2.5-flash")
+    judge = exp.config.get("eval_config", {}).get("judge_model", DEFAULT_JUDGE_MODEL)
 
     for i, pair in enumerate(pairs, 1):
         print(f"\n  [{pair.id}] ({i}/{len(pairs)}) Optimizing...", flush=True)
@@ -356,12 +384,16 @@ def stage_optimize(exp: Experiment, pair_id: str | None = None) -> None:
         elapsed = time.time() - t0
         print(f"  [{pair.id}] Done ({_fmt_duration(elapsed)}) — {len(optimized)} chars")
 
-        exp.merge_pair("optimize", pair.id, {
-            "optimized_prompt": optimized,
-            "elapsed": elapsed,
-            "chars": len(optimized),
-            "thresholds": thresholds,
-        })
+        exp.merge_pair(
+            "optimize",
+            pair.id,
+            {
+                "optimized_prompt": optimized,
+                "elapsed": elapsed,
+                "chars": len(optimized),
+                "thresholds": thresholds,
+            },
+        )
 
         _save_optimized_prompt(exp, pair, optimized)
 
@@ -371,7 +403,12 @@ def _save_optimized_prompt(exp: Experiment, pair: AgentPromptPair, prompt: str) 
     mdir = _manifest_dir(exp)
     agent_ref = pair.agent_module or exp.manifest.agent_module
     stem = Path(agent_ref).stem.replace("_agent", "")
-    prompts_file = mdir / "prompts" / f"{stem}_prompts.py"
+    # `prompts/` sits beside `agents/`, not at the project root that
+    # _manifest_dir() returns — agent_ref is `<agent dir>/agents/<name>_agent`.
+    # Resolving this against mdir alone looked for `prompts/sonnet_prompts.py`
+    # at the repo root, never found it, and dropped every optimized prompt on
+    # the floor with a warning nobody was watching for.
+    prompts_file = mdir / Path(agent_ref).parent.parent / "prompts" / f"{stem}_prompts.py"
     if not prompts_file.exists():
         print(f"  [{pair.id}] Warning: prompts file not found at {prompts_file}")
         return
@@ -379,7 +416,7 @@ def _save_optimized_prompt(exp: Experiment, pair: AgentPromptPair, prompt: str) 
     import ast
 
     version = exp.version
-    judge = exp.manifest.eval_config.get("judge_model", "gemini-3.5-flash")
+    judge = exp.manifest.eval_config.get("judge_model", DEFAULT_MANIFEST_JUDGE_MODEL)
 
     eval_before = exp.read_stage("eval_before")
     case_count = len(eval_before.get(pair.id, {}).get("per_case", []))
@@ -389,21 +426,35 @@ def _save_optimized_prompt(exp: Experiment, pair: AgentPromptPair, prompt: str) 
         "source": "wrangler GEPA optimization",
         "eval_cases": case_count,
         "judge_model": judge,
-        "timestamp": datetime.now().isoformat(),
+        "timestamp": datetime.now(tz=UTC).isoformat(),
     }
 
     content = prompts_file.read_text()
     tree = ast.parse(content)
     optimized_node = None
     for node in ast.walk(tree):
-        if isinstance(node, ast.Assign):
+        # Require a dict literal, not just the name: the code below reads its keys,
+        # and `OPTIMIZED = something_else` is not a shape we can append to.
+        if isinstance(node, ast.Assign) and isinstance(node.value, ast.Dict):
             for target in node.targets:
                 if isinstance(target, ast.Name) and target.id == "OPTIMIZED":
-                    optimized_node = node
+                    optimized_node = node.value
 
     if optimized_node is None:
         print(f"  [{pair.id}] Warning: OPTIMIZED dict not found in {prompts_file}")
         return
+
+    # This append is textual, so it cannot rely on dict semantics to dedupe: writing a
+    # key that already exists produces a literal duplicate and Python silently keeps
+    # only the last one, making the earlier GEPA output unreachable. Re-running the
+    # same experiment version is normal, so suffix instead of clobbering.
+    existing = {k.value for k in optimized_node.keys if isinstance(k, ast.Constant)}
+    if version in existing:
+        base, n = version, 2
+        while version in existing:
+            version = f"{base}_{n}"
+            n += 1
+        print(f"  [{pair.id}] {base} already present — saving as {version}")
 
     lines = [f'    "{version}": {{']
     for k, v in entry.items():
@@ -467,11 +518,15 @@ def stage_redeploy(exp: Experiment, pair_id: str | None = None) -> None:
         elapsed = time.time() - t0
         print(f" {_fmt_duration(elapsed)}")
 
-        exp.merge_pair("redeploy", pair.id, {
-            "engine_id": engine_id,
-            "updated_at": datetime.now().isoformat(timespec="seconds"),
-            "elapsed": elapsed,
-        })
+        exp.merge_pair(
+            "redeploy",
+            pair.id,
+            {
+                "engine_id": engine_id,
+                "updated_at": datetime.now(tz=UTC).isoformat(timespec="seconds"),
+                "elapsed": elapsed,
+            },
+        )
 
 
 def stage_report(exp: Experiment, use_paperbanana: bool = True) -> None:
@@ -506,21 +561,28 @@ def stage_report(exp: Experiment, use_paperbanana: bool = True) -> None:
     eval_cases = load_eval_file(str(eval_path))
     results["_eval_metadata"] = {
         "cases": [
-            {"tier": c.get("tier", ""), "category": c.get("category", ""),
-             "prompt": c.get("prompt", ""), "index": i}
+            {
+                "tier": c.get("tier", ""),
+                "category": c.get("category", ""),
+                "prompt": c.get("prompt", ""),
+                "index": i,
+            }
             for i, c in enumerate(eval_cases)
         ]
     }
 
-    import matplotlib
-    matplotlib.use("Agg")
+    import matplotlib as mpl
 
-    from ..reporting.reporter import REPORTS_DIR, CHARTS_DIR
+    mpl.use("Agg")
+
+    from ..reporting.reporter import CHARTS_DIR, REPORTS_DIR
+
     original_reports = REPORTS_DIR
     original_charts = CHARTS_DIR
 
     try:
         from ..reporting import reporter
+
         reporter.REPORTS_DIR = exp.dir / "reports"
         reporter.CHARTS_DIR = exp.dir / "reports" / "charts"
         reporter.REPORTS_DIR.mkdir(parents=True, exist_ok=True)

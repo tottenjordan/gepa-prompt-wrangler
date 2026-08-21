@@ -22,7 +22,6 @@ import os
 from google.adk.agents import Agent
 from google.adk.tools.mcp_tool.mcp_toolset import McpToolset, SseServerParams
 
-
 # ---------------------------------------------------------------------------
 # MCP Server Connection
 # ---------------------------------------------------------------------------
@@ -39,12 +38,15 @@ mcp_tools = McpToolset(
 # ---------------------------------------------------------------------------
 
 DEFAULT_MODEL = "gemini-3.5-flash"
-DEFAULT_INSTRUCTION = "You are a helpful assistant. Use the available tools to answer user questions."
+DEFAULT_INSTRUCTION = (
+    "You are a helpful assistant. Use the available tools to answer user questions."
+)
 
 
 def create_agent(model: str = DEFAULT_MODEL, instruction: str = DEFAULT_INSTRUCTION) -> Agent:
     """Factory function for wrangler integration."""
     from wrangler.core.config import resolve_model
+
     return Agent(
         model=resolve_model(model),
         name="my_mcp_agent",

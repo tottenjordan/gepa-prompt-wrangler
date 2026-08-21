@@ -1,18 +1,19 @@
 """Tests for wrangler.analysis — report generation and analysis functions."""
 
-import pytest
 from pathlib import Path
+from unittest.mock import MagicMock, patch
 
 from wrangler.reporting.analysis import (
     compute_tier_scores,
-    METRIC_LABELS,
-    PROVIDERS,
-    AGENT_ORDER,
-    MODEL_MAP,
+    generate_category_heatmap,
+    generate_radar_chart,
+    generate_tier_breakdown_chart,
+    generate_tier_improvement_heatmap,
+    normalize_agent_keys,
 )
 from wrangler.reporting.report_sections import (
-    _prompt_evolution_summary,
     _cost_benefit_section,
+    _prompt_evolution_summary,
     generate_agent_report,
     generate_comparison_report,
 )
@@ -26,7 +27,9 @@ class TestComputeTierScores:
             {"quality": 0.9, "safety": 1.0},
         ]
         metadata = [
-            {"tier": "low"}, {"tier": "low"}, {"tier": "high"},
+            {"tier": "low"},
+            {"tier": "low"},
+            {"tier": "high"},
         ]
         result = compute_tier_scores(per_case, metadata, "tier")
         assert "low" in result
@@ -36,10 +39,14 @@ class TestComputeTierScores:
 
     def test_groups_by_category(self):
         per_case = [
-            {"quality": 0.5}, {"quality": 0.9}, {"quality": 0.7},
+            {"quality": 0.5},
+            {"quality": 0.9},
+            {"quality": 0.7},
         ]
         metadata = [
-            {"category": "search"}, {"category": "policy"}, {"category": "search"},
+            {"category": "search"},
+            {"category": "policy"},
+            {"category": "search"},
         ]
         result = compute_tier_scores(per_case, metadata, "category")
         assert abs(result["search"]["quality"] - 0.6) < 0.01
@@ -72,7 +79,9 @@ class TestPromptEvolutionSummary:
 
     def test_keywords_detected_when_added(self):
         original = "You are a helpful assistant."
-        optimized = "You are a helpful assistant. Use the tool for policy checks. Handle errors gracefully."
+        optimized = (
+            "You are a helpful assistant. Use the tool for policy checks. Handle errors gracefully."
+        )
         lines = _prompt_evolution_summary(original, optimized)
         joined = "\n".join(lines)
         assert "Tool-specific guidance" in joined
@@ -146,9 +155,13 @@ class TestCostBenefitSection:
 class TestGenerateAgentReport:
     def test_creates_markdown_file(self, tmp_path, sample_scores_before):
         path = generate_agent_report(
-            "lite", "gemini-3.1-flash-lite", "123",
-            "Generic prompt", None,
-            sample_scores_before, None,
+            "lite",
+            "gemini-3.1-flash-lite",
+            "123",
+            "Generic prompt",
+            None,
+            sample_scores_before,
+            None,
             output_dir=str(tmp_path),
         )
         assert Path(path).exists()
@@ -156,9 +169,13 @@ class TestGenerateAgentReport:
 
     def test_report_contains_agent_name(self, tmp_path, sample_scores_before):
         path = generate_agent_report(
-            "lite", "gemini-3.1-flash-lite", "123",
-            "Generic prompt", None,
-            sample_scores_before, None,
+            "lite",
+            "gemini-3.1-flash-lite",
+            "123",
+            "Generic prompt",
+            None,
+            sample_scores_before,
+            None,
             output_dir=str(tmp_path),
         )
         content = Path(path).read_text()
@@ -166,21 +183,30 @@ class TestGenerateAgentReport:
 
     def test_report_without_optimized_prompt(self, tmp_path, sample_scores_before):
         path = generate_agent_report(
-            "lite", "gemini-3.1-flash-lite", "123",
-            "Generic prompt", None,
-            sample_scores_before, None,
+            "lite",
+            "gemini-3.1-flash-lite",
+            "123",
+            "Generic prompt",
+            None,
+            sample_scores_before,
+            None,
             output_dir=str(tmp_path),
         )
         content = Path(path).read_text()
         assert "Optimized Prompt" not in content
         assert "Before Optimization" in content
 
-    def test_report_with_optimized_prompt_includes_evolution(self, tmp_path, sample_scores_before, sample_scores_after):
+    def test_report_with_optimized_prompt_includes_evolution(
+        self, tmp_path, sample_scores_before, sample_scores_after
+    ):
         path = generate_agent_report(
-            "lite", "gemini-3.1-flash-lite", "123",
+            "lite",
+            "gemini-3.1-flash-lite",
+            "123",
             "Generic prompt",
             "Optimized prompt with tool guidance and policy limits.",
-            sample_scores_before, sample_scores_after,
+            sample_scores_before,
+            sample_scores_after,
             output_dir=str(tmp_path),
         )
         content = Path(path).read_text()
@@ -192,9 +218,13 @@ class TestGenerateAgentReport:
         before = {"final_response_quality_v1": 0.50, "safety_v1": 0.80}
         after = {"final_response_quality_v1": 0.70, "safety_v1": 0.90}
         path = generate_agent_report(
-            "test", "gemini-3.5-flash", "123",
-            "Generic", "Optimized",
-            before, after,
+            "test",
+            "gemini-3.5-flash",
+            "123",
+            "Generic",
+            "Optimized",
+            before,
+            after,
             output_dir=str(tmp_path),
         )
         content = Path(path).read_text()
@@ -205,16 +235,19 @@ class TestGenerateAgentReport:
         before = {"final_response_quality_v1": 0.90, "safety_v1": 0.50}
         after = {"final_response_quality_v1": 0.80, "safety_v1": 0.90}
         path = generate_agent_report(
-            "test", "gemini-3.5-flash", "123",
-            "Generic", "Optimized",
-            before, after,
+            "test",
+            "gemini-3.5-flash",
+            "123",
+            "Generic",
+            "Optimized",
+            before,
+            after,
             output_dir=str(tmp_path),
         )
         content = Path(path).read_text()
         assert "Improved:" in content
         assert "Regressed:" in content
         assert "Safety" in content
-
 
     def test_report_with_per_case_data(self, tmp_path, sample_scores_before, sample_scores_after):
         case_metadata = [
@@ -226,10 +259,13 @@ class TestGenerateAgentReport:
             {"final_response_quality_v1": 0.7, "safety_v1": 0.8},
         ]
         path = generate_agent_report(
-            "lite", "gemini-3.1-flash-lite", "123",
+            "lite",
+            "gemini-3.1-flash-lite",
+            "123",
             "Generic prompt",
             "Optimized prompt with tool guidance.",
-            sample_scores_before, sample_scores_after,
+            sample_scores_before,
+            sample_scores_after,
             output_dir=str(tmp_path),
             before_per_case=per_case,
             after_per_case=per_case,
@@ -276,16 +312,6 @@ class TestGenerateComparisonReport:
 
 
 # ── Chart function tests ──────────────────────────────────────────
-
-from unittest.mock import patch, MagicMock
-
-from wrangler.reporting.analysis import (
-    normalize_agent_keys,
-    generate_tier_breakdown_chart,
-    generate_category_heatmap,
-    generate_radar_chart,
-    generate_tier_improvement_heatmap,
-)
 
 
 class TestNormalizeAgentKeys:
@@ -366,8 +392,14 @@ class TestGenerateRadarChart:
         _mock_plt_setup(mock_plt)
         mock_plt.subplot.return_value = MagicMock()
         results = {
-            "flash": {"model": "gemini-3.5-flash", "after": {"final_response_quality_v1": 0.8, "safety_v1": 0.9}},
-            "sonnet": {"model": "claude-sonnet-4-6", "after": {"final_response_quality_v1": 0.85, "safety_v1": 0.95}},
+            "flash": {
+                "model": "gemini-3.5-flash",
+                "after": {"final_response_quality_v1": 0.8, "safety_v1": 0.9},
+            },
+            "sonnet": {
+                "model": "claude-sonnet-4-6",
+                "after": {"final_response_quality_v1": 0.85, "safety_v1": 0.95},
+            },
         }
         generate_radar_chart(results, charts_dir=tmp_path)
         mock_plt.savefig.assert_called_once()

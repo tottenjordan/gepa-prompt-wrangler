@@ -1,0 +1,32 @@
+# Session Notes — Index
+
+Durable findings from working sessions: things that outlive the conversation and are
+**not** recoverable from the code, git history, or [CLAUDE.md](../../CLAUDE.md).
+
+One topic per file. Keep this index under 200 lines — put detail in the topic notes.
+
+## Notes
+
+| Note | What it covers |
+|------|----------------|
+| [adk-patch-status.md](adk-patch-status.md) | Per-patch status of the ADK monkey-patches against the installed ADK, with upstream issue outcomes. **Read before any ADK bump.** |
+| [model-lifecycle.md](model-lifecycle.md) | Retirement dates, the Claude sampling-parameter cutoff, what the registry does *not* cover, and the **2026-08-20 judge A/B** that moved GEPA scoring to `gemini-3.5-flash`. |
+| [adk-judge-model.md](adk-judge-model.md) | Why only the GEPA path reads `judge_model` at all — batch eval cannot send one. Predicted the risks the judge A/B then measured. |
+| [toolchain-baseline.md](toolchain-baseline.md) | Measured lint/type/test baseline as of 2026-08-20, and what infrastructure does not exist yet. |
+| [repo-traps.md](repo-traps.md) | Non-obvious footguns: gitignored lockfile, duplicated config, why `GOOGLE_CLOUD_LOCATION` can't express the per-model location rule, Agent Registry services invisible to `gcloud run services list`, `TODO` goldens. |
+| [silent-failures.md](silent-failures.md) | Eight failures that reported success: MCP tools missing at deploy, startup checks that never ran, batch eval scoring 0 cases, a tool-use metric floored at ~0.42, GEAP returning 200 with an empty event stream from a booting worker, GEPA optimizing against a safety score pinned at zero, and two **open** ones — the autorater emitting a tool call so the case is dropped from every metric, and OTel span batches dropped under load beneath online eval. Also carries the log queries that found them. |
+
+## Active Plans
+
+| Plan | Status |
+|------|--------|
+| [../plans/2026-08-20-repo-modernization.md](../plans/2026-08-20-repo-modernization.md) | Phases 0–2 done. Phase 3: 3.1–3.4 done — the smoke test ran end to end on 2026-08-21 and surfaced seven silent failures ([silent-failures.md](silent-failures.md)), six fixed. Baseline in [model-lifecycle.md](model-lifecycle.md); GEPA kept its seed prompt, so no prompt-change measurement yet. |
+
+## Conventions for These Notes
+
+- Check for an existing note on the topic and **update it** rather than adding a
+  duplicate. Delete notes that turn out to be wrong or stale.
+- Notes record what was true **when written** — each carries a "verified on" date. If a
+  note names a file, flag, or command, re-verify it still exists before acting on it.
+- Do not restate what the repo already records. Capture the thing you would otherwise
+  rediscover the hard way.

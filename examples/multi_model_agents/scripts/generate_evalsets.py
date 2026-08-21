@@ -48,33 +48,73 @@ EVALSET_TARGETS = [
 # Stratified ~77/23 train/val split — deterministic, balanced across all 8 categories.
 # Every category has at least 1 case in val for coverage.
 TRAIN_CASE_IDS = [
-    "case_10_low_booking", "case_22_medium_booking", "case_40_medium_booking", "case_43_low_booking",
-    "case_44_high_booking", "case_45_low_booking",
-    "case_34_low_boundary", "case_35_low_boundary", "case_36_medium_boundary",
-    "case_53_low_boundary", "case_54_medium_boundary", "case_55_low_boundary",
-    "case_32_medium_cancellation", "case_33_medium_cancellation", "case_46_low_cancellation",
-    "case_48_medium_cancellation", "case_50_high_cancellation", "case_51_low_cancellation",
-    "case_12_low_error_handling", "case_37_low_error_handling", "case_38_low_error_handling",
-    "case_39_medium_error_handling", "case_61_low_error_handling", "case_64_low_error_handling",
-    "case_11_low_expense", "case_15_medium_expense", "case_20_medium_expense",
-    "case_23_medium_expense", "case_29_high_expense", "case_63_medium_expense",
-    "case_17_medium_planning", "case_18_medium_planning", "case_21_medium_planning",
-    "case_25_high_planning", "case_28_high_planning", "case_62_high_planning",
-    "case_7_low_policy", "case_8_low_policy", "case_9_low_policy",
-    "case_59_medium_policy", "case_60_low_policy",
-    "case_1_low_search", "case_2_low_search", "case_3_low_search", "case_4_low_search",
-    "case_5_low_search", "case_6_low_search", "case_30_low_search", "case_57_low_search",
+    "case_10_low_booking",
+    "case_22_medium_booking",
+    "case_40_medium_booking",
+    "case_43_low_booking",
+    "case_44_high_booking",
+    "case_45_low_booking",
+    "case_34_low_boundary",
+    "case_35_low_boundary",
+    "case_36_medium_boundary",
+    "case_53_low_boundary",
+    "case_54_medium_boundary",
+    "case_55_low_boundary",
+    "case_32_medium_cancellation",
+    "case_33_medium_cancellation",
+    "case_46_low_cancellation",
+    "case_48_medium_cancellation",
+    "case_50_high_cancellation",
+    "case_51_low_cancellation",
+    "case_12_low_error_handling",
+    "case_37_low_error_handling",
+    "case_38_low_error_handling",
+    "case_39_medium_error_handling",
+    "case_61_low_error_handling",
+    "case_64_low_error_handling",
+    "case_11_low_expense",
+    "case_15_medium_expense",
+    "case_20_medium_expense",
+    "case_23_medium_expense",
+    "case_29_high_expense",
+    "case_63_medium_expense",
+    "case_17_medium_planning",
+    "case_18_medium_planning",
+    "case_21_medium_planning",
+    "case_25_high_planning",
+    "case_28_high_planning",
+    "case_62_high_planning",
+    "case_7_low_policy",
+    "case_8_low_policy",
+    "case_9_low_policy",
+    "case_59_medium_policy",
+    "case_60_low_policy",
+    "case_1_low_search",
+    "case_2_low_search",
+    "case_3_low_search",
+    "case_4_low_search",
+    "case_5_low_search",
+    "case_6_low_search",
+    "case_30_low_search",
+    "case_57_low_search",
 ]
 
 VAL_CASE_IDS = [
-    "case_41_low_booking", "case_42_medium_booking",
-    "case_52_low_boundary", "case_56_medium_boundary",
-    "case_47_medium_cancellation", "case_49_medium_cancellation",
-    "case_13_low_error_handling", "case_14_low_error_handling",
-    "case_16_medium_expense", "case_27_high_expense",
-    "case_24_high_planning", "case_26_high_planning",
+    "case_41_low_booking",
+    "case_42_medium_booking",
+    "case_52_low_boundary",
+    "case_56_medium_boundary",
+    "case_47_medium_cancellation",
+    "case_49_medium_cancellation",
+    "case_13_low_error_handling",
+    "case_14_low_error_handling",
+    "case_16_medium_expense",
+    "case_27_high_expense",
+    "case_24_high_planning",
+    "case_26_high_planning",
     "case_19_medium_policy",
-    "case_31_low_search", "case_58_low_search",
+    "case_31_low_search",
+    "case_58_low_search",
 ]
 
 
@@ -130,9 +170,7 @@ def build_eval_case(idx: int, tier: str, case: dict, app_name: str) -> dict:
     }
 
 
-def generate_evalset(
-    selected: list[tuple[str, dict]], app_name: str, eval_set_id: str
-) -> dict:
+def generate_evalset(selected: list[tuple[str, dict]], app_name: str, eval_set_id: str) -> dict:
     eval_cases = []
     for idx, (tier, case) in enumerate(selected, start=1):
         eval_cases.append(build_eval_case(idx, tier, case, app_name))
@@ -172,15 +210,19 @@ def main():
         all_ids = {c["eval_id"] for c in evalset["eval_cases"]}
         train_set = set(TRAIN_CASE_IDS)
         val_set = set(VAL_CASE_IDS)
-        assert train_set & val_set == set(), f"Train/val overlap: {train_set & val_set}"
-        assert train_set | val_set == all_ids, f"Split missing cases: {all_ids - (train_set | val_set)}"
+        if train_set & val_set:
+            raise ValueError(f"Train/val overlap: {train_set & val_set}")
+        if train_set | val_set != all_ids:
+            raise ValueError(f"Split missing cases: {all_ids - (train_set | val_set)}")
 
         # Sampler configs are the hand-tuned source of truth — never overwrite.
         # Only bootstrap one when absent.
         config_path = out_dir / "sampler_config.json"
         if config_path.exists():
-            print(f"    preserved existing sampler_config (source of truth): "
-                  f"{config_path.relative_to(EXAMPLE_ROOT)}")
+            print(
+                f"    preserved existing sampler_config (source of truth): "
+                f"{config_path.relative_to(EXAMPLE_ROOT)}"
+            )
             continue
 
         sampler_config = {
@@ -219,9 +261,7 @@ def main():
                         "rubrics": [
                             {
                                 "rubric_id": "correct_tool_selection",
-                                "rubric_content": {
-                                    "text_property": "Correct tools selected."
-                                },
+                                "rubric_content": {"text_property": "Correct tools selected."},
                                 "type": "TOOL_USE_QUALITY",
                             },
                             {
@@ -246,8 +286,10 @@ def main():
         print(f"    bootstrapped sampler_config: {config_path.relative_to(EXAMPLE_ROOT)}")
 
     print(f"\nTrain/val split: {len(TRAIN_CASE_IDS)} train / {len(VAL_CASE_IDS)} val")
-    print("Done. All evalset.json files regenerated; existing sampler_config.json "
-          "files preserved (only absent ones bootstrapped).")
+    print(
+        "Done. All evalset.json files regenerated; existing sampler_config.json "
+        "files preserved (only absent ones bootstrapped)."
+    )
 
 
 if __name__ == "__main__":

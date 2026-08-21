@@ -6,7 +6,6 @@ The create_agent() factory is used by wrangler to inject different models and pr
 
 from google.adk.agents import Agent
 
-
 # ---------------------------------------------------------------------------
 # Your tools — replace these with your actual business logic
 # ---------------------------------------------------------------------------
@@ -51,7 +50,9 @@ def submit_order(item_id: str, quantity: int, customer_name: str) -> dict:
 TOOLS = [lookup_item, submit_order]
 
 DEFAULT_MODEL = "gemini-3.5-flash"
-DEFAULT_INSTRUCTION = "You are a helpful assistant. Use the available tools to answer user questions."
+DEFAULT_INSTRUCTION = (
+    "You are a helpful assistant. Use the available tools to answer user questions."
+)
 
 
 def create_agent(model: str = DEFAULT_MODEL, instruction: str = DEFAULT_INSTRUCTION) -> Agent:
@@ -61,6 +62,7 @@ def create_agent(model: str = DEFAULT_MODEL, instruction: str = DEFAULT_INSTRUCT
     during optimization. Keep this function signature unchanged.
     """
     from wrangler.core.config import resolve_model
+
     return Agent(
         model=resolve_model(model),
         name="my_agent",

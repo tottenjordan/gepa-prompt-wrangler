@@ -5,14 +5,13 @@ and custom LLM metrics. Results appear in the Observability tab, Cloud Logging,
 and Cloud Monitoring.
 
 Usage:
-    uv run python -m wrangler.online_evaluators list
-    uv run python -m wrangler.online_evaluators create
-    uv run python -m wrangler.online_evaluators verify
-    uv run python -m wrangler.online_evaluators delete <evaluator_id>
-    uv run python -m wrangler.online_evaluators cleanup
+    uv run python -m wrangler.eval.online_evaluators list
+    uv run python -m wrangler.eval.online_evaluators create
+    uv run python -m wrangler.eval.online_evaluators verify
+    uv run python -m wrangler.eval.online_evaluators delete <evaluator_id>
+    uv run python -m wrangler.eval.online_evaluators cleanup
 """
 
-import json
 import os
 import sys
 import textwrap
@@ -25,6 +24,9 @@ from ..core.config import GCP_PROJECT_ID, GCP_REGION
 
 PROJECT_NUMBER = os.environ.get("PROJECT_NUMBER", "")
 API_BASE = f"https://{GCP_REGION}-aiplatform.googleapis.com/v1beta1/projects/{PROJECT_NUMBER}/locations/{GCP_REGION}"
+
+# Seconds. Without it these calls can hang forever against a wedged endpoint.
+HTTP_TIMEOUT = 60
 
 CUSTOM_METRICS = [
     {
@@ -96,7 +98,7 @@ def _agent_resource(engine_id: str) -> str:
 
 
 def _list_registered_metrics(headers) -> dict[str, str]:
-    resp = http_requests.get(f"{API_BASE}/evaluationMetrics", headers=headers)
+    resp = http_requests.get(f"{API_BASE}/evaluationMetrics", headers=headers, timeout=HTTP_TIMEOUT)
     if resp.status_code != 200:
         return {}
     result = {}
@@ -123,7 +125,10 @@ def register_custom_metrics() -> list[str]:
 
         print(f"  Registering '{display_name}'...")
         resp = http_requests.post(
-            f"{API_BASE}/evaluationMetrics", headers=headers, json=metric_def,
+            f"{API_BASE}/evaluationMetrics",
+            headers=headers,
+            json=metric_def,
+            timeout=HTTP_TIMEOUT,
         )
         if resp.status_code == 200:
             result = resp.json()
@@ -137,12 +142,10 @@ def register_custom_metrics() -> list[str]:
 
 
 def _build_evaluator_config(label: str, engine_id: str, custom_metric_names: list[str]) -> dict:
-    metric_sources = [
-        {"metric": {"predefinedMetricSpec": {"metricSpecName": m}}}
-        for m in PREDEFINED_METRICS
+    metric_sources: list[dict] = [
+        {"metric": {"predefinedMetricSpec": {"metricSpecName": m}}} for m in PREDEFINED_METRICS
     ]
-    for name in custom_metric_names:
-        metric_sources.append({"metricResourceName": name})
+    metric_sources.extend({"metricResourceName": name} for name in custom_metric_names)
 
     return {
         "displayName": f"Wrangler {label.title()} Online Evaluator",
@@ -158,7 +161,7 @@ def _build_evaluator_config(label: str, engine_id: str, custom_metric_names: lis
 
 def list_evaluators():
     headers = _get_headers()
-    resp = http_requests.get(f"{API_BASE}/onlineEvaluators", headers=headers)
+    resp = http_requests.get(f"{API_BASE}/onlineEvaluators", headers=headers, timeout=HTTP_TIMEOUT)
     resp.raise_for_status()
     evaluators = resp.json().get("onlineEvaluators", [])
 
@@ -207,7 +210,9 @@ def create_evaluators():
         n_metrics = len(config["metricSources"])
         print(f"  Creating '{config['displayName']}' with {n_metrics} metrics...")
 
-        resp = http_requests.post(f"{API_BASE}/onlineEvaluators", headers=headers, json=config)
+        resp = http_requests.post(
+            f"{API_BASE}/onlineEvaluators", headers=headers, json=config, timeout=HTTP_TIMEOUT
+        )
         if resp.status_code == 200:
             result = resp.json()
             print(f"  Operation: {result.get('name', '')}")
@@ -223,14 +228,12 @@ def verify_evaluators():
     agents = _get_agent_engine_ids()
 
     print("=== Online Evaluator Status ===")
-    resp = http_requests.get(f"{API_BASE}/onlineEvaluators", headers=headers)
+    resp = http_requests.get(f"{API_BASE}/onlineEvaluators", headers=headers, timeout=HTTP_TIMEOUT)
     resp.raise_for_status()
     evaluators = resp.json().get("onlineEvaluators", [])
 
     agent_ids = set(agents.values())
-    matching = [
-        e for e in evaluators if e.get("agentResource", "").split("/")[-1] in agent_ids
-    ]
+    matching = [e for e in evaluators if e.get("agentResource", "").split("/")[-1] in agent_ids]
 
     if not matching:
         print("  No evaluators found for wrangler agents")
@@ -246,7 +249,7 @@ def verify_evaluators():
     print(f"\n  {'PASS' if all_active else 'WARN'}: {len(matching)} evaluator(s)")
 
     # Check Cloud Logging for eval results
-    print(f"\n=== Evaluation Results in Cloud Logging ===")
+    print("\n=== Evaluation Results in Cloud Logging ===")
     for label, engine_id in agents.items():
         body = {
             "resourceNames": [f"projects/{GCP_PROJECT_ID}"],
@@ -260,7 +263,9 @@ def verify_evaluators():
         }
         resp = http_requests.post(
             "https://logging.googleapis.com/v2/entries:list",
-            headers=headers, json=body,
+            headers=headers,
+            json=body,
+            timeout=HTTP_TIMEOUT,
         )
         entries = resp.json().get("entries", [])
         print(f"\n  {label} ({engine_id}): {len(entries)} eval result(s)")
@@ -270,7 +275,9 @@ def delete_evaluator(evaluator_id: str):
     headers = _get_headers()
     print(f"Deleting evaluator {evaluator_id}...")
     resp = http_requests.delete(
-        f"{API_BASE}/onlineEvaluators/{evaluator_id}", headers=headers,
+        f"{API_BASE}/onlineEvaluators/{evaluator_id}",
+        headers=headers,
+        timeout=HTTP_TIMEOUT,
     )
     if resp.status_code == 200:
         print("  Deleted")
@@ -285,7 +292,7 @@ def cleanup():
     agent_ids = set(agents.values())
 
     print("=== Cleaning up Online Evaluators ===")
-    resp = http_requests.get(f"{API_BASE}/onlineEvaluators", headers=headers)
+    resp = http_requests.get(f"{API_BASE}/onlineEvaluators", headers=headers, timeout=HTTP_TIMEOUT)
     resp.raise_for_status()
     for ev in resp.json().get("onlineEvaluators", []):
         agent = ev.get("agentResource", "").split("/")[-1]
@@ -300,7 +307,9 @@ def cleanup():
         if display_name in metric_names:
             mid = resource_name.split("/")[-1]
             print(f"Deleting metric '{display_name}' ({mid})...")
-            resp = http_requests.delete(f"{API_BASE}/evaluationMetrics/{mid}", headers=headers)
+            resp = http_requests.delete(
+                f"{API_BASE}/evaluationMetrics/{mid}", headers=headers, timeout=HTTP_TIMEOUT
+            )
             print(f"  {'Deleted' if resp.status_code == 200 else f'Error {resp.status_code}'}")
 
     print("\nCleanup complete.")
@@ -310,13 +319,16 @@ COMMANDS = {
     "list": lambda args: list_evaluators(),
     "create": lambda args: create_evaluators(),
     "verify": lambda args: verify_evaluators(),
-    "delete": lambda args: delete_evaluator(args[0]) if args else print("Usage: delete <evaluator_id>"),
+    "delete": lambda args: (
+        delete_evaluator(args[0]) if args else print("Usage: delete <evaluator_id>")
+    ),
     "cleanup": lambda args: cleanup(),
 }
 
 if __name__ == "__main__":
-    from dotenv import load_dotenv
     from pathlib import Path
+
+    from dotenv import load_dotenv
 
     # Load .env from repo root, then example dir (example overrides root)
     load_dotenv()
@@ -325,7 +337,7 @@ if __name__ == "__main__":
         load_dotenv(str(example_env), override=True)
 
     if len(sys.argv) < 2 or sys.argv[1] not in COMMANDS:
-        print(f"Usage: python -m wrangler.online_evaluators <command>")
+        print("Usage: python -m wrangler.eval.online_evaluators <command>")
         print(f"Commands: {', '.join(COMMANDS)}")
         sys.exit(1)
     COMMANDS[sys.argv[1]](sys.argv[2:])

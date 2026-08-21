@@ -1,11 +1,11 @@
 """Tests for wrangler.cli — Click CLI commands."""
 
-import pytest
-import yaml
 from pathlib import Path
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
 
+import yaml
 from click.testing import CliRunner
+
 from wrangler.cli import main
 
 
@@ -75,10 +75,12 @@ class TestInspectCommand:
     @patch("wrangler.tools.inspector.AgentInspector.to_yaml")
     def test_inspect_calls_inspector(self, mock_to_yaml, mock_inspect):
         from wrangler.tools.inspector import AgentSpec
+
         mock_inspect.return_value = AgentSpec(name="test", model="m", instruction="i", tools=[])
         mock_to_yaml.return_value = "agent:\n  name: test\n"
         runner = CliRunner()
         result = runner.invoke(main, ["inspect", "some/path"])
+        assert result.exit_code == 0
         mock_inspect.assert_called_once_with("some/path")
 
 
@@ -118,7 +120,8 @@ class TestPipelineRunCommand:
         runner = CliRunner()
         with runner.isolated_filesystem():
             manifest = {
-                "name": "test", "agent_module": "agents/test",
+                "name": "test",
+                "agent_module": "agents/test",
                 "eval_data": "eval.yaml",
                 "pairs": [{"id": "p1", "model": "m", "system_prompt": "s"}],
             }
@@ -131,13 +134,15 @@ class TestPipelineRunCommand:
     @patch("wrangler.pipeline.deploy_pipeline.deploy_pipeline")
     def test_pipeline_run_with_custom_run_id(self, mock_deploy):
         mock_deploy.return_value = {
-            "run_id": "my-run", "job_id": "gepa-my-run",
+            "run_id": "my-run",
+            "job_id": "gepa-my-run",
             "dashboard_uri": "https://...",
         }
         runner = CliRunner()
         with runner.isolated_filesystem():
             manifest = {
-                "name": "test", "agent_module": "agents/test",
+                "name": "test",
+                "agent_module": "agents/test",
                 "eval_data": "eval.yaml",
                 "pairs": [{"id": "p1", "model": "m", "system_prompt": "s"}],
             }
@@ -195,11 +200,17 @@ class TestGenerateEvalsetCommand:
         mock_gen.return_value = str(tmp_path / "eval_set.evalset.json")
 
         runner = CliRunner()
-        result = runner.invoke(main, [
-            "generate-evalset",
-            "--from", str(tmp_path / "eval.yaml"),
-            "--output", str(tmp_path / "output"),
-            "-n", "5",
-        ])
+        result = runner.invoke(
+            main,
+            [
+                "generate-evalset",
+                "--from",
+                str(tmp_path / "eval.yaml"),
+                "--output",
+                str(tmp_path / "output"),
+                "-n",
+                "5",
+            ],
+        )
         assert result.exit_code == 0
         assert "Loaded 10 eval cases" in result.output

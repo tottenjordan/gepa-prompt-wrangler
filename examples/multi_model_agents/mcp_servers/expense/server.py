@@ -1,19 +1,26 @@
 """Expense MCP server — exposes expense submission, policy checks, and history over StreamableHTTP."""
 
 import logging
+
 logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 try:
     from otel_setup import setup_opentelemetry
+
     setup_opentelemetry("expense-mcp")
 except Exception as e:
-    logging.warning("OTel setup failed: %s", e)
+    logger.warning("OTel setup failed: %s", e)
 
 from fastmcp import FastMCP
 
 try:
-    from .mock_db import submit_expense as _submit, check_policy as _check, get_expenses as _get
+    from .mock_db import check_policy as _check
+    from .mock_db import get_expenses as _get
+    from .mock_db import submit_expense as _submit
 except ImportError:
-    from mock_db import submit_expense as _submit, check_policy as _check, get_expenses as _get
+    from mock_db import check_policy as _check
+    from mock_db import get_expenses as _get
+    from mock_db import submit_expense as _submit
 
 mcp = FastMCP("expense-mcp", instructions="Submit and manage corporate expense reports.")
 

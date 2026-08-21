@@ -2,7 +2,6 @@
 
 import json
 
-import pytest
 import yaml
 
 
@@ -23,6 +22,7 @@ class TestPipelineDAGCompilation:
 
     def test_compile_single_pair(self, tmp_path):
         from kfp import compiler
+
         from wrangler.pipeline.dag import gepa_pipeline
 
         output_path = str(tmp_path / "pipeline.yaml")
@@ -36,6 +36,7 @@ class TestPipelineDAGCompilation:
 
     def test_compiled_yaml_has_all_components(self, tmp_path):
         from kfp import compiler
+
         from wrangler.pipeline.dag import gepa_pipeline
 
         output_path = str(tmp_path / "pipeline.yaml")
@@ -83,10 +84,7 @@ class TestManifestSerialization:
         assert manifest.pairs[0].costs == {"input": 1.5, "output": 9.0}
         assert manifest.pairs[1].costs is None
 
-        pairs_json = [
-            {"id": p.id, "model": p.model, "costs": p.costs}
-            for p in manifest.pairs
-        ]
+        pairs_json = [{"id": p.id, "model": p.model, "costs": p.costs} for p in manifest.pairs]
         serialized = json.dumps(pairs_json)
         restored = json.loads(serialized)
         assert restored[0]["costs"]["input"] == 1.5
@@ -122,26 +120,40 @@ class TestBlendedCostWithCustom:
         assert abs(result - expected) < 0.001
 
     def test_fallback_to_model_costs(self):
-        from wrangler.core.config import blended_cost, MODEL_COSTS
+        from wrangler.core.config import MODEL_COSTS, blended_cost
 
         result = blended_cost("gemini-3.5-flash")
         cost = MODEL_COSTS["gemini-3.5-flash"]
         expected = (4 * cost["input"] + 1 * cost["output"]) / 5
         assert abs(result - expected) < 0.001
 
-    def test_unknown_model_returns_zero(self):
+    def test_unknown_model_raises(self):
+        """Unregistered ids used to price at $0.00, which reads as "free".
+
+        The registry makes that an error. Reporting opts out explicitly via
+        blended_cost_for_report; nothing else should.
+        """
+        import pytest
+
         from wrangler.core.config import blended_cost
 
-        result = blended_cost("totally-unknown-model")
-        assert result == 0.0
+        with pytest.raises(KeyError, match="totally-unknown-model"):
+            blended_cost("totally-unknown-model")
+
+    def test_report_variant_returns_zero_and_warns(self, caplog):
+        """A report must not abort because one pair used an ad-hoc model id."""
+        from wrangler.core.models import blended_cost_for_report
+
+        with caplog.at_level("WARNING"):
+            assert blended_cost_for_report("totally-unknown-model") == 0.0
+
+        assert "totally-unknown-model" in caplog.text
 
 
 class TestParetoFrontier:
     """Verify the Pareto frontier uses proper non-dominated sort."""
 
     def test_dominated_point_excluded(self):
-        import numpy as np
-        from unittest.mock import patch
 
         results = {
             "cheap-good": {"model": "gemini-3.1-flash-lite", "after": {"q": 0.9}},
@@ -149,10 +161,86 @@ class TestParetoFrontier:
             "expensive-best": {"model": "claude-sonnet-4-6", "after": {"q": 0.95}},
         }
 
-        from wrangler.reporting.analysis import generate_cost_quality_chart
         import tempfile
         from pathlib import Path
+
+        from wrangler.reporting.analysis import generate_cost_quality_chart
 
         with tempfile.TemporaryDirectory() as td:
             generate_cost_quality_chart(results, charts_dir=Path(td))
             assert (Path(td) / "cost_quality.png").exists()
+
+
+class TestImageTag:
+    def test_tag_changes_when_lockfile_changes(self, tmp_path):
+        """The image tag must track uv.lock, not just pyproject.toml.
+
+        pyproject.toml holds version *ranges*. Resolved versions can move
+        without it changing, so hashing it alone lets two builds share a tag
+        while containing different packages.
+        """
+        from wrangler.pipeline.deploy_pipeline import _compute_image_tag
+
+        pyproject = tmp_path / "pyproject.toml"
+        lock = tmp_path / "uv.lock"
+        pyproject.write_text("[project]\nname='x'\n")
+        lock.write_text("version = 1\n")
+
+        tag_before = _compute_image_tag(pyproject, lock)
+        lock.write_text("version = 2\n")
+        tag_after = _compute_image_tag(pyproject, lock)
+
+        assert tag_before != tag_after
+
+    def test_tag_changes_when_pyproject_changes(self, tmp_path):
+        from wrangler.pipeline.deploy_pipeline import _compute_image_tag
+
+        pyproject = tmp_path / "pyproject.toml"
+        lock = tmp_path / "uv.lock"
+        pyproject.write_text("[project]\nname='x'\n")
+        lock.write_text("version = 1\n")
+
+        tag_before = _compute_image_tag(pyproject, lock)
+        pyproject.write_text("[project]\nname='y'\n")
+        assert _compute_image_tag(pyproject, lock) != tag_before
+
+    def test_tag_is_stable_for_identical_inputs(self, tmp_path):
+        from wrangler.pipeline.deploy_pipeline import _compute_image_tag
+
+        pyproject = tmp_path / "pyproject.toml"
+        lock = tmp_path / "uv.lock"
+        pyproject.write_text("[project]\nname='x'\n")
+        lock.write_text("version = 1\n")
+
+        assert _compute_image_tag(pyproject, lock) == _compute_image_tag(pyproject, lock)
+
+    def test_missing_pyproject_is_not_a_shared_tag(self, tmp_path):
+        """Two different projects with no pyproject must not collide on 'unknown'."""
+        from wrangler.pipeline.deploy_pipeline import _compute_image_tag
+
+        missing = tmp_path / "pyproject.toml"
+        lock = tmp_path / "uv.lock"
+        lock.write_text("version = 1\n")
+        tag_a = _compute_image_tag(missing, lock)
+        lock.write_text("version = 2\n")
+        assert _compute_image_tag(missing, lock) != tag_a
+
+    def test_tag_changes_when_dockerfile_changes(self, tmp_path):
+        """Dockerfile.pipeline pins its own deps and is not derived from pyproject.
+
+        It copies pyproject.toml but installs from a hardcoded list, so bumping a
+        pin there changes the image while both other inputs stay byte-identical.
+        """
+        from wrangler.pipeline.deploy_pipeline import _compute_image_tag
+
+        pyproject = tmp_path / "pyproject.toml"
+        lock = tmp_path / "uv.lock"
+        dockerfile = tmp_path / "Dockerfile.pipeline"
+        pyproject.write_text("[project]\nname='x'\n")
+        lock.write_text("version = 1\n")
+        dockerfile.write_text('RUN pip install "google-adk>=2.2.0"\n')
+
+        tag_before = _compute_image_tag(pyproject, lock, dockerfile)
+        dockerfile.write_text('RUN pip install "google-adk>=2.7.1"\n')
+
+        assert _compute_image_tag(pyproject, lock, dockerfile) != tag_before

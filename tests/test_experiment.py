@@ -1,13 +1,12 @@
 """Tests for experiment management and stage functions."""
 
 import json
-from pathlib import Path
 
 import pytest
 import yaml
 
-from wrangler.orchestration.experiment import Experiment, STAGES, STAGE_GATES
-from wrangler.core.factory import Manifest, AgentPromptPair
+from wrangler.core.factory import Manifest
+from wrangler.orchestration.experiment import STAGE_GATES, STAGES, Experiment
 
 
 @pytest.fixture
@@ -45,7 +44,9 @@ def manifest_yaml(tmp_path):
 @pytest.fixture
 def experiment(manifest_yaml, tmp_path):
     """Create a fresh experiment from manifest."""
-    return Experiment.create(manifest_yaml, name="test-exp", version="v1", base_dir=tmp_path / "experiments")
+    return Experiment.create(
+        manifest_yaml, name="test-exp", version="v1", base_dir=tmp_path / "experiments"
+    )
 
 
 class TestExperimentCreate:
@@ -197,7 +198,7 @@ class TestStatus:
 
 class TestPhaseGates:
     def test_deploy_has_no_gate(self, experiment):
-        ok, msg = experiment.check_gate("deploy")
+        ok, _msg = experiment.check_gate("deploy")
         assert ok
 
     def test_eval_before_needs_deploy(self, experiment):
@@ -208,7 +209,7 @@ class TestPhaseGates:
     def test_eval_before_passes_after_deploy(self, experiment):
         experiment.merge_pair("deploy", "pair-a", {"engine_id": "123"})
         experiment.merge_pair("deploy", "pair-b", {"engine_id": "456"})
-        ok, msg = experiment.check_gate("eval_before")
+        ok, _msg = experiment.check_gate("eval_before")
         assert ok
 
     def test_gate_partial_deploy_fails(self, experiment):
@@ -219,10 +220,10 @@ class TestPhaseGates:
 
     def test_gate_with_pair_id(self, experiment):
         experiment.merge_pair("deploy", "pair-a", {"engine_id": "123"})
-        ok, msg = experiment.check_gate("eval_before", pair_id="pair-a")
+        ok, _msg = experiment.check_gate("eval_before", pair_id="pair-a")
         assert ok
 
-        ok, msg = experiment.check_gate("eval_before", pair_id="pair-b")
+        ok, _msg = experiment.check_gate("eval_before", pair_id="pair-b")
         assert not ok
 
     def test_optimize_needs_eval_before(self, experiment):
@@ -241,20 +242,29 @@ class TestPhaseGates:
 class TestCLIExperiment:
     def test_experiment_create(self, manifest_yaml, tmp_path):
         from click.testing import CliRunner
+
         from wrangler.cli import main
 
         runner = CliRunner()
-        result = runner.invoke(main, [
-            "experiment", "create", str(manifest_yaml),
-            "--name", "cli-test",
-            "--dir", str(tmp_path / "exp"),
-        ])
+        result = runner.invoke(
+            main,
+            [
+                "experiment",
+                "create",
+                str(manifest_yaml),
+                "--name",
+                "cli-test",
+                "--dir",
+                str(tmp_path / "exp"),
+            ],
+        )
         assert result.exit_code == 0, result.output
         assert "Created experiment" in result.output
         assert (tmp_path / "exp" / "cli-test" / "config.yaml").exists()
 
     def test_status_command(self, experiment):
         from click.testing import CliRunner
+
         from wrangler.cli import main
 
         runner = CliRunner()

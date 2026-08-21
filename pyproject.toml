@@ -39,4 +39,108 @@ packages = ["wrangler"]
 dev = [
     "pytest>=8.0.0",
     "pytest-asyncio>=0.24.0",
+    "pytest-cov>=7.1.0",
+    "ruff>=0.16.3",
+    "ty>=0.0.73",
 ]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+# *.md is excluded because ruff reformats Python code blocks inside Markdown.
+# docs/notes/ quotes upstream ADK source verbatim (2-space Google style) as
+# evidence; reformatting it to 4-space would make those quotes misleading.
+extend-exclude = ["experiments", "outputs", "_geap_build_pkg", "*.md"]
+
+[tool.ruff.lint]
+select = ["ALL"]
+# Philosophy: every rule that can catch a *bug* stays on. Rules dropped below are
+# either stylistic, in conflict with the formatter, or in conflict with a deliberate
+# architectural choice in this repo. Each one carries its reason.
+ignore = [
+    # --- Not our conventions ---
+    "D",       # docstring style — not adopting pydocstyle wholesale
+    "ANN",     # annotations are enforced by ty, not ruff
+    "CPY001",  # copyright notice in every file — not our convention
+    "T201",    # print() is the CLI's output mechanism
+    "TRY003",  # long messages in exceptions are fine here
+    "EM",      # exception message string literals
+    "FIX",     # TODO comments are tracked, not banned
+    "TD",      # TODO formatting
+
+    # --- Conflict with the formatter ---
+    "COM812",  # trailing comma — ruff format owns this
+    "ISC001",  # implicit string concat — ruff format owns this
+    "E501",    # line length — ruff format owns it; the residue is unsplittable
+               # prompt strings, URLs, and log messages
+
+    # --- Conflict with deliberate architecture ---
+    "PLC0415", # imports inside functions: KFP components are serialized in isolation
+               # and must import locally, and the heavy Google SDKs are lazily imported
+               # so `wrangler --help` stays fast
+    "TID252",  # relative imports are the intra-package convention throughout wrangler/
+    "S603",    # subprocess without shell=True is the *safe* form; this repo shells out
+    "S607",    # to gcloud/docker/git by name on purpose
+    "S108",    # /tmp paths are correct inside pipeline containers
+    "S104",    # MCP servers bind 0.0.0.0 inside containers by design
+    "S311",    # random is used for jitter and sampling, never for secrets
+    "SLF001",  # the ADK monkey-patches in optimize/optimizer.py must touch privates
+    "G004",    # f-strings in log calls — readability preferred over lazy interpolation
+    "RUF001",  # em dashes and typographic quotes are intentional in prompts and reports
+    "BLE001",  # `except Exception` at a degradation boundary. Every remaining site is a
+               # remote call (GEAP, Vertex, MCP, Cloud Run) or a best-effort enrichment
+               # step where the correct behaviour is to report and carry on rather than
+               # abort a multi-hour optimization run. The dangerous variant — swallowing
+               # silently — is still caught: S110 stays enabled.
+    "W291",    # ruff format already strips trailing whitespace from code lines, so every
+               # surviving hit is INSIDE a prompt string literal (line-wrap artifacts in
+               # examples/multi_model_agents/prompts/*.py). Stripping those would change
+               # the prompt text, hence the eval scores, hence archived GEPA results.
+
+    # --- Metrics on existing code, not defects ---
+    "PLR0913", # too many arguments
+    "PLR0917", # too many positional arguments
+    "PLR0915", # too many statements
+    "PLR0912", # too many branches
+    "PLR2004", # magic value comparison
+    "C901",    # complexity
+    "FBT001",  # boolean positional args are baked into the existing public signatures;
+    "FBT002",  # changing them is an API break, not a lint fix
+    "FBT003",
+    "ARG001",  # unused arguments are normal in callbacks and interface implementations
+    "ARG002",
+    "ARG005",
+
+    # --- Deferred, tracked as follow-up (see docs/plans/2026-08-20-repo-modernization.md) ---
+    "PTH",     # os.path -> pathlib migration: ~170 sites, mechanical but large. Worth
+               # doing as its own PR, not smuggled into the toolchain commit.
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["S101", "PLR2004", "SLF001"]        # asserts, magic values, private access
+"scripts/*" = ["INP001"]                         # standalone scripts, not a package
+# KFP serializes each @dsl.component body in isolation, so a module-level
+# `logger = logging.getLogger(__name__)` is not in scope inside a component.
+# The root logger is what the container's Cloud Logging agent captures anyway.
+# N806: same isolation rule applies to constant tables (_METRIC_MAP, METRIC_LABELS) —
+# they are module constants in spirit but must be declared inside the component body.
+"wrangler/pipeline/components.py" = ["LOG015", "N806"]
+# The example agents manipulate sys.path and call load_dotenv() before importing, which
+# E402 forbids. That ordering is required for GEAP deployment compatibility.
+"examples/*" = ["E402", "INP001"]
+"templates/*" = ["INP001"]
+"agents/*" = ["INP001"]
+
+[tool.ty.environment]
+python-version = "3.11"
+
+[tool.ty.rules]
+possibly-unresolved-reference = "error"
+unused-ignore-comment = "warn"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+# The floor is a ratchet: raise it when coverage rises, never lower it to make a
+# red build pass. Measured baseline was 49.84%; the floor sits just under it rather
+# than at the nearest round number, so a real regression cannot hide in the slack.
+addopts = "--cov=wrangler --cov-report=term-missing --cov-fail-under=49"
