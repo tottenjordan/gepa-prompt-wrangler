@@ -75,6 +75,15 @@ class Experiment:
                 "judge_model": manifest.eval_config.get(
                     "judge_model", DEFAULT_MANIFEST_JUDGE_MODEL
                 ),
+                # GEPA's budget. Carried here because the experiment config used
+                # to drop the manifest's `pipeline:` block entirely, so the local
+                # path had no way to set it and fell through to ADK's default of
+                # 100 — which on a 49-case train set buys exactly one generation,
+                # i.e. one random draw of variants rather than a search. That is
+                # why the 2026-08-21 pilot "optimized" in 10 minutes and returned
+                # its seed. Read from `pipeline.max_metric_calls` for manifests
+                # that already set it there.
+                "max_metric_calls": (manifest.pipeline or {}).get("max_metric_calls"),
             },
             "pairs": [],
             "eval_config": manifest.eval_config,

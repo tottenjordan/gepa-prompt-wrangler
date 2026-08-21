@@ -47,6 +47,10 @@ class Manifest:
     eval_data: str
     pairs: list[AgentPromptPair]
     eval_config: dict[str, Any] = field(default_factory=dict)
+    # The manifest's `pipeline:` block. Parsed so the *local* path can read
+    # settings that used to be reachable only from the KFP pipeline —
+    # notably max_metric_calls, GEPA's search budget.
+    pipeline: dict[str, Any] = field(default_factory=dict)
 
     @property
     def pair_ids(self) -> list[str]:
@@ -129,4 +133,5 @@ class PairFactory:
             eval_data=raw.get("eval_data", ""),
             pairs=pairs,
             eval_config=raw.get("eval_config", {}),
+            pipeline=raw.get("pipeline", {}),
         )

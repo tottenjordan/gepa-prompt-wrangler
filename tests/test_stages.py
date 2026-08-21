@@ -243,3 +243,42 @@ class TestCoveragePersisted:
         from wrangler.eval.evaluator import EvalResult
 
         assert EvalResult(coverage={"safety_v1": 3}).coverage == {"safety_v1": 3}
+
+
+class TestOptimizeBudgetIsPlumbed:
+    """GEPA's budget must reach the optimizer, or there is no search.
+
+    `stage_optimize` used to call `optimize()` without `max_metric_calls`, so
+    it fell through to ADK's default of 100. One generation over a 49-case
+    train set costs ~100 calls, so GEPA got a single draw of variants and
+    returned the seed whenever none beat it — which is exactly what the
+    2026-08-21 pilot did, in 10 minutes, against a manifest asking for 150.
+    """
+
+    def test_manifest_pipeline_block_is_parsed(self):
+        from wrangler.core.factory import PairFactory
+
+        m = PairFactory.load("manifests/pipeline_sonnet_manifest.yaml")
+        assert m.pipeline.get("max_metric_calls") == 150
+
+    def test_experiment_config_carries_the_budget(self, tmp_path):
+        from wrangler.orchestration.experiment import Experiment
+
+        exp = Experiment.create(
+            "manifests/pipeline_sonnet_manifest.yaml",
+            name="budget-check",
+            base_dir=str(tmp_path),
+        )
+        assert exp.config["defaults"]["max_metric_calls"] == 150, (
+            "the experiment config dropped the manifest's pipeline block, which "
+            "is how the budget became unreachable from the local path"
+        )
+
+    def test_stage_optimize_passes_it_through(self):
+        import inspect
+
+        from wrangler.orchestration import stages
+
+        src = inspect.getsource(stages.stage_optimize)
+        assert "max_metric_calls=max_calls" in src
+        assert 'defaults", {}).get("max_metric_calls' in src

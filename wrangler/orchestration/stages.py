@@ -378,6 +378,15 @@ def stage_optimize(exp: Experiment, pair_id: str | None = None) -> None:
         if sampler_cfg.exists():
             _validate_sampler_config(sampler_cfg, judge, pair.id)
         t0 = time.time()
+        # GEPA's search budget. Without this the call fell through to ADK's
+        # default of 100, and one generation over a 49-case train set costs
+        # ~100 — so the optimizer got a single draw of variants and returned
+        # the seed whenever none of them beat it. That is not a search, and it
+        # is why three consecutive "optimization" runs produced byte-identical
+        # prompts. None keeps the ADK default for callers that never set it.
+        max_calls = exp.config.get("defaults", {}).get("max_metric_calls")
+        if max_calls:
+            print(f"  [{pair.id}] Max metric calls: {max_calls}")
         optimized = optimize(
             str(agent_path),
             eval_data_path=str(eval_path),
@@ -385,6 +394,7 @@ def stage_optimize(exp: Experiment, pair_id: str | None = None) -> None:
             agent_name=pair.id,
             judge_model=judge,
             initial_instruction=pair.system_prompt,
+            max_metric_calls=max_calls,
         )
         elapsed = time.time() - t0
         print(f"  [{pair.id}] Done ({_fmt_duration(elapsed)}) — {len(optimized)} chars")
