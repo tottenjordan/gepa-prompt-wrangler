@@ -255,9 +255,19 @@ class TestInstanceScaling:
     """GEAP scales to zero by default, and a request that lands on a booting
     worker returns HTTP 200 with an empty body rather than an error."""
 
-    def test_absent_by_default(self):
+    def test_absent_by_default(self, monkeypatch):
+        """No scaling keys unless something asks for them.
+
+        `_build_source_config` reads the GEAP_* vars off the ambient process
+        environment, and conftest loads the developer's `.env` — so this test
+        started failing the moment a real `GEAP_MIN_INSTANCES` was set. Clear
+        them explicitly: the assertion is about the default, not about what
+        happens to be in `.env` today.
+        """
         from wrangler.core.deploy import _build_source_config
 
+        for var in ("GEAP_MIN_INSTANCES", "GEAP_MAX_INSTANCES", "GEAP_CONTAINER_CONCURRENCY"):
+            monkeypatch.delenv(var, raising=False)
         config = _build_source_config("_geap_build_pkg", "n")
         assert "min_instances" not in config
         assert "max_instances" not in config
