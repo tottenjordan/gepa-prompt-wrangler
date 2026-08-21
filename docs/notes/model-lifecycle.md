@@ -224,6 +224,40 @@ Two corrections to what this note previously said:
   platforms. Google Cloud sets its own schedule for partner models — treat the dates in
   the registry as an early-warning floor, not a contract.
 
+## Post-migration baseline, 2026-08-21
+
+The first full `deploy → eval → GEPA → redeploy → eval → report` since the judge
+migration. Experiment `experiments/active/pipeline-smoke-test`
+(`manifests/pipeline_smoke_manifest.yaml`), one pair (`sonnet`) on engine
+`5638288480409747456`, 5 eval cases averaged over 3 runs.
+
+| Metric | eval_before | eval_after | ± std (after) |
+|---|---|---|---|
+| `final_response_quality_v1` | 0.933 | 0.967 | 0.058 |
+| `hallucination_v1` | 0.906 | 0.982 | 0.017 |
+| `instruction_following_v1` | 0.893 | 0.744 | 0.217 |
+| `safety_v1` | 0.744 | 0.850 | 0.130 |
+| `tool_use_quality_v1` | 0.933 | 0.961 | 0.042 |
+| **overall** | **0.880** | **0.901** | |
+
+**Read the delta as nothing.** Two reasons, either one sufficient:
+
+1. **GEPA returned the seed prompt.** 18 generations, 102 metric calls, 89 minutes, and
+   the winning candidate was variant 0 — the 78-char instruction it started with (0.667;
+   the three evolved variants scored 0.600, 0.333, 0.600). Redeploy therefore shipped the
+   same prompt eval-before measured, so this is a repeat measurement, not a comparison.
+2. **The two runs did not score the same cases.** eval_before aggregated 5 per-case rows,
+   eval_after only 4 — see silent failure #7. Averaging over different case sets makes the
+   `+0.019` an artifact of which cases survived.
+
+What it *does* establish: the pipeline runs end to end on the migrated models, and
+**patch 6 holds live** — zero `Unsupported predefined metric: safety_v3` across the whole
+optimize run, where previously every case hit it.
+
+Treat these numbers as a smoke-test baseline, not a quality bar. Five cases at ±0.22 std
+on `instruction_following_v1` cannot separate a good prompt from a bad one; that needs
+`manifests/pipeline_test_manifest.yaml` (64 cases).
+
 ## Pricing figures were wrong before 2026-08-20
 
 The pre-registry cost table listed `gemini-2.5-flash` at $0.15/$0.60. Verified list price
@@ -239,11 +273,10 @@ as fabricated. Fetch `ai.google.dev` directly instead.
 
 ## Not yet done
 
-- **End-to-end smoke test** (plan Task 3.4) — `uv run wrangler run
-  manifests/pipeline_smoke_manifest.yaml`, 5 cases, ~25-30 min, deploys to GEAP and spends
-  real money. The A/B above validated the judge in isolation; it did **not** exercise
-  deploy → eval → GEPA → redeploy → eval. Until it runs, the migration is verified at the
-  unit of the judge, not of the pipeline.
+- **A run that can actually measure a prompt change.** The smoke test above validated the
+  plumbing and nothing else: GEPA kept its seed prompt, so no run in this repo has yet
+  shown the migrated judge moving a score. That needs
+  `manifests/pipeline_test_manifest.yaml` (64 cases, ~2-3 hours).
 - **Re-measure Gemini 3.x RPM against real project quota** and correct the registry's `5`.
   See the finding above — it currently makes `get_batch_config()` throttle 4x harder than
   necessary for every Gemini 3 judge.

@@ -1,10 +1,11 @@
 # Silent Failures
 
-**Verified on:** 2026-08-20, during the Task 3.4 smoke test.
+**Verified on:** 2026-08-20, during the Task 3.4 smoke test. #7 added 2026-08-21.
 
-Six defects found in one sitting. None of them raised. Every one reported success while
-producing worthless output — which is why they had survived so long. Grouped here because
-the *shape* is the transferable part, not the individual bugs (those are fixed).
+Seven defects, six of them found in one sitting. None of them raised. Every one reported
+success while producing worthless output — which is why they had survived so long. Grouped
+here because the *shape* is the transferable part, not the individual bugs. #1–#6 are
+fixed; **#7 is open.**
 
 Related: [repo-traps.md](repo-traps.md), [adk-patch-status.md](adk-patch-status.md).
 
@@ -43,10 +44,19 @@ Fixing the env vars did not close this off, because the swallow is structural.
 and the agent answers toolless — which under GEPA is scored as **a bad prompt**. A network
 blip is laundered into evidence about the instruction.
 
-Measured on one optimize run against the Cloud Run MCP servers: a burst of 12 failed
-`tools/list` attempts as generation 1 fanned out, 10 rescued by ADK's own one-shot retry
-(`retry_on_errors` on `McpToolset.get_tools`), **2 invocations left toolless**. All 12 were
-`tools/list` — never a tool *call*.
+Measured end-to-end on a full optimize run against the Cloud Run MCP servers (2026-08-21,
+18 generations, 102 metric calls, 89 min): **36 failed `tools/list` attempts, 29 rescued by
+ADK's own one-shot retry** (`retry_on_errors` on `McpToolset.get_tools`), **7 invocations
+left toolless** — roughly 7% of the run's metric calls scored an agent that had no tools.
+All 36 were `tools/list`; never a tool *call*.
+
+Two distinct shapes, not one. 32 were `anyio.BrokenResourceError` — the session's memory
+stream already closed under it, which is the teardown race below. The other 4 were
+`asyncio.TimeoutError` from `mcp_toolset._execute_with_session`'s own `asyncio.wait_for`
+around `list_tools`, i.e. the server was reachable but slow. They arrive at
+`_convert_tool_union_to_tools` identically and are swallowed identically, so a log grep for
+one shape undercounts. Both are fixed by the same change, because both are round trips that
+no longer happen.
 
 Ruled out along the way, so nobody re-checks them: the Cloud Run services have session
 affinity on with `minScale=3`; an idle session survived 150s of nothing with no failure, so
@@ -65,10 +75,15 @@ because GEPA's `agent.clone()` is a shallow copy and every candidate shares the 
 `_ToolsetFailureCounter` in `wrangler/optimize/optimizer.py` counts the give-up warning for
 the length of the run and prints a summary, so a degraded optimization says so.
 
-**The lesson:** ADK's one-shot retry meant the loud signal (12 log lines) and the real
-damage (2 cases) differed by 6×. When a library retries internally, count the *give-up*
+**The lesson:** ADK's one-shot retry meant the loud signal (36 log lines) and the real
+damage (7 cases) differed by 5×. When a library retries internally, count the *give-up*
 message, not the *attempt* message, or you will report a catastrophe and fix the wrong
 thing.
+
+**Not yet re-measured with the fix in place.** The run above loaded `registry.py` before
+the TTL was added, so its numbers are the *unfixed* baseline. The next full optimize run is
+the one that shows whether 7 becomes 0 — `_ToolsetFailureCounter`'s summary line is the
+number to read.
 
 ## 2. The startup checks had never run, once, in production
 
@@ -210,3 +225,56 @@ path.* Grep for the pattern, not the file you were debugging. Second, and more g
 right to stop a `None` from crashing the run, but `0.0` is indistinguishable from a real
 score. A sentinel that cannot be mistaken for data — or at minimum a counter of how often
 the coercion fired — would have surfaced this in the first generation.
+
+## 7. The autorater calls a tool, and the case vanishes — OPEN
+
+**Symptom:** `wrangler eval <exp> after` reported `SUCCEEDED`, printed five metrics and a
+respectable 0.901 overall — over **4 cases in run 1 and 3 in run 3**, out of 5. The
+aggregated `eval_after.json` carries 4 `per_case` rows where `eval_before.json` has 5.
+Nothing in the CLI output says a case was lost; you have to compare the array lengths.
+
+**Cause.** Reading the raw GCS result (the defect-3 technique — go under the library)
+shows two of five `candidateResults` carrying an `error` instead of metrics:
+
+```json
+{"code": 3, "message": "The model response did not complete successfully.\nFinish reason:
+ UNEXPECTED_TOOL_CALL.\nFinish message: Unexpected tool call:
+ print(default_api.search_hotels(city = \"Chicago\"))\n...
+ Please adjust the model safety_settings, or try a different prompt."}
+```
+
+The agent under test is **Claude**, which does not emit `default_api.foo(...)` — that is
+the Gemini SDK's Python-style call convention, and `search_hotels` is neither the deployed
+tool name (`wrangler_search_mcp_search_hotels`) nor the eval's expected one
+(`search_mcp_search_hotels`). So the model that produced it is the **autorater**: handed a
+tool-using trajectory to score, it tried to call the tools itself, and Vertex rejected its
+own judge's response.
+
+From there it is defect 3's cascade verbatim: `CandidateResult` has no `error` field and
+`EvaluationItemResult` is `extra='forbid'`, so one rater error makes the **whole GCS file**
+unparseable, `_convert_gcs_to_evaluation_item_result` swallows the `ValidationError`, and
+the per-case fetch returns nothing. The surviving score comes from server-side summary
+metrics over whichever cases the rater managed not to trip on.
+
+**Why it matters more than a lost case.** The dropped cases are not random — they are the
+ones with the richest tool trajectories, i.e. exactly the cases that discriminate between
+prompts. A prompt that provokes more tool use loses more cases and can score *higher* for
+it. Any before/after comparison across differing case counts is measuring the dropout, not
+the prompt.
+
+**Not fixed.** Two directions, neither free: (a) parse the raw GCS JSON ourselves rather
+than through `EvaluationItemResult`, which makes every per-metric error survivable and
+kills this class of cascade for good — defect 3 and defect 5 land in the same place; or
+(b) stop the rater emitting tool calls at all, which means reaching the autorater's
+generation config, and batch eval deliberately cannot send one (see
+[model-lifecycle.md](model-lifecycle.md) — a bare judge model id is rejected as an invalid
+autorater resource). (a) is the real fix; (b) treats the symptom and may not be reachable.
+
+**Minimum before either:** `run_batch_eval` should refuse to average over a case count
+that differs from the input, or at least say so loudly. Right now the only evidence is an
+array length, and the number it prints looks exactly like a number that means something.
+
+**The lesson:** the same `extra='forbid'` cascade has now eaten scores three separate ways
+(#3 unsupported metric version, #5 empty agent stream, #7 rater tool call). It is not
+three bugs; it is one brittle boundary that converts *any* per-item error into total data
+loss. Fix the boundary, not the latest thing to cross it.

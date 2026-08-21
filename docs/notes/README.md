@@ -14,13 +14,13 @@ One topic per file. Keep this index under 200 lines — put detail in the topic 
 | [adk-judge-model.md](adk-judge-model.md) | Why only the GEPA path reads `judge_model` at all — batch eval cannot send one. Predicted the risks the judge A/B then measured. |
 | [toolchain-baseline.md](toolchain-baseline.md) | Measured lint/type/test baseline as of 2026-08-20, and what infrastructure does not exist yet. |
 | [repo-traps.md](repo-traps.md) | Non-obvious footguns: gitignored lockfile, duplicated config, why `GOOGLE_CLOUD_LOCATION` can't express the per-model location rule, Agent Registry services invisible to `gcloud run services list`, `TODO` goldens. |
-| [silent-failures.md](silent-failures.md) | Six failures that reported success: MCP tools missing at deploy, startup checks that never ran, batch eval scoring 0 cases, a tool-use metric floored at ~0.42, GEAP returning 200 with an empty event stream from a booting worker, and GEPA optimizing against a safety score pinned at zero. |
+| [silent-failures.md](silent-failures.md) | Seven failures that reported success: MCP tools missing at deploy, startup checks that never ran, batch eval scoring 0 cases, a tool-use metric floored at ~0.42, GEAP returning 200 with an empty event stream from a booting worker, GEPA optimizing against a safety score pinned at zero, and (**open**) the autorater emitting a tool call so the case is dropped from every metric. |
 
 ## Active Plans
 
 | Plan | Status |
 |------|--------|
-| [../plans/2026-08-20-repo-modernization.md](../plans/2026-08-20-repo-modernization.md) | Phases 0–2 done. Phase 3: 3.1–3.3 done; **3.4 in progress** — the smoke test surfaced four silent failures ([silent-failures.md](silent-failures.md)), all fixed; deploy + eval-before now pass, remaining stages not yet run. |
+| [../plans/2026-08-20-repo-modernization.md](../plans/2026-08-20-repo-modernization.md) | Phases 0–2 done. Phase 3: 3.1–3.4 done — the smoke test ran end to end on 2026-08-21 and surfaced seven silent failures ([silent-failures.md](silent-failures.md)), six fixed. Baseline in [model-lifecycle.md](model-lifecycle.md); GEPA kept its seed prompt, so no prompt-change measurement yet. |
 
 ## Conventions for These Notes
 
