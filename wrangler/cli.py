@@ -97,7 +97,13 @@ def deploy(target: str, pair: str):
 @click.option("--engine-id", default=None, help="Engine ID (standalone mode only).")
 @click.option("--eval-data", default=None, help="Path to eval data file (standalone mode).")
 @click.option("--agent-name", default=None, help="Label for this agent in results.")
-@click.option("--num-runs", "-n", default=1, type=int, help="Number of eval runs to average.")
+@click.option(
+    "--num-runs",
+    "-n",
+    default=None,
+    type=int,
+    help="Number of eval runs to average (default: the experiment's config).",
+)
 @click.option(
     "--retry-failed/--no-retry-failed",
     default=True,
@@ -132,7 +138,13 @@ def eval_cmd(
             exp,
             phase=phase,
             pair_id=pair,
-            num_runs=num_runs if num_runs > 1 else None,
+            # Passed through as-is. This used to be `num_runs if num_runs > 1
+            # else None`, which — with the option defaulting to 1 — made
+            # `-n 1` indistinguishable from the flag being absent. It fell
+            # through to the experiment's own default and silently ran three
+            # times the work. `default=None` above is what lets 1 be a real,
+            # lowering choice rather than a no-op.
+            num_runs=num_runs,
             retry_failed=retry_failed,
         )
     elif engine_id:
@@ -152,7 +164,11 @@ def eval_cmd(
 
         label = agent_name or engine_id
         result = run_batch_eval_averaged(
-            engine_id, eval_cases, num_runs=num_runs, agent_name=label, retry_failed=retry_failed
+            engine_id,
+            eval_cases,
+            num_runs=num_runs or 1,
+            agent_name=label,
+            retry_failed=retry_failed,
         )
         click.echo(f"\nResults for {label}:")
         for metric, score in sorted(result.scores.items()):

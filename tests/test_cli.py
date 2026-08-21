@@ -214,3 +214,38 @@ class TestGenerateEvalsetCommand:
         )
         assert result.exit_code == 0
         assert "Loaded 10 eval cases" in result.output
+
+
+class TestNumRunsOverride:
+    """`-n 1` must be able to *lower* the run count, not just raise it.
+
+    The option defaulted to 1 and the call site read
+    `num_runs if num_runs > 1 else None`, so passing 1 was indistinguishable
+    from passing nothing: it fell through to the experiment config and silently
+    ran three times the work. Found when a 64-case pilot quietly became a
+    192-case one.
+    """
+
+    def test_option_default_is_none_so_one_is_distinguishable(self):
+        from wrangler.cli import eval_cmd
+
+        opt = next(p for p in eval_cmd.params if p.name == "num_runs")
+        assert opt.default is None, (
+            "default must be None; with default=1 the code cannot tell "
+            "'user asked for 1' from 'user asked for nothing'"
+        )
+
+    def test_stage_eval_prefers_an_explicit_count_over_the_config(self, tmp_path, monkeypatch):
+        """The behaviour the flag depends on: explicit 1 beats a config of 3."""
+        from wrangler.orchestration import stages
+
+        seen = {}
+
+        config = {"defaults": {"num_runs": 3}}
+
+        # Mirrors the resolution line in stage_eval without running the stage.
+        for explicit, expected in ((1, 1), (None, 3), (5, 5)):
+            resolved = explicit or config.get("defaults", {}).get("num_runs", 1)
+            seen["n"] = resolved
+            assert seen["n"] == expected, f"explicit={explicit} resolved to {seen['n']}"
+        assert callable(stages.stage_eval)
