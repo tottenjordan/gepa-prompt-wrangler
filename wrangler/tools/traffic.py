@@ -2,6 +2,13 @@
 
 Creates a new session with a unique user ID per query to keep traces independent.
 
+GEAP drops roughly three of every four requests on a booting worker (200 OK, zero
+events, no trace), and no client-side trick avoids it — session identity, pacing,
+and warm-up bursts were all measured and none of them moved the rate. So this tool
+spends *attempts* and *concurrency* to land traces anyway, and reports the
+per-attempt rate so the underlying defect stays visible. See the table above
+``_DEFAULT_MAX_ATTEMPTS`` and docs/notes/silent-failures.md #5.
+
 Usage:
     # Send all 30 eval cases to one agent
     uv run python -m wrangler.tools.traffic --agent-id 4981388556929859584
@@ -21,7 +28,6 @@ Usage:
 
 import argparse
 import asyncio
-import time
 import uuid
 from pathlib import Path
 
@@ -66,10 +72,28 @@ def _resolve_resource(engine_id: str) -> str:
 # second, while a warm worker handling the neighbouring request logged a real
 # rawPredict to the model. Startup here is ~8s: three MCP handshakes.
 #
-# A retry lands on a different (by then warm) worker. Setting GEAP_MIN_INSTANCES
-# on the deployment makes it rarer but cannot remove it -- scaling up under load
-# creates cold workers whatever the floor is.
-_EMPTY_STREAM_RETRIES = 2
+# **No client-side strategy avoids this.** Measured on engine
+# 5638288480409747456 on 2026-08-21, interleaved and order-rotated so an
+# intermittent fault could not frame one arm (docs/notes/silent-failures.md #5):
+#
+#   session identity  new user+session 1/12, same user 2/12, same session 1/12
+#   pacing            sequential 5/30 (17%), concurrent 10/30 (33%), p=0.23
+#   warm-up burst     2/18 (11%) -- no better, plausibly worse
+#
+# The engine logged 37 worker boots for 36 requests: a boot per request, whoever
+# is asking and however they pace it. `GEAP_MIN_INSTANCES=2` does not move it
+# either (measured: 1.3 startups per request, before and after).
+#
+# So the design here does not try to dodge the failure. It treats each attempt
+# as an independent draw at roughly 1-in-4, and spends attempts and concurrency
+# to get the traces anyway -- while reporting the per-attempt rate, so a
+# server-side defect stays visible instead of being buried by the retries.
+_DEFAULT_MAX_ATTEMPTS = 6
+_DEFAULT_CONCURRENCY = 4
+
+# Below this, the retries are papering over something that needs looking at
+# rather than absorbing ordinary flakiness.
+_ATTEMPT_RATE_FLOOR = 0.5
 
 
 def _event_text(event) -> str:
@@ -92,7 +116,7 @@ async def _stream(agent, user_id: str, session_id: str, query: str) -> tuple[str
     Uses ``async_stream_query`` because ADK's class-methods list marks the sync
     ``stream_query`` "Deprecated. Use async_stream_query instead." The two
     behave identically against GEAP — measured, alternating, on one engine — so
-    this is future-proofing, not a workaround. See ``_EMPTY_STREAM_RETRIES``
+    this is future-proofing, not a workaround. See ``_DEFAULT_MAX_ATTEMPTS``
     for the failure the caller does have to handle.
     """
     events = [
@@ -106,21 +130,91 @@ async def _stream(agent, user_id: str, session_id: str, query: str) -> tuple[str
     return "".join(_event_text(e) for e in events), len(events)
 
 
+def summarize_run(traces: int, queries: int, attempts: int) -> list[str]:
+    """Render the closing report, including the per-attempt success rate.
+
+    Split out from the run loop so the arithmetic is testable without a
+    deployed engine. The attempt rate is the number that matters: retries can
+    carry the trace count to something respectable while every individual
+    request is still being eaten, and reporting only "12/12 queries produced
+    traces" would hide exactly the defect this tool exists to observe.
+    """
+    rate = traces / attempts if attempts else 0.0
+    lines = [
+        f"  Queries:        {queries}",
+        f"  Traces emitted: {traces}",
+        f"  Attempts spent: {attempts}",
+        f"  Attempt rate:   {rate:.0%} ({traces}/{attempts} reached the agent)",
+    ]
+    if queries and traces < queries:
+        lines.append(f"  ** {queries - traces} queries produced NO trace after all attempts")
+    if attempts and rate < _ATTEMPT_RATE_FLOOR:
+        lines.append(
+            f"  ** Attempt rate below {_ATTEMPT_RATE_FLOOR:.0%} — the engine is dropping most"
+        )
+        lines.append("     requests on booting workers. See docs/notes/silent-failures.md #5.")
+    return lines
+
+
+async def _one_query(
+    agent,
+    query: str,
+    max_attempts: int,
+    sem: asyncio.Semaphore,
+) -> tuple[int, int, str]:
+    """Resolve one query to a trace. Returns (events, attempts_spent, text).
+
+    Each attempt gets a fresh user and session. That is not a workaround for
+    anything — session identity was measured to make no difference (see the
+    table at the top) — it is just the cheapest way to keep traces independent,
+    which is what this tool is for.
+    """
+    attempts = 0
+    last_error = ""
+    for _ in range(max_attempts):
+        attempts += 1
+        user_id = f"traffic-{uuid.uuid4().hex[:8]}"
+        async with sem:
+            try:
+                # AgentEngine proxies the ADK class_methods list at runtime, so
+                # `create_session` does not exist statically on the object.
+                session = await asyncio.to_thread(agent.create_session, user_id=user_id)
+                session_id = session["id"] if isinstance(session, dict) else session.id
+                text, events = await _stream(agent, user_id, session_id, query)
+            except Exception as exc:
+                # Keep spending attempts rather than abandoning the query. The
+                # previous version returned on the first exception, so one
+                # transient network blip cost a trace that a retry would have
+                # landed — and the failure mode here is *already* transient.
+                last_error, events, text = f"error: {exc}", 0, ""
+        if events:
+            return events, attempts, text
+    return 0, attempts, last_error
+
+
 def generate_traffic(
     agent_ids: list[str],
     queries: list[tuple[str, str]] | None = None,
     count: int | None = None,
     interval: float = 1.0,
     eval_data_path: str | None = None,
+    concurrency: int = _DEFAULT_CONCURRENCY,
+    max_attempts: int = _DEFAULT_MAX_ATTEMPTS,
 ):
-    """Send queries to deployed agents with unique sessions per query.
+    """Send queries to deployed agents, spending attempts to land traces.
 
     Args:
         agent_ids: List of Agent Engine IDs to send traffic to.
         queries: List of (query, complexity) tuples. Uses defaults if None.
         count: Max number of queries to send per agent. Sends all if None.
-        interval: Seconds between queries.
+        interval: Seconds between submissions. 0 submits everything at once.
         eval_data_path: Path to eval YAML to use as query source.
+        concurrency: Requests in flight at once. Concurrency does not improve
+            the per-attempt success rate (measured, p=0.23) but it does divide
+            the wall clock, and the rate is not made worse by it.
+        max_attempts: Attempts per query before giving up. At the observed
+            ~1-in-4 per attempt, 6 attempts lands a trace ~82% of the time;
+            the old value of 3 managed ~58%.
     """
     vertexai.init(project=GCP_PROJECT_ID, location=GCP_REGION)
     disable_pyopenssl()
@@ -140,8 +234,6 @@ def generate_traffic(
             queries = queries[:count]
 
     total = len(queries)
-    errors = 0
-    query_num = 0
 
     # Pre-load agent connections
     agents = {}
@@ -152,58 +244,50 @@ def generate_traffic(
     print(f"{'=' * 60}")
     print("TRAFFIC GENERATOR")
     print(f"{'=' * 60}")
-    print(f"  Agents:    {len(agent_ids)} (round-robin)")
-    print(f"  Queries:   {total} total")
-    print(f"  Interval:  {interval}s between queries")
-    print("  Sessions:  new session + unique user per query")
+    print(f"  Agents:      {len(agent_ids)} (round-robin)")
+    print(f"  Queries:     {total} total")
+    print(f"  Concurrency: {concurrency} in flight")
+    print(f"  Attempts:    up to {max_attempts} per query")
+    print(f"  Interval:    {interval}s between submissions")
     print()
 
-    for i, (query, complexity) in enumerate(queries):
-        query_num += 1
-        agent_id = agent_ids[i % len(agent_ids)]
-        agent = agents[agent_id]
-        agent_short = agent_id[-8:]
-        user_id = f"traffic-{uuid.uuid4().hex[:8]}"
+    async def _run_all():
+        sem = asyncio.Semaphore(concurrency)
+        tasks = []
 
-        print(f"  [{query_num}/{total}] → {agent_short} ({complexity}) {query[:55]}")
-
-        try:
-            for attempt in range(_EMPTY_STREAM_RETRIES + 1):
-                # AgentEngine proxies the ADK class_methods list at runtime, so
-                # these attributes do not exist statically. Each attempt gets a
-                # fresh session: the empty-stream worker may have consumed the
-                # old one.
-                session = agent.create_session(  # ty: ignore[unresolved-attribute]
-                    user_id=user_id
-                )
-                session_id = session["id"] if isinstance(session, dict) else session.id
-
-                full_response, event_count = asyncio.run(_stream(agent, user_id, session_id, query))
-                if event_count:
-                    break
-                if attempt < _EMPTY_STREAM_RETRIES:
-                    print("    ~ Empty stream (cold worker?) — retrying")
-
-            # Zero events is a failure, not a quiet success. The point of this
-            # tool is to emit traces; an empty stream emits none.
-            if event_count == 0:
-                errors += 1
-                print(f"    x No events after {_EMPTY_STREAM_RETRIES + 1} attempts")
+        async def _submit(i, query, complexity):
+            # Stagger submissions so `interval` still means what it did, while
+            # the semaphore -- not the sleep -- is what bounds load.
+            if interval > 0:
+                await asyncio.sleep(i * interval)
+            events, attempts, text = await _one_query(
+                agents[agent_ids[i % len(agent_ids)]], query, max_attempts, sem
+            )
+            short = agent_ids[i % len(agent_ids)][-8:]
+            head = f"  [{i + 1}/{total}] → {short} ({complexity}) {query[:45]}"
+            if events:
+                print(f"{head}\n    -> [{events} events, {attempts} attempt(s)] {text[:70]}")
             else:
-                print(f"    -> [{event_count} events] {full_response[:80]}...")
-        except Exception as e:
-            errors += 1
-            print(f"    x Error: {e}")
+                print(f"{head}\n    x  no trace after {attempts} attempts {text[:60]}")
+            return events, attempts
 
-        if interval > 0 and i < len(queries) - 1:
-            time.sleep(interval)
+        for i, (query, complexity) in enumerate(queries):
+            tasks.append(asyncio.create_task(_submit(i, query, complexity)))
+        return await asyncio.gather(*tasks)
+
+    # One event loop for the whole run rather than one per query: the old shape
+    # tore down and rebuilt the HTTP client for every single request.
+    outcomes = asyncio.run(_run_all())
+
+    traces = sum(1 for events, _ in outcomes if events)
+    attempts = sum(a for _, a in outcomes)
 
     print(f"\n{'=' * 60}")
     print("TRAFFIC COMPLETE")
     print(f"{'=' * 60}")
-    print(f"  Total queries: {query_num}")
-    print(f"  Errors:        {errors}")
-    print(f"  Agents:        {len(agent_ids)} (round-robin)")
+    for line in summarize_run(traces, total, attempts):
+        print(line)
+    print(f"  Agents:         {len(agent_ids)} (round-robin)")
 
 
 if __name__ == "__main__":
@@ -245,6 +329,21 @@ if __name__ == "__main__":
         default=None,
         help="Path to eval YAML to use as query source",
     )
+    parser.add_argument(
+        "--concurrency",
+        type=int,
+        default=_DEFAULT_CONCURRENCY,
+        help=f"Requests in flight at once (default: {_DEFAULT_CONCURRENCY})",
+    )
+    parser.add_argument(
+        "--max-attempts",
+        type=int,
+        default=_DEFAULT_MAX_ATTEMPTS,
+        help=(
+            "Attempts per query before giving up "
+            f"(default: {_DEFAULT_MAX_ATTEMPTS}; the engine eats ~3 of 4 requests)"
+        ),
+    )
     args = parser.parse_args()
 
     generate_traffic(
@@ -252,4 +351,6 @@ if __name__ == "__main__":
         count=args.count,
         interval=args.interval,
         eval_data_path=args.eval_data,
+        concurrency=args.concurrency,
+        max_attempts=args.max_attempts,
     )
