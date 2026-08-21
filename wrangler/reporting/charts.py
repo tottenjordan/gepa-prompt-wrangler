@@ -19,6 +19,56 @@ from .analysis import (
     generate_radar_chart,
 )
 
+# Measured 2026-08-21 on this repo. Every setting below is a fix for something
+# that made PaperBanana silently fall back to matplotlib on every chart:
+#
+# 1. `uvx --from paperbanana` rather than `uv run paperbanana`. Run out of THIS
+#    repo's venv, the planner fails and tenacity retries it three times with
+#    exponential backoff -- 6m32s to a `ClientError`, reproducibly, from any
+#    working directory. The identical CLI and version (0.3.0) in an isolated
+#    uvx environment completes in ~63s. The API itself is fine: the same key
+#    and models answer a direct generateContent in 2-7s. Something in the
+#    repo's dependency set breaks paperbanana's planner call, so give it its
+#    own environment rather than sharing ours.
+#
+# 2. IMAGE_MODEL / VLM_MODEL set explicitly. paperbanana's own defaults are
+#    `gemini-3-pro-image-preview` and `gemini-2.5-flash` (its core/config.py).
+#    The MCP server sets the good models in its env block; this subprocess
+#    inherited nothing, so the repo had been running the slow pro/preview
+#    image model on every chart.
+#
+# 3. `-n 1`, not `-n 3`. `-n` is `--iterations`: *refinement* passes, each a
+#    visualizer->critic round trip. Three of them tripled the runtime for a
+#    chart the first pass already renders correctly.
+#
+# 4. cwd is the temp dir. paperbanana's Settings declare `env_file=".env"`, so
+#    running from the repo root feeds it our .env; and its run directories are
+#    written to cwd, which is how `outputs/run_*` accumulated here. Scoping the
+#    glob to a per-call temp dir also removes a real trap: the old code globbed
+#    the repo's shared `outputs/`, so a run that produced nothing would copy the
+#    newest *previous* chart and report success.
+#
+# 5. The subprocess env is built from scratch rather than inherited. THIS is the
+#    one that actually broke it. Importing `core.config` calls load_dotenv(), so
+#    the whole Vertex/GEAP configuration lands in os.environ and was copied
+#    straight in. `GOOGLE_GENAI_USE_VERTEXAI=1` alone is fatal -- measured
+#    directly, same key and model:
+#
+#      USE_VERTEXAI=1 -> ClientError: 401 UNAUTHENTICATED.
+#                        API keys are not supported by this API.
+#      unset          -> OK
+#
+#    which is precisely the ClientError the planner retried three times. Popping
+#    just that one was still not enough, so we pass only what the working MCP
+#    server passes. CLAUDE.md carries the mirror-image rule for the pipeline (pop
+#    GOOGLE_API_KEY so it cannot override Vertex ADC): the two credential styles
+#    are mutually exclusive, and this process needs the other one.
+_PB_TIMEOUT = 300
+_PB_ENV = {
+    "IMAGE_MODEL": "gemini-3.1-flash-image",
+    "VLM_MODEL": "gemini-3.5-flash",
+}
+
 
 def _try_paperbanana(
     data: dict,
@@ -26,73 +76,83 @@ def _try_paperbanana(
     output_path: Path,
     fallback_fn,
     fallback_kwargs: dict,
-    timeout: int = 180,
+    timeout: int = _PB_TIMEOUT,
     max_attempts: int = 2,
 ) -> bool:
     """Try PaperBanana CLI for chart generation, fall back to matplotlib on failure.
 
     Returns True if PaperBanana succeeded, False if fallback was used.
     """
-    env = os.environ.copy()
-    if not env.get("GOOGLE_API_KEY"):
+    api_key = os.environ.get("GOOGLE_API_KEY")
+    if not api_key:
         print("  PaperBanana skipped (no GOOGLE_API_KEY), using matplotlib")
         fallback_fn(**fallback_kwargs)
         return False
 
+    # Built from scratch, NOT os.environ.copy(). Handing paperbanana this
+    # repo's full environment is what broke it; the MCP server, which works,
+    # passes exactly three variables. PATH and HOME are needed for uvx and its
+    # cache. Everything else in our environment is Vertex/GEAP configuration
+    # that this process must not see.
+    env = {
+        "PATH": os.environ.get("PATH", ""),
+        "HOME": os.environ.get("HOME", ""),
+        "GOOGLE_API_KEY": api_key,
+        **_PB_ENV,
+    }
+
     last_error = None
     for attempt in range(max_attempts):
-        data_path = None
-        try:
-            with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as tmp:
-                json.dump(data, tmp)
-                data_path = tmp.name
+        # A fresh working directory per attempt: paperbanana writes its run dirs
+        # into cwd, and scoping the search to this directory means we can only
+        # ever pick up output *this* call produced.
+        with tempfile.TemporaryDirectory(prefix="paperbanana_") as workdir:
+            try:
+                data_path = Path(workdir) / "data.json"
+                data_path.write_text(json.dumps(data))
 
-            result = subprocess.run(
-                [
-                    "uv",
-                    "run",
-                    "paperbanana",
-                    "plot",
-                    "--data",
-                    data_path,
-                    "--intent",
-                    intent,
-                    "-n",
-                    "3",
-                ],
-                capture_output=True,
-                text=True,
-                timeout=timeout,
-                env=env,
-                check=False,
-            )
+                result = subprocess.run(
+                    [
+                        "uvx",
+                        "--from",
+                        "paperbanana",
+                        "paperbanana",
+                        "plot",
+                        "--data",
+                        str(data_path),
+                        "--intent",
+                        intent,
+                        "-n",
+                        "1",
+                    ],
+                    capture_output=True,
+                    text=True,
+                    timeout=timeout,
+                    env=env,
+                    cwd=workdir,
+                    check=False,
+                )
 
-            # Both raises below deliberately funnel into this function's own
-            # `except` so the attempt loop can retry them uniformly.
-            if result.returncode != 0:
-                msg = result.stderr[-300:] if result.stderr else "unknown error"
-                raise RuntimeError(msg)  # noqa: TRY301
+                # Both raises below deliberately funnel into this function's own
+                # `except` so the attempt loop can retry them uniformly.
+                if result.returncode != 0:
+                    msg = result.stderr[-300:] if result.stderr else "unknown error"
+                    raise RuntimeError(msg)  # noqa: TRY301
 
-            run_dirs = sorted(glob.glob("outputs/run_*"), reverse=True)
-            for run_dir in run_dirs:
-                final = Path(run_dir) / "final_output.png"
-                if final.exists():
+                produced = sorted(glob.glob(f"{workdir}/**/final_output.png", recursive=True))
+                if produced:
                     output_path.parent.mkdir(parents=True, exist_ok=True)
-                    shutil.copy2(str(final), str(output_path))
+                    shutil.copy2(produced[-1], str(output_path))
                     print(f"  Generated (PaperBanana): {output_path.name}")
                     return True
 
-            msg = "PaperBanana output not found in run directories"
-            raise FileNotFoundError(msg)  # noqa: TRY301
+                msg = "PaperBanana output not found in run directories"
+                raise FileNotFoundError(msg)  # noqa: TRY301
 
-        except Exception as e:
-            last_error = e
-            if attempt < max_attempts - 1:
-                print(f"  PaperBanana attempt {attempt + 1} failed, retrying...")
-
-        finally:
-            if data_path and os.path.exists(data_path):
-                os.unlink(data_path)
+            except Exception as e:
+                last_error = e
+                if attempt < max_attempts - 1:
+                    print(f"  PaperBanana attempt {attempt + 1} failed, retrying...")
 
     print(
         f"  PaperBanana failed after {max_attempts} attempts ({type(last_error).__name__}), using matplotlib"

@@ -107,14 +107,14 @@ Pooled standard error: `se = sqrt(std_before² + std_after²) / sqrt(n)`. Signif
 |------|----------|----------|-------------|-------------|
 | #3: Check if a $100 meal and a $250 entertainment expe... | policy | +0.093 | Instruction Following | Safety |
 | #0: Find flights from SFO to JFK... | search | +0.021 | Hallucination | Safety |
-| #1: Submit a $45 meals expense for lunch meeting, user... | expense | -0.025 | Hallucination | Instruction Following |
+| #1: Submit a $45 meals expense for lunch meeting, user... | expense | -0.025 | Safety | Instruction Following |
 
 **Top Regressed:**
 
 | Case | Category | Avg Delta | Best Metric | Worst Metric |
 |------|----------|----------|-------------|-------------|
-| #2: Book flight FL001 for Alice, check if Grand Hyatt ... | planning | -0.033 | Hallucination | Response Quality |
-| #1: Submit a $45 meals expense for lunch meeting, user... | expense | -0.025 | Hallucination | Instruction Following |
+| #2: Book flight FL001 for Alice, check if Grand Hyatt ... | planning | -0.033 | Instruction Following | Response Quality |
+| #1: Submit a $45 meals expense for lunch meeting, user... | expense | -0.025 | Safety | Instruction Following |
 
 ## Per-Model Analysis
 
