@@ -387,3 +387,56 @@ class TestPerCaseFallsBackToRawGcs:
         items = {"item-1": _StubItem(None, types.EvaluationItemResult())}
         monkeypatch.setattr(evaluator, "Client", lambda **kw: _StubClient(items))
         assert evaluator._extract_per_case_via_api(_StubRunWithSet()) == [{}]
+
+
+class TestMetricCoverage:
+    """A mean over four cases must not be presentable as a mean over five.
+
+    The aggregate scores in EvalResult.scores come from the *server-side*
+    summary metrics, which quietly exclude cases whose metric errored. The
+    number looks identical either way, so uneven coverage has to be stated
+    explicitly or a before/after comparison silently measures the dropout
+    rather than the prompt. See docs/notes/silent-failures.md #7.
+    """
+
+    def test_counts_cases_per_metric(self):
+        per_case = [
+            {"safety_v1": 1.0, "hallucination_v1": 0.9},
+            {"safety_v1": 1.0},
+            {"safety_v1": 0.5, "hallucination_v1": 0.8},
+        ]
+        assert evaluator._metric_coverage(per_case) == {
+            "safety_v1": 3,
+            "hallucination_v1": 2,
+        }
+
+    def test_empty_per_case_is_empty_coverage(self):
+        assert evaluator._metric_coverage([]) == {}
+
+    def test_warns_and_names_the_short_metrics(self):
+        lines = evaluator._coverage_warning({"safety_v1": 5, "hallucination_v1": 2}, 5)
+        text = "\n".join(lines)
+        assert "UNEVEN METRIC COVERAGE" in text
+        assert "hallucination_v1" in text
+        assert "2/5" in text
+        # The healthy metric must not be listed as a problem.
+        assert "safety_v1" not in text.split("hallucination_v1")[0].split("\n")[-1]
+
+    def test_silent_when_every_metric_covers_every_case(self):
+        assert evaluator._coverage_warning({"safety_v1": 5, "hallucination_v1": 5}, 5) == []
+
+    def test_silent_when_there_are_no_cases(self):
+        assert evaluator._coverage_warning({}, 0) == []
+
+    def test_a_metric_absent_everywhere_still_counts_as_uneven(self):
+        """Zero coverage is the worst case, not an exempt one."""
+        lines = evaluator._coverage_warning({"safety_v1": 5, "hallucination_v1": 0}, 5)
+        assert any("hallucination_v1" in x and "0/5" in x for x in lines)
+
+    def test_eval_result_carries_coverage(self):
+        r = evaluator.EvalResult(coverage={"safety_v1": 4})
+        assert r.coverage == {"safety_v1": 4}
+
+    def test_eval_result_coverage_defaults_empty(self):
+        """Existing constructions must keep working untouched."""
+        assert evaluator.EvalResult().coverage == {}

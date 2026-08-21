@@ -155,6 +155,9 @@ class EvalResult:
     scores_std: dict[str, float] = field(default_factory=dict)
     num_runs: int = 1
     token_usage: dict[str, int | bool] = field(default_factory=dict)
+    # How many cases each metric actually scored. Defaults empty so existing
+    # constructions are unaffected. See _coverage_warning for why it matters.
+    coverage: dict[str, int] = field(default_factory=dict)
 
 
 def _build_eval_dataset(cases: list[dict]) -> pd.DataFrame:
@@ -308,6 +311,43 @@ def _scores_from_raw_result(raw: dict) -> tuple[dict[str, float], list[str]]:
         if short and score is not None:
             scores[_alias_tool_use_key(short)] = float(score)
     return scores, errored
+
+
+def _metric_coverage(per_case: list[dict[str, float]]) -> dict[str, int]:
+    """Count how many cases produced a score for each metric."""
+    coverage: dict[str, int] = {}
+    for case_scores in per_case:
+        for metric in case_scores:
+            coverage[metric] = coverage.get(metric, 0) + 1
+    return coverage
+
+
+def _coverage_warning(coverage: dict[str, int], num_cases: int) -> list[str]:
+    """Report metrics that scored fewer cases than the run contained.
+
+    The aggregate numbers in ``EvalResult.scores`` come from the *server-side*
+    summary metrics, which quietly exclude cases whose metric errored. A mean
+    over four cases is formatted exactly like a mean over five, so without this
+    an autorater flake is indistinguishable from a real quality change — and a
+    before/after comparison measures the dropout rather than the prompt.
+
+    Pure and list-returning so the wording is testable without an eval run,
+    matching ``wrangler/tools/traffic.py:summarize_run``.
+    """
+    if not num_cases:
+        return []
+    short = {m: n for m, n in coverage.items() if n < num_cases}
+    if not short:
+        return []
+    lines = [
+        "  ** UNEVEN METRIC COVERAGE — means are over different denominators",
+    ]
+    lines += [f"     {metric:<28} {n}/{num_cases} cases" for metric, n in sorted(short.items())]
+    lines.append(
+        "     Autorater errors dropped cases; see docs/notes/silent-failures.md #7. "
+        "Do not compare these means against a run with different coverage."
+    )
+    return lines
 
 
 def _read_raw_result(client, gcs_uri: str) -> dict:
@@ -680,12 +720,16 @@ def run_batch_eval(
             )
     token_usage = _estimate_token_usage(inference_result.eval_dataset_df)
 
+    coverage = _metric_coverage(per_case)
+
     print(
         f"  {tag}Eval complete — total: {_fmt_elapsed(t0)}, {len(scores)} metrics, {len(per_case)} cases, "
         f"~{token_usage['input_tokens']:,} in / ~{token_usage['output_tokens']:,} out tokens (est.)",
         flush=True,
     )
-    return EvalResult(scores=scores, per_case=per_case, token_usage=token_usage)
+    for line in _coverage_warning(coverage, len(per_case)):
+        print(line, flush=True)
+    return EvalResult(scores=scores, per_case=per_case, token_usage=token_usage, coverage=coverage)
 
 
 def run_batch_eval_averaged(
@@ -772,6 +816,11 @@ def run_batch_eval_averaged(
         f"  {tag}Averaged {successful}/{num_runs} runs — overall: {overall:.3f}{skip_note}",
         flush=True,
     )
+    # Averaging N runs does not repair a metric that errored in all of them —
+    # it just hides the gap behind one more layer of arithmetic.
+    avg_coverage = _metric_coverage(avg_per_case)
+    for line in _coverage_warning(avg_coverage, len(avg_per_case)):
+        print(line, flush=True)
 
     return EvalResult(
         scores=avg_scores,
@@ -779,6 +828,7 @@ def run_batch_eval_averaged(
         scores_std=std_scores,
         num_runs=num_runs,
         token_usage=agg_tokens,
+        coverage=avg_coverage,
     )
 
 
