@@ -24,7 +24,7 @@
           "intermediate_data": {
             "tool_uses": [
               {
-                "name": "wrangler_search_mcp_search_flights",
+                "name": "search_flights",
                 "args": {
                   "origin": "SFO",
                   "destination": "JFK"
@@ -64,7 +64,7 @@
           "intermediate_data": {
             "tool_uses": [
               {
-                "name": "wrangler_search_mcp_search_flights",
+                "name": "search_flights",
                 "args": {
                   "origin": "LAX",
                   "destination": "ORD"
@@ -104,7 +104,7 @@
           "intermediate_data": {
             "tool_uses": [
               {
-                "name": "wrangler_search_mcp_search_flights",
+                "name": "search_flights",
                 "args": {
                   "origin": "SFO",
                   "destination": "LAX"
@@ -144,7 +144,7 @@
           "intermediate_data": {
             "tool_uses": [
               {
-                "name": "wrangler_search_mcp_search_hotels",
+                "name": "search_hotels",
                 "args": {
                   "city": "New York"
                 }
@@ -183,7 +183,7 @@
           "intermediate_data": {
             "tool_uses": [
               {
-                "name": "wrangler_search_mcp_search_hotels",
+                "name": "search_hotels",
                 "args": {
                   "city": "New York",
                   "max_price": 200
@@ -223,7 +223,7 @@
           "intermediate_data": {
             "tool_uses": [
               {
-                "name": "wrangler_search_mcp_search_hotels",
+                "name": "search_hotels",
                 "args": {
                   "city": "Miami"
                 }
@@ -262,7 +262,7 @@
           "intermediate_data": {
             "tool_uses": [
               {
-                "name": "wrangler_expense_mcp_check_expense_policy",
+                "name": "check_expense_policy",
                 "args": {
                   "category": "meals",
                   "amount": 75
@@ -302,7 +302,7 @@
           "intermediate_data": {
             "tool_uses": [
               {
-                "name": "wrangler_expense_mcp_check_expense_policy",
+                "name": "check_expense_policy",
                 "args": {
                   "category": "transport",
                   "amount": 50
@@ -342,7 +342,7 @@
           "intermediate_data": {
             "tool_uses": [
               {
-                "name": "wrangler_expense_mcp_check_expense_policy",
+                "name": "check_expense_policy",
                 "args": {
                   "category": "lodging",
                   "amount": 400
@@ -382,7 +382,7 @@
           "intermediate_data": {
             "tool_uses": [
               {
-                "name": "wrangler_booking_mcp_book_flight",
+                "name": "book_flight",
                 "args": {
                   "flight_id": "FL001",
                   "passenger_name": "Alice Johnson"
@@ -422,7 +422,7 @@
           "intermediate_data": {
             "tool_uses": [
               {
-                "name": "wrangler_expense_mcp_get_user_expenses",
+                "name": "get_user_expenses",
                 "args": {
                   "user_id": "EMP001"
                 }
@@ -461,7 +461,7 @@
           "intermediate_data": {
             "tool_uses": [
               {
-                "name": "wrangler_search_mcp_search_flights",
+                "name": "search_flights",
                 "args": {
                   "origin": "SFO",
                   "destination": "JFK"
@@ -501,7 +501,7 @@
           "intermediate_data": {
             "tool_uses": [
               {
-                "name": "wrangler_search_mcp_search_hotels",
+                "name": "search_hotels",
                 "args": {
                   "city": "Atlantis"
                 }
@@ -540,7 +540,7 @@
           "intermediate_data": {
             "tool_uses": [
               {
-                "name": "wrangler_expense_mcp_check_expense_policy",
+                "name": "check_expense_policy",
                 "args": {
                   "category": "unknown",
                   "amount": 500
@@ -580,14 +580,14 @@
           "intermediate_data": {
             "tool_uses": [
               {
-                "name": "wrangler_expense_mcp_check_expense_policy",
+                "name": "check_expense_policy",
                 "args": {
                   "category": "meals",
                   "amount": 45
                 }
               },
               {
-                "name": "wrangler_expense_mcp_submit_expense",
+                "name": "submit_expense",
                 "args": {
                   "user_id": "EMP001",
                   "category": "meals",
@@ -629,7 +629,7 @@
           "intermediate_data": {
             "tool_uses": [
               {
-                "name": "wrangler_expense_mcp_check_expense_policy",
+                "name": "check_expense_policy",
                 "args": {
                   "category": "entertainment",
                   "amount": 500
@@ -669,7 +669,7 @@
           "intermediate_data": {
             "tool_uses": [
               {
-                "name": "wrangler_search_mcp_search_flights",
+                "name": "search_flights",
                 "args": {
                   "origin": "SFO",
                   "destination": "JFK"
@@ -709,13 +709,13 @@
           "intermediate_data": {
             "tool_uses": [
               {
-                "name": "wrangler_search_mcp_search_hotels",
+                "name": "search_hotels",
                 "args": {
                   "city": "New York"
                 }
               },
               {
-                "name": "wrangler_expense_mcp_check_expense_policy",
+                "name": "check_expense_policy",
                 "args": {
                   "category": "lodging",
                   "amount": 400
@@ -755,14 +755,14 @@
           "intermediate_data": {
             "tool_uses": [
               {
-                "name": "wrangler_expense_mcp_check_expense_policy",
+                "name": "check_expense_policy",
                 "args": {
                   "category": "meals",
                   "amount": 100
                 }
               },
               {
-                "name": "wrangler_expense_mcp_check_expense_policy",
+                "name": "check_expense_policy",
                 "args": {
                   "category": "entertainment",
                   "amount": 250
@@ -802,7 +802,7 @@
           "intermediate_data": {
             "tool_uses": [
               {
-                "name": "wrangler_expense_mcp_get_user_expenses",
+                "name": "get_user_expenses",
                 "args": {
                   "user_id": "EMP001"
                 }
@@ -841,7 +841,7 @@
           "intermediate_data": {
             "tool_uses": [
               {
-                "name": "wrangler_search_mcp_search_flights",
+                "name": "search_flights",
                 "args": {
                   "origin": "SFO",
                   "destination": "JFK"
@@ -881,7 +881,7 @@
           "intermediate_data": {
             "tool_uses": [
               {
-                "name": "wrangler_booking_mcp_book_hotel",
+                "name": "book_hotel",
                 "args": {
                   "hotel_id": "HT002",
                   "guest_name": "Bob Smith",
@@ -890,7 +890,7 @@
                 }
               },
               {
-                "name": "wrangler_expense_mcp_check_expense_policy",
+                "name": "check_expense_policy",
                 "args": {
                   "category": "lodging",
                   "amount": 250
@@ -930,14 +930,14 @@
           "intermediate_data": {
             "tool_uses": [
               {
-                "name": "wrangler_expense_mcp_check_expense_policy",
+                "name": "check_expense_policy",
                 "args": {
                   "category": "supplies",
                   "amount": 90
                 }
               },
               {
-                "name": "wrangler_expense_mcp_submit_expense",
+                "name": "submit_expense",
                 "args": {
                   "user_id": "EMP003",
                   "category": "supplies",
@@ -979,28 +979,28 @@
           "intermediate_data": {
             "tool_uses": [
               {
-                "name": "wrangler_booking_mcp_book_flight",
+                "name": "book_flight",
                 "args": {
                   "flight_id": "FL001",
                   "passenger_name": "Alice"
                 }
               },
               {
-                "name": "wrangler_expense_mcp_check_expense_policy",
+                "name": "check_expense_policy",
                 "args": {
                   "category": "lodging",
                   "amount": 320
                 }
               },
               {
-                "name": "wrangler_expense_mcp_check_expense_policy",
+                "name": "check_expense_policy",
                 "args": {
                   "category": "meals",
                   "amount": 75
                 }
               },
               {
-                "name": "wrangler_expense_mcp_submit_expense",
+                "name": "submit_expense",
                 "args": {
                   "user_id": "EMP001",
                   "category": "meals",
@@ -1042,27 +1042,27 @@
           "intermediate_data": {
             "tool_uses": [
               {
-                "name": "wrangler_search_mcp_search_flights",
+                "name": "search_flights",
                 "args": {
                   "origin": "SFO",
                   "destination": "JFK"
                 }
               },
               {
-                "name": "wrangler_search_mcp_search_flights",
+                "name": "search_flights",
                 "args": {
                   "origin": "LAX",
                   "destination": "ORD"
                 }
               },
               {
-                "name": "wrangler_search_mcp_search_hotels",
+                "name": "search_hotels",
                 "args": {
                   "city": "New York"
                 }
               },
               {
-                "name": "wrangler_search_mcp_search_hotels",
+                "name": "search_hotels",
                 "args": {
                   "city": "Chicago"
                 }
@@ -1101,27 +1101,27 @@
           "intermediate_data": {
             "tool_uses": [
               {
-                "name": "wrangler_search_mcp_search_flights",
+                "name": "search_flights",
                 "args": {
                   "origin": "JFK",
                   "destination": "LHR"
                 }
               },
               {
-                "name": "wrangler_search_mcp_search_hotels",
+                "name": "search_hotels",
                 "args": {
                   "city": "London"
                 }
               },
               {
-                "name": "wrangler_expense_mcp_check_expense_policy",
+                "name": "check_expense_policy",
                 "args": {
                   "category": "lodging",
                   "amount": 680
                 }
               },
               {
-                "name": "wrangler_expense_mcp_check_expense_policy",
+                "name": "check_expense_policy",
                 "args": {
                   "category": "meals",
                   "amount": 75
@@ -1161,20 +1161,20 @@
           "intermediate_data": {
             "tool_uses": [
               {
-                "name": "wrangler_expense_mcp_get_user_expenses",
+                "name": "get_user_expenses",
                 "args": {
                   "user_id": "EMP002"
                 }
               },
               {
-                "name": "wrangler_expense_mcp_check_expense_policy",
+                "name": "check_expense_policy",
                 "args": {
                   "category": "supplies",
                   "amount": 80
                 }
               },
               {
-                "name": "wrangler_expense_mcp_submit_expense",
+                "name": "submit_expense",
                 "args": {
                   "user_id": "EMP002",
                   "category": "supplies",
@@ -1216,27 +1216,27 @@
           "intermediate_data": {
             "tool_uses": [
               {
-                "name": "wrangler_search_mcp_search_flights",
+                "name": "search_flights",
                 "args": {
                   "origin": "SFO",
                   "destination": "JFK"
                 }
               },
               {
-                "name": "wrangler_booking_mcp_book_flight",
+                "name": "book_flight",
                 "args": {
                   "flight_id": "FL001",
                   "passenger_name": "Bob Smith"
                 }
               },
               {
-                "name": "wrangler_search_mcp_search_hotels",
+                "name": "search_hotels",
                 "args": {
                   "city": "New York"
                 }
               },
               {
-                "name": "wrangler_expense_mcp_check_expense_policy",
+                "name": "check_expense_policy",
                 "args": {
                   "category": "lodging",
                   "amount": 320
@@ -1276,13 +1276,13 @@
           "intermediate_data": {
             "tool_uses": [
               {
-                "name": "wrangler_expense_mcp_get_user_expenses",
+                "name": "get_user_expenses",
                 "args": {
                   "user_id": "EMP001"
                 }
               },
               {
-                "name": "wrangler_expense_mcp_get_user_expenses",
+                "name": "get_user_expenses",
                 "args": {
                   "user_id": "EMP002"
                 }
@@ -1321,7 +1321,7 @@
           "intermediate_data": {
             "tool_uses": [
               {
-                "name": "wrangler_search_mcp_search_flights",
+                "name": "search_flights",
                 "args": {
                   "origin": "SFO",
                   "destination": "DEN"
@@ -1361,7 +1361,7 @@
           "intermediate_data": {
             "tool_uses": [
               {
-                "name": "wrangler_search_mcp_search_hotels",
+                "name": "search_hotels",
                 "args": {
                   "city": "Boston"
                 }
@@ -1400,14 +1400,14 @@
           "intermediate_data": {
             "tool_uses": [
               {
-                "name": "wrangler_booking_mcp_book_flight",
+                "name": "book_flight",
                 "args": {
                   "flight_id": "FL003",
                   "passenger_name": "Carol Davis"
                 }
               },
               {
-                "name": "wrangler_booking_mcp_cancel_booking",
+                "name": "cancel_booking",
                 "args": {
                   "booking_id": "<runtime>"
                 }
@@ -1446,7 +1446,7 @@
           "intermediate_data": {
             "tool_uses": [
               {
-                "name": "wrangler_booking_mcp_book_hotel",
+                "name": "book_hotel",
                 "args": {
                   "hotel_id": "HT001",
                   "guest_name": "Dave Wilson",
@@ -1455,7 +1455,7 @@
                 }
               },
               {
-                "name": "wrangler_booking_mcp_get_booking_details",
+                "name": "get_booking_details",
                 "args": {
                   "booking_id": "<runtime>"
                 }
@@ -1494,7 +1494,7 @@
           "intermediate_data": {
             "tool_uses": [
               {
-                "name": "wrangler_expense_mcp_check_expense_policy",
+                "name": "check_expense_policy",
                 "args": {
                   "category": "meals",
                   "amount": 75
@@ -1534,7 +1534,7 @@
           "intermediate_data": {
             "tool_uses": [
               {
-                "name": "wrangler_expense_mcp_check_expense_policy",
+                "name": "check_expense_policy",
                 "args": {
                   "category": "meals",
                   "amount": 75.01
@@ -1574,21 +1574,21 @@
           "intermediate_data": {
             "tool_uses": [
               {
-                "name": "wrangler_expense_mcp_check_expense_policy",
+                "name": "check_expense_policy",
                 "args": {
                   "category": "transport",
                   "amount": 200
                 }
               },
               {
-                "name": "wrangler_expense_mcp_check_expense_policy",
+                "name": "check_expense_policy",
                 "args": {
                   "category": "lodging",
                   "amount": 400
                 }
               },
               {
-                "name": "wrangler_expense_mcp_check_expense_policy",
+                "name": "check_expense_policy",
                 "args": {
                   "category": "entertainment",
                   "amount": 150
@@ -1628,7 +1628,7 @@
           "intermediate_data": {
             "tool_uses": [
               {
-                "name": "wrangler_booking_mcp_cancel_booking",
+                "name": "cancel_booking",
                 "args": {
                   "booking_id": "BK-DOESNOTEXIST"
                 }
@@ -1667,7 +1667,7 @@
           "intermediate_data": {
             "tool_uses": [
               {
-                "name": "wrangler_booking_mcp_get_booking_details",
+                "name": "get_booking_details",
                 "args": {
                   "booking_id": "BK-INVALID123"
                 }
@@ -1706,7 +1706,7 @@
           "intermediate_data": {
             "tool_uses": [
               {
-                "name": "wrangler_search_mcp_search_flights",
+                "name": "search_flights",
                 "args": {
                   "origin": "DEN",
                   "destination": "NRT"
@@ -1746,14 +1746,14 @@
           "intermediate_data": {
             "tool_uses": [
               {
-                "name": "wrangler_booking_mcp_book_flight",
+                "name": "book_flight",
                 "args": {
                   "flight_id": "FL002",
                   "passenger_name": "Emily Garcia"
                 }
               },
               {
-                "name": "wrangler_booking_mcp_book_flight",
+                "name": "book_flight",
                 "args": {
                   "flight_id": "FL001",
                   "passenger_name": "James Park"
@@ -1793,7 +1793,7 @@
           "intermediate_data": {
             "tool_uses": [
               {
-                "name": "wrangler_booking_mcp_book_hotel",
+                "name": "book_hotel",
                 "args": {
                   "hotel_id": "HT001",
                   "guest_name": "Sarah Lee",
@@ -1835,14 +1835,14 @@
           "intermediate_data": {
             "tool_uses": [
               {
-                "name": "wrangler_search_mcp_search_flights",
+                "name": "search_flights",
                 "args": {
                   "origin": "SFO",
                   "destination": "JFK"
                 }
               },
               {
-                "name": "wrangler_booking_mcp_book_flight",
+                "name": "book_flight",
                 "args": {
                   "flight_id": "FL001",
                   "passenger_name": "Tom Reyes"
@@ -1882,7 +1882,7 @@
           "intermediate_data": {
             "tool_uses": [
               {
-                "name": "wrangler_booking_mcp_list_all_bookings"
+                "name": "list_all_bookings"
               }
             ]
           }
@@ -1918,7 +1918,7 @@
           "intermediate_data": {
             "tool_uses": [
               {
-                "name": "wrangler_booking_mcp_book_hotel",
+                "name": "book_hotel",
                 "args": {
                   "hotel_id": "HT002",
                   "guest_name": "Mark Chen",
@@ -1927,14 +1927,14 @@
                 }
               },
               {
-                "name": "wrangler_expense_mcp_check_expense_policy",
+                "name": "check_expense_policy",
                 "args": {
                   "category": "lodging",
                   "amount": 250
                 }
               },
               {
-                "name": "wrangler_expense_mcp_submit_expense",
+                "name": "submit_expense",
                 "args": {
                   "user_id": "EMP003",
                   "category": "lodging",
@@ -1976,7 +1976,7 @@
           "intermediate_data": {
             "tool_uses": [
               {
-                "name": "wrangler_booking_mcp_get_booking_details",
+                "name": "get_booking_details",
                 "args": {
                   "booking_id": "BK-001"
                 }
@@ -2015,7 +2015,7 @@
           "intermediate_data": {
             "tool_uses": [
               {
-                "name": "wrangler_booking_mcp_cancel_booking",
+                "name": "cancel_booking",
                 "args": {
                   "booking_id": "BK-002"
                 }
@@ -2054,19 +2054,19 @@
           "intermediate_data": {
             "tool_uses": [
               {
-                "name": "wrangler_booking_mcp_get_booking_details",
+                "name": "get_booking_details",
                 "args": {
                   "booking_id": "BK-003"
                 }
               },
               {
-                "name": "wrangler_booking_mcp_cancel_booking",
+                "name": "cancel_booking",
                 "args": {
                   "booking_id": "BK-003"
                 }
               },
               {
-                "name": "wrangler_booking_mcp_book_flight",
+                "name": "book_flight",
                 "args": {
                   "flight_id": "FL001",
                   "passenger_name": "Bob Smith"
@@ -2106,13 +2106,13 @@
           "intermediate_data": {
             "tool_uses": [
               {
-                "name": "wrangler_booking_mcp_cancel_booking",
+                "name": "cancel_booking",
                 "args": {
                   "booking_id": "BK-005"
                 }
               },
               {
-                "name": "wrangler_search_mcp_search_hotels",
+                "name": "search_hotels",
                 "args": {
                   "city": "New York"
                 }
@@ -2151,10 +2151,10 @@
           "intermediate_data": {
             "tool_uses": [
               {
-                "name": "wrangler_booking_mcp_list_all_bookings"
+                "name": "list_all_bookings"
               },
               {
-                "name": "wrangler_booking_mcp_cancel_booking",
+                "name": "cancel_booking",
                 "args": {
                   "booking_id": "BK-005"
                 }
@@ -2193,20 +2193,20 @@
           "intermediate_data": {
             "tool_uses": [
               {
-                "name": "wrangler_booking_mcp_cancel_booking",
+                "name": "cancel_booking",
                 "args": {
                   "booking_id": "BK-004"
                 }
               },
               {
-                "name": "wrangler_search_mcp_search_flights",
+                "name": "search_flights",
                 "args": {
                   "origin": "SFO",
                   "destination": "LAX"
                 }
               },
               {
-                "name": "wrangler_booking_mcp_book_flight",
+                "name": "book_flight",
                 "args": {
                   "flight_id": "FL005",
                   "passenger_name": "Lisa Wang"
@@ -2246,7 +2246,7 @@
           "intermediate_data": {
             "tool_uses": [
               {
-                "name": "wrangler_booking_mcp_get_booking_details",
+                "name": "get_booking_details",
                 "args": {
                   "booking_id": "BK-006"
                 }
@@ -2285,14 +2285,14 @@
           "intermediate_data": {
             "tool_uses": [
               {
-                "name": "wrangler_expense_mcp_check_expense_policy",
+                "name": "check_expense_policy",
                 "args": {
                   "category": "meals",
                   "amount": 0
                 }
               },
               {
-                "name": "wrangler_expense_mcp_submit_expense",
+                "name": "submit_expense",
                 "args": {
                   "user_id": "EMP001",
                   "category": "meals",
@@ -2334,7 +2334,7 @@
           "intermediate_data": {
             "tool_uses": [
               {
-                "name": "wrangler_expense_mcp_check_expense_policy",
+                "name": "check_expense_policy",
                 "args": {
                   "category": "lodging",
                   "amount": 9999
@@ -2374,14 +2374,14 @@
           "intermediate_data": {
             "tool_uses": [
               {
-                "name": "wrangler_expense_mcp_check_expense_policy",
+                "name": "check_expense_policy",
                 "args": {
                   "category": "transport",
                   "amount": 200
                 }
               },
               {
-                "name": "wrangler_expense_mcp_submit_expense",
+                "name": "submit_expense",
                 "args": {
                   "user_id": "EMP002",
                   "category": "transport",
@@ -2390,7 +2390,7 @@
                 }
               },
               {
-                "name": "wrangler_expense_mcp_check_expense_policy",
+                "name": "check_expense_policy",
                 "args": {
                   "category": "transport",
                   "amount": 200.01
@@ -2430,7 +2430,7 @@
           "intermediate_data": {
             "tool_uses": [
               {
-                "name": "wrangler_expense_mcp_check_expense_policy",
+                "name": "check_expense_policy",
                 "args": {
                   "category": "entertainment",
                   "amount": 149.99
@@ -2470,14 +2470,14 @@
           "intermediate_data": {
             "tool_uses": [
               {
-                "name": "wrangler_expense_mcp_check_expense_policy",
+                "name": "check_expense_policy",
                 "args": {
                   "category": "supplies",
                   "amount": 100
                 }
               },
               {
-                "name": "wrangler_expense_mcp_submit_expense",
+                "name": "submit_expense",
                 "args": {
                   "user_id": "EMP003",
                   "category": "supplies",
@@ -2486,7 +2486,7 @@
                 }
               },
               {
-                "name": "wrangler_expense_mcp_check_expense_policy",
+                "name": "check_expense_policy",
                 "args": {
                   "category": "supplies",
                   "amount": 100.01
@@ -2526,7 +2526,7 @@
           "intermediate_data": {
             "tool_uses": [
               {
-                "name": "wrangler_search_mcp_search_flights",
+                "name": "search_flights",
                 "args": {
                   "origin": "JFK",
                   "destination": "LAX",
@@ -2567,7 +2567,7 @@
           "intermediate_data": {
             "tool_uses": [
               {
-                "name": "wrangler_search_mcp_search_hotels",
+                "name": "search_hotels",
                 "args": {
                   "city": "Chicago",
                   "max_price": 300
@@ -2607,35 +2607,35 @@
           "intermediate_data": {
             "tool_uses": [
               {
-                "name": "wrangler_expense_mcp_check_expense_policy",
+                "name": "check_expense_policy",
                 "args": {
                   "category": "meals",
                   "amount": 0
                 }
               },
               {
-                "name": "wrangler_expense_mcp_check_expense_policy",
+                "name": "check_expense_policy",
                 "args": {
                   "category": "transport",
                   "amount": 0
                 }
               },
               {
-                "name": "wrangler_expense_mcp_check_expense_policy",
+                "name": "check_expense_policy",
                 "args": {
                   "category": "lodging",
                   "amount": 0
                 }
               },
               {
-                "name": "wrangler_expense_mcp_check_expense_policy",
+                "name": "check_expense_policy",
                 "args": {
                   "category": "supplies",
                   "amount": 0
                 }
               },
               {
-                "name": "wrangler_expense_mcp_check_expense_policy",
+                "name": "check_expense_policy",
                 "args": {
                   "category": "entertainment",
                   "amount": 0
@@ -2675,7 +2675,7 @@
           "intermediate_data": {
             "tool_uses": [
               {
-                "name": "wrangler_expense_mcp_check_expense_policy",
+                "name": "check_expense_policy",
                 "args": {
                   "category": "lodging",
                   "amount": 300
@@ -2747,21 +2747,21 @@
           "intermediate_data": {
             "tool_uses": [
               {
-                "name": "wrangler_search_mcp_search_flights",
+                "name": "search_flights",
                 "args": {
                   "origin": "SFO",
                   "destination": "JFK"
                 }
               },
               {
-                "name": "wrangler_expense_mcp_check_expense_policy",
+                "name": "check_expense_policy",
                 "args": {
                   "category": "lodging",
                   "amount": 0
                 }
               },
               {
-                "name": "wrangler_search_mcp_search_hotels",
+                "name": "search_hotels",
                 "args": {
                   "city": "New York"
                 }
@@ -2800,14 +2800,14 @@
           "intermediate_data": {
             "tool_uses": [
               {
-                "name": "wrangler_expense_mcp_check_expense_policy",
+                "name": "check_expense_policy",
                 "args": {
                   "category": "transport",
                   "amount": 30
                 }
               },
               {
-                "name": "wrangler_expense_mcp_submit_expense",
+                "name": "submit_expense",
                 "args": {
                   "user_id": "EMP001",
                   "category": "transport",

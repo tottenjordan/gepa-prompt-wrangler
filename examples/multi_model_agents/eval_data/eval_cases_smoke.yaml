@@ -3,7 +3,7 @@ eval_cases:
   reference: 'I found flights from SFO to JFK: United FL001 departing 08:00 at $450, and Delta FL002 departing 10:30 at $520.'
   expected_tool: ''
   expected_tools:
-  - name: wrangler_search_mcp_search_flights
+  - name: search_flights
     args:
       origin: SFO
       destination: JFK
@@ -16,11 +16,11 @@ eval_cases:
     EMP001 and approved.
   expected_tool: ''
   expected_tools:
-  - name: wrangler_expense_mcp_check_expense_policy
+  - name: check_expense_policy
     args:
       category: meals
       amount: 45
-  - name: wrangler_expense_mcp_submit_expense
+  - name: submit_expense
     args:
       user_id: EMP001
       category: meals
@@ -35,19 +35,19 @@ eval_cases:
   reference: FL001 booked for Alice. Grand Hyatt $320 within $400 policy. $75 meals submitted, approved.
   expected_tool: ''
   expected_tools:
-  - name: wrangler_booking_mcp_book_flight
+  - name: book_flight
     args:
       flight_id: FL001
       passenger_name: Alice
-  - name: wrangler_expense_mcp_check_expense_policy
+  - name: check_expense_policy
     args:
       category: lodging
       amount: 320
-  - name: wrangler_expense_mcp_check_expense_policy
+  - name: check_expense_policy
     args:
       category: meals
       amount: 75
-  - name: wrangler_expense_mcp_submit_expense
+  - name: submit_expense
     args:
       user_id: EMP001
       category: meals
@@ -60,11 +60,11 @@ eval_cases:
   reference: Meals $100 exceeds $75 limit. Entertainment $250 exceeds $150 limit. Both need manager review.
   expected_tool: ''
   expected_tools:
-  - name: wrangler_expense_mcp_check_expense_policy
+  - name: check_expense_policy
     args:
       category: meals
       amount: 100
-  - name: wrangler_expense_mcp_check_expense_policy
+  - name: check_expense_policy
     args:
       category: entertainment
       amount: 250
@@ -76,13 +76,13 @@ eval_cases:
   reference: Hotel HT002 (Palmer House, $250/night) booked for Bob Smith. Rate within $400 lodging policy.
   expected_tool: ''
   expected_tools:
-  - name: wrangler_booking_mcp_book_hotel
+  - name: book_hotel
     args:
       hotel_id: HT002
       guest_name: Bob Smith
       checkin: '2026-06-15'
       checkout: '2026-06-18'
-  - name: wrangler_expense_mcp_check_expense_policy
+  - name: check_expense_policy
     args:
       category: lodging
       amount: 250
