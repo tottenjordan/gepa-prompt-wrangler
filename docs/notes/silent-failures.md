@@ -5,8 +5,8 @@
 
 Eight defects, six of them found in one sitting. None of them raised. Every one reported
 success while producing worthless output — which is why they had survived so long. Grouped
-here because the *shape* is the transferable part, not the individual bugs. #1–#6 are
-fixed; **#7 and #8 are open.**
+here because the *shape* is the transferable part, not the individual bugs. #1–#7 are
+fixed; **#8 is open.**
 
 #8 is the one that argues for auditing logs on a schedule rather than after a failure:
 every other defect here was found because something looked wrong, and #8 never will.
@@ -238,6 +238,14 @@ were quietly converting a 17% server-side success rate into a respectable-lookin
 count; the tool now says both numbers. First run after the change: 8/12 traces from 48
 attempts, printing `Attempt rate: 17%` and the warning.
 
+**It can block a whole eval run, and `_retry_failed_cases` does not save you.** On
+2026-08-21 an `eval_after` verification run logged `Detected 4/5 failed cases` then
+`Recovered 0/4`, and on the next run `5/5` then `Recovered 0/5` — nine retried cases, zero
+recovered. With every case empty, `create_evaluation_run` then returned `500 INTERNAL`
+rather than a useful error, so the run died at the API rather than reporting no data.
+Budget for this: a 5-case eval at a ~25% per-attempt reach rate will usually not complete,
+and the failure arrives as a server 500 that says nothing about the cause.
+
 Query to re-measure after changing `GEAP_MIN_INSTANCES`:
 
 ```bash
@@ -310,7 +318,7 @@ right to stop a `None` from crashing the run, but `0.0` is indistinguishable fro
 score. A sentinel that cannot be mistaken for data — or at minimum a counter of how often
 the coercion fired — would have surfaced this in the first generation.
 
-## 7. The autorater calls a tool, and the case vanishes — OPEN
+## 7. The autorater calls a tool, and the case vanishes
 
 **Symptom:** `wrangler eval <exp> after` reported `SUCCEEDED`, printed five metrics and a
 respectable 0.901 overall — over **4 cases in run 1 and 3 in run 3**, out of 5. The
@@ -346,17 +354,60 @@ prompts. A prompt that provokes more tool use loses more cases and can score *hi
 it. Any before/after comparison across differing case counts is measuring the dropout, not
 the prompt.
 
-**Not fixed.** Two directions, neither free: (a) parse the raw GCS JSON ourselves rather
-than through `EvaluationItemResult`, which makes every per-metric error survivable and
-kills this class of cascade for good — defect 3 and defect 5 land in the same place; or
-(b) stop the rater emitting tool calls at all, which means reaching the autorater's
-generation config, and batch eval deliberately cannot send one (see
-[model-lifecycle.md](model-lifecycle.md) — a bare judge model id is rejected as an invalid
-autorater resource). (a) is the real fix; (b) treats the symptom and may not be reachable.
+### Which metric was calling tools — the first guess was wrong
 
-**Minimum before either:** `run_batch_eval` should refuse to average over a case count
-that differs from the input, or at least say so loudly. Right now the only evidence is an
-array length, and the number it prints looks exactly like a number that means something.
+This note originally implied the culprit was our custom `tool_use_quality` LLMMetric,
+whose prompt renders the tool trajectory and which we therefore control. Scanning all 118
+archived result files in `gs://$GCP_STAGING_BUCKET/eval-results/` says otherwise:
+
+| Metric | Error | Count |
+| --- | --- | --- |
+| `hallucination_v1` | UNEXPECTED_TOOL_CALL | 3 |
+| `final_response_quality_v1` | UNEXPECTED_TOOL_CALL | 3 |
+| `tool_use_quality` | `agent_data` unrendered (#5) | 15 |
+| `safety_v3` / `instruction_following_v2` / `hallucination_v2` | unsupported version (#3) | 45 |
+
+The tool calls come from **predefined** metrics. That matters because it kills the
+prompt-side fix: we do not own `hallucination_v1`'s prompt, and this SDK has **no
+`AutoraterConfig`** (no such symbol in `vertexai._genai.types`), so the rater's generation
+config is unreachable. Option (b) was never available. Recovery was the only lever.
+
+Worth knowing anyway, if it ever becomes reachable: the published cause of this finish
+reason is prompt-induced phantom tools — a model shown tool-call syntax it has no
+declarations for imitates it. The rater is handed a trajectory full of `search_hotels(...)`
+and produces `print(default_api.search_hotels(city = "unknown"))`. Don't render raw
+tool-call syntax into a judge prompt if you have the choice.
+
+### Fixed
+
+`wrangler/eval/evaluator.py`, pinned by `tests/test_evaluator_metrics.py`:
+
+- **`_scores_from_raw_result()`** parses the result payload as plain JSON, keeping every
+  metric that scored and returning the names of those that errored. A `None` score is
+  dropped, never coerced to `0.0` — see #6 for what that costs.
+- **`_extract_per_case_via_api()`** falls back to the raw file when the SDK hands back an
+  empty `EvaluationItemResult` next to a live `gcs_uri` — the exact signature of the failed
+  parse. Only on that path, so the happy path costs no extra request.
+- **`_metric_coverage()` / `_coverage_warning()`** report cases-per-metric and warn when
+  they disagree, on both the single and averaged paths.
+
+Measured on the three affected files from the 02:09–02:13 `eval_after` window, which
+previously contributed nothing at all:
+
+```
+result_8780…: {tool_use_quality_v1: 0.5, safety_v1: 1.0, instruction_following_v1: 0.0}
+result_2023…: {safety_v1: 1.0, tool_use_quality_v1: 0.8, instruction_following_v1: 0.0}
+result_3920…: {safety_v1: 1.0, instruction_following_v1: 0.667}
+```
+
+**Not fixed: the underlying rater flake.** Cases still lose individual metrics; they no
+longer lose *all* of them, and the gap is now stated rather than absorbed. Retrying
+errored cases was deliberately deferred — the finish reason is non-deterministic, so a
+retry would likely fill the gaps, but shipping it alongside the parser would have made it
+impossible to tell which change moved the numbers.
+
+**The read path no longer goes through `extra='forbid'`.** That boundary ate scores three
+ways (#3, #5, #7); all three now degrade to a missing metric instead of a missing case.
 
 **The lesson:** the same `extra='forbid'` cascade has now eaten scores three separate ways
 (#3 unsupported metric version, #5 empty agent stream, #7 rater tool call). It is not

@@ -155,6 +155,9 @@ class EvalResult:
     scores_std: dict[str, float] = field(default_factory=dict)
     num_runs: int = 1
     token_usage: dict[str, int | bool] = field(default_factory=dict)
+    # How many cases each metric actually scored. Defaults empty so existing
+    # constructions are unaffected. See _coverage_warning for why it matters.
+    coverage: dict[str, int] = field(default_factory=dict)
 
 
 def _build_eval_dataset(cases: list[dict]) -> pd.DataFrame:
@@ -269,6 +272,98 @@ def _extract_per_case_scores(evaluation_run) -> list[dict[str, float]]:
     return per_case
 
 
+def _scores_from_raw_result(raw: dict) -> tuple[dict[str, float], list[str]]:
+    """Pull metric scores out of a raw result payload, skipping errored metrics.
+
+    Returns ``(scores, errored_metric_names)``.
+
+    This exists because the SDK's own loader cannot. ``types.CandidateResult``
+    has no ``error`` field and inherits ``extra='forbid'`` from
+    ``google.genai._common.BaseModel``, so a single per-metric error makes the
+    *entire* result file fail validation;
+    ``_evals_common._convert_gcs_to_evaluation_item_result`` catches that,
+    logs, and returns an empty ``EvaluationItemResult()``. The caller receives
+    a well-formed object containing nothing and has no way to tell the
+    difference between "this case scored nothing" and "this file would not
+    parse", so the case silently contributes to no metric at all.
+
+    Reading the JSON ourselves makes each metric independent, which is the
+    whole point: the same boundary has now destroyed scores three separate ways
+    (silent-failures #3 unsupported metric version, #5 empty agent stream, #7
+    autorater tool call). Fixing the boundary retires the class rather than the
+    latest instance.
+
+    A ``None`` score is dropped rather than coerced — see #6, where coercing a
+    missing score to 0.0 had GEPA optimize against a criterion nailed to zero.
+    """
+    scores: dict[str, float] = {}
+    errored: list[str] = []
+    for candidate in raw.get("candidateResults") or []:
+        if not isinstance(candidate, dict):
+            continue
+        metric = candidate.get("metric") or ""
+        short = metric.rsplit("/", 1)[-1] if metric else ""
+        if "error" in candidate:
+            if short:
+                errored.append(short)
+            continue
+        score = candidate.get("score")
+        if short and score is not None:
+            scores[_alias_tool_use_key(short)] = float(score)
+    return scores, errored
+
+
+def _metric_coverage(per_case: list[dict[str, float]]) -> dict[str, int]:
+    """Count how many cases produced a score for each metric."""
+    coverage: dict[str, int] = {}
+    for case_scores in per_case:
+        for metric in case_scores:
+            coverage[metric] = coverage.get(metric, 0) + 1
+    return coverage
+
+
+def _coverage_warning(coverage: dict[str, int], num_cases: int) -> list[str]:
+    """Report metrics that scored fewer cases than the run contained.
+
+    The aggregate numbers in ``EvalResult.scores`` come from the *server-side*
+    summary metrics, which quietly exclude cases whose metric errored. A mean
+    over four cases is formatted exactly like a mean over five, so without this
+    an autorater flake is indistinguishable from a real quality change — and a
+    before/after comparison measures the dropout rather than the prompt.
+
+    Pure and list-returning so the wording is testable without an eval run,
+    matching ``wrangler/tools/traffic.py:summarize_run``.
+    """
+    if not num_cases:
+        return []
+    short = {m: n for m, n in coverage.items() if n < num_cases}
+    if not short:
+        return []
+    lines = [
+        "  ** UNEVEN METRIC COVERAGE — means are over different denominators",
+    ]
+    lines += [f"     {metric:<28} {n}/{num_cases} cases" for metric, n in sorted(short.items())]
+    lines.append(
+        "     Autorater errors dropped cases; see docs/notes/silent-failures.md #7. "
+        "Do not compare these means against a run with different coverage."
+    )
+    return lines
+
+
+def _read_raw_result(client, gcs_uri: str) -> dict:
+    """Read an evaluation result file from GCS as plain JSON.
+
+    Reuses the SDK's own GCS reader rather than taking a direct dependency on
+    google-cloud-storage, so credentials and path parsing behave identically to
+    the code path this is standing in for. Kept as a separate function so tests
+    can substitute it without patching the SDK internals.
+    """
+    from vertexai._genai import _gcs_utils
+
+    gcs = _gcs_utils.GcsUtils(api_client=client._api_client)
+    return json.loads(gcs.read_file_contents(gcs_uri))
+
+
 def _extract_per_case_via_api(evaluation_run) -> list[dict[str, float]]:
     """Fallback: fetch per-case scores directly from the Evaluation Management API."""
     per_case: list[dict[str, float]] = []
@@ -285,18 +380,36 @@ def _extract_per_case_via_api(evaluation_run) -> list[dict[str, float]]:
 
         for item_name in eval_set.evaluation_items:
             case_scores: dict[str, float] = {}
+            errored: list[str] = []
             # One unreadable item must not drop the scores for every other case;
             # it just contributes an empty dict.
             with contextlib.suppress(Exception):
                 item = client.evals.get_evaluation_item(name=item_name)
                 response = getattr(item, "evaluation_response", None)
-                if response:
-                    for candidate in getattr(response, "candidate_results", []):
-                        metric = getattr(candidate, "metric", "")
-                        score = getattr(candidate, "score", None)
-                        if metric and score is not None:
-                            short = metric.split("/")[-1] if "/" in metric else metric
-                            case_scores[short] = float(score)
+                candidates = getattr(response, "candidate_results", None) if response else None
+                for candidate in candidates or []:
+                    metric = getattr(candidate, "metric", "")
+                    score = getattr(candidate, "score", None)
+                    if metric and score is not None:
+                        short = metric.split("/")[-1] if "/" in metric else metric
+                        case_scores[short] = float(score)
+
+                # An empty response with a gcs_uri is the signature of defect #7:
+                # the SDK could not parse the file and handed back a blank
+                # EvaluationItemResult instead of raising, so `response` looks
+                # legitimately empty. The file itself is still readable and
+                # still holds every metric that did score. Only reached when the
+                # SDK gave us nothing, so the happy path costs no extra request.
+                if not case_scores and getattr(item, "gcs_uri", None):
+                    with contextlib.suppress(Exception):
+                        case_scores, errored = _scores_from_raw_result(
+                            _read_raw_result(client, item.gcs_uri)
+                        )
+                        if errored:
+                            print(
+                                f"  Recovered {len(case_scores)} metric(s) from GCS for a case "
+                                f"the SDK dropped; these metrics errored: {', '.join(errored)}"
+                            )
             per_case.append(case_scores)
     except Exception as e:
         print(f"  Warning in API fallback for per-case scores: {e}")
@@ -607,12 +720,16 @@ def run_batch_eval(
             )
     token_usage = _estimate_token_usage(inference_result.eval_dataset_df)
 
+    coverage = _metric_coverage(per_case)
+
     print(
         f"  {tag}Eval complete — total: {_fmt_elapsed(t0)}, {len(scores)} metrics, {len(per_case)} cases, "
         f"~{token_usage['input_tokens']:,} in / ~{token_usage['output_tokens']:,} out tokens (est.)",
         flush=True,
     )
-    return EvalResult(scores=scores, per_case=per_case, token_usage=token_usage)
+    for line in _coverage_warning(coverage, len(per_case)):
+        print(line, flush=True)
+    return EvalResult(scores=scores, per_case=per_case, token_usage=token_usage, coverage=coverage)
 
 
 def run_batch_eval_averaged(
@@ -699,6 +816,11 @@ def run_batch_eval_averaged(
         f"  {tag}Averaged {successful}/{num_runs} runs — overall: {overall:.3f}{skip_note}",
         flush=True,
     )
+    # Averaging N runs does not repair a metric that errored in all of them —
+    # it just hides the gap behind one more layer of arithmetic.
+    avg_coverage = _metric_coverage(avg_per_case)
+    for line in _coverage_warning(avg_coverage, len(avg_per_case)):
+        print(line, flush=True)
 
     return EvalResult(
         scores=avg_scores,
@@ -706,6 +828,7 @@ def run_batch_eval_averaged(
         scores_std=std_scores,
         num_runs=num_runs,
         token_usage=agg_tokens,
+        coverage=avg_coverage,
     )
 
 
