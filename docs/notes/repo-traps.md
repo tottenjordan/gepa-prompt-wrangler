@@ -145,6 +145,24 @@ The same class of mistake bit twice in one session — see
 Cloud Logging ingestion delay, not an absence of logs. **Absence observed through a
 tool with a cap or a lag is not absence.**
 
+**The `--limit` on `gcloud logging read` is the same trap with a worse failure mode**
+(2026-08-21). Here the cap does not hide a row you were looking for — it hands you a full
+result set drawn entirely from the *wrong* resource. One crash-looping engine in
+`hybrid-vertex` was emitting ~450,000 log entries a day; a 2,000-row query scoped to a
+different engine came back completely full, every row belonging to the noisy neighbour,
+with nothing marking the truncation. The first read of that output was "our engine is
+quiet" — the exact opposite of the truth.
+
+Two habits that would have caught it:
+
+- **When a scoped log query comes back at exactly the limit, assume truncation.** Compare
+  the oldest returned timestamp against the window you asked for: 2,000 rows spanning six
+  minutes of a two-day query is the tell.
+- **Aggregate before reading.** `--format='value(resource.labels.reasoning_engine_id)' |
+  sort | uniq -c | sort -rn` shows who is actually producing the volume in one line, and
+  is how the crash loop was found at all. It was deleted the same day; the engine had
+  served zero requests in 30 days and nothing referenced it.
+
 ## Test count in CLAUDE.md was stale (fixed 2026-08-20)
 
 CLAUDE.md said 316; the suite was 356. Corrected, then it went stale twice more in the
