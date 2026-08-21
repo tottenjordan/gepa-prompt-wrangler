@@ -181,6 +181,34 @@ window is open for most of a run. No crash indicators anywhere in the logs (no t
 no worker-exit, no OOM) — these are ordinary scale-ups, which is exactly why nothing
 surfaces them.
 
+**`GEAP_MIN_INSTANCES=2` was then measured, and it does not help.** Engine redeployed
+2026-08-21 04:09 with `minInstances: 2` confirmed live on the deployment spec, then given
+32 traffic queries over 35 minutes:
+
+| | Before (`minInstances` unset) | After (`minInstances: 2`) |
+| --- | --- | --- |
+| Startups per stream request | 40 / 31 = 1.3 | 100 / 75 = 1.3 |
+
+Identical. The floor keeps *containers* warm; it does nothing about GEAP spawning a fresh
+**worker process** per request, which is the thing that actually eats the request. The
+sharpest number: **75 stream requests were served across 68 distinct PIDs**, and only 18
+of them (24%) had a `Received response from Claude` from that same PID. Roughly
+three-quarters of attempts never reached the model. Keep the setting — it is cheap and
+harmless — but do not count it as a mitigation, and do not spend more on it.
+
+*Caveat on the PID arithmetic:* a PID is unique within a container, not across them, and
+low PIDs (15–23) recur in every fresh container. So distinct-PID counts are a floor, and
+the same-PID match can pair a request in one container with a response in another —
+meaning the true reach rate is at most 24%, not at least.
+
+**The traffic generator is the worst case for this, by design.** It opens a new session
+with a fresh user id per query, so each query is eligible for a different worker. Compare
+the same engine on the same day: the `eval_after` batch-eval window did 31 stream requests
+and logged **50** Claude responses (1.6 per request — multi-turn tool use working
+normally), while the traffic run did 75 and logged **19** (0.25). Same defect, but the
+tool whose entire job is generating traces is the one most exposed to the thing that
+prevents them. Its two retries are load-bearing, not belt-and-braces.
+
 Query to re-measure after changing `GEAP_MIN_INSTANCES`:
 
 ```bash
