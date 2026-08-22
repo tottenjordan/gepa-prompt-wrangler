@@ -980,8 +980,17 @@ def save_eval_results(
     scores: dict[str, float],
     phase: str = "baseline",
     output_dir: str | None = None,
+    per_case: list[dict] | None = None,
 ) -> str:
-    """Save eval results to JSON. Returns the file path."""
+    """Save eval results to JSON. Returns the file path.
+
+    ``per_case`` is optional but matters: without it a standalone eval keeps
+    only aggregate means, and two such runs can be compared solely by
+    subtracting numbers computed over different case subsets. That is how the
+    control arm on 2026-08-22 produced an apparent +0.180 spread on an
+    unchanged prompt with no way to tell how much was sampling. With the rows
+    kept, `paired_deltas()` can compare the cases both runs actually scored.
+    """
     import json
     from datetime import UTC, datetime
     from pathlib import Path
@@ -998,6 +1007,7 @@ def save_eval_results(
         "phase": phase,
         "timestamp": datetime.now(tz=UTC).isoformat(),
         "scores": scores,
+        "per_case": per_case or [],
     }
     with open(path, "w") as f:
         json.dump(data, f, indent=2, default=str)
