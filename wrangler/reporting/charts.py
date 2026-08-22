@@ -8,7 +8,7 @@ import subprocess
 import tempfile
 from pathlib import Path
 
-from ..core.config import MODEL_COSTS
+from ..core.config import MODEL_COSTS, PAPERBANANA_API_KEY
 from ..core.models import AGENT_ORDER, DEFAULT_FIGURE_VLM_MODEL, MODEL_MAP, PROVIDERS
 from ..core.models import blended_cost_for_report as blended_cost
 from .analysis import (
@@ -85,7 +85,11 @@ def _try_paperbanana(
 
     Returns True if PaperBanana succeeded, False if fallback was used.
     """
-    api_key = os.environ.get("GOOGLE_API_KEY")
+    # From the stash, not the environment: core.config pops the API keys at
+    # import so they cannot reach Vertex, which rejects them (401 on
+    # EvaluationService). PaperBanana is the one caller that legitimately
+    # wants an API key, so it is handed the value directly.
+    api_key = PAPERBANANA_API_KEY
     if not api_key:
         print("  PaperBanana skipped (no GOOGLE_API_KEY), using matplotlib")
         fallback_fn(**fallback_kwargs)

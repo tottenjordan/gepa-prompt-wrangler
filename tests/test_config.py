@@ -223,3 +223,55 @@ def test_config_reexports_registry_not_its_own_tables():
 
     assert set(cfg.MODEL_COSTS) == set(MODELS), "MODEL_COSTS has drifted from the registry"
     assert set(cfg.RATE_LIMITS) == set(MODELS), "RATE_LIMITS has drifted from the registry"
+
+
+class TestApiKeysDoNotReachVertex:
+    """An API key in the environment breaks Vertex's EvaluationService.
+
+    google-genai prefers an API key when one is present, but
+    EvaluationService.EvaluateInstances rejects it:
+
+        401 UNAUTHENTICATED. API keys are not supported by this API.
+
+    On 2026-08-21 that killed a four-hour, 85-generation GEPA run — 754 of
+    them, from the first metric call onward, so every candidate was scored
+    against a failing service. CLAUDE.md already required this pop and the
+    pipeline components did it; the local path did not.
+    """
+
+    def test_keys_are_removed_from_the_environment(self):
+        import importlib
+        import os
+
+        import wrangler.core.config as cfg
+
+        # Reload rather than relying on import order: another test may have
+        # already imported (and popped), which would make this pass vacuously.
+        os.environ["GOOGLE_API_KEY"] = "should-be-popped"  # pragma: allowlist secret
+        os.environ["GEMINI_API_KEY"] = "should-be-popped"  # pragma: allowlist secret
+        importlib.reload(cfg)
+
+        assert "GOOGLE_API_KEY" not in os.environ
+        assert "GEMINI_API_KEY" not in os.environ
+
+    def test_the_key_is_stashed_rather_than_destroyed(self, monkeypatch):
+        """PaperBanana needs it — it talks to the Developer API, where an API
+        key is the correct credential."""
+        import importlib
+        import os
+
+        monkeypatch.setenv("GOOGLE_API_KEY", "test-key-value")  # pragma: allowlist secret
+        import wrangler.core.config as cfg
+
+        importlib.reload(cfg)
+        assert cfg.PAPERBANANA_API_KEY == "test-key-value"  # pragma: allowlist secret
+        assert "GOOGLE_API_KEY" not in os.environ
+
+    def test_charts_reads_the_stash_not_the_environment(self):
+        import inspect
+
+        from wrangler.reporting import charts
+
+        src = inspect.getsource(charts._try_paperbanana)
+        assert "api_key = PAPERBANANA_API_KEY" in src
+        assert 'os.environ.get("GOOGLE_API_KEY")' not in src

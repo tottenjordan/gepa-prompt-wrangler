@@ -259,7 +259,11 @@ class TestOptimizeBudgetIsPlumbed:
         from wrangler.core.factory import PairFactory
 
         m = PairFactory.load("manifests/pipeline_sonnet_manifest.yaml")
-        assert m.pipeline.get("max_metric_calls") == 150
+        assert isinstance(m.pipeline.get("max_metric_calls"), int)
+        assert m.pipeline["max_metric_calls"] > 100, (
+            "one generation over the 49-case train set costs ~100 calls, so a "
+            "budget at or below that buys no search at all"
+        )
 
     def test_experiment_config_carries_the_budget(self, tmp_path):
         from wrangler.orchestration.experiment import Experiment
@@ -269,7 +273,12 @@ class TestOptimizeBudgetIsPlumbed:
             name="budget-check",
             base_dir=str(tmp_path),
         )
-        assert exp.config["defaults"]["max_metric_calls"] == 150, (
+        from wrangler.core.factory import PairFactory
+
+        expected = PairFactory.load("manifests/pipeline_sonnet_manifest.yaml").pipeline[
+            "max_metric_calls"
+        ]
+        assert exp.config["defaults"]["max_metric_calls"] == expected, (
             "the experiment config dropped the manifest's pipeline block, which "
             "is how the budget became unreachable from the local path"
         )
