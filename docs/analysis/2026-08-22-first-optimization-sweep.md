@@ -126,3 +126,90 @@ smallest sample. That is worth remembering before treating +0.111 as settled.
   [../notes/model-lifecycle.md](../notes/model-lifecycle.md)
 - The inference dropout behind the unbalanced case counts —
   [../notes/silent-failures.md](../notes/silent-failures.md) #5
+
+---
+
+## Follow-up: why instruction_following diverged (+0.099 sonnet, −0.095 pro)
+
+The sharpest disagreement in the sweep, investigated 2026-08-22.
+
+### instruction_following is measured but never optimized
+
+GEPA's criteria come from `sampler_config.json`:
+
+| GEPA optimizes | batch eval reports |
+| --- | --- |
+| `safety_v1` | `safety_v1` |
+| `rubric_based_final_response_quality_v1` *(rubrics: instruction_adherence, completeness)* | `final_response_quality_v1` |
+| `rubric_based_tool_use_quality_v1` | `tool_use_quality_v1` |
+| `hallucinations_v1` | `hallucination_v1` |
+| — | **`instruction_following_v1`** |
+
+`instruction_following_v1` appears only on the right. **GEPA never optimizes it**, so it is
+free to be traded away for gains in the four criteria that are optimized. Its only
+pressure is indirect, through the `instruction_adherence` rubric inside
+`rubric_based_final_response_quality_v1`.
+
+### The threshold on that rubric differed between the arms
+
+At the time of the sweep (commit `67624a7~1`):
+
+| arm | FRQ threshold gating `instruction_adherence` | prompt changed | instruction_following |
+| --- | --- | --- | --- |
+| sonnet | **0.85** | yes | **+0.099** |
+| flash | 0.85 | no *(control)* | −0.018 (noise) |
+| pro | **0.50** | yes | **−0.095** |
+
+The two arms whose prompts changed sit at opposite ends of both columns, and the control
+arm rules out the metric drifting on its own. The threshold is the **only** structural
+difference between sonnet's and pro's runs — same seed, same budget, same eval set, same
+train/validation split.
+
+### The prompts corroborate it
+
+Explicit behavioural constraints in the optimized prompts — the thing an
+instruction-following judge scores:
+
+| arm | prohibition sentences | words | density |
+| --- | --- | --- | --- |
+| sonnet | **7** | 776 | 10.3 / 1k words |
+| pro | **1** | 343 | 2.9 / 1k words |
+
+Sonnet's, verbatim: *"Absolutely avoid asking follow-up questions"*, *"Do not invent or
+assume information"*, *"Avoid making inferences, adding speculative details"*, *"DO NOT use
+markdown tables for single items, simple lists, or confirmations."*
+
+Pro's, in full: *"Do not proactively offer to book the flight or ask for additional
+personal information."*
+
+Under strong instruction-adherence pressure sonnet's search grew a prompt dense with
+explicit constraints. Under weak pressure pro's grew a task-completion prompt and spent
+its gains elsewhere — its safety went **+0.082**, the largest single improvement in the
+sweep.
+
+### What this is and is not
+
+**Is:** a coherent mechanism with a matching structural cause, corroborated by prompt
+content, with the control arm excluding metric drift.
+
+**Is not** established causation. Two arms is two points. It is confounded with prompt
+length — sonnet's is 2.3× longer and a longer prompt has more room for constraints
+whatever the pressure. And the underlying deltas rest on unpaired case subsets (sonnet
+30/57, pro 58/62), so sonnet's +0.099 in particular sits on a 30-case baseline.
+
+### It is now testable
+
+Thresholds were unified at 0.85 for all six agents. **If this explanation is right, a
+re-run should show pro's instruction_following no longer regressing.** That is a real
+prediction the next sweep will confirm or kill, and it costs nothing extra to check.
+
+### The framing worth keeping
+
+A held-out metric is not a defect. `instruction_following_v1` is the one number in the
+report that GEPA cannot game, which makes it the sweep's best evidence of what the
+optimizer traded away. Pro's −0.095 is that mechanism working as intended: it bought
++0.082 safety and +0.034 response quality with instruction-following it was never asked
+to protect.
+
+The actionable part is not to add it to the criteria but to **read it as a holdout** —
+and to keep the rubric thresholds identical across arms so that the pressure on it is too.
