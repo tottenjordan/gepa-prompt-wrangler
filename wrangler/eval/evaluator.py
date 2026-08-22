@@ -255,8 +255,12 @@ def _extract_per_case_scores(evaluation_run) -> list[dict[str, float]]:
             print("  Warning: eval_case_results is empty")
             return per_case
 
-        for case_result in case_results:
-            case_scores: dict[str, float] = {}
+        for position, case_result in enumerate(case_results):
+            # eval_case_index is the case's position in the eval set and is what
+            # makes before/after pairable. Fall back to enumeration order, which
+            # is the same ordering the SDK returns results in.
+            idx = getattr(case_result, "eval_case_index", None)
+            case_scores: dict[str, float] = {CASE_INDEX_KEY: position if idx is None else idx}
             candidates = getattr(case_result, "response_candidate_results", [])
             if candidates:
                 metric_results = getattr(candidates[0], "metric_results", None)
@@ -320,11 +324,72 @@ def _scores_from_raw_result(raw: dict) -> tuple[dict[str, float], list[str]]:
     return scores, errored
 
 
+# Reserved key in a per_case row: which eval case it is, by position in the
+# eval set. NOT a metric — every consumer that walks a row's keys must strip it
+# with case_metrics() first.
+#
+# Without it a per_case row is a bare {metric: score} dict that cannot say which
+# case it came from, so before/after cannot be paired. The 2026-08-22 sweep
+# scored 30 cases before and 57 after on one arm (60/36 on another), meaning
+# every reported delta compared two different subsets of the 64. That unpairing
+# is the largest single contributor to the +0.039 noise floor that sweep
+# measured.
+CASE_INDEX_KEY = "case_index"
+
+
+def case_metrics(row: dict) -> dict[str, float]:
+    """A per_case row's metric scores, with the reserved case key removed."""
+    return {k: v for k, v in row.items() if k != CASE_INDEX_KEY}
+
+
+def pair_per_case(
+    before: list[dict], after: list[dict]
+) -> dict[int, tuple[dict[str, float], dict[str, float]]]:
+    """Match before/after rows by case index. Only cases present on both sides.
+
+    Returns ``{case_index: (before_metrics, after_metrics)}``.
+
+    Rows without an index are skipped rather than matched by position. Positional
+    matching would pair case 0 of one subset with case 0 of a *different* subset
+    and present the result as a like-for-like comparison, which is precisely the
+    error this function exists to prevent.
+    """
+    b = {r[CASE_INDEX_KEY]: case_metrics(r) for r in before if CASE_INDEX_KEY in r}
+    a = {r[CASE_INDEX_KEY]: case_metrics(r) for r in after if CASE_INDEX_KEY in r}
+    return {i: (b[i], a[i]) for i in sorted(b.keys() & a.keys())}
+
+
+def paired_deltas(before: list[dict], after: list[dict]) -> dict:
+    """Per-metric deltas over only the cases that both sides scored.
+
+    This is the comparison worth reporting: same cases, same agent, one prompt
+    change between them. Also returns how many cases each side contributed that
+    the other did not, because a paired delta over 12 of 64 cases is a different
+    claim from one over 60.
+    """
+    paired = pair_per_case(before, after)
+    deltas: dict[str, float] = {}
+    if paired:
+        metrics = {m for b, a in paired.values() for m in (b.keys() | a.keys())}
+        for m in metrics:
+            pairs = [(b[m], a[m]) for b, a in paired.values() if m in b and m in a]
+            if pairs:
+                deltas[m] = sum(y - x for x, y in pairs) / len(pairs)
+    b_idx = {r[CASE_INDEX_KEY] for r in before if CASE_INDEX_KEY in r}
+    a_idx = {r[CASE_INDEX_KEY] for r in after if CASE_INDEX_KEY in r}
+    return {
+        "n_paired": len(paired),
+        "deltas": deltas,
+        "dropped_before": len(b_idx - a_idx),
+        "dropped_after": len(a_idx - b_idx),
+    }
+
+
 def _metric_coverage(per_case: list[dict[str, float]]) -> dict[str, int]:
     """Count how many cases produced a score for each metric."""
     coverage: dict[str, int] = {}
     for case_scores in per_case:
-        for metric in case_scores:
+        for metric in case_metrics(case_scores):
             coverage[metric] = coverage.get(metric, 0) + 1
     return coverage
 
@@ -385,8 +450,9 @@ def _extract_per_case_via_api(evaluation_run) -> list[dict[str, float]]:
         if not eval_set or not getattr(eval_set, "evaluation_items", None):
             return per_case
 
-        for item_name in eval_set.evaluation_items:
-            case_scores: dict[str, float] = {}
+        for position, item_name in enumerate(eval_set.evaluation_items):
+            # The eval set lists items in case order, so position is the index.
+            case_scores: dict[str, float] = {CASE_INDEX_KEY: position}
             errored: list[str] = []
             # One unreadable item must not drop the scores for every other case;
             # it just contributes an empty dict.
@@ -407,14 +473,19 @@ def _extract_per_case_via_api(evaluation_run) -> list[dict[str, float]]:
                 # legitimately empty. The file itself is still readable and
                 # still holds every metric that did score. Only reached when the
                 # SDK gave us nothing, so the happy path costs no extra request.
-                if not case_scores and getattr(item, "gcs_uri", None):
+                # Test for *metrics*, not for an empty dict: the row already
+                # holds its case index, so `not case_scores` would never be
+                # true and this fallback would be dead code.
+                if not case_metrics(case_scores) and getattr(item, "gcs_uri", None):
                     with contextlib.suppress(Exception):
-                        case_scores, errored = _scores_from_raw_result(
+                        recovered, errored = _scores_from_raw_result(
                             _read_raw_result(client, item.gcs_uri)
                         )
+                        # Merge rather than replace, so the case keeps its index.
+                        case_scores.update(recovered)
                         if errored:
                             print(
-                                f"  Recovered {len(case_scores)} metric(s) from GCS for a case "
+                                f"  Recovered {len(recovered)} metric(s) from GCS for a case "
                                 f"the SDK dropped; these metrics errored: {', '.join(errored)}"
                             )
             per_case.append(case_scores)

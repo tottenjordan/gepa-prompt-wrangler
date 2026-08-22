@@ -13,6 +13,7 @@ import numpy as np
 from ..core.config import REPORTS_DIR
 from ..core.models import AGENT_ORDER, MODEL_MAP
 from ..core.models import blended_cost_for_report as blended_cost
+from ..eval.evaluator import case_metrics
 
 METRIC_LABELS = {
     "final_response_quality_v1": "Response Quality",
@@ -655,9 +656,11 @@ def compute_tier_scores(
     for group, score_list in buckets.items():
         if not score_list:
             continue
+        # Strip the reserved case-index key: it is an identifier, not a metric,
+        # and would otherwise be averaged and charted as one.
         all_metrics = set()
         for s in score_list:
-            all_metrics.update(s.keys())
+            all_metrics.update(case_metrics(s).keys())
         avg: dict[str, float] = {}
         for metric in all_metrics:
             values = [s[metric] for s in score_list if metric in s]
