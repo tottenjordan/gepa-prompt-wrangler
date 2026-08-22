@@ -16,6 +16,12 @@ One topic per file. Keep this index under 200 lines — put detail in the topic 
 | [repo-traps.md](repo-traps.md) | Non-obvious footguns: gitignored lockfile, duplicated config, why `GOOGLE_CLOUD_LOCATION` can't express the per-model location rule, Agent Registry services invisible to `gcloud run services list`, `TODO` goldens. |
 | [silent-failures.md](silent-failures.md) | Eight failures that reported success: MCP tools missing at deploy, startup checks that never ran, batch eval scoring 0 cases, a tool-use metric floored at ~0.42, GEAP returning 200 with an empty event stream from a booting worker, GEPA optimizing against a safety score pinned at zero, the autorater emitting a tool call so the case is dropped from every metric, and OTel span batches dropped under load beneath online eval (fixed, and now detectable with `trace-health`). Also carries the log queries that found them, and the three refuted hypotheses behind the traffic-generator redesign. |
 
+## Analyses
+
+| Analysis | What it covers |
+|----------|----------------|
+| [../analysis/2026-08-22-first-optimization-sweep.md](../analysis/2026-08-22-first-optimization-sweep.md) | The first sweep that produced a real prompt change. Three arms, identical seed and budget; flash returned its seed unchanged and so became an unplanned control, putting the noise floor at +0.039. Sonnet clears it on four metrics, pro on one — and pro *regresses* on instruction-following, structurally. Total cost $1.14. |
+
 ## Active Plans
 
 | Plan | Status |
