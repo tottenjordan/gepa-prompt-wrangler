@@ -282,3 +282,50 @@ as fabricated. Fetch `ai.google.dev` directly instead.
   necessary for every Gemini 3 judge.
 - **Decide on the vacuous `correct_parameters` rubric.** Changing it changes GEPA's
   optimization target, so it wants an explicit decision rather than a drive-by fix.
+
+## Measurement sweep, 2026-08-22 — three blockers found before any number
+
+The modernization plan's final task (measure a real prompt change) ran into three
+defects in a row, each of which silently invalidated the attempt before it. All three
+are fixed; the sweep itself is running as three pipeline jobs.
+
+**1. `wrangler eval -n 1` was ignored.** The option defaulted to 1 and the call site read
+`num_runs if num_runs > 1 else None`, so passing 1 was indistinguishable from passing
+nothing and fell through to the experiment's 3. A 64-case pilot quietly became 192.
+
+**2. GEPA's budget never reached the local optimizer.** `stage_optimize` called
+`optimize()` without `max_metric_calls`, so it used ADK's default of 100 — and one
+generation over the 49-case train set costs ~100. GEPA got a single random draw of
+variants and returned the seed whenever none beat it. Measured: `Max metric calls: 100`,
+`Total metric calls: 102`, one generation, 10 minutes, best variant = the 78-char seed.
+The budget was unreachable by construction: `Manifest` did not parse the `pipeline:`
+block and `Experiment.create` dropped it, so only the KFP path could ever set it.
+
+This is the likely explanation for the historical record — v5, v6 and v7 are
+byte-identical to v4 in all five prompt registries. Three "optimization" runs that
+produced nothing new.
+
+**3. An API key in the environment invalidated every GEPA score.** With the budget
+fixed, the re-run reached 85 generations over four hours — and was scoring against
+nothing the whole time:
+
+```
+401 UNAUTHENTICATED. API keys are not supported by this API.
+method: EvaluationService.EvaluateInstances
+```
+
+754 of them, the first at the very start. `GOOGLE_API_KEY`/`GEMINI_API_KEY` make
+google-genai prefer API-key auth, which Vertex's EvaluationService rejects. CLAUDE.md
+already required popping them and `pipeline/components.py` does it twice — the local CLI
+path never did. So **only pipeline runs were ever protected**, which is a strong argument
+for running optimization there rather than locally.
+
+**What is valid so far.** `eval_before` for sonnet: 27 of 64 cases scored, zero 401s (it
+uses the server-side `create_evaluation_run` path, not `EvaluateInstances`). The retry
+budget from PR #16 took usable inference from 14/64 to 39/64. Nothing else from the local
+attempts should be trusted, and the `wrangler_v8` the first run wrote — the seed,
+recorded as an optimization result — was reverted rather than kept.
+
+**Sizing, for the next person.** ~100 metric calls per generation on a 49-case train set
+(102 in 602s, measured). The manifests' old 150 bought 1.5 generations. 800 buys ~8, in
+the region of the 150 minutes v4's one successful run took.
