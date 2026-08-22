@@ -329,3 +329,55 @@ recorded as an optimization result — was reverted rather than kept.
 **Sizing, for the next person.** ~100 metric calls per generation on a 49-case train set
 (102 in 602s, measured). The manifests' old 150 bought 1.5 generations. 800 buys ~8, in
 the region of the 150 minutes v4's one successful run took.
+
+### The measurement, 2026-08-22
+
+Three arms, identical 78-char seed, 800 metric calls, run as pipeline jobs.
+`gepa-run-2cb23b568f` / `d7677f2073` / `38d87b5b32`.
+
+| Arm | seed → optimized | optimize | cases before/after |
+| --- | --- | --- | --- |
+| sonnet | 78 → **5370** chars | 11.2h | 30 / 57 |
+| flash | 78 → **78** chars (unchanged) | 10.9h | 60 / 36 |
+| pro | 78 → **2489** chars | 9.6h | 58 / 62 |
+
+**GEPA did optimize — in two arms of three.** This is the first genuine prompt
+change since v4 in May, and it only happened once the budget actually reached the
+optimizer. Flash searched for 10.9 hours and still concluded nothing beat the seed.
+
+| metric | sonnet | flash *(prompt unchanged)* | pro |
+| --- | --- | --- | --- |
+| final_response_quality | 0.797→0.908 **+0.111** | 0.883→0.922 +0.039 | 0.868→0.902 +0.034 |
+| hallucination | 0.861→0.956 **+0.095** | 0.962→0.960 −0.002 | 0.968→0.952 −0.016 |
+| instruction_following | 0.690→0.789 **+0.099** | 0.845→0.826 −0.018 | 0.855→0.760 −0.095 |
+| safety | 0.943→0.956 +0.014 | 0.945→0.980 +0.035 | 0.885→0.967 **+0.082** |
+| tool_use_quality | 0.904→0.977 **+0.072** | 0.976→1.000 +0.024 | 0.981→0.976 −0.005 |
+
+**Read flash as the control, because that is what it accidentally is.** Its prompt is
+byte-identical before and after, so every one of its deltas is pure measurement noise:
+**up to +0.039**. That is the floor any claim has to clear.
+
+Against that floor:
+
+- **sonnet clears it on four metrics** (+0.111, +0.095, +0.099, +0.072). That is the
+  only arm where the change is larger than the noise across the board.
+- **pro clears it on safety only** (+0.082); its +0.034 on response quality is *inside*
+  flash's noise and should not be called an improvement.
+- **instruction_following is the one consistent worry**: sonnet +0.099 but pro −0.095.
+  A 5370-char and a 2489-char prompt disagreeing that sharply on the same metric is
+  worth understanding before either is trusted.
+
+Direction agreement across all three arms holds for **final_response_quality** and
+**safety** only — and flash moving on both while unchanged is exactly why agreement
+alone is not evidence.
+
+**What limits this measurement.** The before/after case counts are badly unbalanced —
+sonnet 30/57, flash 60/36 — and `per_case` rows carry **no case identifier**, so the two
+sides cannot be paired. Each delta therefore compares two different subsets of the 64
+cases. Per-metric coverage *within* each side is clean (every metric scored every case,
+so defect #7 is absent), but the between-side asymmetry is the dominant uncertainty and
+almost certainly explains most of flash's noise floor.
+
+**The single highest-value fix for the next run: give `per_case` a case id.** Paired
+before/after on the same cases would collapse that noise floor and make deltas this size
+readable. Everything else here is already good enough.

@@ -20,7 +20,7 @@ One topic per file. Keep this index under 200 lines — put detail in the topic 
 
 | Plan | Status |
 |------|--------|
-| [../plans/2026-08-20-repo-modernization.md](../plans/2026-08-20-repo-modernization.md) | Phases 0–2 done. Phase 3: 3.1–3.4 done — the smoke test ran end to end on 2026-08-21 and surfaced seven silent failures ([silent-failures.md](silent-failures.md)), six fixed. Baseline in [model-lifecycle.md](model-lifecycle.md); GEPA kept its seed prompt, so no prompt-change measurement yet. |
+| [../plans/2026-08-20-repo-modernization.md](../plans/2026-08-20-repo-modernization.md) | **Complete.** Phases 0–3 done. The final task — measure a real prompt change — landed 2026-08-22: a three-arm sweep (sonnet/flash/pro, identical seed and budget) produced GEPA's first genuine optimization since May. Flash returned its seed unchanged and so serves as a control, putting the noise floor at +0.039. Results and limits in [model-lifecycle.md](model-lifecycle.md). |
 
 ## Conventions for These Notes
 
