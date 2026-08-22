@@ -343,7 +343,10 @@ class TestPerCaseFallsBackToRawGcs:
 
         per_case = evaluator._extract_per_case_via_api(_StubRunWithSet())
 
-        assert per_case == [{"safety_v1": 1.0, "instruction_following_v1": 0.0}]
+        assert [evaluator.case_metrics(r) for r in per_case] == [
+            {"safety_v1": 1.0, "instruction_following_v1": 0.0}
+        ]
+        assert per_case[0][evaluator.CASE_INDEX_KEY] == 0, "rows must identify their case"
 
     def test_does_not_touch_gcs_when_the_sdk_parsed_fine(self, monkeypatch):
         """No extra read on the happy path — it is a per-item network call."""
@@ -363,7 +366,8 @@ class TestPerCaseFallsBackToRawGcs:
 
         monkeypatch.setattr(evaluator, "_read_raw_result", _boom)
 
-        assert evaluator._extract_per_case_via_api(_StubRunWithSet()) == [{"safety_v1": 1.0}]
+        got = evaluator._extract_per_case_via_api(_StubRunWithSet())
+        assert [evaluator.case_metrics(r) for r in got] == [{"safety_v1": 1.0}]
 
     def test_one_unreadable_file_does_not_sink_the_other_cases(self, monkeypatch):
         raw = {"candidateResults": [{"metric": "safety_v1", "score": 1.0}]}
@@ -381,12 +385,16 @@ class TestPerCaseFallsBackToRawGcs:
         monkeypatch.setattr(evaluator, "_read_raw_result", _read)
 
         per_case = evaluator._extract_per_case_via_api(_StubRunWithSet())
-        assert per_case == [{}, {"safety_v1": 1.0}]
+        assert [evaluator.case_metrics(r) for r in per_case] == [{}, {"safety_v1": 1.0}]
+        # Even the unreadable case keeps its identity, so it can be seen as
+        # missing from a pairing rather than vanishing silently.
+        assert [r[evaluator.CASE_INDEX_KEY] for r in per_case] == [0, 1]
 
     def test_item_with_no_gcs_uri_is_simply_empty(self, monkeypatch):
         items = {"item-1": _StubItem(None, types.EvaluationItemResult())}
         monkeypatch.setattr(evaluator, "Client", lambda **kw: _StubClient(items))
-        assert evaluator._extract_per_case_via_api(_StubRunWithSet()) == [{}]
+        got = evaluator._extract_per_case_via_api(_StubRunWithSet())
+        assert [evaluator.case_metrics(r) for r in got] == [{}]
 
 
 class TestMetricCoverage:
@@ -581,3 +589,58 @@ class TestEmptyEvalIsRefused:
         from wrangler.eval.evaluator import _assert_scorable
 
         _assert_scorable(self._df(["one", "two"]), tag="")
+
+
+class TestCaseIdentity:
+    """per_case rows must say *which* case they are, or before/after cannot pair.
+
+    The 2026-08-22 sweep scored 30 cases before and 57 after on one arm, 60/36
+    on another. Every delta therefore compared two different subsets of the 64,
+    and there was no way to line them up — the rows were bare {metric: score}
+    dicts with nothing identifying the case. That unpairing is the single
+    largest source of the measured +0.039 noise floor.
+    """
+
+    def test_reserved_key_is_not_treated_as_a_metric(self):
+        from wrangler.eval.evaluator import CASE_INDEX_KEY, case_metrics
+
+        row = {CASE_INDEX_KEY: 7, "safety_v1": 1.0, "hallucination_v1": 0.5}
+        assert case_metrics(row) == {"safety_v1": 1.0, "hallucination_v1": 0.5}
+
+    def test_coverage_ignores_the_case_index(self):
+        """Otherwise every row reports an extra 'metric' with perfect coverage."""
+        from wrangler.eval.evaluator import CASE_INDEX_KEY, _metric_coverage
+
+        pc = [{CASE_INDEX_KEY: 0, "safety_v1": 1.0}, {CASE_INDEX_KEY: 3, "safety_v1": 0.5}]
+        assert _metric_coverage(pc) == {"safety_v1": 2}
+
+    def test_pairing_matches_on_case_index(self):
+        from wrangler.eval.evaluator import CASE_INDEX_KEY, pair_per_case
+
+        before = [{CASE_INDEX_KEY: 0, "m": 0.4}, {CASE_INDEX_KEY: 2, "m": 0.6}]
+        after = [{CASE_INDEX_KEY: 2, "m": 0.9}, {CASE_INDEX_KEY: 5, "m": 0.1}]
+        paired = pair_per_case(before, after)
+        assert list(paired) == [2], "only case 2 appears on both sides"
+        assert paired[2] == ({"m": 0.6}, {"m": 0.9})
+
+    def test_pairing_is_empty_without_indices(self):
+        """Rows from before this change carry no index; pairing must not guess.
+
+        Falling back to positional matching would silently pair case 0 of one
+        subset with case 0 of a different subset — the exact error this exists
+        to prevent.
+        """
+        from wrangler.eval.evaluator import pair_per_case
+
+        assert pair_per_case([{"m": 0.4}], [{"m": 0.9}]) == {}
+
+    def test_paired_delta_uses_only_common_cases(self):
+        from wrangler.eval.evaluator import CASE_INDEX_KEY, paired_deltas
+
+        before = [{CASE_INDEX_KEY: 0, "m": 0.4}, {CASE_INDEX_KEY: 1, "m": 0.2}]
+        after = [{CASE_INDEX_KEY: 1, "m": 0.6}, {CASE_INDEX_KEY: 9, "m": 1.0}]
+        d = paired_deltas(before, after)
+        assert d["n_paired"] == 1
+        assert d["deltas"]["m"] == pytest.approx(0.4)
+        assert d["dropped_before"] == 1
+        assert d["dropped_after"] == 1

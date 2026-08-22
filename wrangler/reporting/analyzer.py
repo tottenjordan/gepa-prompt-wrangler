@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from ..core.models import blended_cost_for_report as blended_cost
+from ..eval.evaluator import paired_deltas
 
 if TYPE_CHECKING:
     from ..orchestration.experiment import Experiment
@@ -50,6 +51,22 @@ class PairAnalysis:
     @property
     def avg_after(self) -> float:
         return sum(self.after.values()) / max(len(self.after), 1)
+
+    @property
+    def paired(self) -> dict:
+        """Deltas over only the cases *both* eval sides scored.
+
+        ``deltas`` (above) subtracts two separately-averaged score sets. When
+        the two sides scored different case subsets — 30 before and 57 after on
+        one 2026-08-22 arm — that difference is partly sampling, not the prompt.
+        This compares like with like and reports how many cases each side
+        contributed that the other did not, so a paired delta over 12 of 64 is
+        not mistaken for one over 60.
+
+        Empty when the rows predate case indices; it does not fall back to
+        positional matching, which would silently compare different cases.
+        """
+        return paired_deltas(self.before_per_case, self.after_per_case)
 
     @property
     def is_control(self) -> bool:
@@ -425,6 +442,29 @@ def format_analysis_report(
     # --- Calibration, stated before any number the reader might act on ---
     lines.append("## Calibration\n")
     lines.append(analysis.calibration_note + "\n")
+
+    # Paired coverage: which deltas rest on a like-for-like comparison. The
+    # unpaired average subtracts two separately-scored subsets, which on the
+    # 2026-08-22 sweep meant 30 cases against 57.
+    paired_rows = [(p, p.paired) for p in analysis.pairs]
+    if any(pd["n_paired"] for _, pd in paired_rows):
+        lines.append("| Pair | Cases before | Cases after | Paired | Only before | Only after |")
+        lines.append("|------|-------------|------------|--------|-------------|------------|")
+        for pair, pd in paired_rows:
+            lines.append(
+                f"| {pair.pair_id} | {len(pair.before_per_case)} | {len(pair.after_per_case)} | "
+                f"**{pd['n_paired']}** | {pd['dropped_before']} | {pd['dropped_after']} |"
+            )
+        lines.append(
+            "\nDeltas below the paired column compare the *same* cases on both sides. "
+            "Where the paired count is much smaller than either side, treat the "
+            "unpaired averages as sampling noise rather than a prompt effect.\n"
+        )
+    else:
+        lines.append(
+            "_Per-case rows carry no case index, so before/after cannot be paired; "
+            "every delta below compares two different subsets._\n"
+        )
 
     # --- Aggregate summary ---
     lines.append("## Summary\n")

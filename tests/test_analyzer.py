@@ -372,3 +372,58 @@ class TestExperimentCalibration:
         flat = TestControlArmCalibration._pair("pro", {"a": 0.8}, {"a": 0.8}, opt="longer")
         e = self._exp([ctrl, flat])
         assert e.overall_improved is False
+
+
+class TestPairedDeltas:
+    """Deltas must come from cases both sides scored, not from two subsets.
+
+    sonnet's 2026-08-22 arm scored 30 cases before and 57 after. Averaging each
+    side separately and subtracting compares different samples and calls the
+    difference a prompt effect.
+    """
+
+    @staticmethod
+    def _pair_with(before_pc, after_pc):
+        from wrangler.reporting.analyzer import PairAnalysis
+
+        return PairAnalysis(
+            pair_id="p",
+            model="m",
+            before={"m": 0.5},
+            after={"m": 0.9},
+            before_per_case=before_pc,
+            after_per_case=after_pc,
+            original_prompt="seed",
+            optimized_prompt="longer",
+        )
+
+    def test_paired_delta_ignores_unmatched_cases(self):
+        from wrangler.eval.evaluator import CASE_INDEX_KEY
+
+        # Case 0 exists only before; case 9 only after. Only case 1 is comparable,
+        # and on it the metric got *worse* — the unpaired average hides that.
+        p = self._pair_with(
+            [{CASE_INDEX_KEY: 0, "m": 0.1}, {CASE_INDEX_KEY: 1, "m": 0.9}],
+            [{CASE_INDEX_KEY: 1, "m": 0.6}, {CASE_INDEX_KEY: 9, "m": 1.0}],
+        )
+        assert p.paired["n_paired"] == 1
+        assert p.paired["deltas"]["m"] == pytest.approx(-0.3)
+        assert p.paired["dropped_before"] == 1
+        assert p.paired["dropped_after"] == 1
+
+    def test_unpaired_average_would_have_disagreed(self):
+        """Guards the premise: the naive delta points the other way."""
+        from wrangler.eval.evaluator import CASE_INDEX_KEY
+
+        p = self._pair_with(
+            [{CASE_INDEX_KEY: 0, "m": 0.1}, {CASE_INDEX_KEY: 1, "m": 0.9}],
+            [{CASE_INDEX_KEY: 1, "m": 0.6}, {CASE_INDEX_KEY: 9, "m": 1.0}],
+        )
+        naive = (0.6 + 1.0) / 2 - (0.1 + 0.9) / 2
+        assert naive > 0
+        assert p.paired["deltas"]["m"] < 0
+
+    def test_no_indices_yields_no_pairing(self):
+        p = self._pair_with([{"m": 0.1}], [{"m": 0.9}])
+        assert p.paired["n_paired"] == 0
+        assert p.paired["deltas"] == {}
