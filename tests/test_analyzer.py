@@ -1,5 +1,7 @@
 """Tests for wrangler.reporting.analyzer — experiment analysis and report generation."""
 
+import pytest
+
 from wrangler.reporting.analyzer import (
     ExperimentAnalysis,
     GepaRunStats,
@@ -72,10 +74,20 @@ class TestPairAnalysis:
 
 
 class TestExperimentAnalysis:
-    def test_overall_improved_true(self):
+    """`overall_improved` now means "beyond the noise floor", not "went up".
+
+    It used to be `sum(after - before) > 0`, which calls any positive drift a
+    win. A control arm on 2026-08-22 drifted +0.039 without its prompt
+    changing, so that test would have reported pure noise as improvement.
+    These cases therefore need a control arm to return True at all.
+    """
+
+    def test_overall_improved_true_when_the_gain_clears_the_floor(self):
+        control = _make_pair(
+            before={"q": 0.70}, after={"q": 0.72}, original="same", optimized="same"
+        )
         p1 = _make_pair(before={"q": 0.5}, after={"q": 0.9})
-        p2 = _make_pair(before={"q": 0.7}, after={"q": 0.75})
-        ea = ExperimentAnalysis(experiment_name="test", pairs=[p1, p2])
+        ea = ExperimentAnalysis(experiment_name="test", pairs=[control, p1])
         assert ea.overall_improved is True
 
     def test_overall_improved_false(self):
@@ -248,3 +260,115 @@ class TestFormatToolAudit:
         lines = _format_tool_audit(analysis, stats)
         text = "\n".join(lines)
         assert "Tool Keyword Preservation" in text
+
+
+class TestControlArmCalibration:
+    """A delta is only an improvement if it beats the control arm's noise.
+
+    CLAUDE.md requires every sweep to carry an arm whose prompt does not
+    change. On 2026-08-22 such an arm moved response quality +0.039 and safety
+    +0.035 while being byte-identical before and after. Reporting a +0.034 gain
+    from another arm as an improvement — which the old hardcoded 0.005
+    threshold would have done — states as fact something indistinguishable
+    from nothing.
+    """
+
+    @staticmethod
+    def _pair(name, before, after, orig="seed", opt=None):
+        from wrangler.reporting.analyzer import PairAnalysis
+
+        return PairAnalysis(
+            pair_id=name,
+            model="m",
+            before=before,
+            after=after,
+            original_prompt=orig,
+            optimized_prompt=orig if opt is None else opt,
+        )
+
+    def test_an_unchanged_prompt_is_recognised_as_a_control(self):
+        ctrl = self._pair("flash", {"a": 0.9}, {"a": 0.94})
+        real = self._pair("sonnet", {"a": 0.8}, {"a": 0.9}, opt="a much longer prompt")
+        assert ctrl.is_control is True
+        assert real.is_control is False
+
+    def test_a_pair_with_no_prompts_recorded_is_not_a_control(self):
+        """Absent prompts must not masquerade as 'unchanged'."""
+        blank = self._pair("x", {"a": 0.9}, {"a": 0.9}, orig="", opt="")
+        assert blank.is_control is False
+
+    def test_noise_floor_is_the_largest_control_movement(self):
+        from wrangler.reporting.analyzer import measure_noise_floor
+
+        ctrl = self._pair("flash", {"a": 0.9, "b": 0.5}, {"a": 0.939, "b": 0.48})
+        real = self._pair("sonnet", {"a": 0.8}, {"a": 0.99}, opt="longer")
+        assert measure_noise_floor([ctrl, real]) == pytest.approx(0.039)
+
+    def test_no_control_arm_returns_none_not_zero(self):
+        """None means 'uncalibrated'. Zero would mean 'no noise', which is a lie."""
+        from wrangler.reporting.analyzer import measure_noise_floor
+
+        real = self._pair("sonnet", {"a": 0.8}, {"a": 0.9}, opt="longer")
+        assert measure_noise_floor([real]) is None
+
+    def test_deltas_inside_the_floor_are_not_improvements(self):
+        from wrangler.reporting.analyzer import classify_deltas
+
+        real = self._pair("pro", {"a": 0.868, "b": 0.885}, {"a": 0.902, "b": 0.967}, opt="longer")
+        got = classify_deltas(real, floor=0.039)
+        assert got["a"] == "within-noise", "+0.034 is below the 0.039 floor"
+        assert got["b"] == "improved", "+0.082 clears it"
+
+    def test_regressions_are_held_to_the_same_floor(self):
+        from wrangler.reporting.analyzer import classify_deltas
+
+        p = self._pair("pro", {"a": 0.855, "b": 0.981}, {"a": 0.760, "b": 0.976}, opt="longer")
+        got = classify_deltas(p, floor=0.039)
+        assert got["a"] == "regressed", "-0.095 clears the floor"
+        assert got["b"] == "within-noise", "-0.005 does not"
+
+    def test_without_a_floor_everything_is_uncalibrated(self):
+        from wrangler.reporting.analyzer import classify_deltas
+
+        p = self._pair("sonnet", {"a": 0.8}, {"a": 0.99}, opt="longer")
+        assert set(classify_deltas(p, floor=None).values()) == {"uncalibrated"}
+
+
+class TestExperimentCalibration:
+    """The sweep-level verdict must respect the noise floor too."""
+
+    @staticmethod
+    def _exp(pairs):
+        from wrangler.reporting.analyzer import ExperimentAnalysis
+
+        return ExperimentAnalysis(experiment_name="sweep", pairs=pairs)
+
+    def test_overall_improved_is_false_without_a_control(self):
+        """No control arm means no basis for the claim — not an optimistic guess."""
+        p = TestControlArmCalibration._pair("sonnet", {"a": 0.8}, {"a": 0.99}, opt="longer")
+        e = self._exp([p])
+        assert e.noise_floor is None
+        assert e.overall_improved is False
+        assert "UNCALIBRATED" in e.calibration_note
+
+    def test_drift_smaller_than_the_floor_is_not_an_improvement(self):
+        ctrl = TestControlArmCalibration._pair("flash", {"a": 0.9}, {"a": 0.94})
+        real = TestControlArmCalibration._pair("pro", {"a": 0.868}, {"a": 0.902}, opt="longer")
+        e = self._exp([ctrl, real])
+        assert e.noise_floor == pytest.approx(0.04)
+        assert e.overall_improved is False, "+0.034 must not beat a 0.040 floor"
+
+    def test_a_gain_beyond_the_floor_counts(self):
+        ctrl = TestControlArmCalibration._pair("flash", {"a": 0.9}, {"a": 0.94})
+        real = TestControlArmCalibration._pair("sonnet", {"a": 0.8}, {"a": 0.99}, opt="longer")
+        e = self._exp([ctrl, real])
+        assert e.overall_improved is True
+        assert "Noise floor" in e.calibration_note
+        assert "flash" in e.calibration_note
+
+    def test_the_control_arm_does_not_inflate_the_verdict(self):
+        """Its own drift must be excluded from the gain it is calibrating."""
+        ctrl = TestControlArmCalibration._pair("flash", {"a": 0.5}, {"a": 0.54})
+        flat = TestControlArmCalibration._pair("pro", {"a": 0.8}, {"a": 0.8}, opt="longer")
+        e = self._exp([ctrl, flat])
+        assert e.overall_improved is False

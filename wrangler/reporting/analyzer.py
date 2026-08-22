@@ -52,6 +52,17 @@ class PairAnalysis:
         return sum(self.after.values()) / max(len(self.after), 1)
 
     @property
+    def is_control(self) -> bool:
+        """True when this arm's prompt did not change.
+
+        Such an arm measures the noise floor: whatever its scores do between
+        before and after, they did it without the prompt changing. Requires a
+        non-empty prompt on both sides so that a pair with nothing recorded
+        cannot masquerade as 'unchanged'.
+        """
+        return bool(self.original_prompt) and self.original_prompt == self.optimized_prompt
+
+    @property
     def improved_metrics(self) -> list[str]:
         return [m for m, d in self.deltas.items() if d > 0.005]
 
@@ -79,8 +90,42 @@ class ExperimentAnalysis:
     thresholds: dict[str, float] = field(default_factory=dict)
 
     @property
+    def noise_floor(self) -> float | None:
+        """Largest movement from an arm whose prompt did not change, or None."""
+        return measure_noise_floor(self.pairs)
+
+    @property
     def overall_improved(self) -> bool:
-        return sum(p.avg_after - p.avg_before for p in self.pairs) > 0
+        """Did the sweep improve *beyond what an unchanged prompt achieves*?
+
+        This used to be `sum(after - before) > 0`, which reports an improvement
+        for any positive drift at all. On 2026-08-22 an arm whose prompt was
+        byte-identical before and after drifted +0.039, so that test would have
+        called pure noise a win. With no control arm present there is no basis
+        for the claim, and it returns False rather than guessing.
+        """
+        floor = self.noise_floor
+        if floor is None:
+            return False
+        gain = sum(p.avg_after - p.avg_before for p in self.pairs if not p.is_control)
+        return gain > floor
+
+    @property
+    def calibration_note(self) -> str:
+        """One line stating what the sweep's numbers can support."""
+        floor = self.noise_floor
+        if floor is None:
+            return (
+                "**UNCALIBRATED** — this sweep has no control arm, so no delta here can be "
+                "distinguished from measurement noise. CLAUDE.md requires an arm whose prompt "
+                "does not change; add one before reporting any of these as improvements."
+            )
+        controls = ", ".join(p.pair_id for p in self.pairs if p.is_control)
+        return (
+            f"Noise floor **{floor:+.3f}**, measured from the control arm(s) ({controls}) whose "
+            f"prompt did not change. Only deltas larger than this are improvements or "
+            f"regressions; anything smaller is indistinguishable from noise."
+        )
 
 
 def analyze_experiment(exp: Experiment) -> ExperimentAnalysis:
@@ -125,6 +170,45 @@ def analyze_experiment(exp: Experiment) -> ExperimentAnalysis:
         analysis.pairs.append(pa)
 
     return analysis
+
+
+def measure_noise_floor(pairs: list) -> float | None:
+    """Largest movement shown by any arm whose prompt did not change.
+
+    That movement happened with the prompt held constant, so it is measurement
+    noise — differing case subsets between the two eval sides, mostly (see
+    docs/notes/silent-failures.md #5). Any real arm's delta has to beat it to
+    mean anything.
+
+    Returns ``None``, not ``0.0``, when the sweep has no control arm. Zero
+    would assert that there is no noise, which is the claim this exists to
+    stop anyone making by accident. CLAUDE.md requires a control arm in every
+    sweep for exactly this reason.
+    """
+    controls = [p for p in pairs if getattr(p, "is_control", False)]
+    if not controls:
+        return None
+    movements = [abs(d) for p in controls for d in p.deltas.values()]
+    return max(movements) if movements else None
+
+
+def classify_deltas(pair, floor: float | None) -> dict[str, str]:
+    """Label each metric's change against the measured noise floor.
+
+    ``improved`` / ``regressed`` mean the change is larger than anything the
+    control arm produced without changing its prompt. ``within-noise`` means it
+    is not, whatever its sign. ``uncalibrated`` means the sweep had no control
+    arm, so the honest answer is that we cannot tell.
+    """
+    if floor is None:
+        return dict.fromkeys(pair.deltas, "uncalibrated")
+    out = {}
+    for metric, delta in pair.deltas.items():
+        if abs(delta) <= floor:
+            out[metric] = "within-noise"
+        else:
+            out[metric] = "improved" if delta > 0 else "regressed"
+    return out
 
 
 def _prompt_diff_summary(original: str, optimized: str) -> str:
@@ -338,13 +422,28 @@ def format_analysis_report(
     lines.append(f"# Analysis Report — {analysis.experiment_name}\n")
     lines.append(f"Generated: {datetime.now(tz=UTC).isoformat(timespec='seconds')}\n")
 
+    # --- Calibration, stated before any number the reader might act on ---
+    lines.append("## Calibration\n")
+    lines.append(analysis.calibration_note + "\n")
+
     # --- Aggregate summary ---
     lines.append("## Summary\n")
     lines.append("| Pair | Model | Avg Before | Avg After | Delta | Verdict |")
     lines.append("|------|-------|-----------|----------|-------|---------|")
+    # A hardcoded +/-0.005 band would call a 0.039 drift an improvement. Judge
+    # against the control arm instead, and say "uncalibrated" when there is none
+    # rather than inventing a verdict. See CLAUDE.md, control-arm rule.
+    floor = analysis.noise_floor
     for p in analysis.pairs:
         delta = p.avg_after - p.avg_before
-        verdict = "improved" if delta > 0.005 else "regressed" if delta < -0.005 else "unchanged"
+        if p.is_control:
+            verdict = "control (unchanged prompt)"
+        elif floor is None:
+            verdict = "uncalibrated"
+        elif abs(delta) <= floor:
+            verdict = "within noise"
+        else:
+            verdict = "improved" if delta > 0 else "regressed"
         lines.append(
             f"| {p.pair_id} | {p.model} "
             f"| {p.avg_before:.3f} | {p.avg_after:.3f} "
