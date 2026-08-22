@@ -11,6 +11,11 @@ pairs:
     model: "gemini-3.5-flash"
     description: "Gemini 3.5 Flash — optimized"
     agent_module: "examples/multi_model_agents/agents/flash_agent"
+    # The 78-char generic seed, deliberately. GEPA has produced a prompt change
+    # exactly once (wrangler_v4, 2026-05-30) and that run started here, from
+    # maximum headroom. The three runs that started from an already-optimized
+    # prompt all returned it unchanged. Held identical across the sonnet, flash
+    # and pro arms so the model is the only factor that varies.
     system_prompt: "You are a helpful assistant. Use the available tools to answer user questions."
 
 eval_config:
@@ -20,3 +25,8 @@ eval_config:
 pipeline:
   secret_id: wrangler-agent-env
   cache_bust: "v7"
+  # ~100 metric calls per generation on a 49-case train set (measured
+  # 2026-08-21: generation 1 used 102 calls in 602s). 800 buys roughly eight
+  # generations, i.e. an actual search. The previous 150 bought 1.5 -- one
+  # random draw of variants, which is why GEPA kept returning its seed.
+  max_metric_calls: 800

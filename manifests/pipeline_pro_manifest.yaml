@@ -1,21 +1,22 @@
-name: "pipeline-sonnet-optimize"
+name: "pipeline-pro-optimize"
 description: >
-  Full optimization run — claude-sonnet-4-6 on 64 eval cases with
-  tightened thresholds and rich seed prompt.
+  Full optimization run — gemini-3.1-pro-preview on 64 eval cases, generic seed.
+  Third arm of the 2026-08-21 measurement sweep; see the sonnet and flash
+  manifests, which carry the identical seed and metric-call budget so that the
+  model is the only factor that varies between arms.
 
-agent_module: "examples/multi_model_agents/agents/sonnet_agent"
+agent_module: "examples/multi_model_agents/agents/pro_agent"
 eval_data: "examples/multi_model_agents/eval_data/eval_cases.yaml"
 
 pairs:
-  - id: "sonnet"
-    model: "claude-sonnet-4-6"
-    description: "Claude Sonnet 4.6 — optimized"
-    agent_module: "examples/multi_model_agents/agents/sonnet_agent"
+  - id: "pro"
+    model: "gemini-3.1-pro-preview"
+    description: "Gemini 3.1 Pro — optimized"
+    agent_module: "examples/multi_model_agents/agents/pro_agent"
     # The 78-char generic seed, deliberately. GEPA has produced a prompt change
     # exactly once (wrangler_v4, 2026-05-30) and that run started here, from
     # maximum headroom. The three runs that started from an already-optimized
-    # prompt all returned it unchanged. Held identical across the sonnet, flash
-    # and pro arms so the model is the only factor that varies.
+    # prompt all returned it unchanged.
     system_prompt: "You are a helpful assistant. Use the available tools to answer user questions."
 
 eval_config:
@@ -24,7 +25,7 @@ eval_config:
 
 pipeline:
   secret_id: wrangler-agent-env
-  cache_bust: "v3"
+  cache_bust: "v8"
   # ~100 metric calls per generation on a 49-case train set (measured
   # 2026-08-21: generation 1 used 102 calls in 602s). 800 buys roughly eight
   # generations, i.e. an actual search. The previous 150 bought 1.5 -- one

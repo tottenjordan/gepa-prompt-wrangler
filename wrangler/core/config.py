@@ -15,6 +15,31 @@ from .models import (
 
 load_dotenv()
 
+# --- API-key vs ADC: they are mutually exclusive, and the key wins by default ---
+#
+# A GOOGLE_API_KEY / GEMINI_API_KEY in the environment makes google-genai
+# authenticate by API key. Vertex AI's EvaluationService does not accept one:
+#
+#   401 UNAUTHENTICATED. API keys are not supported by this API. Expected
+#   OAuth2 access token ... method: EvaluationService.EvaluateInstances
+#
+# On 2026-08-21 that killed a four-hour, 85-generation GEPA run — 754 of them,
+# starting at the very first metric call, so every candidate was scored against
+# a failing service. The run would have finished and produced a confident,
+# meaningless "optimized" prompt.
+#
+# CLAUDE.md already required this pop and `wrangler/pipeline/components.py`
+# does it (twice); the local CLI path never did, so only pipeline runs were
+# protected. Popping here covers every local entry point at import.
+#
+# The key is not discarded — PaperBanana genuinely needs it, and it talks to
+# the Gemini Developer API where an API key is the *correct* credential. It is
+# stashed below so `wrangler/reporting/charts.py` can hand it to that
+# subprocess explicitly, which is the only place it should ever reach.
+PAPERBANANA_API_KEY = os.environ.get("GOOGLE_API_KEY") or os.environ.get("GEMINI_API_KEY", "")
+for _key_var in ("GOOGLE_API_KEY", "GEMINI_API_KEY"):
+    os.environ.pop(_key_var, None)
+
 # --- GCP Settings ---
 GCP_PROJECT_ID = os.environ.get("GCP_PROJECT_ID", "")
 GCP_REGION = os.environ.get("GCP_REGION", "us-central1")

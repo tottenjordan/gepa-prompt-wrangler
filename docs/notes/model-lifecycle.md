@@ -282,3 +282,102 @@ as fabricated. Fetch `ai.google.dev` directly instead.
   necessary for every Gemini 3 judge.
 - **Decide on the vacuous `correct_parameters` rubric.** Changing it changes GEPA's
   optimization target, so it wants an explicit decision rather than a drive-by fix.
+
+## Measurement sweep, 2026-08-22 — three blockers found before any number
+
+The modernization plan's final task (measure a real prompt change) ran into three
+defects in a row, each of which silently invalidated the attempt before it. All three
+are fixed; the sweep itself is running as three pipeline jobs.
+
+**1. `wrangler eval -n 1` was ignored.** The option defaulted to 1 and the call site read
+`num_runs if num_runs > 1 else None`, so passing 1 was indistinguishable from passing
+nothing and fell through to the experiment's 3. A 64-case pilot quietly became 192.
+
+**2. GEPA's budget never reached the local optimizer.** `stage_optimize` called
+`optimize()` without `max_metric_calls`, so it used ADK's default of 100 — and one
+generation over the 49-case train set costs ~100. GEPA got a single random draw of
+variants and returned the seed whenever none beat it. Measured: `Max metric calls: 100`,
+`Total metric calls: 102`, one generation, 10 minutes, best variant = the 78-char seed.
+The budget was unreachable by construction: `Manifest` did not parse the `pipeline:`
+block and `Experiment.create` dropped it, so only the KFP path could ever set it.
+
+This is the likely explanation for the historical record — v5, v6 and v7 are
+byte-identical to v4 in all five prompt registries. Three "optimization" runs that
+produced nothing new.
+
+**3. An API key in the environment invalidated every GEPA score.** With the budget
+fixed, the re-run reached 85 generations over four hours — and was scoring against
+nothing the whole time:
+
+```
+401 UNAUTHENTICATED. API keys are not supported by this API.
+method: EvaluationService.EvaluateInstances
+```
+
+754 of them, the first at the very start. `GOOGLE_API_KEY`/`GEMINI_API_KEY` make
+google-genai prefer API-key auth, which Vertex's EvaluationService rejects. CLAUDE.md
+already required popping them and `pipeline/components.py` does it twice — the local CLI
+path never did. So **only pipeline runs were ever protected**, which is a strong argument
+for running optimization there rather than locally.
+
+**What is valid so far.** `eval_before` for sonnet: 27 of 64 cases scored, zero 401s (it
+uses the server-side `create_evaluation_run` path, not `EvaluateInstances`). The retry
+budget from PR #16 took usable inference from 14/64 to 39/64. Nothing else from the local
+attempts should be trusted, and the `wrangler_v8` the first run wrote — the seed,
+recorded as an optimization result — was reverted rather than kept.
+
+**Sizing, for the next person.** ~100 metric calls per generation on a 49-case train set
+(102 in 602s, measured). The manifests' old 150 bought 1.5 generations. 800 buys ~8, in
+the region of the 150 minutes v4's one successful run took.
+
+### The measurement, 2026-08-22
+
+Three arms, identical 78-char seed, 800 metric calls, run as pipeline jobs.
+`gepa-run-2cb23b568f` / `d7677f2073` / `38d87b5b32`.
+
+| Arm | seed → optimized | optimize | cases before/after |
+| --- | --- | --- | --- |
+| sonnet | 78 → **5370** chars | 11.2h | 30 / 57 |
+| flash | 78 → **78** chars (unchanged) | 10.9h | 60 / 36 |
+| pro | 78 → **2489** chars | 9.6h | 58 / 62 |
+
+**GEPA did optimize — in two arms of three.** This is the first genuine prompt
+change since v4 in May, and it only happened once the budget actually reached the
+optimizer. Flash searched for 10.9 hours and still concluded nothing beat the seed.
+
+| metric | sonnet | flash *(prompt unchanged)* | pro |
+| --- | --- | --- | --- |
+| final_response_quality | 0.797→0.908 **+0.111** | 0.883→0.922 +0.039 | 0.868→0.902 +0.034 |
+| hallucination | 0.861→0.956 **+0.095** | 0.962→0.960 −0.002 | 0.968→0.952 −0.016 |
+| instruction_following | 0.690→0.789 **+0.099** | 0.845→0.826 −0.018 | 0.855→0.760 −0.095 |
+| safety | 0.943→0.956 +0.014 | 0.945→0.980 +0.035 | 0.885→0.967 **+0.082** |
+| tool_use_quality | 0.904→0.977 **+0.072** | 0.976→1.000 +0.024 | 0.981→0.976 −0.005 |
+
+**Read flash as the control, because that is what it accidentally is.** Its prompt is
+byte-identical before and after, so every one of its deltas is pure measurement noise:
+**up to +0.039**. That is the floor any claim has to clear.
+
+Against that floor:
+
+- **sonnet clears it on four metrics** (+0.111, +0.095, +0.099, +0.072). That is the
+  only arm where the change is larger than the noise across the board.
+- **pro clears it on safety only** (+0.082); its +0.034 on response quality is *inside*
+  flash's noise and should not be called an improvement.
+- **instruction_following is the one consistent worry**: sonnet +0.099 but pro −0.095.
+  A 5370-char and a 2489-char prompt disagreeing that sharply on the same metric is
+  worth understanding before either is trusted.
+
+Direction agreement across all three arms holds for **final_response_quality** and
+**safety** only — and flash moving on both while unchanged is exactly why agreement
+alone is not evidence.
+
+**What limits this measurement.** The before/after case counts are badly unbalanced —
+sonnet 30/57, flash 60/36 — and `per_case` rows carry **no case identifier**, so the two
+sides cannot be paired. Each delta therefore compares two different subsets of the 64
+cases. Per-metric coverage *within* each side is clean (every metric scored every case,
+so defect #7 is absent), but the between-side asymmetry is the dominant uncertainty and
+almost certainly explains most of flash's noise floor.
+
+**The single highest-value fix for the next run: give `per_case` a case id.** Paired
+before/after on the same cases would collapse that noise floor and make deltas this size
+readable. Everything else here is already good enough.
