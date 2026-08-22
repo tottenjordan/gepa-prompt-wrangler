@@ -32,11 +32,22 @@ GCS_EVAL_DEST = f"gs://{GCP_STAGING_BUCKET}/eval-results"
 MAX_POLL_SECONDS = 2400
 
 # Attempts per eval case, initial inference included. GEAP drops ~3 of every 4
-# requests on a booting worker (silent-failures.md #5), so at p~0.25 a single
-# attempt lands ~25% of cases and two land ~44% -- which is why the old
-# one-retry behaviour recovered 0 of 9 on a real run. Six lands ~82%, matching
-# the value `wrangler/tools/traffic.py` arrived at by measurement.
-_INFERENCE_MAX_ATTEMPTS = 6
+# requests on a booting worker (silent-failures.md #5), so at p~0.25:
+#
+#     attempts   1     2     3     6     10    12
+#     coverage   25%   44%   58%   82%   94%   97%
+#
+# Six was chosen to match `wrangler/tools/traffic.py`, whose job is only to emit
+# some traces. Eval has a stricter requirement: *both* sides must score the same
+# cases or the delta compares different subsets. The 2026-08-22 sweep landed
+# 30/64 and 57/64 on one arm, leaving 23 paired -- and 82% per side implies only
+# ~67% expected overlap, which is the arithmetic behind that.
+#
+# Ten pushes per-side coverage to ~94% and expected overlap to ~88%. Attempts are
+# spent only on cases still failing and each pass shrinks, so the cost falls on
+# the runs that need it. Raise further only with a measurement: past ~12 the
+# curve flattens and the wall-clock does not.
+_INFERENCE_MAX_ATTEMPTS = 10
 
 # Explicit tool-use criteria, mirroring the GEPA sampler_config's
 # rubric_based_tool_use_quality_v1 rubrics (correct_tool_selection +
