@@ -86,6 +86,8 @@ class TestPidReuse:
 
 
 class TestWorkerTimelines:
+    """A PID maps to a *list* of incarnations, one per `Started server process`."""
+
     def test_first_seen_and_startup_complete(self):
         entries = [
             _entry(0, 100, "Started server process [100]"),
@@ -93,12 +95,20 @@ class TestWorkerTimelines:
             _entry(9, 100, "MCP summary: 3 OK, 0 failed"),
         ]
         workers = bpj.build_worker_timelines(entries)
-        assert workers[100].first_seen == _ts(0)
-        assert workers[100].startup_complete == _ts(3)
+        assert len(workers[100]) == 1
+        assert workers[100][0].first_seen == _ts(0)
+        assert workers[100][0].startup_complete == _ts(3)
 
     def test_a_worker_that_never_finished_booting_has_no_completion(self):
         workers = bpj.build_worker_timelines([_entry(0, 100, "Started server process [100]")])
-        assert workers[100].startup_complete is None
+        assert workers[100][0].startup_complete is None
+
+    def test_a_restart_opens_a_second_incarnation(self):
+        entries = [
+            _entry(0, 19, "Started server process [19]"),
+            _entry(100, 19, "Started server process [19]"),
+        ]
+        assert len(bpj.build_worker_timelines(entries)[19]) == 2
 
 
 class TestJoin:
@@ -217,6 +227,93 @@ class TestDoseResponse:
         assert 0.0 <= curve[0]["ci_low"] <= curve[0]["ci_high"] <= 1.0
 
 
+class TestIncarnations:
+    """PID reuse must not corrupt worker age.
+
+    Measured 2026-08-23: a 30-minute window on a settled engine had zero reused
+    PIDs, but the first hour of a freshly-deployed one had ten. Taking a PID's
+    *first* log line as its birth therefore ages a recycled PID from the wrong
+    container -- by minutes. Anchoring on the most recent `Started server
+    process` at or before the request fixes it, and turns PID reuse from a
+    disqualifier into a fact about the window.
+    """
+
+    def test_age_uses_the_most_recent_start_for_that_pid(self):
+        entries = [
+            _entry(0, 19, "Started server process [19]"),
+            _entry(1, 19, "Application startup complete."),
+            _entry(100, 19, "Started server process [19]"),
+            _entry(101, 19, "Application startup complete."),
+            _entry(104, 19, '10.0.0.1:1 - "POST /api/stream_reasoning_engine HTTP/1.1" 200 OK'),
+        ]
+        joined = bpj.join_rows([_row(103, 108)], entries)
+        assert joined[0]["worker_age_s"] == 4.0
+
+    def test_boot_state_uses_the_matching_incarnation(self):
+        """An earlier incarnation's completed boot must not vouch for a new one."""
+        entries = [
+            _entry(0, 19, "Started server process [19]"),
+            _entry(1, 19, "Application startup complete."),
+            _entry(100, 19, "Started server process [19]"),
+            _entry(102, 19, '10.0.0.1:1 - "POST /api/stream_reasoning_engine HTTP/1.1" 200 OK'),
+        ]
+        joined = bpj.join_rows([_row(101, 106)], entries)
+        assert joined[0]["booted_before_request"] is False
+
+    def test_a_worker_with_no_start_line_in_the_window_is_flagged(self):
+        """It booted before the lead-in, so its age is a lower bound, not a fact."""
+        entries = [
+            _entry(0, 19, "Application startup complete."),
+            _entry(10, 19, '10.0.0.1:1 - "POST /api/stream_reasoning_engine HTTP/1.1" 200 OK'),
+        ]
+        joined = bpj.join_rows([_row(9, 14)], entries)
+        assert joined[0]["worker_age_is_lower_bound"] is True
+
+
+class TestNonceJoin:
+    """The authoritative per-request join, found 2026-08-23.
+
+    GEAP emits a structured log stream (`reasoning_engine_stdout`) whose labels
+    carry `user.id` and the full input/output messages. The probe puts its
+    nonce in the user id, so "did this exact request reach the model" stops
+    being an inference from co-occurring PIDs and becomes a lookup.
+
+    Verified on the gate run: of three attempts, only the one that returned
+    events appeared in the stream. The other two produced a 200 and no
+    inference was ever performed for them.
+    """
+
+    def test_a_served_user_id_means_the_model_was_reached(self):
+        entries = [_entry(10, 100, '10.0.0.1:1 - "POST /api/stream_reasoning_engine" 200 OK')]
+        rows = [_row(9, 14, user_id="probe-abc123")]
+        joined = bpj.join_rows(rows, entries, served_user_ids={"probe-abc123"})
+        assert joined[0]["reached_model"] is True
+        assert joined[0]["model_join"] == "user_id"
+
+    def test_an_absent_user_id_means_it_did_not(self):
+        entries = [_entry(10, 100, '10.0.0.1:1 - "POST /api/stream_reasoning_engine" 200 OK')]
+        rows = [_row(9, 14, user_id="probe-abc123")]
+        joined = bpj.join_rows(rows, entries, served_user_ids=set())
+        assert joined[0]["reached_model"] is False
+        assert joined[0]["model_join"] == "user_id"
+
+    def test_the_user_id_join_works_even_when_the_pid_join_fails(self):
+        """The two are independent, which is the point of having both."""
+        rows = [_row(9, 14, user_id="probe-abc123")]
+        joined = bpj.join_rows(rows, [], served_user_ids={"probe-abc123"})
+        assert joined[0]["joinable"] is False
+        assert joined[0]["reached_model"] is True
+
+    def test_falls_back_to_log_patterns_when_no_user_ids_are_supplied(self):
+        entries = [
+            _entry(10, 100, '10.0.0.1:1 - "POST /api/stream_reasoning_engine" 200 OK'),
+            _entry(12, 100, "Received response from Claude."),
+        ]
+        joined = bpj.join_rows([_row(9, 14)], entries)
+        assert joined[0]["reached_model"] is True
+        assert joined[0]["model_join"] == "log_pattern"
+
+
 class TestJoinSummary:
     def test_reports_the_unjoinable_fraction(self):
         rows = [{"joinable": True}, {"joinable": True}, {"joinable": False}]
@@ -225,10 +322,23 @@ class TestJoinSummary:
         assert summary["unjoinable"] == 1
         assert summary["join_rate"] == 2 / 3
 
-    def test_pid_reuse_makes_the_join_unsound(self):
+    def test_pid_reuse_is_reported_but_no_longer_disqualifying(self):
+        """Incarnations handle a recycled PID; the count stays visible as context."""
         summary = bpj.join_summary([{"joinable": True}], pid_reuse=3)
-        assert summary["join_sound"] is False
-
-    def test_no_pid_reuse_makes_the_join_sound(self):
-        summary = bpj.join_summary([{"joinable": True}], pid_reuse=0)
+        assert summary["pid_reuse"] == 3
         assert summary["join_sound"] is True
+
+    def test_a_lower_bound_age_makes_the_join_unsound(self):
+        """Its start line fell outside the window, so the age is not a measurement."""
+        summary = bpj.join_summary(
+            [{"joinable": True, "worker_age_is_lower_bound": True}], pid_reuse=0
+        )
+        assert summary["join_sound"] is False
+        assert summary["ages_lower_bound"] == 1
+
+    def test_measured_ages_make_the_join_sound(self):
+        summary = bpj.join_summary(
+            [{"joinable": True, "worker_age_is_lower_bound": False}], pid_reuse=0
+        )
+        assert summary["join_sound"] is True
+        assert summary["ages_measured"] == 1
