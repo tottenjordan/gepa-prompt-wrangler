@@ -176,6 +176,10 @@ class EvalResult:
     # How many cases each metric actually scored. Defaults empty so existing
     # constructions are unaffected. See _coverage_warning for why it matters.
     coverage: dict[str, int] = field(default_factory=dict)
+    # submitted / scored / source, where source names the extraction path that
+    # produced `per_case`. Read this before treating a run as evidence that the
+    # scoring-loss recovery works: "sdk" means the recovery never fired.
+    scoring: dict[str, object] = field(default_factory=dict)
 
 
 def _build_eval_dataset(cases: list[dict]) -> pd.DataFrame:
@@ -238,7 +242,9 @@ def _extract_aggregate_scores(evaluation_run) -> dict[str, float]:
     return scores
 
 
-def _extract_per_case_scores(evaluation_run, expected: int | None = None) -> list[dict[str, float]]:
+def _extract_per_case_scores(
+    evaluation_run, expected: int | None = None
+) -> tuple[list[dict[str, float]], str]:
     """Extract per-case metric scores from evaluation run results.
 
     Primary path: evaluation_item_results.eval_case_results[i]
@@ -249,6 +255,12 @@ def _extract_per_case_scores(evaluation_run, expected: int | None = None) -> lis
     evaluation_run_results.evaluation_set is missing. When that
     happens, fall back to fetching evaluation items directly via
     the API client.
+
+    Returns ``(rows, source)`` where source is ``"sdk"`` or
+    ``"gcs_recovery"``. The caller records it in the saved artifact: the
+    2026-08-23 control run could only be read back through the *shape* of its
+    rows, because the one statement of which path ran was a print to a log
+    that no longer existed by the time anyone looked.
     """
     per_case: list[dict[str, float]] = []
     try:
@@ -259,12 +271,13 @@ def _extract_per_case_scores(evaluation_run, expected: int | None = None) -> lis
                 print(
                     "  Warning: evaluation_item_results is None and API fallback returned no results"
                 )
-            return per_case
+                return per_case, "sdk"
+            return per_case, "gcs_recovery"
 
         case_results = getattr(item_results, "eval_case_results", None)
         if not case_results:
             print("  Warning: eval_case_results is empty")
-            return per_case
+            return per_case, "sdk"
 
         for position, case_result in enumerate(case_results):
             # eval_case_index is the case's position in the eval set and is what
@@ -310,13 +323,13 @@ def _extract_per_case_scores(evaluation_run, expected: int | None = None) -> lis
         recovered = _extract_per_case_via_api(evaluation_run)
         if len(recovered) > len(per_case):
             print(f"  Recovered {len(recovered)}/{expected} cases from GCS", flush=True)
-            return recovered
+            return recovered, "gcs_recovery"
         print(
             f"  GCS recovery returned {len(recovered)}; keeping {len(per_case)}. "
             f"{expected - len(per_case)} case(s) remain unscored.",
             flush=True,
         )
-    return per_case
+    return per_case, "sdk"
 
 
 def _scores_from_raw_result(raw: dict) -> tuple[dict[str, float], list[str]]:
@@ -882,9 +895,8 @@ def run_batch_eval(
     # `expected` is the number of rows actually submitted for scoring, so a
     # case dropped between submission and result is detected rather than
     # silently reducing the denominator.
-    per_case = _extract_per_case_scores(
-        evaluation_run, expected=len(inference_result.eval_dataset_df)
-    )
+    submitted = len(inference_result.eval_dataset_df)
+    per_case, scoring_source = _extract_per_case_scores(evaluation_run, expected=submitted)
     for case_scores in per_case:
         # Same single-tool-use-metric clobber assumption as above.
         if _TOOL_USE_METRIC_NAME in case_scores:
@@ -902,7 +914,13 @@ def run_batch_eval(
     )
     for line in _coverage_warning(coverage, len(per_case)):
         print(line, flush=True)
-    return EvalResult(scores=scores, per_case=per_case, token_usage=token_usage, coverage=coverage)
+    return EvalResult(
+        scores=scores,
+        per_case=per_case,
+        token_usage=token_usage,
+        coverage=coverage,
+        scoring={"submitted": submitted, "scored": len(per_case), "source": scoring_source},
+    )
 
 
 def run_batch_eval_averaged(
@@ -1011,6 +1029,8 @@ def save_eval_results(
     phase: str = "baseline",
     output_dir: str | None = None,
     per_case: list[dict] | None = None,
+    coverage: dict[str, int] | None = None,
+    scoring: dict[str, object] | None = None,
 ) -> str:
     """Save eval results to JSON. Returns the file path.
 
@@ -1020,6 +1040,12 @@ def save_eval_results(
     control arm on 2026-08-22 produced an apparent +0.180 spread on an
     unchanged prompt with no way to tell how much was sampling. With the rows
     kept, `paired_deltas()` can compare the cases both runs actually scored.
+
+    ``coverage`` and ``scoring`` are the same argument one level up: without
+    them the file says how each case scored but not how many cases were
+    submitted, how many each metric reached, or which extraction path
+    produced the rows — so a run cannot be read back as evidence about the
+    scoring stage itself.
     """
     import json
     from datetime import UTC, datetime
@@ -1038,6 +1064,8 @@ def save_eval_results(
         "timestamp": datetime.now(tz=UTC).isoformat(),
         "scores": scores,
         "per_case": per_case or [],
+        "coverage": coverage or {},
+        "scoring": scoring or {},
     }
     with open(path, "w") as f:
         json.dump(data, f, indent=2, default=str)
