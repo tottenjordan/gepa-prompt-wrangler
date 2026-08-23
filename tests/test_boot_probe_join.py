@@ -283,26 +283,29 @@ class TestNonceJoin:
     inference was ever performed for them.
     """
 
-    def test_a_served_user_id_means_the_model_was_reached(self):
+    def test_a_served_nonce_means_the_model_was_reached(self):
         entries = [_entry(10, 100, '10.0.0.1:1 - "POST /api/stream_reasoning_engine" 200 OK')]
-        rows = [_row(9, 14, user_id="probe-abc123")]
-        joined = bpj.join_rows(rows, entries, served_user_ids={"probe-abc123"})
+        joined = bpj.join_rows([_row(9, 14)], entries, served_nonces={"abc123"})
         assert joined[0]["reached_model"] is True
-        assert joined[0]["model_join"] == "user_id"
+        assert joined[0]["model_join"] == "nonce"
 
-    def test_an_absent_user_id_means_it_did_not(self):
+    def test_an_absent_nonce_means_it_did_not(self):
         entries = [_entry(10, 100, '10.0.0.1:1 - "POST /api/stream_reasoning_engine" 200 OK')]
-        rows = [_row(9, 14, user_id="probe-abc123")]
-        joined = bpj.join_rows(rows, entries, served_user_ids=set())
+        joined = bpj.join_rows([_row(9, 14)], entries, served_nonces=set())
         assert joined[0]["reached_model"] is False
-        assert joined[0]["model_join"] == "user_id"
+        assert joined[0]["model_join"] == "nonce"
 
-    def test_the_user_id_join_works_even_when_the_pid_join_fails(self):
+    def test_the_nonce_join_works_even_when_the_pid_join_fails(self):
         """The two are independent, which is the point of having both."""
-        rows = [_row(9, 14, user_id="probe-abc123")]
-        joined = bpj.join_rows(rows, [], served_user_ids={"probe-abc123"})
+        joined = bpj.join_rows([_row(9, 14)], [], served_nonces={"abc123"})
         assert joined[0]["joinable"] is False
         assert joined[0]["reached_model"] is True
+
+    def test_the_nonce_is_extracted_from_a_logged_prompt(self):
+        """user.id was the first choice and some engines do not emit it; the
+        prompt text is emitted consistently."""
+        payload = '[{"role":"user","parts":[{"content":"Reply with exactly the word OK. Probe id: f84b12ef88e7","type":"text"}]}]'
+        assert bpj._NONCE_IN_PROMPT.findall(payload) == ["f84b12ef88e7"]
 
     def test_falls_back_to_log_patterns_when_no_user_ids_are_supplied(self):
         entries = [

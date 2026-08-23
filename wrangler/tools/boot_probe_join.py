@@ -9,13 +9,14 @@ boot that takes M".
 There are two independent joins, and they fail independently — which is exactly
 why both are here.
 
-**The user-id join answers "did the model run".** GEAP emits a structured log
-stream (`reasoning_engine_stdout`) whose labels carry `user.id` alongside the
-full input and output messages. The probe puts its nonce in the user id, so
-membership is a lookup, not an inference from co-occurring PIDs. Verified on the
+**The nonce join answers "did the model run".** GEAP emits a structured log
+stream (`reasoning_engine_stdout`) whose labels carry the full prompt in
+`gen_ai.input.messages`. The probe puts a nonce in every prompt, so membership
+is a lookup, not an inference from co-occurring PIDs. Verified on the
 2026-08-23 gate run: of three attempts, only the one that returned events
 appears in that stream — the other two got an HTTP 200 for which no inference
-was ever performed.
+was ever performed. (Not `labels."user.id"`, which the first version used and
+which some engines simply do not emit.)
 
 **The PID join answers "how old was the worker".** It reads the `[3258]` prefix
 every container log line carries and matches the request line falling inside the
@@ -66,6 +67,10 @@ SERVER_START = "Started server process"
 DEFAULT_MODEL_PATTERNS = ("Received response from Claude", ":rawPredict")
 
 _LINE = re.compile(r"^(?P<ts>\S+)\t\[(?P<pid>\d+)\]\s*(?P<msg>.*)$")
+
+# Matches the probe's nonce inside a logged prompt. Kept in step with
+# boot_probe.PROMPT_TEMPLATE.
+_NONCE_IN_PROMPT = re.compile(r"Probe id: ([0-9a-f]{12})")
 
 # Slack after the client saw the stream finish, for the model-response line to
 # land in the log pipeline.
@@ -177,7 +182,7 @@ def join_rows(
     rows: list[dict],
     entries: list[LogEntry],
     model_patterns: tuple[str, ...] = DEFAULT_MODEL_PATTERNS,
-    served_user_ids: set[str] | None = None,
+    served_nonces: set[str] | None = None,
 ) -> list[dict]:
     """Attach serving worker, worker age, boot state, and model reach to each row.
 
@@ -185,14 +190,14 @@ def join_rows(
 
     * **the PID join** places the request on a worker incarnation and gives its
       age. It depends on a timestamp window and can fail.
-    * **the user-id join** says whether the model was reached. GEAP's structured
-      log stream carries ``labels."user.id"``, and the probe puts its nonce
-      there, so this is a lookup rather than an inference. Supply
-      ``served_user_ids`` and it is used; omit it and the weaker log-pattern
-      match on the serving worker is used instead.
+    * **the nonce join** says whether the model was reached. GEAP's structured
+      log stream carries the full prompt in ``labels."gen_ai.input.messages"``
+      and the probe puts a nonce in every prompt, so this is a lookup rather
+      than an inference. Supply ``served_nonces`` and it is used; omit it and
+      the weaker log-pattern match on the serving worker is used instead.
 
     They fail independently, which is the point of having both: on the gate run
-    the PID join was unsound while the user-id join was exact.
+    the PID join was unsound while the nonce join was exact.
     """
     workers = build_worker_timelines(entries)
     requests = sorted(
@@ -207,9 +212,9 @@ def join_rows(
         matches = [e for e in requests if sent <= e.ts <= finished]
         out = dict(row)
 
-        if served_user_ids is not None:
-            out["reached_model"] = row.get("user_id") in served_user_ids
-            out["model_join"] = "user_id"
+        if served_nonces is not None:
+            out["reached_model"] = row.get("nonce") in served_nonces
+            out["model_join"] = "nonce"
 
         if len(matches) != 1:
             out.update(
@@ -224,7 +229,7 @@ def join_rows(
                     else f"{len(matches)} stream-request log lines in the client window"
                 ),
             )
-            if served_user_ids is None:
+            if served_nonces is None:
                 out.update(reached_model=None, model_join="log_pattern")
             joined.append(out)
             continue
@@ -245,7 +250,7 @@ def join_rows(
             joinable=True,
             join_note="",
         )
-        if served_user_ids is None:
+        if served_nonces is None:
             out.update(
                 reached_model=any(
                     served.ts <= e.ts <= window_end and any(p in e.message for p in model_patterns)
@@ -341,28 +346,33 @@ def fetch_logs(
     return [e for e in (parse_log_line(line) for line in result.stdout.splitlines()) if e]
 
 
-def fetch_served_user_ids(
+def fetch_served_nonces(
     engine_id: str,
     start: datetime,
     end: datetime,
     project: str | None = None,
     limit: int = 20000,
 ) -> set[str]:
-    """User ids GEAP actually ran an inference for, from the structured log stream.
+    """Nonces GEAP actually ran an inference for, from the structured log stream.
 
-    `reasoning_engine_stdout` entries carry ``labels."user.id"`` alongside the
-    input and output messages, and the probe puts its nonce in the user id. So
-    membership in this set *is* the answer to "did this request reach the
-    model" — no timestamp window, no PID, no pattern matching.
+    `reasoning_engine_stdout` entries carry the full prompt in
+    ``labels."gen_ai.input.messages"``, and the probe puts a nonce in every
+    prompt. So membership in this set *is* the answer to "did the model run for
+    this request" — no timestamp window, no PID, no pattern matching.
 
-    Verified on the 2026-08-23 gate run: of three attempts, only the one that
-    returned events appears here. The other two got an HTTP 200 for which no
-    inference was ever performed.
+    The nonce, not ``labels."user.id"``. The first version of this used the
+    user id, which is present on some engines and absent on others: on the
+    2026-08-23 smoke run one arm reported 0/4 served while the client had
+    watched all four answer. The prompt text is emitted consistently.
+
+    An engine that ran no inference at all emits no structured events, which is
+    correctly an empty set rather than an error — the mcp-claude arm on that
+    same run had 0/4 client reach and no events, and those agree.
     """
     filter_ = (
         'resource.type="aiplatform.googleapis.com/ReasoningEngine" '
         f'AND resource.labels.reasoning_engine_id="{engine_id}" '
-        'AND labels."user.id":"probe-" '
+        'AND labels."gen_ai.input.messages":"Probe id" '
         f'AND timestamp>="{start.astimezone(UTC).isoformat()}" '
         f'AND timestamp<="{end.astimezone(UTC).isoformat()}"'
     )
@@ -374,14 +384,14 @@ def fetch_served_user_ids(
             filter_,
             f"--project={project or GCP_PROJECT_ID}",
             f"--limit={limit}",
-            '--format=value(labels."user.id")',
+            '--format=value(labels."gen_ai.input.messages")',
         ],
         capture_output=True,
         text=True,
         check=True,
         timeout=600,
     )
-    return {line.strip() for line in result.stdout.splitlines() if line.strip()}
+    return set(_NONCE_IN_PROMPT.findall(result.stdout))
 
 
 def load_rows(path: str | Path) -> list[dict]:
@@ -415,7 +425,7 @@ def join_probe_run(
             end + timedelta(minutes=1),
             project=project,
         )
-        served = fetch_served_user_ids(
+        served = fetch_served_nonces(
             engine_id,
             start - timedelta(minutes=1),
             end + timedelta(minutes=1),
@@ -423,12 +433,12 @@ def join_probe_run(
         )
         reuse = pid_reuse_count(entries)
         joined = join_rows(
-            engine_rows, entries, model_patterns=model_patterns, served_user_ids=served
+            engine_rows, entries, model_patterns=model_patterns, served_nonces=served
         )
         all_joined.extend(joined)
         per_engine[engine_id] = join_summary(joined, pid_reuse=reuse)
         per_engine[engine_id]["log_lines"] = len(entries)
-        per_engine[engine_id]["served_user_ids"] = len(served)
+        per_engine[engine_id]["served_nonces"] = len(served)
         per_engine[engine_id]["reached_model"] = sum(1 for r in joined if r.get("reached_model"))
 
     out_path = Path(probe_path).with_suffix(".joined.jsonl")
@@ -450,9 +460,7 @@ def join_probe_run(
             f"({summary['join_rate']:.0%}), {summary['log_lines']} log lines, "
             f"{summary['pid_reuse']} reused PIDs, {ages}"
         )
-        print(
-            f"    reached the model (user-id join): {summary['reached_model']}/{summary['total']}"
-        )
+        print(f"    reached the model (nonce join): {summary['reached_model']}/{summary['total']}")
 
     print(f"\n{'=' * 64}")
     print("REACH BY WORKER AGE AT REQUEST")
