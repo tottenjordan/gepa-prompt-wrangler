@@ -1,13 +1,18 @@
 # Silent Failures
 
 **Verified on:** 2026-08-20, during the Task 3.4 smoke test. #7 added 2026-08-21; #8 added
-2026-08-21 from a log audit of the deployed engine.
+2026-08-21 from a log audit of the deployed engine; #9 added 2026-08-23 from control runs.
 
-Eight defects, six of them found in one sitting. None of them raised. Every one reported
+Nine defects, six of them found in one sitting. None of them raised. Every one reported
 success while producing worthless output — which is why they had survived so long. Grouped
-here because the *shape* is the transferable part, not the individual bugs. #1–#7 are
-fixed; **#8's export failures are fixed and #7's underlying rater flake is not** — see
-each entry for exactly what remains.
+here because the *shape* is the transferable part, not the individual bugs. See each entry
+for exactly what remains; #7's underlying rater flake and #5's worker churn are the two
+causes still open.
+
+**Four of the nine are the same `extra='forbid'` boundary** (#3, #5, #7, #9): one
+per-metric error makes a whole result file unparseable and the case disappears. Each was
+found separately, months apart, because nothing ever compared the number of results
+returned against the number expected.
 
 #8 is the one that argues for auditing logs on a schedule rather than after a failure:
 every other defect here was found because something looked wrong, and #8 never will.
@@ -543,3 +548,44 @@ lower bound, not a measurement. The difference now is that you can find out.
 
 **Not fixed:** the worker churn in #5 that made the exports fragile in the first place.
 That is server-side, and `GEAP_MIN_INSTANCES` was measured not to move it.
+
+## 9. Cases that inferred fine still vanish during scoring
+
+**Symptom:** the run reports fewer cases than it submitted, and says nothing.
+Measured 2026-08-23 on two control runs: **50 rows submitted → 41 scored**, and
+**44 → 39**. Roughly 11–18% of successfully-inferred cases lost *after* inference.
+
+This is distinct from #5. That one loses cases at inference, before a response exists.
+This loses cases that produced a perfectly good response.
+
+**Cause.** The same `extra='forbid'` cascade as #3, #5 and #7 — one per-metric error makes
+the whole result file unparseable and the SDK's conversion drops the item — but reached by
+a path the earlier fix did not cover. `_extract_per_case_scores` reads whatever
+`evaluation_item_results.eval_case_results` contains and **never compares it against the
+number submitted**. The GCS recovery from #7 lives on the API-fallback path, which runs
+only when `evaluation_item_results is None`. When it is present but *short*, nothing looks.
+
+**What is actually erroring**, from the raw result files of one control run:
+
+| metric | error |
+| --- | --- |
+| `hallucination_v1` | `UNEXPECTED_TOOL_CALL` (#7 — predefined metric, prompt not ours) |
+| `final_response_quality_v1` | `UNEXPECTED_TOOL_CALL` |
+| `tool_use_quality` | **`Error parsing JSON. Expecting property name`** |
+
+The third is **ours**. The custom tool-use judge is asked for
+`{"explanation": ..., "score": ...}` and sometimes returns something unparseable. Unlike
+the autorater's tool calls, that prompt is ours to harden — and because of the cascade, one
+malformed judge response costs the case *every* metric, not just tool use.
+
+**Fixed (the loss):** `_extract_per_case_scores` now takes `expected` — the number of rows
+actually submitted — reports the shortfall, and falls back to per-item GCS recovery when
+short, keeping whichever result is more complete.
+
+**Not fixed (the causes):** the autorater's tool calls are #7 and unreachable; the judge's
+JSON reliability is reachable and worth hardening, but changing that prompt changes every
+score it produces, so it wants a deliberate decision rather than a drive-by edit.
+
+**The lesson, again:** a count that is never compared against an expectation is not a
+measurement. Three of the four losses in this file were invisible for the same reason —
+nothing asserted how many results *should* have come back.

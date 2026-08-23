@@ -709,3 +709,52 @@ class TestStandaloneResultsArePairable:
         d = paired_deltas(a, b)
         assert d["n_paired"] == 1
         assert d["deltas"]["m"] == pytest.approx(0.1)
+
+
+class TestScoringStageLoss:
+    """Cases that inferred fine can still vanish during scoring, silently.
+
+    Measured 2026-08-23 on two control runs: 50 rows submitted -> 41 scored,
+    and 44 -> 39. The primary extraction path reads whatever
+    `evaluation_item_results.eval_case_results` contains and never compares it
+    against the number submitted, so a case whose result file carried any
+    per-metric error — the extra='forbid' cascade — is simply absent.
+
+    PR #11 added GCS recovery, but only on the API-fallback path, which runs
+    solely when `evaluation_item_results is None`. When it is present but
+    short, nothing notices.
+    """
+
+    class _Case:
+        def __init__(self, idx, score):
+            self.eval_case_index = idx
+            self.response_candidate_results = [
+                type("C", (), {"metric_results": {"safety_v1": score}})()
+            ]
+
+    class _Items:
+        def __init__(self, cases):
+            self.eval_case_results = cases
+
+    class _Run:
+        def __init__(self, cases):
+            self.evaluation_item_results = TestScoringStageLoss._Items(cases)
+            self.evaluation_run_results = None
+
+    def test_shortfall_against_expected_is_reported(self, capsys):
+        """Silence is what let 9 cases disappear unnoticed."""
+        run = self._Run([self._Case(0, 1.0), self._Case(1, 0.5)])
+        evaluator._extract_per_case_scores(run, expected=5)
+        out = capsys.readouterr().out
+        assert "2" in out, out
+        assert "5" in out, out
+        assert "scor" in out.lower()
+
+    def test_no_shortfall_stays_quiet(self, capsys):
+        run = self._Run([self._Case(0, 1.0), self._Case(1, 0.5)])
+        evaluator._extract_per_case_scores(run, expected=2)
+        assert "fewer" not in capsys.readouterr().out.lower()
+
+    def test_expected_is_optional_so_existing_callers_are_unaffected(self):
+        run = self._Run([self._Case(0, 1.0)])
+        assert len(evaluator._extract_per_case_scores(run)) == 1
