@@ -720,15 +720,16 @@ def mcp_env_from_environ() -> dict[str, str]:
 def _scaling_from_environ() -> dict:
     """Read GEAP instance-scaling settings from the environment.
 
-    `GEAP_MIN_INSTANCES` is the one that matters. GEAP will route a request to
-    a worker that has not finished booting, and that request comes back HTTP
-    200 with zero events instead of an error -- startup here is ~8s of MCP
-    handshakes. Raising the floor keeps warm workers around so fewer requests
-    land on a cold one.
+    `GEAP_MIN_INSTANCES` is the only one anyone has reached for, and it was
+    reached for on a theory that has since been refuted: that GEAP routes
+    requests to workers still mid-boot, so a warm floor would catch them. A
+    per-request join on 948 attempts (2026-08-23) found every one served by a
+    worker that had already finished starting up. Measurement agrees --
+    `min_instances` 0 and 2 give the same 1.3 startups per request.
 
-    It is a mitigation, not a fix: GEAP also spawns cold workers when scaling
-    *up*, which was observed mid-run under steady load, so callers still have
-    to treat an empty stream as retryable. See `wrangler/tools/traffic.py`.
+    So this is not a mitigation for the empty-stream defect. It is cheap and
+    harmless, and callers must treat an empty stream as retryable either way.
+    See docs/notes/silent-failures.md #5 and `wrangler/tools/traffic.py`.
 
     Unset means "leave it to GEAP", so this stays a no-op until asked for.
     """
