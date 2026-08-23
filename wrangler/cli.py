@@ -175,6 +175,20 @@ def eval_cmd(
             std = result.scores_std.get(metric)
             std_str = f" +/- {std:.3f}" if std else ""
             click.echo(f"  {metric:40s} {score:.2f}{std_str}")
+
+        # Persist per-case rows, not just the means. A control arm runs through
+        # this path twice, and comparing two runs by subtracting aggregate means
+        # measures the difference between their case subsets as much as anything
+        # else. With the rows on disk the two can be paired by case index.
+        from .eval.evaluator import save_eval_results
+
+        saved = save_eval_results(
+            agent_name=label,
+            scores=result.scores,
+            phase="standalone",
+            per_case=result.per_case,
+        )
+        click.echo(f"\n  Saved: {saved} ({len(result.per_case)} per-case rows)")
     else:
         click.echo("Error: provide an experiment directory or --engine-id.")
         raise SystemExit(1)

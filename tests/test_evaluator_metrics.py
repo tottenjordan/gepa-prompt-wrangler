@@ -644,3 +644,68 @@ class TestCaseIdentity:
         assert d["deltas"]["m"] == pytest.approx(0.4)
         assert d["dropped_before"] == 1
         assert d["dropped_after"] == 1
+
+
+class TestStandaloneResultsArePairable:
+    """A control arm runs through standalone eval twice; it must keep per-case rows.
+
+    Standalone mode used to persist only aggregate means. Two such runs can then
+    be compared only by subtracting numbers computed over different case
+    subsets — which on 2026-08-22 produced an apparent +0.180 spread from an
+    unchanged prompt, with no way to separate sampling from signal.
+    """
+
+    def test_per_case_is_written(self, tmp_path):
+        import json
+        import pathlib
+
+        from wrangler.eval.evaluator import CASE_INDEX_KEY, save_eval_results
+
+        rows = [{CASE_INDEX_KEY: 0, "safety_v1": 1.0}, {CASE_INDEX_KEY: 4, "safety_v1": 0.5}]
+        path = save_eval_results(
+            agent_name="control",
+            scores={"safety_v1": 0.75},
+            output_dir=str(tmp_path),
+            per_case=rows,
+        )
+        saved = json.loads(pathlib.Path(path).read_text())
+        assert saved["per_case"] == rows
+
+    def test_absent_per_case_is_an_empty_list_not_missing(self, tmp_path):
+        """Consumers should not have to distinguish 'no rows' from 'old file'."""
+        import json
+        import pathlib
+
+        from wrangler.eval.evaluator import save_eval_results
+
+        path = save_eval_results(
+            agent_name="a", scores={"safety_v1": 1.0}, output_dir=str(tmp_path)
+        )
+        assert json.loads(pathlib.Path(path).read_text())["per_case"] == []
+
+    def test_two_saved_runs_can_be_paired(self, tmp_path):
+        """The whole point: a measured noise floor over the same cases."""
+        import json
+        import pathlib
+
+        from wrangler.eval.evaluator import CASE_INDEX_KEY, paired_deltas, save_eval_results
+
+        p1 = save_eval_results(
+            agent_name="c",
+            scores={},
+            phase="run1",
+            output_dir=str(tmp_path),
+            per_case=[{CASE_INDEX_KEY: 0, "m": 0.5}, {CASE_INDEX_KEY: 1, "m": 0.9}],
+        )
+        p2 = save_eval_results(
+            agent_name="c",
+            scores={},
+            phase="run2",
+            output_dir=str(tmp_path),
+            per_case=[{CASE_INDEX_KEY: 1, "m": 1.0}, {CASE_INDEX_KEY: 7, "m": 0.2}],
+        )
+        a = json.loads(pathlib.Path(p1).read_text())["per_case"]
+        b = json.loads(pathlib.Path(p2).read_text())["per_case"]
+        d = paired_deltas(a, b)
+        assert d["n_paired"] == 1
+        assert d["deltas"]["m"] == pytest.approx(0.1)
