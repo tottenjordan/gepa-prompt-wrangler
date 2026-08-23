@@ -213,3 +213,69 @@ to protect.
 
 The actionable part is not to add it to the criteria but to **read it as a holdout** —
 and to keep the rubric thresholds identical across arms so that the pressure on it is too.
+
+---
+
+## Follow-up 2: the noise floor, measured deliberately (2026-08-23)
+
+The 2026-08-22 floor (+0.039) came from flash accidentally returning its seed. Before
+re-running the sweep, the control arm was run **on purpose**: two standalone evals of the
+same engine and the same prompt, nothing between them, 64 cases each.
+
+### The floor is larger than the accident suggested
+
+| control pair | scored | floor |
+| --- | --- | --- |
+| first (unpaired only) | 33 / 35 | **±0.180** |
+| second, unpaired | 41 / 39 | ±0.069 |
+| second, **paired on 34 common cases** | 34 | **±0.059** |
+
+Two things follow, and the second was not what I expected.
+
+**The accidental control understated the floor.** +0.039 from flash against ±0.059–0.180
+measured deliberately. An arm that happens to return its seed is a control only by luck,
+and luck can be flattering.
+
+**Pairing is not the main lever.** It reduced this pair's floor by **15%** (0.069 → 0.059),
+not the large fraction assumed when case IDs were built. The unpaired-subset problem was
+real and worth fixing, but the residual ±0.059 is measured on the *same cases with the
+same prompt* — so it is judge and agent non-determinism, not sampling.
+
+### The lever that does work is averaging
+
+Variance falls with √n, so:
+
+| num_runs | expected floor |
+| --- | --- |
+| 1 | 0.059 |
+| 2 | 0.042 |
+| **3** | **0.034** |
+| 5 | 0.026 |
+
+The experiment config defaults to `num_runs: 3`. It was lowered to 1 for the 2026-08-22
+sweep to save wall-clock, which raised the floor by ~1.7×. **That default existed for a
+reason and should not have been overridden.**
+
+### What this means for the published sweep
+
+Against a ±0.059 paired floor, most of the sweep's claims survive: sonnet's four gains
+(+0.111, +0.095, +0.099, +0.072), pro's safety (+0.082), and pro's instruction-following
+regression (−0.095) all clear it. **Pro's +0.034 response-quality gain does not** — it was
+already flagged as inside the +0.039 floor and remains so.
+
+The instruction-following divergence therefore still stands as a real effect, though the
+±0.180 seen in the first control pair is a warning that a single run can be much noisier
+than a single measurement suggests.
+
+### Recommended settings for the next sweep
+
+1. **`num_runs: 3`.** The single highest-value change; it roughly halves the floor.
+2. **Keep the deliberate control arm** — two evals of one unchanged prompt, run first as a
+   gate. It cost ~3 hours here and changed the plan.
+3. Coverage is still poor: 41 and 39 of 64 scored, implying ~9-15% per-attempt success
+   against the ~25% the retry budget assumes. That is defect #5 and it is server-side.
+
+### Cost of the gate
+
+Four control evals, ~6 hours, and it stopped a ~30-hour three-arm sweep from running at a
+setting that would have produced a floor larger than several of the effects being measured.

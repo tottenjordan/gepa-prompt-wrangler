@@ -189,6 +189,13 @@ For multi-model agents: `SEARCH_MCP_SERVER`, `BOOKING_MCP_SERVER`, `EXPENSE_MCP_
   +0.034 gain that is actually indistinguishable from nothing would have been promoted.
   That control existed only by accident: GEPA happened to return the seed for one model.
 
+  **Run the control first, as a gate**, and run it at the same `num_runs` as the real
+  arms. Measured 2026-08-23: the floor is ~0.059 at `num_runs: 1` and ~0.034 at the
+  configured default of 3, because averaging cuts variance by sqrt(n). Lowering
+  `num_runs` to save wall-clock raises the floor by ~1.7x and can put it above the
+  effects being measured. Pairing before/after on case index helps too, but only by
+  ~15% -- the residual is judge and agent non-determinism, not case sampling.
+
   Do not substitute a repeat of the same arm, and do not reuse a floor measured on an
   earlier run — the dropout that generates the noise varies with load and with how many
   arms run at once. See
