@@ -238,7 +238,7 @@ def _extract_aggregate_scores(evaluation_run) -> dict[str, float]:
     return scores
 
 
-def _extract_per_case_scores(evaluation_run) -> list[dict[str, float]]:
+def _extract_per_case_scores(evaluation_run, expected: int | None = None) -> list[dict[str, float]]:
     """Extract per-case metric scores from evaluation run results.
 
     Primary path: evaluation_item_results.eval_case_results[i]
@@ -291,6 +291,31 @@ def _extract_per_case_scores(evaluation_run) -> list[dict[str, float]]:
             per_case.append(case_scores)
     except Exception as e:
         print(f"  Warning extracting per-case scores: {e}")
+
+    # A case can infer perfectly and still vanish here. Its result file carries
+    # one per-metric error, `extra='forbid'` makes the whole file unparseable,
+    # and the SDK's conversion drops the item -- so `eval_case_results` is
+    # simply short and nothing above notices. Measured 2026-08-23: 50 rows
+    # submitted / 41 scored, and 44 / 39.
+    #
+    # The GCS recovery added for this cascade lives on the API-fallback path,
+    # which only runs when `evaluation_item_results is None`. When it is present
+    # but incomplete, fall back anyway and keep whichever is more complete.
+    if expected is not None and len(per_case) < expected:
+        print(
+            f"  Scoring dropped cases: {len(per_case)}/{expected} scored. Recovering "
+            f"from raw GCS (see docs/notes/silent-failures.md #7).",
+            flush=True,
+        )
+        recovered = _extract_per_case_via_api(evaluation_run)
+        if len(recovered) > len(per_case):
+            print(f"  Recovered {len(recovered)}/{expected} cases from GCS", flush=True)
+            return recovered
+        print(
+            f"  GCS recovery returned {len(recovered)}; keeping {len(per_case)}. "
+            f"{expected - len(per_case)} case(s) remain unscored.",
+            flush=True,
+        )
     return per_case
 
 
@@ -854,7 +879,12 @@ def run_batch_eval(
 
     scores = _extract_aggregate_scores(evaluation_run)
 
-    per_case = _extract_per_case_scores(evaluation_run)
+    # `expected` is the number of rows actually submitted for scoring, so a
+    # case dropped between submission and result is detected rather than
+    # silently reducing the denominator.
+    per_case = _extract_per_case_scores(
+        evaluation_run, expected=len(inference_result.eval_dataset_df)
+    )
     for case_scores in per_case:
         # Same single-tool-use-metric clobber assumption as above.
         if _TOOL_USE_METRIC_NAME in case_scores:
