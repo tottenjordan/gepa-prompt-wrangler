@@ -20,7 +20,14 @@ One topic per file. Keep this index under 200 lines — put detail in the topic 
 
 | Analysis | What it covers |
 |----------|----------------|
+| [../analysis/2026-08-23-geap-empty-stream-doe.md](../analysis/2026-08-23-geap-empty-stream-doe.md) | 960 requests, four engines, two models, with a per-request join. GEAP returns 200 with no inference for **31.7%** of requests — and the cold-worker cause this repo believed for two days is **refuted**: all 948 joined requests were served by workers that had already finished booting. Also kills the "~8s startup" and "empty responses wait for the boot" claims. Rate is per-engine and varies 4%–68%. |
 | [../analysis/2026-08-22-first-optimization-sweep.md](../analysis/2026-08-22-first-optimization-sweep.md) | The first sweep that produced a real prompt change. Three arms, identical seed and budget; flash returned its seed unchanged and so became an unplanned control, putting the noise floor at +0.039. Sonnet clears it on four metrics, pro on one — and pro *regresses* on instruction-following, structurally. Total cost $1.14. Follow-up explains the instruction_following divergence: it is a **holdout** GEPA never optimizes, and its only pressure (the instruction_adherence rubric) was gated at 0.85 for sonnet but 0.50 for pro. |
+
+## Escalations
+
+| Escalation | Status |
+|------------|--------|
+| [../escalations/2026-08-23-geap-empty-stream.md](../escalations/2026-08-23-geap-empty-stream.md) | **Ready to file, not yet filed.** Agent Engine returns 200 with an empty stream and runs no inference, 31.7% of requests. The ask is narrow: do not use 200 for a request the service did not serve — 1.2% of requests already return `400 Service Unavailable`, so the path exists. |
 
 ## DOE Campaigns
 

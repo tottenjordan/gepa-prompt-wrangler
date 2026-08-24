@@ -159,53 +159,76 @@ score that is plausible-but-low reads as an agent problem. Before optimizing aga
 metric, verify it can return 1.0 for known-good input — a metric with a ceiling below 1.0
 is a broken instrument, and GEPA will happily spend a whole budget chasing it.
 
-## 5. GEAP answers 200 with an empty event stream from a booting worker
+## 5. GEAP answers 200 with an empty event stream, and never runs the model
 
 **Symptom:** `stream_query` / `async_stream_query` against a healthy engine returns HTTP
-200, zero events, no error — intermittently, roughly half the time under light load.
+200, zero events, no error. **31.7%** of requests, 95% CI 28.8–34.7%, measured over 960
+requests across four engines and two model families on 2026-08-23.
 
-**Cause:** GEAP routes a request to a worker that has not finished starting up. The
-ReasoningEngine logs show it plainly: worker `1237` logged `Application startup complete`
-and served `POST /api/stream_reasoning_engine 200 OK` **in the same second**, while warm
-worker `1169` handling the neighbouring request logged a real `rawPredict` to the model.
-Startup is ~8s here — three MCP handshakes. The request is consumed during boot and never
-reaches the agent.
+**Cause: unknown, and it is *not* a booting worker.** This entry said for two days that
+GEAP routes the request to a worker that has not finished starting up and the request is
+consumed during an ~8s boot. A per-request join over 948 attempts refutes that: **every one
+of them was served by a worker that had already logged `Application startup complete`, and
+zero by a worker still booting.** The median serving-worker age at request was 215s. Full
+measurement in
+[../analysis/2026-08-23-geap-empty-stream-doe.md](../analysis/2026-08-23-geap-empty-stream-doe.md);
+the escalation built on it is
+[../escalations/2026-08-23-geap-empty-stream.md](../escalations/2026-08-23-geap-empty-stream.md).
 
-**It is not a cold-start-from-idle problem.** New workers appeared mid-run under steady
-back-to-back load (PIDs 956, 997, 1023, 1169, 1237 across two minutes), so
-`GEAP_MIN_INSTANCES` narrows the window but cannot close it. **Callers must treat an empty
-stream as retryable.** `wrangler/tools/traffic.py` retries twice with a fresh session;
-that took one engine from 0/3 to 5/6 queries producing traces.
+**How to tell, per request.** GEAP emits a structured log stream whose labels carry the
+full prompt in `gen_ai.input.messages`. Put a nonce in the prompt and membership answers
+"did the model run for *this* request" exactly — it agreed with the client-side event count
+960 times out of 960. This is the single most useful thing in this entry; it replaces every
+inference-from-co-occurring-PIDs argument that came before it.
 
-**Measured from the engine's own logs, 2026-08-21.** Over the 11-minute `eval_after`
-window on engine `5638288480409747456`, the ReasoningEngine logged **40 `Application is
-starting up` events against 31 `POST /api/stream_reasoning_engine` requests** — the engine
-booted a worker slightly *more often* than it served a request. Over the full two-day
-window: 164 startups, 113 requests, 7 SIGTERMs. So worker creation is not a startup
-transient that settles; it is the steady state under this load pattern, and the exposure
-window is open for most of a run. No crash indicators anywhere in the logs (no traceback,
-no worker-exit, no OOM) — these are ordinary scale-ups, which is exactly why nothing
-surfaces them.
+```
+resource.type="aiplatform.googleapis.com/ReasoningEngine"
+AND resource.labels.reasoning_engine_id="<ID>"
+AND labels."gen_ai.input.messages":"<nonce>"
+```
 
-**`GEAP_MIN_INSTANCES=2` was then measured, and it does not help.** Engine redeployed
-2026-08-21 04:09 with `minInstances: 2` confirmed live on the deployment spec, then given
-32 traffic queries over 35 minutes:
+Not `labels."user.id"` — present on some engines, absent on others, and it silently reports
+zero served for an engine you just watched answer.
 
-| | Before (`minInstances` unset) | After (`minInstances: 2`) |
-| --- | --- | --- |
-| Startups per stream request | 40 / 31 = 1.3 | 100 / 75 = 1.3 |
+**The rate is per-engine and enormous.** Four engines deployed minutes apart from the same
+source package:
 
-Identical. The floor keeps *containers* warm; it does nothing about GEAP spawning a fresh
-**worker process** per request, which is the thing that actually eats the request. The
-sharpest number: **75 stream requests were served across 68 distinct PIDs**, and only 18
-of them (24%) had a `Received response from Claude` from that same PID. Roughly
-three-quarters of attempts never reached the model. Keep the setting — it is cheap and
-harmless — but do not count it as a mitigation, and do not spend more on it.
+| arm | toolsets | model | failure rate |
+| --- | --- | --- | --- |
+| `mcp-gemini` | 3 MCP | Gemini | 4.2% |
+| `bare-claude` | none | Claude | 10.4% |
+| `bare-gemini` | none | Gemini | 44.6% |
+| `mcp-claude` | 3 MCP | Claude | 67.5% |
 
-*Caveat on the PID arithmetic:* a PID is unique within a container, not across them, and
-low PIDs (15–23) recur in every fresh container. So distinct-PID counts are a floor, and
-the same-PID match can pair a request in one container with a response in another —
-meaning the true reach rate is at most 24%, not at least.
+An order of magnitude between engines, stable within an engine across a 70-minute run and
+mostly stable across sessions. **Removing every toolset does not remove the defect**, and
+both model families produce it — so it is neither our agent's startup cost nor a
+Claude/global-endpoint problem, which were the two obvious suspects.
+
+**Corrections to what this entry used to say**, all from the same measurement:
+
+- *"Startup is ~8s: three MCP handshakes"* — **no**. Median 0.00s from `Started server
+  process` to `Application startup complete`, on all four arms. The MCP handshakes run on a
+  background thread *after* startup completes and never blocked it.
+- *"Empty responses take 5–15s, i.e. they wait for the boot and then return nothing"* —
+  **no**. Empty: median 10.8s, p90 22.7s. Reached: median 10.5s, p90 20.7s. Latency does
+  not distinguish them.
+- *"~24% of requests reach the model"* — superseded. 68.3% [0.653–0.712] here, and the old
+  figure came from PID co-occurrence rather than a join.
+- *"1.3 startups per stream request"* — superseded. 0.75 to 1.68, engine-dependent.
+- *A PID is recycled across containers so the arithmetic is only a floor* — real, and it
+  varies: zero reuse in 30 minutes on a settled engine, 24 in a few hours on a busy one.
+  It is not fatal if each `Started server process` is treated as opening a new worker
+  *incarnation*, which is what `wrangler/tools/boot_probe_join.py` does.
+
+**`GEAP_MIN_INSTANCES=2` does not help** (measured 2026-08-21, 32 queries over 35 minutes:
+1.3 startups per request before and after). Keep it — cheap and harmless — but it is not a
+mitigation. Callers must treat an empty stream as retryable regardless.
+
+**GEAP can report this properly and occasionally does.** 12 of 960 requests (1.2%) returned
+`400 Reasoning Engine Execution failed … Service Unavailable` — visible and retryable. The
+other 292 failures returned 200. That is the basis of the ask in the escalation: not "fix
+the routing", but "do not use 200 for a request you did not serve".
 
 **The traffic generator is the worst case for this, by design.** It opens a new session
 with a fresh user id per query, so each query is eligible for a different worker. Compare
@@ -230,10 +253,11 @@ variable you changed (the dead end above is the same lesson).
 The concurrency arm looked like a 5× win at n=12 (5/12 vs 1/12) and collapsed to nothing
 at n=30. Worth remembering before acting on the first encouraging split you see.
 
-Why none of it works is visible in the logs: **37 worker boots for 36 requests.** GEAP
-starts a worker per request regardless of who is asking or how they pace it, and the
-request is consumed during the ~8s boot. Latency confirms it — empty responses take
-5–15s, i.e. they wait for the boot and then return nothing, rather than failing fast.
+Two more hypotheses were added and refuted on 2026-08-23, on 960 requests rather than 30:
+**our agent's own startup cost** (a no-toolset build with sub-second startup still failed
+44.6%) and **Claude / the global endpoint** (both model families produce it). Nothing
+client-side has moved this yet, and the mechanism is still unknown — the paragraph that
+used to sit here explained it as a boot-window race, which the per-request join refutes.
 
 **So the traffic generator was redesigned around the failure rather than against it**
 (`wrangler/tools/traffic.py`): bounded concurrency (wall-clock, since the rate is not made

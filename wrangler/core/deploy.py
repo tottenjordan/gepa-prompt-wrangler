@@ -398,6 +398,69 @@ def _run_startup_checks_in_background():
 _run_startup_checks_in_background()
 '''
 
+# A second entrypoint with no toolsets at all, used to make agent startup cost a
+# controllable variable rather than a confound.
+#
+# Every measurement of the empty-stream defect (docs/notes/silent-failures.md #5)
+# has been taken against an agent that performs three MCP handshakes at import.
+# So "GEAP admits requests to a worker that has not finished booting" and "this
+# particular agent takes a long time to boot" cannot be told apart, and the
+# latter is the first thing anyone will suggest.
+#
+# Deploying the normal package with `env_vars={}` does NOT produce this: the
+# generated registry.py raises RuntimeError at import when no MCP URLs are set,
+# so the container crash-loops rather than booting quickly. Hence a separate
+# template rather than a configuration.
+#
+# Deliberately identical to _APP_PY_TEMPLATE everywhere it can be -- same
+# resolve_model() call, same instruction.txt read, same AdkApp with tracing --
+# so the toolset is the only thing that differs between the two arms.
+_APP_PY_TEMPLATE_NO_TOOLS = '''\
+"""Auto-generated GEAP entrypoint (no toolsets)."""
+import os
+import logging as _log
+from pathlib import Path
+
+from google.adk.agents import LlmAgent
+from google.adk.tools.preload_memory_tool import PreloadMemoryTool
+from vertexai.agent_engines import AdkApp
+
+from .config import resolve_model
+
+_log.basicConfig(level=_log.INFO)
+_here = Path(__file__).parent
+INSTRUCTION = (_here / "instruction.txt").read_text().strip()
+MODEL = os.environ.get("AGENT_MODEL", "{model}")
+
+_log.info("[GEAP startup] model=%s, location=%s, project=%s",
+          MODEL, os.environ.get("GOOGLE_CLOUD_LOCATION", "unset"),
+          os.environ.get("GCP_PROJECT_ID", os.environ.get("GOOGLE_CLOUD_PROJECT", "unset")))
+_log.info("[GEAP startup] instruction=%d chars, toolsets: none (bare probe build)",
+          len(INSTRUCTION))
+
+try:
+    resolved = resolve_model(MODEL)
+    _log.info("[GEAP startup] model resolved: %s (type=%s)", resolved, type(resolved).__name__)
+except Exception as exc:
+    _log.error("[GEAP startup] FATAL: resolve_model(%s) failed: %s", MODEL, exc)
+    raise
+
+root_agent = LlmAgent(
+    model=resolved,
+    name="{agent_name}",
+    description="Bare probe agent with no MCP tools, for measuring GEAP request routing.",
+    instruction=INSTRUCTION,
+    # PreloadMemoryTool is kept deliberately. The factor under test is the three
+    # MCP handshakes at import, not "has any tool at all" -- so the two arms
+    # differ in exactly one thing.
+    tools=[PreloadMemoryTool()],
+)
+
+app = AdkApp(agent=root_agent, enable_tracing=True)
+
+_log.info("[GEAP startup] bare probe ready")
+'''
+
 _REGISTRY_PY_TEMPLATE = '''\
 """MCP tool discovery for GEAP deployment.
 
@@ -487,6 +550,7 @@ def build_source_package(
     instruction: str,
     model: str,
     build_dir: str | None = None,
+    include_mcp: bool = True,
 ) -> str:
     """Assemble a self-contained source package for GEAP deployment.
 
@@ -503,6 +567,12 @@ def build_source_package(
         instruction: The system prompt text.
         model: Model string (e.g. "claude-sonnet-4-6").
         build_dir: Where to assemble the package.  Defaults to a sibling of agent_module.
+        include_mcp: When False, build an agent with no MCP toolsets — no
+            registry.py, and the no-tools entrypoint. Used to make startup cost
+            a controllable variable when measuring GEAP request routing
+            (docs/notes/silent-failures.md #5). Note that setting ``env_vars``
+            empty does NOT achieve this: the generated registry.py raises at
+            import with no MCP URLs, so the container crash-loops instead.
 
     Returns:
         The build_dir path.
@@ -568,7 +638,8 @@ def build_source_package(
     # Generate a GEAP-specific registry.py that uses Agent Registry with
     # ADC auth instead of direct Cloud Run URLs.  The GEAP container's
     # service account provides ADC automatically.
-    (build_path / "registry.py").write_text(_REGISTRY_PY_TEMPLATE)
+    if include_mcp:
+        (build_path / "registry.py").write_text(_REGISTRY_PY_TEMPLATE)
 
     # Patch config.py for GEAP compatibility: rewrite hard os.environ["KEY"]
     # to os.environ.get() for the MCP vars. A third-party agent config that
@@ -616,7 +687,8 @@ def build_source_package(
 
     # Write app.py from template
     agent_name = agent_path.stem.replace("_agent", "") + "_agent"
-    app_content = _APP_PY_TEMPLATE.format(
+    template = _APP_PY_TEMPLATE if include_mcp else _APP_PY_TEMPLATE_NO_TOOLS
+    app_content = template.format(
         model=model,
         agent_name=agent_name,
     )
@@ -648,15 +720,16 @@ def mcp_env_from_environ() -> dict[str, str]:
 def _scaling_from_environ() -> dict:
     """Read GEAP instance-scaling settings from the environment.
 
-    `GEAP_MIN_INSTANCES` is the one that matters. GEAP will route a request to
-    a worker that has not finished booting, and that request comes back HTTP
-    200 with zero events instead of an error -- startup here is ~8s of MCP
-    handshakes. Raising the floor keeps warm workers around so fewer requests
-    land on a cold one.
+    `GEAP_MIN_INSTANCES` is the only one anyone has reached for, and it was
+    reached for on a theory that has since been refuted: that GEAP routes
+    requests to workers still mid-boot, so a warm floor would catch them. A
+    per-request join on 948 attempts (2026-08-23) found every one served by a
+    worker that had already finished starting up. Measurement agrees --
+    `min_instances` 0 and 2 give the same 1.3 startups per request.
 
-    It is a mitigation, not a fix: GEAP also spawns cold workers when scaling
-    *up*, which was observed mid-run under steady load, so callers still have
-    to treat an empty stream as retryable. See `wrangler/tools/traffic.py`.
+    So this is not a mitigation for the empty-stream defect. It is cheap and
+    harmless, and callers must treat an empty stream as retryable either way.
+    See docs/notes/silent-failures.md #5 and `wrangler/tools/traffic.py`.
 
     Unset means "leave it to GEAP", so this stays a no-op until asked for.
     """
@@ -678,6 +751,7 @@ def _build_source_config(
     env_vars: dict | None = None,
     min_instances: int | None = None,
     max_instances: int | None = None,
+    include_mcp: bool = True,
 ) -> dict:
     """Build the config dict for source-based deployment."""
     pkg_name = Path(build_dir).name
@@ -715,7 +789,9 @@ def _build_source_config(
             **_OTEL_ENV_VARS,
             # MCP vars are a *default* layer: an explicit env_vars from the
             # caller (the pipeline passes its localhost overrides here) wins.
-            **mcp_env_from_environ(),
+            # Omitted entirely for a no-MCP build so the recorded deployment
+            # spec says what the agent actually has.
+            **(mcp_env_from_environ() if include_mcp else {}),
             **(env_vars or {}),
         },
     }
@@ -729,11 +805,15 @@ def deploy_agent_from_source(
     env_vars: dict | None = None,
     min_instances: int | None = None,
     max_instances: int | None = None,
+    include_mcp: bool = True,
 ) -> str:
     """Deploy a new agent to GEAP using source-based deployment. Returns engine_id.
 
     Assembles a build package from the agent's source files and deploys via
     source_packages — no cloudpickle serialization.
+
+    ``include_mcp=False`` deploys an agent with no MCP toolsets. See
+    ``build_source_package`` — it is not the same as passing empty ``env_vars``.
     """
     import time as _time
 
@@ -748,13 +828,16 @@ def deploy_agent_from_source(
     build_dir = None
     for attempt in range(3):
         try:
-            build_dir = build_source_package(agent_module, instruction, model)
+            build_dir = build_source_package(
+                agent_module, instruction, model, include_mcp=include_mcp
+            )
             config = _build_source_config(
                 build_dir,
                 display_name=display_name or "gepa-agent",
                 env_vars=env_vars,
                 min_instances=min_instances,
                 max_instances=max_instances,
+                include_mcp=include_mcp,
             )
             remote = _get_client().agent_engines.create(config=config)
             break
@@ -793,8 +876,13 @@ def update_agent_from_source(
     env_vars: dict | None = None,
     min_instances: int | None = None,
     max_instances: int | None = None,
+    include_mcp: bool = True,
 ) -> str:
-    """Update an existing agent on GEAP using source-based deployment. Returns engine_id."""
+    """Update an existing agent on GEAP using source-based deployment. Returns engine_id.
+
+    ``include_mcp`` must match how the agent was deployed. Leaving it at the
+    default when updating a no-MCP build silently rebuilds it *with* toolsets.
+    """
     vertexai.init(
         project=GCP_PROJECT_ID,
         location=GCP_REGION,
@@ -811,13 +899,16 @@ def update_agent_from_source(
     build_dir = None
     for attempt in range(3):
         try:
-            build_dir = build_source_package(agent_module, instruction, model)
+            build_dir = build_source_package(
+                agent_module, instruction, model, include_mcp=include_mcp
+            )
             config = _build_source_config(
                 build_dir,
                 display_name=display_name or "gepa-agent",
                 env_vars=env_vars,
                 min_instances=min_instances,
                 max_instances=max_instances,
+                include_mcp=include_mcp,
             )
             remote = _get_client().agent_engines.update(name=engine_id, config=config)
             break
