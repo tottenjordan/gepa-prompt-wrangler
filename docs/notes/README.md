@@ -36,7 +36,7 @@ collecting. Index and rules in [../doe/README.md](../doe/README.md).
 
 | Campaign | Status |
 |----------|--------|
-| [../doe/01-engine-lottery.md](../doe/01-engine-lottery.md) | Not started. Are the 4%–68% per-engine failure rates a deployment lottery, and can a bad engine be rerolled? Cheapest, and the one with a real payoff: a deploy-time health gate would roughly double usable eval coverage. |
+| [../doe/01-engine-lottery.md](../doe/01-engine-lottery.md) | **Complete 2026-08-24.** Ten byte-identical engines ranged **0%–100%** reach, so the spread is a deployment lottery. Sharper: of 626 worker processes, only 3.2% ever both succeeded and failed — a worker is persistently good or persistently bad, and an engine's rate is its bad fraction (r=0.954 against requests-per-worker). Redeploying in place redraws it (0%→50%, 6%→56%), so a deploy-time health gate works. |
 | [../doe/02-judge-variance.md](../doe/02-judge-variance.md) | Not started. Splits the noise floor into judge vs agent non-determinism — never separated — and settles the `tool_use_quality` JSON hardening by scoring identical responses. |
 | [../doe/03-noise-floor.md](../doe/03-noise-floor.md) | Not started. Re-measures the floor across `num_runs`; the 0.034 figure at 3 runs was computed through positionally-mispaired averaging. Produces a `minimum_detectable_effect()` the reporter can call. |
 | [../doe/04-gepa-budget-and-criteria.md](../doe/04-gepa-budget-and-criteria.md) | Not started, expensive (~90 h). What a GEPA budget buys, and whether the instruction-following regression is a configuration asymmetry or the cost of leaving a metric out of the criteria. |

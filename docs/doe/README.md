@@ -13,7 +13,7 @@ outcome would mean *before* looking is what stops that.
 
 | # | Campaign | Status | Cost |
 |---|----------|--------|------|
-| [01](01-engine-lottery.md) | Is the engine failure rate a deployment lottery? | **Not started** | ~half a day, negligible tokens |
+| [01](01-engine-lottery.md) | Is the engine failure rate a deployment lottery? | **Complete 2026-08-24 — yes, and it is a per-worker property** | 1,400 attempts, ~6 h |
 | [02](02-judge-variance.md) | How much of the noise floor is the judge? | **Not started** | One capture, then scoring only |
 | [03](03-noise-floor.md) | What is the noise floor, really? | **Not started** | Moderate |
 | [04](04-gepa-budget-and-criteria.md) | What does a GEPA budget buy? | **Not started** | ~90 h wall-clock |
