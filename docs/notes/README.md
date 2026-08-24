@@ -22,6 +22,18 @@ One topic per file. Keep this index under 200 lines — put detail in the topic 
 |----------|----------------|
 | [../analysis/2026-08-22-first-optimization-sweep.md](../analysis/2026-08-22-first-optimization-sweep.md) | The first sweep that produced a real prompt change. Three arms, identical seed and budget; flash returned its seed unchanged and so became an unplanned control, putting the noise floor at +0.039. Sonnet clears it on four metrics, pro on one — and pro *regresses* on instruction-following, structurally. Total cost $1.14. Follow-up explains the instruction_following divergence: it is a **holdout** GEPA never optimizes, and its only pressure (the instruction_adherence rubric) was gated at 0.85 for sonnet but 0.50 for pro. |
 
+## DOE Campaigns
+
+Pre-registered experiments — question, design, n and stopping rule written down *before*
+collecting. Index and rules in [../doe/README.md](../doe/README.md).
+
+| Campaign | Status |
+|----------|--------|
+| [../doe/01-engine-lottery.md](../doe/01-engine-lottery.md) | Not started. Are the 4%–68% per-engine failure rates a deployment lottery, and can a bad engine be rerolled? Cheapest, and the one with a real payoff: a deploy-time health gate would roughly double usable eval coverage. |
+| [../doe/02-judge-variance.md](../doe/02-judge-variance.md) | Not started. Splits the noise floor into judge vs agent non-determinism — never separated — and settles the `tool_use_quality` JSON hardening by scoring identical responses. |
+| [../doe/03-noise-floor.md](../doe/03-noise-floor.md) | Not started. Re-measures the floor across `num_runs`; the 0.034 figure at 3 runs was computed through positionally-mispaired averaging. Produces a `minimum_detectable_effect()` the reporter can call. |
+| [../doe/04-gepa-budget-and-criteria.md](../doe/04-gepa-budget-and-criteria.md) | Not started, expensive (~90 h). What a GEPA budget buys, and whether the instruction-following regression is a configuration asymmetry or the cost of leaving a metric out of the criteria. |
+
 ## Active Plans
 
 | Plan | Status |
