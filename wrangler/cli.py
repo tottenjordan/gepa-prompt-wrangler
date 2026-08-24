@@ -199,6 +199,84 @@ def eval_cmd(
         raise SystemExit(1)
 
 
+@main.command("capture")
+@click.option("--engine-id", required=True, help="Engine to run inference against.")
+@click.option("--eval-data", required=True, help="Path to eval data file.")
+@click.option("--label", default="capture", help="Name for this capture.")
+@click.option("--model", default="", help="Model id, for batch-config tuning and the sidecar.")
+@click.option(
+    "--retry-failed/--no-retry-failed", default=True, help="Retry failed inference cases."
+)
+def capture_cmd(engine_id: str, eval_data: str, label: str, model: str, retry_failed: bool):
+    """Run inference and save the responses, without scoring them.
+
+    The expensive half on its own. Score the result as many times as the
+    question needs with `wrangler score`, against identical responses and
+    without touching the engine again.
+    """
+    from .core.converter import load_eval_file
+    from .eval.evaluator import capture_inference
+
+    path = capture_inference(
+        engine_id=engine_id,
+        eval_cases=load_eval_file(eval_data),
+        label=label,
+        model=model,
+        agent_name=label,
+        retry_failed=retry_failed,
+    )
+    click.echo(f"\n  Capture: {path}")
+    click.echo(f"  Score it: wrangler score {path}")
+
+
+@main.command("score")
+@click.argument("capture_path")
+@click.option(
+    "--repeat",
+    "-r",
+    default=1,
+    type=int,
+    help="Score the same capture N times and report the spread. N>1 measures judge "
+    "non-determinism directly, since the responses are identical.",
+)
+@click.option("--label", default="", help="Label for output.")
+def score_cmd(capture_path: str, repeat: int, label: str):
+    """Score a capture. Makes no agent calls.
+
+    Every judge question — how much a judge disagrees with itself, whether a
+    different judge model shifts the result, what a metric prompt change does —
+    is only a valid comparison if the responses underneath are identical.
+    """
+    from .eval.evaluator import save_eval_results, score_captured, score_captured_repeated
+
+    name = label or Path(capture_path).stem
+
+    if repeat > 1:
+        summary = score_captured_repeated(capture_path, repeat=repeat, agent_name=name)
+        click.echo(f"\n{summary['n']} scoring passes over identical responses:")
+        click.echo(f"  {'metric':40s} {'mean':>7s} {'sd':>7s} {'min':>7s} {'max':>7s}")
+        for metric in sorted(summary["mean"]):
+            click.echo(
+                f"  {metric:40s} {summary['mean'][metric]:7.3f} {summary['std'][metric]:7.3f} "
+                f"{summary['min'][metric]:7.3f} {summary['max'][metric]:7.3f}"
+            )
+        return
+
+    result = score_captured(capture_path, agent_name=name)
+    click.echo(f"\nResults for {name}:")
+    for metric, score in sorted(result.scores.items()):
+        click.echo(f"  {metric:40s} {score:.3f}")
+    saved = save_eval_results(
+        agent_name=name,
+        scores=result.scores,
+        phase="scored",
+        per_case=result.per_case,
+        coverage=result.coverage,
+        scoring=result.scoring,
+    )
+    click.echo(f"\n  Saved: {saved} ({len(result.per_case)} per-case rows)")
+
+
 @main.command()
 @click.argument("target", default="manifest.yaml")
 @click.option("--pair", "-p", default=None, help="Optimize only a specific pair by ID.")

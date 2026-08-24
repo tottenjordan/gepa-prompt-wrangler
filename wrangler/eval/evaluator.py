@@ -765,6 +765,34 @@ def _retry_failed_cases(
     return types.EvaluationDataset(eval_dataset_df=merged_df)
 
 
+def _drop_unscorable_rows(result_df: "pd.DataFrame", tag: str = "") -> "pd.DataFrame":
+    """Remove rows the eval service cannot score, and say how many.
+
+    Rows with NaN/float in ``response`` or ``agent_data`` make the SDK raise a
+    ValidationError. A row whose response is an *error payload* goes too: left
+    in, it takes every other metric on that case down with it via the
+    extra='forbid' cascade (see ``_is_failed_response``).
+
+    Shared by ``run_batch_eval`` and ``capture_inference`` so a capture holds
+    exactly the rows a live run would have scored — otherwise the two paths
+    would score different sets and could not be compared.
+    """
+
+    def _is_invalid(val):
+        return val is None or (isinstance(val, float) and pd.isna(val)) or val == ""
+
+    invalid_mask = result_df["response"].apply(_is_failed_response)
+    if "agent_data" in result_df.columns:
+        invalid_mask = invalid_mask | result_df["agent_data"].apply(_is_invalid)
+    n_invalid = invalid_mask.sum()
+    if n_invalid > 0:
+        print(
+            f"  {tag}Dropped {n_invalid}/{len(result_df)} rows with invalid agent_data", flush=True
+        )
+        return result_df[~invalid_mask].reset_index(drop=True)
+    return result_df
+
+
 def run_batch_eval(
     engine_id: str,
     eval_cases: list[dict],
@@ -824,32 +852,49 @@ def run_batch_eval(
 
     print(f"  {tag}Inference complete ({_fmt_elapsed(t0)})", flush=True)
 
-    # Clean invalid rows before scoring — rows with NaN/float in response or
-    # agent_data cause ValidationError in the SDK. A row whose response is an
-    # error payload is dropped too: left in, it takes every other metric on
-    # that case down with it (see _is_failed_response).
-    result_df = inference_result.eval_dataset_df
-
-    def _is_invalid(val):
-        return val is None or (isinstance(val, float) and pd.isna(val)) or val == ""
-
-    invalid_mask = result_df["response"].apply(_is_failed_response)
-    if "agent_data" in result_df.columns:
-        invalid_mask = invalid_mask | result_df["agent_data"].apply(_is_invalid)
-    n_invalid = invalid_mask.sum()
-    if n_invalid > 0:
-        print(
-            f"  {tag}Dropped {n_invalid}/{len(result_df)} rows with invalid agent_data", flush=True
-        )
-        clean_df = result_df[~invalid_mask].reset_index(drop=True)
-        inference_result = types.EvaluationDataset(eval_dataset_df=clean_df)
-
+    inference_result = types.EvaluationDataset(
+        eval_dataset_df=_drop_unscorable_rows(inference_result.eval_dataset_df, tag)
+    )
     _assert_scorable(inference_result.eval_dataset_df, tag)
+
+    return _score_dataset(
+        client,
+        inference_result,
+        metrics=metrics,
+        agent_resource=agent_resource,
+        tag=tag,
+        t0=t0,
+    )
+
+
+def _score_dataset(
+    client: "Client",
+    inference_result: "types.EvaluationDataset",
+    metrics: list,
+    agent_resource: str | None = None,
+    tag: str = "",
+    t0: float | None = None,
+) -> EvalResult:
+    """Score an already-inferred dataset. Makes no agent calls.
+
+    This is the second half of ``run_batch_eval``, split out so the same
+    responses can be scored more than once. Every judge question — how much a
+    judge disagrees with itself, whether a different judge model shifts the
+    result, what a metric prompt change does — is a comparison that is only
+    valid if the responses underneath are identical, and re-running inference
+    guarantees they are not. It is also the cheap half: inference against an
+    engine that drops a third of its requests is what costs.
+    """
+    if t0 is None:
+        t0 = time.time()
 
     print(f"  {tag}Scoring: creating evaluation run ({len(metrics)} metrics)...", flush=True)
     eval_t0 = time.time()
     evaluation_run = client.evals.create_evaluation_run(
         dataset=inference_result,
+        # Optional: a capture carries its own responses, so scoring one does not
+        # need the engine that produced them — and must not require it to still
+        # exist. Engine ids are not pinned anywhere in this repo.
         agent=agent_resource,
         metrics=metrics,
         dest=GCS_EVAL_DEST,
@@ -921,6 +966,180 @@ def run_batch_eval(
         coverage=coverage,
         scoring={"submitted": submitted, "scored": len(per_case), "source": scoring_source},
     )
+
+
+CAPTURE_DIR = "outputs/captures"
+
+
+def save_capture(
+    frame: "pd.DataFrame",
+    out_dir: str = CAPTURE_DIR,
+    label: str = "capture",
+    engine_id: str = "",
+    model: str = "",
+    submitted: int | None = None,
+) -> str:
+    """Persist an inference frame plus a human-readable sidecar. Returns the path.
+
+    Pickle for the frame: it holds SDK pydantic objects in ``session_inputs``
+    and ``agent_data``, which no columnar format round-trips. That makes a
+    capture **scratch, not archive** — an SDK bump can render an old one
+    unloadable.
+
+    Which is why the sidecar exists and is JSON. It records what the capture
+    *was* — engine, model, row count, and how many rows the inference dropout
+    cost — so a capture whose frame no longer loads is still identifiable
+    rather than an anonymous file.
+    """
+    import pickle
+    from datetime import UTC, datetime
+    from pathlib import Path
+
+    out = Path(out_dir)
+    out.mkdir(parents=True, exist_ok=True)
+    stamp = datetime.now(tz=UTC).strftime("%Y%m%d_%H%M%S")
+    path = out / f"{label}_{stamp}.pkl"
+
+    with path.open("wb") as f:
+        pickle.dump(frame, f)
+
+    rows = len(frame)
+    meta = {
+        "label": label,
+        "engine_id": engine_id,
+        "model": model,
+        "rows": rows,
+        "submitted": submitted if submitted is not None else rows,
+        "dropped": (submitted - rows) if submitted is not None else 0,
+        "columns": list(frame.columns),
+        "captured_at": datetime.now(tz=UTC).isoformat(),
+    }
+    path.with_suffix(".json").write_text(json.dumps(meta, indent=2, default=str))
+    return str(path)
+
+
+def load_capture(path: str) -> "pd.DataFrame":
+    """Load a captured inference frame."""
+    import pickle
+    from pathlib import Path
+
+    with Path(path).open("rb") as f:
+        return pickle.load(f)  # noqa: S301 -- our own file, written by save_capture
+
+
+def capture_inference(
+    engine_id: str,
+    eval_cases: list[dict],
+    label: str = "capture",
+    model: str = "",
+    agent_name: str = "",
+    retry_failed: bool = True,
+    out_dir: str = CAPTURE_DIR,
+) -> str:
+    """Run inference only, and save the responses. Returns the capture path.
+
+    The expensive half on its own. Everything downstream — every judge, every
+    metric variant, every repeat — reads this file and never touches the engine
+    again, which also puts it out of reach of the empty-stream defect
+    (docs/notes/silent-failures.md #5).
+    """
+    tag = f"[{agent_name}] " if agent_name else ""
+    vertexai.init(
+        project=GCP_PROJECT_ID,
+        location=GCP_REGION,
+        staging_bucket=f"gs://{GCP_STAGING_BUCKET}",
+    )
+    client = Client(project=GCP_PROJECT_ID, location=GCP_REGION)
+    agent_resource = _resolve_resource_name(engine_id)
+
+    eval_df = _build_eval_dataset(eval_cases)
+    batch_size, delay, max_workers = get_batch_config(model)
+
+    t0 = time.time()
+    inference_result = _run_batched_inference(
+        client, agent_resource, eval_df, batch_size, delay, max_workers, tag
+    )
+    if retry_failed:
+        inference_result = _retry_failed_cases(
+            client, agent_resource, eval_df, inference_result, model, tag
+        )
+    print(f"  {tag}Inference complete ({_fmt_elapsed(t0)})", flush=True)
+
+    clean_df = _drop_unscorable_rows(inference_result.eval_dataset_df, tag)
+    path = save_capture(
+        clean_df,
+        out_dir=out_dir,
+        label=label,
+        engine_id=engine_id,
+        model=model,
+        submitted=len(eval_cases),
+    )
+    print(f"  {tag}Captured {len(clean_df)}/{len(eval_cases)} cases -> {path}", flush=True)
+    return path
+
+
+def score_captured(
+    capture_path: str,
+    metrics: list | None = None,
+    agent_name: str = "",
+    expected: int | None = None,
+) -> EvalResult:
+    """Score a capture. Makes no agent calls."""
+    tag = f"[{agent_name}] " if agent_name else ""
+    vertexai.init(
+        project=GCP_PROJECT_ID,
+        location=GCP_REGION,
+        staging_bucket=f"gs://{GCP_STAGING_BUCKET}",
+    )
+    client = Client(project=GCP_PROJECT_ID, location=GCP_REGION)
+    frame = load_capture(capture_path)
+    dataset = types.EvaluationDataset(eval_dataset_df=frame)
+    return _score_dataset(
+        client,
+        dataset,
+        metrics=metrics if metrics is not None else DEFAULT_METRICS,
+        tag=tag,
+    )
+
+
+def summarize_repeats(results: list[EvalResult]) -> dict:
+    """Mean, spread and range per metric across repeated scorings.
+
+    The spread is the point. Scoring the same responses five times and
+    reporting only the mean hides exactly the quantity being measured —
+    how much the judge disagrees with itself.
+    """
+    scored = [r for r in results if r.scores]
+    if not scored:
+        return {"n": 0, "mean": {}, "std": {}, "min": {}, "max": {}}
+
+    keys: set[str] = set()
+    for r in scored:
+        keys.update(r.scores)
+
+    mean, std, lo, hi = {}, {}, {}, {}
+    for key in sorted(keys):
+        vals = [r.scores[key] for r in scored if key in r.scores]
+        mean[key] = statistics.mean(vals)
+        std[key] = statistics.stdev(vals) if len(vals) > 1 else 0.0
+        lo[key], hi[key] = min(vals), max(vals)
+    return {"n": len(scored), "mean": mean, "std": std, "min": lo, "max": hi}
+
+
+def score_captured_repeated(
+    capture_path: str,
+    repeat: int = 1,
+    metrics: list | None = None,
+    agent_name: str = "",
+) -> dict:
+    """Score one capture ``repeat`` times and summarize the spread."""
+    results = []
+    for i in range(repeat):
+        print(f"  Scoring pass {i + 1}/{repeat}...", flush=True)
+        results.append(score_captured(capture_path, metrics=metrics, agent_name=agent_name))
+    summary = summarize_repeats(results)
+    summary["results"] = results
+    return summary
 
 
 def run_batch_eval_averaged(
