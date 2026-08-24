@@ -9,11 +9,19 @@ count for as long as it did.
 
 The probe measures the individual attempt instead:
 
-* **one request in flight per engine.** Arms run concurrently across *different*
-  engines, so the wall clock still divides by the number of arms while each
-  engine's log stream stays unambiguous. With two requests overlapping, two
+* **one request in flight per engine.** Each engine's log stream then stays
+  unambiguous: with two requests overlapping, two
   ``POST /api/stream_reasoning_engine`` lines fall inside both client windows
-  and neither can be attributed to a request.
+  and neither can be attributed.
+
+  Arms are launched concurrently, but **do not budget as if the wall clock
+  divides by the number of arms** — it does not. Measured throughput is about
+  1.5x a single arm whatever the arm count: 4 arms managed 6.9 attempts/min and
+  10 arms 5.8/min, against a per-arm cycle of ~15s that should have given 16 and
+  40. Something under ``async_stream_query`` serializes. Budget roughly
+  ``total_attempts / 6`` minutes and check before promising a finish time.
+  (The serialization is harmless to the measurement, and mildly helpful to the
+  join — it just costs time.)
 * **no retries.** Every attempt is a row, whatever it did.
 * **a nonce in every prompt.** Free now, impossible to add afterwards, and a
   second join key the day any ADK log level surfaces request content.
@@ -162,7 +170,9 @@ async def run_arm(
     """Run ``n`` strictly-serialized attempts against one engine.
 
     ``spacing`` is the gap *between* attempts, not a rate limit — the point is
-    that no two requests to this engine are ever in flight together.
+    that no two requests to this engine are ever in flight together. Note that
+    concurrent arms do not actually multiply throughput; see the module
+    docstring before estimating how long a run will take.
 
     ``block_size`` labels the attempts in groups. Concurrent arms already share
     the time axis, so blocks do not change what is measured; they make the

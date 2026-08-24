@@ -62,9 +62,13 @@ be replaced by redeploying and the gate would only ever refuse to proceed.
 
 ## Cost
 
-10 deploys at ~5 min each ≈ 1 h sequential; ~40 min of probing per phase. Token cost
-negligible — the probe prompt is one line and the reply is one word. Reuses
-`scripts/deploy_probe_arms.py` and both probe tools.
+10 deploys at ~5 min each ≈ 1 h sequential. Probing 1,000 attempts takes **~3 h**, not the
+~40 min a naive "ten arms run concurrently" estimate gives: measured throughput is about
+1.5× a single arm regardless of arm count (4 arms → 6.9 attempts/min, 10 arms → 5.8/min),
+because something beneath `async_stream_query` serializes. Budget `total_attempts / 6`
+minutes. Token cost is negligible — the prompt is one line and the reply is one word.
+
+Reuses `scripts/deploy_probe_arms.py --replicates` and both probe tools.
 
 ## Result
 
