@@ -119,6 +119,61 @@ def summarize(rows: list[dict]) -> dict[str, dict]:
     return out
 
 
+# Campaign 01 (docs/doe/01-engine-lottery.md) probed ten byte-identical engines
+# at 100 attempts each and found six at 97-100%, two at 35-55% and two at 0-6%.
+# Nothing landed between 56% and 97%, so 0.8 separates two populations rather
+# than splitting a continuum, with room on both sides.
+GATE_THRESHOLD = 0.8
+
+# Enough to place an engine in the right population without paying for
+# precision nobody uses: at n=60 a 97% engine essentially never reads below
+# 0.8, and a 55% one essentially never reads above it.
+GATE_ATTEMPTS = 60
+
+
+def gate_decision(reached: int, n: int, threshold: float = GATE_THRESHOLD) -> dict:
+    """Does this engine clear the health bar?
+
+    Judged on the **point estimate**, deliberately, not the interval's lower
+    bound. At n=60 a genuinely 90% engine has a Wilson lower bound around 0.80,
+    so gating on the bound would reject healthy engines nearly as often as bad
+    ones. The interval is reported for context; the decision is the rate.
+
+    Zero attempts is a failure, not a pass — the gate exists to catch silence.
+    """
+    rate = reached / n if n else 0.0
+    lo, hi = wilson_interval(reached, n)
+    return {
+        "reached": reached,
+        "n": n,
+        "rate": rate,
+        "ci_low": lo,
+        "ci_high": hi,
+        "threshold": threshold,
+        "passed": bool(n) and rate >= threshold,
+    }
+
+
+def gate_report(engine_id: str, decision: dict) -> list[str]:
+    """Render the gate outcome, and on failure say what to do about it."""
+    d = decision
+    head = (
+        f"  Engine health: {d['reached']}/{d['n']} reached "
+        f"({d['rate']:.1%}, 95% CI {d['ci_low']:.2f}-{d['ci_high']:.2f})"
+    )
+    if d["passed"]:
+        return [head, f"  PASS — at or above the {d['threshold']:.0%} bar."]
+    fail = (
+        f"  FAIL — below the {d['threshold']:.0%} bar. Engine {engine_id} is dropping "
+        f"requests as 200-with-no-inference."
+    )
+    advice = (
+        "  Redeploy it: the rate is redrawn on deploy, not attached to the engine id "
+        "(0%->50% and 6%->56% when measured). See docs/doe/01-engine-lottery.md."
+    )
+    return [head, fail, advice]
+
+
 async def _one_attempt(agent, arm: str, engine_id: str, index: int, block: int) -> dict:
     """Send exactly one request and describe what happened. Never retries."""
     nonce = uuid.uuid4().hex[:12]
@@ -264,6 +319,35 @@ def run_probe(
     print(f"\n  Rows: {out_path}")
     print(f"  Join to serving workers: python -m wrangler.tools.boot_probe_join {out_path}")
     return summary
+
+
+def probe_engine(
+    engine_id: str,
+    n: int = GATE_ATTEMPTS,
+    spacing: float = 2.0,
+    threshold: float = GATE_THRESHOLD,
+    label: str = "gate",
+    out_dir: str | Path | None = "outputs/probes",
+) -> dict:
+    """Probe one engine and return a gate decision. Roughly n*(spacing+latency) seconds.
+
+    Tighter spacing than a measurement run: this is a health check, not an
+    experiment, and Campaign 01 found pacing does not affect the rate anyway.
+    """
+    import vertexai
+    from vertexai import agent_engines
+
+    vertexai.init(project=GCP_PROJECT_ID, location=GCP_REGION)
+    disable_pyopenssl()
+
+    agent = agent_engines.get(_resolve_resource(engine_id))
+    out_path = Path(out_dir) / f"{label}_{engine_id}.jsonl" if out_dir else None
+    rows = asyncio.run(run_arm(agent, label, engine_id, n=n, spacing=spacing, out_path=out_path))
+    reached = sum(1 for r in rows if r["reached"])
+    decision = gate_decision(reached, len(rows), threshold=threshold)
+    for line in gate_report(engine_id, decision):
+        print(line, flush=True)
+    return decision
 
 
 def _parse_arm(spec: str) -> tuple[str, str]:

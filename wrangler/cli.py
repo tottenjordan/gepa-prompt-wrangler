@@ -199,6 +199,35 @@ def eval_cmd(
         raise SystemExit(1)
 
 
+@main.command("probe")
+@click.option("--engine-id", required=True, help="Engine to health-check.")
+@click.option("--n", default=None, type=int, help="Attempts (default: 60).")
+@click.option("--threshold", default=None, type=float, help="Reach bar (default: 0.80).")
+@click.option(
+    "--gate",
+    is_flag=True,
+    help="Exit non-zero when the engine is below the bar, so a deploy script can stop.",
+)
+def probe_cmd(engine_id: str, n: int | None, threshold: float | None, gate: bool):
+    """Check whether a deployed engine actually serves requests.
+
+    Ten byte-identical engines measured 0% to 100% reach, and a bad one returns
+    HTTP 200 with no inference rather than an error — so nothing downstream
+    notices until a third of an eval run has quietly gone missing. Redeploying
+    redraws the rate, so a failing engine is worth replacing rather than
+    working around. See docs/doe/01-engine-lottery.md.
+    """
+    from .tools.boot_probe import GATE_ATTEMPTS, GATE_THRESHOLD, probe_engine
+
+    decision = probe_engine(
+        engine_id,
+        n=n or GATE_ATTEMPTS,
+        threshold=threshold if threshold is not None else GATE_THRESHOLD,
+    )
+    if gate and not decision["passed"]:
+        raise SystemExit(1)
+
+
 @main.command("capture")
 @click.option("--engine-id", required=True, help="Engine to run inference against.")
 @click.option("--eval-data", required=True, help="Path to eval data file.")
