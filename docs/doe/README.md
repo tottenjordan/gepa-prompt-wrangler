@@ -32,6 +32,11 @@ averaging fix. 04 needs 03's floor, or its results cannot be read.
 - **Report a null as readily as a hit.** Several of these are designed so that "no effect"
   is the more useful answer.
 - **State what was dropped.** A silent truncation reads as full coverage.
+- **A campaign is not complete until its engines are torn down.** Deploy them with
+  `lifecycle: ephemeral` and `campaign: <id>` labels, and reap them with
+  `wrangler engines prune` once the Result section is written. Campaign 01 added ten
+  engines in one night; the project was at 80 before anyone counted. See
+  [../notes/engine-lifecycle.md](../notes/engine-lifecycle.md).
 
 ## Related
 

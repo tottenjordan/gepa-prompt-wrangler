@@ -175,6 +175,16 @@ For multi-model agents: `SEARCH_MCP_SERVER`, `BOOKING_MCP_SERVER`, `EXPENSE_MCP_
 - **Sampler configs** in `agents/*_opt/sampler_config.json` are the **single source of truth** for GEPA criteria and thresholds. When a sampler_config.json exists it is used verbatim — experiment/manifest thresholds do NOT override it. To tune what GEPA optimizes against, edit the sampler_config.json. The `eval_thresholds` flowing from manifests only (a) seed the fallback `_build_criteria()` when no sampler_config.json exists, and (b) drive report pass/fail marking — keep them in sync with the sampler config for accurate reports.
 - Agent `__init__.py` files must use absolute imports (e.g., `from agents.example_agent.agent import ...`) for GEAP deployment compatibility.
 - **Do not pin Agent Engine deployment ids** — no hardcoded ids in source, and nothing may *require* `*_ENGINE_ID` to be present in `.env`. An id names one deployment; whether a change means update, redeploy, or a brand-new engine is decided ad hoc at the time. Engine ids arrive at the call site (`--engine-id`, manifest `engine_id`, an env var read where it is used) and a missing one should skip or fail clearly, never fall back to a checked-in default. The example scripts write ids into `.env` as scratch space for their own `--update` flow; that is convenience, not configuration.
+- **Reap the engines you deploy.** Because ids are never pinned (above), nothing in the
+  repo names a deployment and nothing reaps it — the project reached **80 engines** before
+  anyone counted, 61 of them holding warm instances. `wrangler engines list` shows the
+  inventory with the evidence behind each disposition; `wrangler engines prune` deletes
+  only what every signal agrees on and is dry-run by default. Deploy scratch engines with
+  `labels={"lifecycle": "ephemeral", "campaign": "<id>"}` so they can be found later, and
+  treat teardown as the last step of a campaign rather than a separate chore. The policy,
+  and why an age-based sweep would have deleted someone else's live work, is in
+  [docs/notes/engine-lifecycle.md](docs/notes/engine-lifecycle.md).
+
 - **Every optimization sweep carries a control arm whose prompt does not change.** Run
   `eval_before` and `eval_after` against the *same* prompt, with no optimize stage between
   them, alongside the real arms and under identical conditions. Whatever that arm's deltas

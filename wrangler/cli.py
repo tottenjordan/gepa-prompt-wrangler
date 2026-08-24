@@ -199,6 +199,72 @@ def eval_cmd(
         raise SystemExit(1)
 
 
+@main.group("engines")
+def engines_group():
+    """Inventory and reap Agent Engines."""
+
+
+@engines_group.command("list")
+@click.option("--days", default=30, help="Traffic window (default: 30).")
+def engines_list(days: int):
+    """Show every engine with its disposition and the evidence behind it."""
+    from .tools.engines import build_plan, render_plan
+
+    for line in render_plan(build_plan(days), window_days=days):
+        click.echo(line)
+
+
+@engines_group.command("prune")
+@click.option("--days", default=30, help="Traffic window (default: 30).")
+@click.option("--yes", is_flag=True, help="Actually delete. Without this, nothing happens.")
+@click.option("--snapshot/--no-snapshot", default=True, help="Write a dated inventory first.")
+def engines_prune(days: int, yes: bool, snapshot: bool):
+    """Delete engines every signal agrees are disposable. Dry run by default.
+
+    An engine is only deletable when it is labelled ours, has served no traffic
+    in the window, is referenced nowhere, and is not being deliberately kept
+    warm. Any one of those protects it — 80 engines accumulated here and three
+    of the busiest were not ours. See docs/notes/engine-lifecycle.md.
+    """
+    from .tools.engines import (
+        build_plan,
+        delete_engine,
+        execute_prune,
+        render_plan,
+        render_snapshot,
+        snapshot_path,
+    )
+
+    plan = build_plan(days)
+    for line in render_plan(plan, window_days=days):
+        click.echo(line)
+
+    if not plan["delete"]:
+        click.echo("\nNothing to delete.")
+        return
+
+    if snapshot:
+        path = snapshot_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(render_snapshot(plan, window_days=days))
+        click.echo(f"\n  Inventory written to {path}")
+
+    if not yes:
+        click.echo(
+            f"\nDRY RUN — nothing deleted. Re-run with --yes to remove these "
+            f"{len(plan['delete'])} engines."
+        )
+        return
+
+    click.echo(f"\nDeleting {len(plan['delete'])} engines...")
+    result = execute_prune(plan, delete_fn=delete_engine, confirm=True)
+    click.echo(f"  deleted: {len(result['deleted'])}")
+    for eid, err in result["failed"].items():
+        click.echo(f"  FAILED {eid}: {err}")
+    if result["failed"]:
+        raise SystemExit(1)
+
+
 @main.command("probe")
 @click.option("--engine-id", required=True, help="Engine to health-check.")
 @click.option("--n", default=None, type=int, help="Attempts (default: 60).")

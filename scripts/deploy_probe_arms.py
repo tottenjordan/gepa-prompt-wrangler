@@ -59,6 +59,9 @@ INSTRUCTION = (
 
 MIN_INSTANCES = 2
 
+# Stamped onto every probe engine, so a sweeper knows which campaign owns it.
+CAMPAIGN = "01"
+
 ARMS = {
     "mcp-claude": {"model": DEFAULT_AGENT_MODEL_ALT, "include_mcp": True},
     "bare-claude": {"model": DEFAULT_AGENT_MODEL_ALT, "include_mcp": False},
@@ -78,6 +81,10 @@ def deploy_arm(arm: str) -> str:
         display_name=f"geap-probe-{arm}",
         min_instances=MIN_INSTANCES,
         include_mcp=spec["include_mcp"],
+        # Scratch by construction. `wrangler engines` finds these by label
+        # rather than by matching a name prefix, so a campaign's engines are
+        # reapable even if nobody remembers what they were called.
+        labels={"lifecycle": "ephemeral", "campaign": CAMPAIGN},
     )
     print(f"  {arm}: {engine_id}  ({time.time() - t0:.0f}s)")
     return engine_id
