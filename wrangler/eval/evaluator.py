@@ -968,6 +968,52 @@ def _score_dataset(
     )
 
 
+def average_per_case(runs: list[list[dict]]) -> list[dict[str, float]]:
+    """Average per-case rows across runs, matching cases by index.
+
+    This used to match by *list position*: ``r.per_case[k]`` for each run. Runs
+    drop different cases, so position k is a different case in each one — a run
+    scoring cases [0, 2, 5] averaged against a run scoring [0, 1, 5] merged
+    case 2's score with case 1's. It also averaged ``case_index`` itself as
+    though it were a metric, yielding fractional indices that nothing
+    downstream could pair on.
+
+    The consequence is not cosmetic: the ~0.034 noise floor measured at
+    ``num_runs: 3`` — the figure CLAUDE.md tells every sweep to clear — was
+    computed through it, so that number has to be re-measured.
+
+    A case only one run scored is kept with that run's value rather than
+    dropped. Metrics are averaged independently, so a metric missing from one
+    run does not drag the others.
+    """
+    by_case: dict[int, dict[str, list[float]]] = {}
+    unindexed = 0
+    for run in runs:
+        for row in run:
+            idx = row.get(CASE_INDEX_KEY)
+            if idx is None:
+                # Unpairable by construction. Dropped rather than guessed at,
+                # and counted rather than dropped quietly -- the guess is what
+                # this function is being fixed for.
+                unindexed += 1
+                continue
+            bucket = by_case.setdefault(int(idx), {})
+            for metric, value in case_metrics(row).items():
+                bucket.setdefault(metric, []).append(value)
+
+    if unindexed:
+        print(
+            f"  Warning: {unindexed} per-case row(s) had no {CASE_INDEX_KEY} and could not be "
+            f"paired across runs; excluded from the average.",
+            flush=True,
+        )
+
+    return [
+        {CASE_INDEX_KEY: idx, **{m: statistics.mean(v) for m, v in sorted(metrics.items())}}
+        for idx, metrics in sorted(by_case.items())
+    ]
+
+
 CAPTURE_DIR = "outputs/captures"
 
 
@@ -1200,17 +1246,7 @@ def run_batch_eval_averaged(
         avg_scores[metric] = statistics.mean(values)
         std_scores[metric] = statistics.stdev(values) if len(values) > 1 else 0.0
 
-    avg_per_case: list[dict[str, float]] = []
-    runs_with_cases = [r for r in all_results if r.per_case]
-    if runs_with_cases:
-        n_cases = max(len(r.per_case) for r in runs_with_cases)
-        for case_idx in range(n_cases):
-            case_metrics: dict[str, list[float]] = {}
-            for r in runs_with_cases:
-                if case_idx < len(r.per_case):
-                    for k, v in r.per_case[case_idx].items():
-                        case_metrics.setdefault(k, []).append(v)
-            avg_per_case.append({k: statistics.mean(vs) for k, vs in case_metrics.items()})
+    avg_per_case = average_per_case([r.per_case for r in all_results if r.per_case])
 
     agg_tokens: dict[str, int | bool] = {"input_tokens": 0, "output_tokens": 0, "is_estimate": True}
     for r in all_results:
