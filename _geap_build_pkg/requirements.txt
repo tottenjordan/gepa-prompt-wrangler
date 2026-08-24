@@ -1,0 +1,11 @@
+google-cloud-aiplatform[adk,agent-engines]>=1.163.0
+google-genai>=2
+google-auth>=2.52.0
+google-adk[a2a,agent-identity,eval,mcp]==2.7.1
+anthropic[vertex]>=0.49.0
+litellm>=1.83.14
+python-dotenv>=1.0.0
+pydantic>=2.12.5
+opentelemetry-instrumentation-google-genai
+opentelemetry-instrumentation-grpc
+opentelemetry-instrumentation-httpx
