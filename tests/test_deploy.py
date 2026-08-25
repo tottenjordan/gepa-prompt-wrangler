@@ -251,6 +251,86 @@ class TestBuildSourcePackage:
         assert reqs == _SOURCE_REQUIREMENTS
 
 
+class TestBuildWithoutMcp:
+    """A build mode with no MCP toolsets, so startup cost becomes a variable.
+
+    Every measurement of the empty-stream defect (silent-failures.md #5) has
+    been taken against an agent that performs three MCP handshakes at import,
+    so "GEAP routes to booting workers" and "this agent boots slowly" are
+    confounded. Deploying the normal package with ``env_vars={}`` does not
+    separate them -- the generated registry.py raises at import when no MCP
+    URLs are set, so the container crash-loops instead of booting fast.
+
+    This mode is the experiment's independent variable, and it doubles as the
+    minimal reproduction shipped with the escalation.
+    """
+
+    def test_no_registry_is_written(self, tmp_path):
+        from wrangler.core.deploy import build_source_package
+
+        build_dir = str(tmp_path / "build")
+        build_source_package(
+            _make_agent_tree(tmp_path), "Prompt", "gemini-3.5-flash", build_dir, include_mcp=False
+        )
+        assert not (Path(build_dir) / "registry.py").exists()
+
+    def test_app_does_not_reference_mcp(self, tmp_path):
+        from wrangler.core.deploy import build_source_package
+
+        build_dir = str(tmp_path / "build")
+        build_source_package(
+            _make_agent_tree(tmp_path), "Prompt", "gemini-3.5-flash", build_dir, include_mcp=False
+        )
+        app = (Path(build_dir) / "app.py").read_text()
+        assert "get_mcp_tools" not in app
+        assert "registry" not in app
+        assert "MCP_SERVER" not in app
+
+    def test_everything_else_is_still_written(self, tmp_path):
+        """Only the toolset changes. A missing config.py fails twenty minutes later."""
+        from wrangler.core.deploy import build_source_package
+
+        build_dir = str(tmp_path / "build")
+        build_source_package(
+            _make_agent_tree(tmp_path), "Prompt", "gemini-3.5-flash", build_dir, include_mcp=False
+        )
+        build_path = Path(build_dir)
+        for name in ("app.py", "config.py", "instruction.txt", "requirements.txt", "__init__.py"):
+            assert (build_path / name).exists(), name
+
+    def test_generated_app_is_valid_python(self, tmp_path):
+        """The container imports this; a syntax error is a twenty-minute round trip."""
+        from wrangler.core.deploy import build_source_package
+
+        build_dir = str(tmp_path / "build")
+        build_source_package(
+            _make_agent_tree(tmp_path), "Prompt", "gemini-3.5-flash", build_dir, include_mcp=False
+        )
+        compile((Path(build_dir) / "app.py").read_text(), "app.py", "exec")
+
+    def test_instruction_still_travels(self, tmp_path):
+        from wrangler.core.deploy import build_source_package
+
+        build_dir = str(tmp_path / "build")
+        build_source_package(
+            _make_agent_tree(tmp_path),
+            "Bare probe prompt",
+            "gemini-3.5-flash",
+            build_dir,
+            include_mcp=False,
+        )
+        assert (Path(build_dir) / "instruction.txt").read_text() == "Bare probe prompt"
+
+    def test_default_is_unchanged(self, tmp_path):
+        """The MCP path is what every real deployment uses; it must not move."""
+        from wrangler.core.deploy import build_source_package
+
+        build_dir = str(tmp_path / "build")
+        build_source_package(_make_agent_tree(tmp_path), "Prompt", "gemini-3.5-flash", build_dir)
+        assert (Path(build_dir) / "registry.py").exists()
+        assert "get_mcp_tools" in (Path(build_dir) / "app.py").read_text()
+
+
 class TestOtelSpanExport:
     """Span batches were being dropped under load, taking online eval's input
     with them. The tuning below is the only handle we have on the exporter --

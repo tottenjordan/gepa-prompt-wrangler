@@ -2,10 +2,11 @@
 
 Creates a new session with a unique user ID per query to keep traces independent.
 
-GEAP drops roughly three of every four requests on a booting worker (200 OK, zero
-events, no trace), and no client-side trick avoids it — session identity, pacing,
-and warm-up bursts were all measured and none of them moved the rate. So this tool
-spends *attempts* and *concurrency* to land traces anyway, and reports the
+GEAP answers a share of requests with 200 OK, zero events and no trace, having run no
+inference at all — 31.7% over 960 requests, but 4% to 68% depending on the engine. No
+client-side trick avoids it: session identity, pacing, warm-up bursts, removing every
+toolset and switching model family were all measured and none moved the rate. So this
+tool spends *attempts* and *concurrency* to land traces anyway, and reports the
 per-attempt rate so the underlying defect stays visible. See the table above
 ``_DEFAULT_MAX_ATTEMPTS`` and docs/notes/silent-failures.md #5.
 
@@ -65,29 +66,36 @@ def _resolve_resource(engine_id: str) -> str:
     return f"projects/{GCP_PROJECT_ID}/locations/{GCP_REGION}/reasoningEngines/{engine_id}"
 
 
-# GEAP routes a request to a worker that has not finished booting, and that
-# request comes back HTTP 200 with an empty event stream -- no error, no trace.
-# Confirmed in the ReasoningEngine logs: a worker logged "Application startup
-# complete" and served "POST /api/stream_reasoning_engine 200 OK" in the same
-# second, while a warm worker handling the neighbouring request logged a real
-# rawPredict to the model. Startup here is ~8s: three MCP handshakes.
+# A share of requests come back HTTP 200 with an empty event stream -- no error,
+# no trace -- and the server ran no inference for them at all. Established by a
+# per-request join on 960 attempts (2026-08-23): a nonce in each prompt, matched
+# against GEAP's structured log stream, agreed with the client-side event count
+# 960 times out of 960.
 #
-# **No client-side strategy avoids this.** Measured on engine
-# 5638288480409747456 on 2026-08-21, interleaved and order-rotated so an
+# The cause is NOT a worker caught mid-boot, which is what this comment claimed
+# until that measurement. All 948 joined requests were served by workers that had
+# already finished starting up, median age 215s.
+#
+# **No client-side strategy avoids this.** Interleaved and order-rotated so an
 # intermittent fault could not frame one arm (docs/notes/silent-failures.md #5):
 #
 #   session identity  new user+session 1/12, same user 2/12, same session 1/12
 #   pacing            sequential 5/30 (17%), concurrent 10/30 (33%), p=0.23
 #   warm-up burst     2/18 (11%) -- no better, plausibly worse
+#   no toolsets       bare agent, sub-second startup: still 44.6% failures
+#   model family      both Claude and Gemini affected
 #
-# The engine logged 37 worker boots for 36 requests: a boot per request, whoever
-# is asking and however they pace it. `GEAP_MIN_INSTANCES=2` does not move it
-# either (measured: 1.3 startups per request, before and after).
+# `GEAP_MIN_INSTANCES=2` does not move it either (1.3 startups per request,
+# before and after).
 #
-# So the design here does not try to dodge the failure. It treats each attempt
-# as an independent draw at roughly 1-in-4, and spends attempts and concurrency
-# to get the traces anyway -- while reporting the per-attempt rate, so a
-# server-side defect stays visible instead of being buried by the retries.
+# So the design here does not try to dodge the failure. It treats each attempt as
+# an independent draw and spends attempts and concurrency to get the traces
+# anyway -- while reporting the per-attempt rate, so a server-side defect stays
+# visible instead of being buried by the retries.
+#
+# Six attempts was chosen against a measured ~1-in-4 per-attempt rate on one
+# engine. The rate is now known to be strongly per-engine (4% to 68% failure), so
+# read the attempt rate this tool prints rather than assuming the budget fits.
 _DEFAULT_MAX_ATTEMPTS = 6
 _DEFAULT_CONCURRENCY = 4
 
