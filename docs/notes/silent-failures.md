@@ -589,3 +589,33 @@ score it produces, so it wants a deliberate decision rather than a drive-by edit
 **The lesson, again:** a count that is never compared against an expectation is not a
 measurement. Three of the four losses in this file were invisible for the same reason —
 nothing asserted how many results *should* have come back.
+
+### Verified 2026-08-23 — and the verification nearly failed for its own reason
+
+One control eval on engine `3411962152116813824`, 64 cases, `num_runs: 1`, against the two
+runs above as baselines:
+
+| run | inferred / 64 | scored / submitted | per-metric coverage |
+| --- | --- | --- | --- |
+| ctrlA (before fix) | 50 | 41 / 50 (82%) | uniform 41 on all five |
+| ctrlB (before fix) | 44 | 39 / 44 (89%) | uniform 39 on all five |
+| **ctrlC (after)** | **53** | **53 / 53 (100%)** | ragged: 51 / 48 / 47 / 46 / 44 |
+
+Zero cases lost at the scoring stage, and every individual metric beat both baselines —
+the worst (hallucination, 44) still clears ctrlA's 41.
+
+**The uniform-vs-ragged shape is the diagnosis.** Before, a case survived only if *all five*
+metrics parsed, so coverage was flat at the worst metric. Now a case keeps whatever scored:
+53 rows, indices dense `0..52`, several rows carrying one to four metrics and two carrying
+none. That density-plus-raggedness is `_extract_per_case_via_api`'s signature — it
+enumerates the eval set by position, so it cannot skip an index, and it drops only the
+metrics that errored.
+
+**But the artifact could not say so.** The one direct statement of which path ran was a
+`print` to a log in `/tmp`, and the machine rebooted before it was read. The saved JSON held
+per-case rows and nothing about submission counts, coverage, or provenance, so the run had
+to be reconstructed from row *shape* — strong, but circumstantial. `save_eval_results` now
+persists `coverage` and `scoring` (`submitted` / `scored` / `source`, where source is `sdk`
+or `gcs_recovery`), and the experiment stage records the same. A run that has to be
+interpreted from a log file is not a durable measurement — the same mistake as the counts
+above, one level up.

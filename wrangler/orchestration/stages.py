@@ -346,6 +346,10 @@ def stage_eval(
                 # and the printed warning scrolls past while the artifact is
                 # what anyone actually reads later. See silent-failures.md #7.
                 "coverage": result.coverage,
+                # submitted/scored/source. Distinguishes "the scoring stage lost
+                # nothing" from "it lost cases and the GCS recovery put them
+                # back" -- indistinguishable from the rows alone.
+                "scoring": result.scoring,
             },
         )
 

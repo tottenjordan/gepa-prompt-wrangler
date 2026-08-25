@@ -757,4 +757,84 @@ class TestScoringStageLoss:
 
     def test_expected_is_optional_so_existing_callers_are_unaffected(self):
         run = self._Run([self._Case(0, 1.0)])
-        assert len(evaluator._extract_per_case_scores(run)) == 1
+        assert len(evaluator._extract_per_case_scores(run)[0]) == 1
+
+
+class TestScoringProvenance:
+    """Which extraction path produced the rows has to survive into the artifact.
+
+    The 2026-08-23 control run scored 53/53 with ragged per-metric coverage —
+    the recovery path's exact signature, since it enumerates the eval set by
+    position and keeps whatever metrics parsed. But the only record that it
+    fired was a stdout line, and the log was lost before it could be read. The
+    artifact alone could not distinguish "recovery worked" from "the loss did
+    not reproduce". Verification that depends on a log file is not
+    verification.
+    """
+
+    def test_sdk_path_is_labelled(self):
+        run = TestScoringStageLoss._Run(
+            [TestScoringStageLoss._Case(0, 1.0), TestScoringStageLoss._Case(1, 0.5)]
+        )
+        rows, source = evaluator._extract_per_case_scores(run, expected=2)
+        assert len(rows) == 2
+        assert source == "sdk"
+
+    def test_recovery_path_is_labelled(self, monkeypatch):
+        from wrangler.eval.evaluator import CASE_INDEX_KEY
+
+        run = TestScoringStageLoss._Run([TestScoringStageLoss._Case(0, 1.0)])
+        monkeypatch.setattr(
+            evaluator,
+            "_extract_per_case_via_api",
+            lambda _run: [
+                {CASE_INDEX_KEY: 0, "safety_v1": 1.0},
+                {CASE_INDEX_KEY: 1},
+                {CASE_INDEX_KEY: 2, "safety_v1": 0.5},
+            ],
+        )
+        rows, source = evaluator._extract_per_case_scores(run, expected=3)
+        assert len(rows) == 3
+        assert source == "gcs_recovery"
+
+    def test_failed_recovery_keeps_the_sdk_label(self, monkeypatch):
+        """Recovery that did not help must not be recorded as if it had."""
+        run = TestScoringStageLoss._Run([TestScoringStageLoss._Case(0, 1.0)])
+        monkeypatch.setattr(evaluator, "_extract_per_case_via_api", lambda _run: [])
+        rows, source = evaluator._extract_per_case_scores(run, expected=3)
+        assert len(rows) == 1
+        assert source == "sdk"
+
+    def test_saved_artifact_records_coverage_and_scoring(self, tmp_path):
+        import json
+        import pathlib
+
+        from wrangler.eval.evaluator import CASE_INDEX_KEY, save_eval_results
+
+        path = save_eval_results(
+            agent_name="ctrl",
+            scores={"safety_v1": 1.0},
+            phase="standalone",
+            output_dir=str(tmp_path),
+            per_case=[{CASE_INDEX_KEY: 0, "safety_v1": 1.0}, {CASE_INDEX_KEY: 1}],
+            coverage={"safety_v1": 1},
+            scoring={"submitted": 2, "scored": 2, "source": "gcs_recovery"},
+        )
+        data = json.loads(pathlib.Path(path).read_text())
+        assert data["coverage"] == {"safety_v1": 1}
+        assert data["scoring"]["source"] == "gcs_recovery"
+        assert data["scoring"]["submitted"] == 2
+
+    def test_saved_artifact_omits_nothing_when_unknown(self, tmp_path):
+        """Older callers pass neither; the keys stay present and empty."""
+        import json
+        import pathlib
+
+        from wrangler.eval.evaluator import save_eval_results
+
+        path = save_eval_results(
+            agent_name="ctrl", scores={}, phase="standalone", output_dir=str(tmp_path)
+        )
+        data = json.loads(pathlib.Path(path).read_text())
+        assert data["coverage"] == {}
+        assert data["scoring"] == {}

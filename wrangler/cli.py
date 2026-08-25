@@ -187,8 +187,13 @@ def eval_cmd(
             scores=result.scores,
             phase="standalone",
             per_case=result.per_case,
+            coverage=result.coverage,
+            scoring=result.scoring,
         )
-        click.echo(f"\n  Saved: {saved} ({len(result.per_case)} per-case rows)")
+        source = result.scoring.get("source", "unknown")
+        click.echo(
+            f"\n  Saved: {saved} ({len(result.per_case)} per-case rows, scoring source: {source})"
+        )
     else:
         click.echo("Error: provide an experiment directory or --engine-id.")
         raise SystemExit(1)
