@@ -331,6 +331,34 @@ class TestBuildWithoutMcp:
         assert "get_mcp_tools" in (Path(build_dir) / "app.py").read_text()
 
 
+class TestOwnershipLabels:
+    """`wrangler engines` refuses to delete anything without the ownership label,
+    so an engine that loses it becomes unreapable. Callers add to it, never
+    replace it."""
+
+    def test_the_solution_label_is_always_present(self):
+        from wrangler.core.deploy import _build_source_config
+
+        cfg = _build_source_config("_geap_build_pkg", display_name="d")
+        assert cfg["labels"]["solution"] == "promp-wrangler"
+
+    def test_custom_labels_merge_rather_than_replace(self):
+        from wrangler.core.deploy import _build_source_config
+
+        cfg = _build_source_config(
+            "_geap_build_pkg", display_name="d", labels={"lifecycle": "ephemeral"}
+        )
+        assert cfg["labels"]["lifecycle"] == "ephemeral"
+        assert cfg["labels"]["solution"] == "promp-wrangler"
+
+    def test_a_caller_cannot_drop_the_owner_label_by_accident(self):
+        """Passing an empty dict must not clear it."""
+        from wrangler.core.deploy import _build_source_config
+
+        cfg = _build_source_config("_geap_build_pkg", display_name="d", labels={})
+        assert cfg["labels"]["solution"] == "promp-wrangler"
+
+
 class TestOtelSpanExport:
     """Span batches were being dropped under load, taking online eval's input
     with them. The tuning below is the only handle we have on the exporter --

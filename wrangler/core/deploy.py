@@ -752,6 +752,7 @@ def _build_source_config(
     min_instances: int | None = None,
     max_instances: int | None = None,
     include_mcp: bool = True,
+    labels: dict | None = None,
 ) -> dict:
     """Build the config dict for source-based deployment."""
     pkg_name = Path(build_dir).name
@@ -780,7 +781,12 @@ def _build_source_config(
         "class_methods": _ADK_CLASS_METHODS,
         "agent_framework": "google-adk",
         "display_name": display_name,
-        "labels": {"solution": "promp-wrangler"},
+        # The ownership label is merged *under* the caller's, never replaced:
+        # `wrangler engines` refuses to delete anything without it, and an
+        # engine that loses it becomes unreapable. Callers add to it -- probe
+        # deploys pass lifecycle=ephemeral so a sweeper can find scratch engines
+        # by evidence rather than by matching a name prefix.
+        "labels": {"solution": "promp-wrangler", **(labels or {})},
         "env_vars": {
             "GCP_PROJECT_ID": GCP_PROJECT_ID,
             "GCP_REGION": GCP_REGION,
@@ -806,6 +812,7 @@ def deploy_agent_from_source(
     min_instances: int | None = None,
     max_instances: int | None = None,
     include_mcp: bool = True,
+    labels: dict | None = None,
 ) -> str:
     """Deploy a new agent to GEAP using source-based deployment. Returns engine_id.
 
@@ -838,6 +845,7 @@ def deploy_agent_from_source(
                 min_instances=min_instances,
                 max_instances=max_instances,
                 include_mcp=include_mcp,
+                labels=labels,
             )
             remote = _get_client().agent_engines.create(config=config)
             break
@@ -877,6 +885,7 @@ def update_agent_from_source(
     min_instances: int | None = None,
     max_instances: int | None = None,
     include_mcp: bool = True,
+    labels: dict | None = None,
 ) -> str:
     """Update an existing agent on GEAP using source-based deployment. Returns engine_id.
 
@@ -909,6 +918,7 @@ def update_agent_from_source(
                 min_instances=min_instances,
                 max_instances=max_instances,
                 include_mcp=include_mcp,
+                labels=labels,
             )
             remote = _get_client().agent_engines.update(name=engine_id, config=config)
             break

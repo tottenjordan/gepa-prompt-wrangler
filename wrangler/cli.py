@@ -199,6 +199,179 @@ def eval_cmd(
         raise SystemExit(1)
 
 
+@main.group("engines")
+def engines_group():
+    """Inventory and reap Agent Engines."""
+
+
+@engines_group.command("list")
+@click.option("--days", default=30, help="Traffic window (default: 30).")
+def engines_list(days: int):
+    """Show every engine with its disposition and the evidence behind it."""
+    from .tools.engines import build_plan, render_plan
+
+    for line in render_plan(build_plan(days), window_days=days):
+        click.echo(line)
+
+
+@engines_group.command("prune")
+@click.option("--days", default=30, help="Traffic window (default: 30).")
+@click.option("--yes", is_flag=True, help="Actually delete. Without this, nothing happens.")
+@click.option("--snapshot/--no-snapshot", default=True, help="Write a dated inventory first.")
+def engines_prune(days: int, yes: bool, snapshot: bool):
+    """Delete engines every signal agrees are disposable. Dry run by default.
+
+    An engine is only deletable when it is labelled ours, has served no traffic
+    in the window, is referenced nowhere, and is not being deliberately kept
+    warm. Any one of those protects it — 80 engines accumulated here and three
+    of the busiest were not ours. See docs/notes/engine-lifecycle.md.
+    """
+    from .tools.engines import (
+        build_plan,
+        delete_engine,
+        execute_prune,
+        render_plan,
+        render_snapshot,
+        snapshot_path,
+    )
+
+    plan = build_plan(days)
+    for line in render_plan(plan, window_days=days):
+        click.echo(line)
+
+    if not plan["delete"]:
+        click.echo("\nNothing to delete.")
+        return
+
+    if snapshot:
+        path = snapshot_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(render_snapshot(plan, window_days=days))
+        click.echo(f"\n  Inventory written to {path}")
+
+    if not yes:
+        click.echo(
+            f"\nDRY RUN — nothing deleted. Re-run with --yes to remove these "
+            f"{len(plan['delete'])} engines."
+        )
+        return
+
+    click.echo(f"\nDeleting {len(plan['delete'])} engines...")
+    result = execute_prune(plan, delete_fn=delete_engine, confirm=True)
+    click.echo(f"  deleted: {len(result['deleted'])}")
+    for eid, err in result["failed"].items():
+        click.echo(f"  FAILED {eid}: {err}")
+    if result["failed"]:
+        raise SystemExit(1)
+
+
+@main.command("probe")
+@click.option("--engine-id", required=True, help="Engine to health-check.")
+@click.option("--n", default=None, type=int, help="Attempts (default: 60).")
+@click.option("--threshold", default=None, type=float, help="Reach bar (default: 0.80).")
+@click.option(
+    "--gate",
+    is_flag=True,
+    help="Exit non-zero when the engine is below the bar, so a deploy script can stop.",
+)
+def probe_cmd(engine_id: str, n: int | None, threshold: float | None, gate: bool):
+    """Check whether a deployed engine actually serves requests.
+
+    Ten byte-identical engines measured 0% to 100% reach, and a bad one returns
+    HTTP 200 with no inference rather than an error — so nothing downstream
+    notices until a third of an eval run has quietly gone missing. Redeploying
+    redraws the rate, so a failing engine is worth replacing rather than
+    working around. See docs/doe/01-engine-lottery.md.
+    """
+    from .tools.boot_probe import GATE_ATTEMPTS, GATE_THRESHOLD, probe_engine
+
+    decision = probe_engine(
+        engine_id,
+        n=n or GATE_ATTEMPTS,
+        threshold=threshold if threshold is not None else GATE_THRESHOLD,
+    )
+    if gate and not decision["passed"]:
+        raise SystemExit(1)
+
+
+@main.command("capture")
+@click.option("--engine-id", required=True, help="Engine to run inference against.")
+@click.option("--eval-data", required=True, help="Path to eval data file.")
+@click.option("--label", default="capture", help="Name for this capture.")
+@click.option("--model", default="", help="Model id, for batch-config tuning and the sidecar.")
+@click.option(
+    "--retry-failed/--no-retry-failed", default=True, help="Retry failed inference cases."
+)
+def capture_cmd(engine_id: str, eval_data: str, label: str, model: str, retry_failed: bool):
+    """Run inference and save the responses, without scoring them.
+
+    The expensive half on its own. Score the result as many times as the
+    question needs with `wrangler score`, against identical responses and
+    without touching the engine again.
+    """
+    from .core.converter import load_eval_file
+    from .eval.evaluator import capture_inference
+
+    path = capture_inference(
+        engine_id=engine_id,
+        eval_cases=load_eval_file(eval_data),
+        label=label,
+        model=model,
+        agent_name=label,
+        retry_failed=retry_failed,
+    )
+    click.echo(f"\n  Capture: {path}")
+    click.echo(f"  Score it: wrangler score {path}")
+
+
+@main.command("score")
+@click.argument("capture_path")
+@click.option(
+    "--repeat",
+    "-r",
+    default=1,
+    type=int,
+    help="Score the same capture N times and report the spread. N>1 measures judge "
+    "non-determinism directly, since the responses are identical.",
+)
+@click.option("--label", default="", help="Label for output.")
+def score_cmd(capture_path: str, repeat: int, label: str):
+    """Score a capture. Makes no agent calls.
+
+    Every judge question — how much a judge disagrees with itself, whether a
+    different judge model shifts the result, what a metric prompt change does —
+    is only a valid comparison if the responses underneath are identical.
+    """
+    from .eval.evaluator import save_eval_results, score_captured, score_captured_repeated
+
+    name = label or Path(capture_path).stem
+
+    if repeat > 1:
+        summary = score_captured_repeated(capture_path, repeat=repeat, agent_name=name)
+        click.echo(f"\n{summary['n']} scoring passes over identical responses:")
+        click.echo(f"  {'metric':40s} {'mean':>7s} {'sd':>7s} {'min':>7s} {'max':>7s}")
+        for metric in sorted(summary["mean"]):
+            click.echo(
+                f"  {metric:40s} {summary['mean'][metric]:7.3f} {summary['std'][metric]:7.3f} "
+                f"{summary['min'][metric]:7.3f} {summary['max'][metric]:7.3f}"
+            )
+        return
+
+    result = score_captured(capture_path, agent_name=name)
+    click.echo(f"\nResults for {name}:")
+    for metric, score in sorted(result.scores.items()):
+        click.echo(f"  {metric:40s} {score:.3f}")
+    saved = save_eval_results(
+        agent_name=name,
+        scores=result.scores,
+        phase="scored",
+        per_case=result.per_case,
+        coverage=result.coverage,
+        scoring=result.scoring,
+    )
+    click.echo(f"\n  Saved: {saved} ({len(result.per_case)} per-case rows)")
+
+
 @main.command()
 @click.argument("target", default="manifest.yaml")
 @click.option("--pair", "-p", default=None, help="Optimize only a specific pair by ID.")

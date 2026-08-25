@@ -59,6 +59,9 @@ INSTRUCTION = (
 
 MIN_INSTANCES = 2
 
+# Stamped onto every probe engine, so a sweeper knows which campaign owns it.
+CAMPAIGN = "01"
+
 ARMS = {
     "mcp-claude": {"model": DEFAULT_AGENT_MODEL_ALT, "include_mcp": True},
     "bare-claude": {"model": DEFAULT_AGENT_MODEL_ALT, "include_mcp": False},
@@ -78,6 +81,10 @@ def deploy_arm(arm: str) -> str:
         display_name=f"geap-probe-{arm}",
         min_instances=MIN_INSTANCES,
         include_mcp=spec["include_mcp"],
+        # Scratch by construction. `wrangler engines` finds these by label
+        # rather than by matching a name prefix, so a campaign's engines are
+        # reapable even if nobody remembers what they were called.
+        labels={"lifecycle": "ephemeral", "campaign": CAMPAIGN},
     )
     print(f"  {arm}: {engine_id}  ({time.time() - t0:.0f}s)")
     return engine_id
@@ -92,8 +99,29 @@ if __name__ == "__main__":
         default=None,
         help="Deploy only these arms (repeatable). Default: all four.",
     )
+    parser.add_argument(
+        "--replicates",
+        type=int,
+        default=0,
+        help=(
+            "Deploy N byte-identical copies of one arm instead of the 2x2. With one "
+            "engine per cell, engine identity and cell are confounded; identical "
+            "replicates are the only way to tell a factor effect from a per-deployment "
+            "one. See docs/doe/01-engine-lottery.md"
+        ),
+    )
     args = parser.parse_args()
-    wanted = args.arm or list(ARMS)
+
+    if args.replicates:
+        # One arm, N times. bare-gemini by default: no toolsets, so the fastest
+        # deploy and the toolset variable is removed from the question entirely.
+        base = (args.arm or ["bare-gemini"])[0]
+        for i in range(1, args.replicates + 1):
+            ARMS[f"lottery-{i:02d}"] = dict(ARMS[base])
+        wanted = [f"lottery-{i:02d}" for i in range(1, args.replicates + 1)]
+        print(f"Campaign 01: {args.replicates} byte-identical copies of {base}\n")
+    else:
+        wanted = args.arm or list(ARMS)
 
     deployed: dict[str, str] = {}
     failed: dict[str, str] = {}

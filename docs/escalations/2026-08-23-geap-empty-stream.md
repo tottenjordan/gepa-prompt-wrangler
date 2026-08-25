@@ -2,8 +2,9 @@
 
 **Status:** ready to file · **Filed:** _(not yet)_ · **Case:** _(none)_
 **Reported by:** GEPA Prompt Wrangler team
-**Date of measurement:** 2026-08-23
+**Date of measurement:** 2026-08-23, extended 2026-08-24
 **Supporting analysis:** [../analysis/2026-08-23-geap-empty-stream-doe.md](../analysis/2026-08-23-geap-empty-stream-doe.md)
+**Worker-level follow-up:** [../doe/01-engine-lottery.md](../doe/01-engine-lottery.md)
 
 ---
 
@@ -11,9 +12,21 @@
 
 `async_stream_query` against a healthy, fully-started Agent Engine returns **HTTP 200 with
 zero events and no error**, and the server performs no inference for that request at all.
-Measured over **960 requests across four independently-deployed engines and two models**,
-this happens to **31.7% of requests** (95% CI 28.8–34.7%), with per-engine rates from 4.2%
-to 67.5%.
+
+**The failure belongs to individual worker processes.** Across 2,360 requests and 14
+engines, a worker is almost always either permanently good or permanently bad: of 626
+worker processes observed with a per-request join, **only 20 (3.2%) ever both succeeded and
+failed** — 330 always succeeded, 276 always failed. The bad ones boot normally, log
+`Application startup complete`, accept requests, return 200, and never run an inference.
+
+**Which workers an engine gets appears to be decided at deployment.** Ten byte-identical
+engines — same source package, same model, same config, deployed within an hour — ranged
+from **0% to 100%** reach at n=100 each: six effectively perfect, two effectively dead, two
+in between. Redeploying a dead engine in place with identical content redraws the rate
+(0%→50%, 6%→56%), so it is not durably attached to the engine id.
+
+Pooled over a mixture of such engines the failure rate was **31.7%** (95% CI 28.8–34.7%),
+but that average is not a property of the service so much as of the mix.
 
 The response is indistinguishable from a legitimately empty answer, so a client cannot
 detect it, cannot attribute it, and cannot correctly decide to retry. In our workload it
@@ -43,6 +56,15 @@ Four engines, deployed back to back on 2026-08-23, identical but for two factors
 | `bare-claude` | `3191356139119837184` | none | `claude-sonnet-4-6` (global) |
 | `mcp-gemini` | `554498557294411776` | 3 MCP toolsets | `gemini-3.5-flash` (global) |
 | `bare-gemini` | `1373309264545710080` | none | `gemini-3.5-flash` (global) |
+
+A further **ten byte-identical engines** were deployed on 2026-08-24 for §4.2b, all matching
+the `bare-gemini` configuration above:
+
+```
+923793726738792448  4728209511960018944  8555143295318097920  6346690628046290944
+4040847618832596992 5725756829422583808  3482401265038655488  890016729533513728
+12377752149688320   642881699981557760
+```
 
 Every engine ran the same trivial instruction: *"Reply to every message with exactly the
 word OK and nothing else."* Prompts were one line and provoked no tool use.
@@ -97,6 +119,29 @@ reported rather than dropped.
 n = 120 per cell per replicate, Wilson 95% CI. Sample size was fixed before any data was
 collected, and no arm was extended after the fact.
 
+### 4.2b A worker is persistently good or persistently bad
+
+Ten byte-identical engines, 100 attempts each, 2026-08-24
+([../doe/01-engine-lottery.md](../doe/01-engine-lottery.md)):
+
+| reach | engines |
+| --- | --- |
+| 97–100% | 6 |
+| 35–55% | 2 |
+| 0–6% | 2 |
+
+Joining every request to its serving worker across those 1,000 attempts:
+
+- **626 worker processes. 330 always succeeded, 276 always failed, 20 (3.2%) did both.**
+- Requests-per-worker correlates with reach at **r = 0.954** across the ten engines: a
+  healthy engine reuses each worker ~2.2 times, a dead one burns ~1.05 workers per request.
+- Redeploying in place with identical content redraws the rate: 0%→50%, 6%→56%, while two
+  100% engines stayed at 97% and 99%.
+
+This is the most actionable thing we can tell you, and it accounts for every other
+observation below: the per-engine stability, the failure of `min_instances` to help (it
+keeps bad workers warm too), and why no client-side strategy moved the rate.
+
 ### 4.3 The workers serving these requests were fully started
 
 We initially believed the cause was requests being admitted to workers that had not finished
@@ -116,6 +161,10 @@ Reach does not vary with worker age (6 / 13 / 54 / 132 / 743 requests in the 0�
 startup itself is sub-second on all four engines — median 0.00s from `Started server
 process` to `Application startup complete`.
 
+The ten-engine run reproduced this independently: all 998 joined requests were served by
+workers past `Application startup complete`, median age ~1,100s. **A bad worker is not a
+young worker — it is a fully-started one that never runs an inference.**
+
 ### 4.4 The service can already report this correctly
 
 **12 of 960 requests (1.2%) returned `400 Reasoning Engine Execution failed … Service
@@ -134,7 +183,8 @@ error-reporting path exists and is reachable.
 | Pacing — bursts find warm workers | sequential vs concurrent, n=30 each | 17% vs 33%, Fisher **p=0.23** |
 | A warm-up burst primes workers | cold burst vs discarded warm-up then burst | 28% vs 11% — no better |
 | `min_instances` | 0 vs 2, 75 requests each | identical (1.3 startups per request either way) |
-| Cold/booting workers | per-request join, 948 requests | **refuted** — 0 of 948 served during boot |
+| Cold/booting workers | per-request join, 948 + 998 requests | **refuted** — 0 of 1,946 served during boot |
+| Anything we configure | 10 byte-identical engines, 100 attempts each | **refuted** — 0% to 100% across identical deployments |
 
 ## 6. Impact
 
@@ -157,9 +207,10 @@ error-reporting path exists and is reachable.
    the whole ask; everything else below is optional.
 2. If the empty stream is intentional in some cases, **a response header or trailer** that
    distinguishes "the agent produced no output" from "we did not run the agent".
-3. Guidance on what drives the per-engine spread. Two engines deployed minutes apart from the
-   same source package differed by an order of magnitude (4.2% vs 67.5% failure) and stayed
-   that way across sessions. We cannot see what differs from outside.
+3. **What makes a worker process permanently unable to serve** — §4.2b. Ten identical
+   deployments produced anywhere from 0% to 100% healthy workers, and we cannot see from
+   outside whether the difference is the worker, its host, its placement, or something in
+   provisioning. This is the root cause; items 1 and 2 are about making it survivable.
 
 ## 8. Open questions we could not answer from outside
 
@@ -198,3 +249,6 @@ Filter on `textPayload`.
 - `outputs/probes/doe_rep1.jsonl`, `doe_rep2.jsonl` — one row per attempt
 - `outputs/probes/doe_rep{1,2}.joined.jsonl` — the same rows with serving worker, worker age,
   boot state and inference-log membership
+- `outputs/probes/lottery_a.jsonl`, `lottery_a.joined.jsonl` — ten identical engines, 1,000
+  attempts, the per-worker analysis in §4.2b
+- `outputs/probes/lottery_b.jsonl` — the same four engines after an in-place redeploy

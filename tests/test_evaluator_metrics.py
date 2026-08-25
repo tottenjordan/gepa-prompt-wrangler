@@ -760,6 +760,76 @@ class TestScoringStageLoss:
         assert len(evaluator._extract_per_case_scores(run)[0]) == 1
 
 
+class TestMultiRunAveragingPairsByCase:
+    """Averaging N runs paired `per_case` rows by list position, not case index.
+
+    Runs drop different cases, so position k is a different case in each run:
+    run A scoring [0, 2, 5] and run B scoring [0, 1, 5] would average case 2's
+    score with case 1's. It also averaged `case_index` itself as though it were
+    a metric, producing fractional indices that nothing downstream can pair on.
+
+    This matters beyond tidiness. The ~0.034 noise floor at `num_runs: 3` --
+    the number CLAUDE.md instructs every sweep to clear -- was measured through
+    this, so it has to be re-measured.
+    """
+
+    @staticmethod
+    def _average(runs):
+        from wrangler.eval.evaluator import CASE_INDEX_KEY, average_per_case
+
+        return {r[CASE_INDEX_KEY]: r for r in average_per_case(runs)}
+
+    def test_cases_are_matched_by_index_not_position(self):
+        from wrangler.eval.evaluator import CASE_INDEX_KEY as K
+
+        a = [{K: 0, "m": 1.0}, {K: 2, "m": 0.0}, {K: 5, "m": 1.0}]
+        b = [{K: 0, "m": 0.0}, {K: 1, "m": 1.0}, {K: 5, "m": 0.0}]
+        out = self._average([a, b])
+        assert out[0]["m"] == pytest.approx(0.5)
+        assert out[5]["m"] == pytest.approx(0.5)
+        # Positional averaging would have merged case 2 with case 1.
+        assert out[2]["m"] == 0.0
+        assert out[1]["m"] == 1.0
+
+    def test_the_index_is_never_averaged(self):
+        from wrangler.eval.evaluator import CASE_INDEX_KEY as K
+
+        out = self._average([[{K: 0, "m": 1.0}], [{K: 4, "m": 1.0}]])
+        assert sorted(out) == [0, 4]
+        assert all(isinstance(i, int) for i in out)
+
+    def test_a_case_only_one_run_scored_survives_unaveraged(self):
+        from wrangler.eval.evaluator import CASE_INDEX_KEY as K
+
+        out = self._average([[{K: 7, "m": 0.4}], [{K: 8, "m": 0.6}]])
+        assert out[7]["m"] == pytest.approx(0.4)
+        assert out[8]["m"] == pytest.approx(0.6)
+
+    def test_metrics_are_averaged_independently_per_case(self):
+        """A metric missing from one run must not drag the other's mean."""
+        from wrangler.eval.evaluator import CASE_INDEX_KEY as K
+
+        out = self._average([[{K: 0, "a": 1.0, "b": 1.0}], [{K: 0, "a": 0.0}]])
+        assert out[0]["a"] == pytest.approx(0.5)
+        assert out[0]["b"] == pytest.approx(1.0)
+
+    def test_an_unindexed_row_is_excluded_loudly(self, capsys):
+        """Unpairable by construction. Dropping it quietly is the old bug's shape."""
+        from wrangler.eval.evaluator import CASE_INDEX_KEY as K
+        from wrangler.eval.evaluator import average_per_case
+
+        rows = average_per_case([[{K: 0, "m": 1.0}, {"m": 0.0}]])
+        assert len(rows) == 1
+        assert "could not be paired" in capsys.readouterr().out
+
+    def test_rows_come_back_in_index_order(self):
+        from wrangler.eval.evaluator import CASE_INDEX_KEY as K
+        from wrangler.eval.evaluator import average_per_case
+
+        rows = average_per_case([[{K: 5, "m": 1.0}, {K: 1, "m": 1.0}]])
+        assert [r[K] for r in rows] == [1, 5]
+
+
 class TestScoringProvenance:
     """Which extraction path produced the rows has to survive into the artifact.
 

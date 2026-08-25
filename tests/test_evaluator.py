@@ -96,10 +96,13 @@ class TestRunBatchEvalAveraged:
             assert result.num_runs == 1
 
     def test_multi_run_averages(self):
+        # per_case rows carry their case index: averaging pairs on it, because
+        # runs drop different cases and list position is a different case in
+        # each. See TestMultiRunAveragingPairsByCase in test_evaluator_metrics.
         results = [
-            EvalResult(scores={"q": 0.8, "s": 1.0}, per_case=[{"q": 0.8}]),
-            EvalResult(scores={"q": 0.9, "s": 0.9}, per_case=[{"q": 0.9}]),
-            EvalResult(scores={"q": 1.0, "s": 0.8}, per_case=[{"q": 1.0}]),
+            EvalResult(scores={"q": 0.8, "s": 1.0}, per_case=[{"case_index": 0, "q": 0.8}]),
+            EvalResult(scores={"q": 0.9, "s": 0.9}, per_case=[{"case_index": 0, "q": 0.9}]),
+            EvalResult(scores={"q": 1.0, "s": 0.8}, per_case=[{"case_index": 0, "q": 1.0}]),
         ]
         with patch("wrangler.eval.evaluator.run_batch_eval", side_effect=results):
             result = run_batch_eval_averaged("engine", [{"prompt": "hi"}], num_runs=3)

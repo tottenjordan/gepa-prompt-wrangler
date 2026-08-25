@@ -9,11 +9,19 @@ count for as long as it did.
 
 The probe measures the individual attempt instead:
 
-* **one request in flight per engine.** Arms run concurrently across *different*
-  engines, so the wall clock still divides by the number of arms while each
-  engine's log stream stays unambiguous. With two requests overlapping, two
+* **one request in flight per engine.** Each engine's log stream then stays
+  unambiguous: with two requests overlapping, two
   ``POST /api/stream_reasoning_engine`` lines fall inside both client windows
-  and neither can be attributed to a request.
+  and neither can be attributed.
+
+  Arms are launched concurrently, but **do not budget as if the wall clock
+  divides by the number of arms** — it does not. Measured throughput is about
+  1.5x a single arm whatever the arm count: 4 arms managed 6.9 attempts/min and
+  10 arms 5.8/min, against a per-arm cycle of ~15s that should have given 16 and
+  40. Something under ``async_stream_query`` serializes. Budget roughly
+  ``total_attempts / 6`` minutes and check before promising a finish time.
+  (The serialization is harmless to the measurement, and mildly helpful to the
+  join — it just costs time.)
 * **no retries.** Every attempt is a row, whatever it did.
 * **a nonce in every prompt.** Free now, impossible to add afterwards, and a
   second join key the day any ADK log level surfaces request content.
@@ -111,6 +119,61 @@ def summarize(rows: list[dict]) -> dict[str, dict]:
     return out
 
 
+# Campaign 01 (docs/doe/01-engine-lottery.md) probed ten byte-identical engines
+# at 100 attempts each and found six at 97-100%, two at 35-55% and two at 0-6%.
+# Nothing landed between 56% and 97%, so 0.8 separates two populations rather
+# than splitting a continuum, with room on both sides.
+GATE_THRESHOLD = 0.8
+
+# Enough to place an engine in the right population without paying for
+# precision nobody uses: at n=60 a 97% engine essentially never reads below
+# 0.8, and a 55% one essentially never reads above it.
+GATE_ATTEMPTS = 60
+
+
+def gate_decision(reached: int, n: int, threshold: float = GATE_THRESHOLD) -> dict:
+    """Does this engine clear the health bar?
+
+    Judged on the **point estimate**, deliberately, not the interval's lower
+    bound. At n=60 a genuinely 90% engine has a Wilson lower bound around 0.80,
+    so gating on the bound would reject healthy engines nearly as often as bad
+    ones. The interval is reported for context; the decision is the rate.
+
+    Zero attempts is a failure, not a pass — the gate exists to catch silence.
+    """
+    rate = reached / n if n else 0.0
+    lo, hi = wilson_interval(reached, n)
+    return {
+        "reached": reached,
+        "n": n,
+        "rate": rate,
+        "ci_low": lo,
+        "ci_high": hi,
+        "threshold": threshold,
+        "passed": bool(n) and rate >= threshold,
+    }
+
+
+def gate_report(engine_id: str, decision: dict) -> list[str]:
+    """Render the gate outcome, and on failure say what to do about it."""
+    d = decision
+    head = (
+        f"  Engine health: {d['reached']}/{d['n']} reached "
+        f"({d['rate']:.1%}, 95% CI {d['ci_low']:.2f}-{d['ci_high']:.2f})"
+    )
+    if d["passed"]:
+        return [head, f"  PASS — at or above the {d['threshold']:.0%} bar."]
+    fail = (
+        f"  FAIL — below the {d['threshold']:.0%} bar. Engine {engine_id} is dropping "
+        f"requests as 200-with-no-inference."
+    )
+    advice = (
+        "  Redeploy it: the rate is redrawn on deploy, not attached to the engine id "
+        "(0%->50% and 6%->56% when measured). See docs/doe/01-engine-lottery.md."
+    )
+    return [head, fail, advice]
+
+
 async def _one_attempt(agent, arm: str, engine_id: str, index: int, block: int) -> dict:
     """Send exactly one request and describe what happened. Never retries."""
     nonce = uuid.uuid4().hex[:12]
@@ -162,7 +225,9 @@ async def run_arm(
     """Run ``n`` strictly-serialized attempts against one engine.
 
     ``spacing`` is the gap *between* attempts, not a rate limit — the point is
-    that no two requests to this engine are ever in flight together.
+    that no two requests to this engine are ever in flight together. Note that
+    concurrent arms do not actually multiply throughput; see the module
+    docstring before estimating how long a run will take.
 
     ``block_size`` labels the attempts in groups. Concurrent arms already share
     the time axis, so blocks do not change what is measured; they make the
@@ -254,6 +319,35 @@ def run_probe(
     print(f"\n  Rows: {out_path}")
     print(f"  Join to serving workers: python -m wrangler.tools.boot_probe_join {out_path}")
     return summary
+
+
+def probe_engine(
+    engine_id: str,
+    n: int = GATE_ATTEMPTS,
+    spacing: float = 2.0,
+    threshold: float = GATE_THRESHOLD,
+    label: str = "gate",
+    out_dir: str | Path | None = "outputs/probes",
+) -> dict:
+    """Probe one engine and return a gate decision. Roughly n*(spacing+latency) seconds.
+
+    Tighter spacing than a measurement run: this is a health check, not an
+    experiment, and Campaign 01 found pacing does not affect the rate anyway.
+    """
+    import vertexai
+    from vertexai import agent_engines
+
+    vertexai.init(project=GCP_PROJECT_ID, location=GCP_REGION)
+    disable_pyopenssl()
+
+    agent = agent_engines.get(_resolve_resource(engine_id))
+    out_path = Path(out_dir) / f"{label}_{engine_id}.jsonl" if out_dir else None
+    rows = asyncio.run(run_arm(agent, label, engine_id, n=n, spacing=spacing, out_path=out_path))
+    reached = sum(1 for r in rows if r["reached"])
+    decision = gate_decision(reached, len(rows), threshold=threshold)
+    for line in gate_report(engine_id, decision):
+        print(line, flush=True)
+    return decision
 
 
 def _parse_arm(spec: str) -> tuple[str, str]:
