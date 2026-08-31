@@ -21,6 +21,7 @@ import datetime as dt
 import os
 import sys
 import textwrap
+import time
 
 import google.auth
 import google.auth.transport.requests
@@ -465,14 +466,37 @@ def count_span_export_errors(engine_id: str, minutes: int = 60) -> dict:
         ),
         "pageSize": 200,
     }
-    resp = http_requests.post(_LOGGING_API, headers=_get_headers(), json=body, timeout=HTTP_TIMEOUT)
-    resp.raise_for_status()
+    # The Logging API rate-limits this at five engines in quick succession, and
+    # an unhandled 429 took the whole health check down mid-run -- a monitoring
+    # tool that dies under load reports nothing, which is the exact failure it
+    # exists to catch. Back off, then give up on *this engine* rather than the
+    # run, and say the result is unknown instead of implying clean.
+    for attempt in range(4):
+        resp = http_requests.post(
+            _LOGGING_API, headers=_get_headers(), json=body, timeout=HTTP_TIMEOUT
+        )
+        if resp.status_code != 429:
+            break
+        wait = 5 * (attempt + 1)
+        print(f"  (rate limited reading logs for {engine_id}, retrying in {wait}s)", flush=True)
+        time.sleep(wait)
+
+    if resp.status_code != 200:
+        return {
+            "engine_id": engine_id,
+            "window_minutes": minutes,
+            "dropped_batches": 0,
+            "truncated": False,
+            "error": f"HTTP {resp.status_code}",
+        }
+
     entries = resp.json().get("entries", [])
     return {
         "engine_id": engine_id,
         "window_minutes": minutes,
         "dropped_batches": len(entries),
         "truncated": len(entries) >= body["pageSize"],
+        "error": "",
     }
 
 
@@ -494,9 +518,18 @@ def trace_health(args: list[str]):
         return
 
     print(f"=== Span export health (last {minutes} min) ===")
-    degraded = []
+    degraded, unknown = [], []
     for name, eid in sorted(agents.items()):
-        result = count_span_export_errors(eid, minutes)
+        try:
+            result = count_span_export_errors(eid, minutes)
+        except Exception as exc:
+            unknown.append(name)
+            print(f"  {name:8} {eid}: UNKNOWN — {type(exc).__name__}: {exc}")
+            continue
+        if result.get("error"):
+            unknown.append(name)
+            print(f"  {name:8} {eid}: UNKNOWN — {result['error']}")
+            continue
         n = result["dropped_batches"]
         more = "+" if result["truncated"] else ""
         if n:
@@ -504,6 +537,12 @@ def trace_health(args: list[str]):
             print(f"  {name:8} {eid}: {n}{more} DROPPED span batches")
         else:
             print(f"  {name:8} {eid}: clean")
+
+    if unknown:
+        print(
+            f"\n  Could not read span health for: {', '.join(unknown)}. "
+            "Unknown is not clean — re-run before trusting an online-eval number."
+        )
 
     if degraded:
         print(

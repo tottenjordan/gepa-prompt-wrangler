@@ -98,3 +98,47 @@ class TestCoverageReport:
     def test_full_coverage_reports_nothing_unwatched(self):
         out = oe.evaluator_coverage([_ev("1", "agent-a")], engine_ids={"a": "agent-a"})
         assert out["unwatched"] == {}
+
+
+class TestTraceHealthSurvivesRateLimits:
+    """A monitoring tool that dies under load reports nothing.
+
+    Reading span health for five engines in quick succession rate-limited the
+    Logging API, and the unhandled 429 aborted the whole check mid-run on
+    2026-08-31 — two engines never got looked at, and the output gave no hint
+    that they hadn't.
+    """
+
+    def test_a_rate_limit_is_retried_then_reported_as_unknown(self, monkeypatch):
+        calls = []
+
+        class _Resp:
+            status_code = 429
+            text = "rate limited"
+
+            def json(self):  # pragma: no cover - never reached on 429
+                return {}
+
+        monkeypatch.setattr(oe, "_get_headers", dict)
+        monkeypatch.setattr(oe.time, "sleep", lambda _s: None)
+        monkeypatch.setattr(oe.http_requests, "post", lambda *a, **k: calls.append(1) or _Resp())
+        out = oe.count_span_export_errors("eng1", 60)
+        assert len(calls) == 4, "should back off and retry before giving up"
+        assert out["error"] == "HTTP 429"
+
+    def test_unknown_is_not_reported_as_clean(self, monkeypatch):
+        """Zero dropped batches and 'we could not look' are different claims."""
+
+        class _Resp:
+            status_code = 429
+            text = ""
+
+            def json(self):  # pragma: no cover
+                return {}
+
+        monkeypatch.setattr(oe, "_get_headers", dict)
+        monkeypatch.setattr(oe.time, "sleep", lambda _s: None)
+        monkeypatch.setattr(oe.http_requests, "post", lambda *a, **k: _Resp())
+        out = oe.count_span_export_errors("eng1", 60)
+        assert out["dropped_batches"] == 0
+        assert out["error"], "must carry an error so the caller cannot read it as clean"
