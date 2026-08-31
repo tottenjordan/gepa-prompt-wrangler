@@ -100,6 +100,75 @@ class TestGateRerolls:
         assert "quota" in out["error"]
 
 
+class TestRejectedEnginesAreDisposedOf:
+    """Every rejected draw leaves an engine behind unless someone deletes it.
+
+    Two reroll rounds leak two engines per pair. On 2026-08-31 that put four
+    engines behind the display name `wrangler-opus-agent-v5` and three behind
+    `wrangler-lite-agent-v5`, only one of each being the live one.
+    """
+
+    def test_a_gate_created_reject_is_discarded(self):
+        discarded = []
+        ids = iter(["eng2", "eng3"])
+        stages.gate_engine_health(
+            "eng1",
+            redeploy_fn=lambda: next(ids),
+            probe_fn=_Probe([0.0, 0.0, 0.99]),
+            max_rerolls=2,
+            discard_fn=discarded.append,
+        )
+        # eng1 came from the caller; eng2 the gate made and then rejected.
+        assert discarded == ["eng2"]
+
+    def test_the_caller_supplied_engine_is_never_discarded(self):
+        """It may be a live deployment we were only asked to check."""
+        discarded = []
+        stages.gate_engine_health(
+            "caller-owned",
+            redeploy_fn=lambda: "eng2",
+            probe_fn=_Probe([0.0, 0.99]),
+            max_rerolls=1,
+            discard_fn=discarded.append,
+        )
+        assert discarded == []
+
+    def test_rejected_ids_are_returned_so_the_caller_can_decide(self):
+        out = stages.gate_engine_health(
+            "eng1",
+            redeploy_fn=lambda: "eng2",
+            probe_fn=_Probe([0.0, 0.99]),
+            max_rerolls=1,
+        )
+        assert out["rejected"] == ["eng1"]
+
+    def test_a_passing_engine_leaves_nothing_rejected(self):
+        out = stages.gate_engine_health("eng1", redeploy_fn=lambda: "eng2", probe_fn=_Probe([0.99]))
+        assert out["rejected"] == []
+
+    def test_a_failed_discard_does_not_abort_the_reroll(self):
+        """Leaking an engine is untidy; aborting a repair over it is worse."""
+
+        def _boom(_eid):
+            raise RuntimeError("quota")
+
+        out = stages.gate_engine_health(
+            "eng1",
+            redeploy_fn=lambda: "eng2",
+            probe_fn=_Probe([0.0, 0.99]),
+            max_rerolls=1,
+            discard_fn=_boom,
+        )
+        assert out["passed"] is True
+        assert out["engine_id"] == "eng2"
+
+    def test_no_discard_fn_still_reports_rejects(self):
+        out = stages.gate_engine_health(
+            "eng1", redeploy_fn=lambda: "eng2", probe_fn=_Probe([0.0, 0.99]), max_rerolls=1
+        )
+        assert out["rejected"] == ["eng1"]
+
+
 class TestGateConfig:
     def test_the_gate_is_on_by_default(self):
         assert stages.health_gate_config({})["enabled"] is True

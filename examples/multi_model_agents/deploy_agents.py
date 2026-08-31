@@ -126,7 +126,21 @@ def deploy_single(
                 display_name=display_name,
             )
 
-        health = gate_engine_health(engine_id, redeploy_fn=_redeploy)
+        from wrangler.tools.engines import delete_engine
+
+        was_update = bool(update)
+        health = gate_engine_health(engine_id, redeploy_fn=_redeploy, discard_fn=delete_engine)
+        # The gate never discards the engine handed to it. On a fresh deploy we
+        # made that one too, so a rejected first draw is ours to clean up; on
+        # --update it is a pre-existing deployment and must be left alone.
+        if not was_update:
+            for stale in health["rejected"]:
+                if stale != health["engine_id"]:
+                    try:
+                        delete_engine(stale)
+                        print(f"  Discarded rejected engine {stale}")
+                    except Exception as exc:
+                        print(f"  Could not discard {stale}: {type(exc).__name__}: {exc}")
         engine_id = health["engine_id"]
         if not health["passed"]:
             print(

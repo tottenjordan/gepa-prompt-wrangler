@@ -187,7 +187,16 @@ def deploy_single_agent(
                 env_vars=mcp_env,
             )
 
-        health = gate_engine_health(engine_id, redeploy_fn=_redeploy)
+        from wrangler.tools.engines import delete_engine
+
+        health = gate_engine_health(engine_id, redeploy_fn=_redeploy, discard_fn=delete_engine)
+        # This path always deploys fresh, so a rejected first draw is ours.
+        for stale in health["rejected"]:
+            if stale != health["engine_id"]:
+                try:
+                    delete_engine(stale)
+                except Exception as exc:
+                    logging.warning(f"[{pair_id}] could not discard {stale}: {exc}")
         engine_id = health["engine_id"]
         if not health["passed"]:
             logging.warning(

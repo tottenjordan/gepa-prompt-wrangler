@@ -273,6 +273,7 @@ def gate_engine_health(
     attempts: int = 0,
     threshold: float = 0.0,
     max_rerolls: int = 2,
+    discard_fn=None,
 ) -> dict:
     """Probe a freshly-deployed engine and redeploy it while it fails the bar.
 
@@ -286,6 +287,17 @@ def gate_engine_health(
     engine is worth replacing rather than working around. It is a fresh draw,
     not a repair, hence a bounded number of them.
 
+    Every rejected draw leaves an engine behind, so ``discard_fn`` is called on
+    each one the gate itself created -- two reroll rounds otherwise leak two
+    engines per pair, which is how four engines ended up sharing the display
+    name ``wrangler-opus-agent-v5`` on 2026-08-31.
+
+    **The engine passed in is never discarded**, only ones the gate deployed.
+    The caller may have handed us a pre-existing engine it wants kept (an
+    ``--update`` against a live deployment), and deleting that on a bad health
+    draw would destroy something we were only asked to check. Its id comes back
+    in ``rejected`` so a caller that does own it can decide for itself.
+
     Never raises. The deploy itself succeeded; a failing gate is information the
     run should carry, not a crash. See docs/doe/01-engine-lottery.md.
     """
@@ -296,6 +308,8 @@ def gate_engine_health(
     bar = threshold or GATE_THRESHOLD
 
     current, rerolls, error = engine_id, 0, ""
+    rejected: list[str] = []
+    gate_created: set[str] = set()
     while True:
         decision = probe(current, n=n, threshold=bar)
         for line in gate_report(current, decision):
@@ -305,11 +319,17 @@ def gate_engine_health(
         rerolls += 1
         print(f"  Rerolling ({rerolls}/{max_rerolls})...", flush=True)
         try:
-            current = redeploy_fn() or current
+            replacement = redeploy_fn()
         except Exception as exc:
             error = f"{type(exc).__name__}: {exc}"
             print(f"  Reroll failed: {error}", flush=True)
             break
+        if not replacement:
+            break
+        rejected.append(current)
+        _discard(current, gate_created, discard_fn)
+        current = replacement
+        gate_created.add(current)
 
     return {
         "engine_id": current,
@@ -318,8 +338,21 @@ def gate_engine_health(
         "n": decision["n"],
         "threshold": bar,
         "rerolls": rerolls,
+        "rejected": rejected,
         "error": error,
     }
+
+
+def _discard(engine_id: str, gate_created: set[str], discard_fn) -> None:
+    """Delete a rejected engine, but only one this gate deployed."""
+    if discard_fn is None or engine_id not in gate_created:
+        return
+    try:
+        discard_fn(engine_id)
+        print(f"  Discarded rejected engine {engine_id}", flush=True)
+    except Exception as exc:
+        # Leaking an engine is untidy; aborting a repair over it is worse.
+        print(f"  Could not discard {engine_id}: {type(exc).__name__}: {exc}", flush=True)
 
 
 def _default_probe(engine_id: str, n: int, threshold: float) -> dict:
@@ -397,9 +430,12 @@ def stage_deploy(exp: Experiment, pair_id: str | None = None) -> None:
                         display_name=_display,
                     )
 
+                from ..tools.engines import delete_engine
+
                 health = gate_engine_health(
                     engine_id,
                     redeploy_fn=_redeploy,
+                    discard_fn=delete_engine,
                     attempts=gate_cfg["attempts"],
                     threshold=gate_cfg["threshold"],
                     max_rerolls=gate_cfg["max_rerolls"],
