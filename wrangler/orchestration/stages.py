@@ -325,7 +325,7 @@ def gate_engine_health(
 def _default_probe(engine_id: str, n: int, threshold: float) -> dict:
     from ..tools.boot_probe import probe_engine
 
-    return probe_engine(engine_id, n=n, threshold=threshold, label="deploy-gate")
+    return probe_engine(engine_id, n=n, threshold=threshold, label="deploy-gate", quiet=True)
 
 
 def stage_deploy(exp: Experiment, pair_id: str | None = None) -> None:
