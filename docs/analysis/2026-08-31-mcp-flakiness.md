@@ -99,6 +99,43 @@ component — with a test naming all three so a fourth cannot be added quietly. 
 proved itself immediately on the reroll: it deployed `lite`, measured 28/60, refused it, and
 redeployed.
 
+## What the fix then exposed: opus is not deployable
+
+Redeploying to pick up the fix rerolled the health lottery. Four tiers settled
+quickly; `opus` did not, across **six consecutive deploys**:
+
+| draw | reach |
+| --- | --- |
+| 1 | 3.3% |
+| 2 | 50.0% |
+| 3 | 16.7% |
+| 4 | 28.3% |
+| 5 | 13.3% |
+| 6 | **0/60** |
+
+Six failures at a ~40% base rate is a **1% event**, so this is not the lottery.
+Meanwhile `lite` passed on its second draw and `flash`/`pro`/`sonnet` sat at
+100/100/93%.
+
+The obvious mechanism does not hold: opus containers start *normally* now
+(median 4.9s import→serving, n=72), so this is not the slow-start problem the
+rest of this document is about. It is the empty-stream defect
+([../notes/silent-failures.md](../notes/silent-failures.md) #5) landing far
+harder on opus than on anything else, and the cause is not visible from outside.
+
+Note `sonnet` is also Claude and is healthy, so "Claude" is not the variable.
+
+**Final tool-use check**, five attempts per query per tier:
+
+| tier | flights | hotels | expense |
+| --- | --- | --- | --- |
+| lite / flash / pro | ✅ | ✅ | ✅ |
+| sonnet | ✅ | empty stream | ✅ |
+| **opus** | **empty** | **empty** | **empty** |
+
+Four of five drive all three MCP toolsets correctly. **opus should not be used
+for evaluation until this changes** — every case against it will be dropout.
+
 ## Recommended path
 
 1. **Done — treat the probe as diagnostic, not as a gate.** It never gated anything; it just
@@ -107,12 +144,51 @@ redeployed.
    deploy path.
 3. **Do not chase the MCP servers.** They were never the problem, and `minScale=3` plus
    session affinity is already the right configuration.
-4. **Open: why are some containers 17× slower to start?** Not observable from outside, and
+4. **Exclude opus from eval sweeps** until its reach recovers, and add the six-draw result
+   to the escalation. A model-correlated failure rate is a much sharper signal for the
+   service owner than the aggregate rate already reported, and it is not explained by
+   container startup.
+5. **Open: why are some containers 17× slower to start?** Not observable from outside, and
    it is the same shape as the empty-stream lottery — some workers are simply starved. Worth
    adding to the escalation rather than debugging locally.
-5. **Cleanup available:** three duplicate MCP services (`search-mcp`, `booking-mcp`,
+6. **Cleanup available:** three duplicate MCP services (`search-mcp`, `booking-mcp`,
    `expense-mcp`, created 2026-08-07, `minScale=1`) sit alongside the `wrangler-` prefixed
    ones that `.env` actually points at. Three idle warm instances doing nothing.
+
+## Eval capabilities worth adding next
+
+Ranked by value per hour, from what this session kept tripping over.
+
+**1. A pre-eval reach gate, not just a pre-deploy one.** The deploy gate proves an engine
+works *at deploy time*. `sonnet` was 93% and still returned an empty stream on one of three
+final queries. An eval that starts against a degraded engine spends hours measuring dropout.
+`stage_eval` should probe (~20 requests, ~4 min) and refuse to start below the bar — the
+pieces already exist in `wrangler probe`.
+
+**2. Coverage as a first-class pass/fail, not a warning.** `EvalResult.coverage` and
+`scoring` are recorded, and `_coverage_warning` prints. Nothing *fails*. A run that scored
+40 of 64 cases should not produce a report that reads like a measurement. Wire the existing
+`minimum_detectable_effect` work (Campaign 03) to mark any delta computed on partial
+coverage as uninterpretable.
+
+**3. Campaign 02, now unblocked.** `wrangler capture` / `score --repeat` makes judge
+questions cheap *and* valid, and after the capture it makes **no agent calls** — so it is
+the only eval work in this repo the empty-stream defect cannot touch. It also settles the
+`tool_use_quality` JSON hardening, the last in-repo cause of case loss.
+
+**4. A tool-use smoke test in CI-shape.** The check used here — one query per MCP domain,
+assert a real `function_call` and no `<tool_call>` role-play — caught more in five minutes
+than the startup probe did in a week, because it tests the serving path rather than a
+throwaway one. Worth making a command (`wrangler verify-tools`) rather than an ad-hoc script.
+
+**5. Online-evaluator scores are not yet read back.** 23 evaluators are running and nothing
+in the repo consumes their output. Until something does, they are cost without signal. A
+`wrangler evaluators scores` that pulls recent scores per engine would close the loop and
+give a continuous quality signal between sweeps.
+
+**6. Fixture realism.** The search MCP holds only 2026-06-15..22, all in the past. The guard
+test added here stops a new case silently asking for an empty date, but the fixtures should
+eventually be generated relative to `now` so the eval set does not rot.
 
 ## Related
 
