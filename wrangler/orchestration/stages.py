@@ -229,6 +229,22 @@ def _manifest_dir(exp: Experiment) -> Path:
 # ── Stage functions ────────────────────────────────────────────
 
 
+def _sync_env_engine_id(pair_id: str, engine_id: str) -> None:
+    """Point the example .env at a rerolled engine, if the pair maps to a tier."""
+    from ..core.env_ids import ENGINE_LABELS, set_engine_id
+
+    label = next((x for x in ENGINE_LABELS if x in pair_id.lower()), "")
+    if not label:
+        print(
+            f"  Note: pair {pair_id!r} matches no known model tier, so .env was not "
+            f"updated. Point anything that references the old id at {engine_id}.",
+            flush=True,
+        )
+        return
+    if set_engine_id(label, engine_id):
+        print(f"  Updated {label.upper()}_ENGINE_ID -> {engine_id} in .env", flush=True)
+
+
 def health_gate_config(config: dict) -> dict:
     """Resolve health-gate settings, defaulting to the values Campaign 01 measured."""
     from ..tools.boot_probe import GATE_ATTEMPTS, GATE_THRESHOLD
@@ -392,6 +408,15 @@ def stage_deploy(exp: Experiment, pair_id: str | None = None) -> None:
                 # id would point every later stage at the engine just refused.
                 record["engine_id"] = health["engine_id"]
                 record["health"] = health
+                # A reroll changes the id, and several things read the old one
+                # out of .env: the online evaluators pick their targets there,
+                # trace-health resolves names through it, and `wrangler engines`
+                # treats a named id as referenced and refuses to delete it. Left
+                # stale, an evaluator scores a dead engine and the prune policy
+                # protects a corpse -- 10 of 28 evaluators were in exactly that
+                # state on 2026-08-31.
+                if health["engine_id"] != engine_id:
+                    _sync_env_engine_id(pair.id, health["engine_id"])
                 if not health["passed"]:
                     print(
                         f"  {tag} WARNING: engine below the health bar after "

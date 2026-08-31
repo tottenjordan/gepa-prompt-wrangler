@@ -194,6 +194,67 @@ def list_evaluators():
     return evaluators
 
 
+def orphaned_evaluators(evaluators: list[dict], live_engine_ids: set[str] | None) -> list[dict]:
+    """Evaluators whose target engine no longer exists.
+
+    An orphan stays ACTIVE and keeps waking every 10 minutes to score an engine
+    that is gone. 10 of 28 were in that state on 2026-08-31 while the five live
+    v4 engines had none at all. ``cleanup()`` cannot reach them: it only deletes
+    evaluators whose agent is listed in ``.env``, and a deleted engine is
+    precisely the thing that is not.
+
+    ``live_engine_ids=None`` means the lookup failed, and returns nothing --
+    "we could not list engines" must never read as "every engine is deleted".
+    """
+    if live_engine_ids is None:
+        return []
+    out = []
+    for ev in evaluators:
+        agent = (ev.get("agentResource") or "").split("/")[-1]
+        if not agent:
+            continue  # unattributable; report, do not guess
+        if agent not in live_engine_ids:
+            out.append(
+                {
+                    "evaluator_id": ev["name"].split("/")[-1],
+                    "engine_id": agent,
+                    "display_name": ev.get("displayName", ""),
+                    "state": ev.get("state", ""),
+                }
+            )
+    return out
+
+
+def evaluator_coverage(evaluators: list[dict], engine_ids: dict[str, str]) -> dict:
+    """Which of ``engine_ids`` (label -> id) have an evaluator, and which do not."""
+    watched_agents = {(ev.get("agentResource") or "").split("/")[-1] for ev in evaluators}
+    watched = {k: v for k, v in engine_ids.items() if v in watched_agents}
+    return {
+        "watched": watched,
+        "unwatched": {k: v for k, v in engine_ids.items() if v not in watched_agents},
+    }
+
+
+def prune_evaluators(
+    evaluators: list[dict],
+    live_engine_ids: set[str] | None,
+    delete_fn,
+    confirm: bool = False,
+) -> dict:
+    """Delete orphaned evaluators. **Does nothing unless ``confirm``.**"""
+    orphans = orphaned_evaluators(evaluators, live_engine_ids)
+    if not confirm:
+        return {"orphans": orphans, "deleted": [], "failed": {}, "dry_run": True}
+    deleted, failed = [], {}
+    for o in orphans:
+        try:
+            delete_fn(o["evaluator_id"])
+            deleted.append(o["evaluator_id"])
+        except Exception as exc:
+            failed[o["evaluator_id"]] = f"{type(exc).__name__}: {exc}"
+    return {"orphans": orphans, "deleted": deleted, "failed": failed, "dry_run": False}
+
+
 def create_evaluators():
     print("=== Step 1: Register Custom Metrics ===")
     custom_metric_names = register_custom_metrics()

@@ -204,6 +204,69 @@ class TestStageDeployIntegration:
             stages.stage_deploy(exp)
         assert exp.written["deploy"]["p1"]["engine_id"] == "eng-good"
 
+    def test_a_reroll_syncs_the_env_engine_id(self, tmp_path, monkeypatch):
+        """Otherwise evaluators and trace-health keep pointing at the dead one."""
+        exp = _stub_experiment(tmp_path)
+        exp.manifest.pairs[0].id = "sonnet"
+        synced = []
+        with (
+            patch.object(stages.deployer, "deploy_agent_from_source", return_value="eng-bad"),
+            patch.object(stages, "gate_engine_health") as gate,
+            patch(
+                "wrangler.core.env_ids.set_engine_id",
+                side_effect=lambda label, eid, **kw: synced.append((label, eid)) or True,
+            ),
+        ):
+            gate.return_value = {
+                "engine_id": "eng-good",
+                "passed": True,
+                "rate": 0.97,
+                "n": 60,
+                "rerolls": 1,
+            }
+            stages.stage_deploy(exp)
+        assert synced == [("sonnet", "eng-good")]
+
+    def test_no_reroll_means_no_env_write(self, tmp_path):
+        """The id did not change; touching .env would be noise in a diff."""
+        exp = _stub_experiment(tmp_path)
+        exp.manifest.pairs[0].id = "sonnet"
+        synced = []
+        with (
+            patch.object(stages.deployer, "deploy_agent_from_source", return_value="eng-new"),
+            patch.object(stages, "gate_engine_health") as gate,
+            patch(
+                "wrangler.core.env_ids.set_engine_id",
+                side_effect=lambda label, eid, **kw: synced.append((label, eid)) or True,
+            ),
+        ):
+            gate.return_value = {
+                "engine_id": "eng-new",
+                "passed": True,
+                "rate": 0.99,
+                "n": 60,
+                "rerolls": 0,
+            }
+            stages.stage_deploy(exp)
+        assert synced == []
+
+    def test_a_pair_matching_no_tier_says_so_instead_of_guessing(self, tmp_path, capsys):
+        exp = _stub_experiment(tmp_path)
+        exp.manifest.pairs[0].id = "some-custom-arm"
+        with (
+            patch.object(stages.deployer, "deploy_agent_from_source", return_value="eng-bad"),
+            patch.object(stages, "gate_engine_health") as gate,
+        ):
+            gate.return_value = {
+                "engine_id": "eng-good",
+                "passed": True,
+                "rate": 0.97,
+                "n": 60,
+                "rerolls": 1,
+            }
+            stages.stage_deploy(exp)
+        assert "matches no known model tier" in capsys.readouterr().out
+
     def test_the_gate_can_be_disabled(self, tmp_path):
         exp = _stub_experiment(tmp_path, config={"health_gate": {"enabled": False}})
         with (
