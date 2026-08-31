@@ -15,7 +15,7 @@ from .registry import get_mcp_tools
 _log.basicConfig(level=_log.INFO)
 _here = Path(__file__).parent
 INSTRUCTION = (_here / "instruction.txt").read_text().strip()
-MODEL = os.environ.get("AGENT_MODEL", "gemini-3.1-pro-preview")
+MODEL = os.environ.get("AGENT_MODEL", "gemini-3.1-flash-lite")
 
 # Budget for one MCP handshake in the startup CHECK. Not 30s: see the comment
 # in _startup_checks. Matches examples/multi_model_agents/registry.py's
@@ -38,7 +38,7 @@ except Exception as exc:
 
 root_agent = LlmAgent(
     model=resolved,
-    name="pro_agent",
+    name="lite_agent",
     description="Corporate travel and expense assistant with access to flight, hotel, and expense management tools.",
     instruction=INSTRUCTION,
     tools=[
