@@ -322,3 +322,36 @@ def _stub_experiment(tmp_path, config=None, engine_id=""):
             self.written.setdefault(stage, {}).setdefault(pid, {}).update(data)
 
     return _Exp()
+
+
+class TestAllThreeDeployPathsAreGated:
+    """There are three ways to deploy here, and only one was gated.
+
+    stage_deploy (local), examples/multi_model_agents/deploy_agents.py (the
+    script that actually deployed the v4 set), and the KFP deploy component.
+    The script shipped a 0/30 engine on 2026-08-31 precisely because it was
+    ungated, so a test naming all three is worth more than a comment.
+    """
+
+    def test_the_local_stage_gates(self):
+        from pathlib import Path
+
+        src = Path("wrangler/orchestration/stages.py").read_text()
+        assert "gate_engine_health(" in src
+
+    def test_the_example_script_gates(self):
+        from pathlib import Path
+
+        src = Path("examples/multi_model_agents/deploy_agents.py").read_text()
+        assert "gate_engine_health" in src
+
+    def test_the_kfp_component_gates(self):
+        """KFP serializes each component in isolation, so the import must be
+        inside the function body or it is simply absent at runtime."""
+        from pathlib import Path
+
+        src = Path("wrangler/pipeline/components.py").read_text()
+        i = src.index("def deploy_single_agent")
+        body = src[i : i + 6000]
+        assert "gate_engine_health" in body
+        assert "from wrangler.orchestration.stages import gate_engine_health" in body

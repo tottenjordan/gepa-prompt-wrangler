@@ -168,6 +168,32 @@ def deploy_single_agent(
             display_name=f"gepa-{pair_id}",
             env_vars=mcp_env,
         )
+        # Health-gate the fresh engine. A deploy is a lottery -- ten
+        # byte-identical engines measured 0%-100% reach -- and a bad one
+        # answers HTTP 200 with no inference rather than an error, so the
+        # eval_before that follows would measure dropout instead of the
+        # prompt. Redeploying redraws the rate, so retry while below the bar.
+        #
+        # Imported inside the component body: KFP serializes each @dsl.component
+        # in isolation, so a module-level helper is not available at runtime.
+        from wrangler.orchestration.stages import gate_engine_health
+
+        def _redeploy():
+            return deploy_agent_from_source(
+                agent_module=f"/app/{agent_module}",
+                model=model,
+                instruction=pair["system_prompt"],
+                display_name=f"gepa-{pair_id}",
+                env_vars=mcp_env,
+            )
+
+        health = gate_engine_health(engine_id, redeploy_fn=_redeploy)
+        engine_id = health["engine_id"]
+        if not health["passed"]:
+            logging.warning(
+                f"[{pair_id}] engine below the health bar after {health['rerolls']} "
+                f"reroll(s) at {health['rate']:.0%} reach — eval will lose cases"
+            )
         elapsed = time.time() - t0
 
         result = {
@@ -177,6 +203,7 @@ def deploy_single_agent(
             "original_prompt": pair["system_prompt"],
             "source": "deployed",
             "elapsed": elapsed,
+            "health": health,
         }
         logging.info(f"[{pair_id}] Deployed in {elapsed:.0f}s: {engine_id}")
 
@@ -186,7 +213,11 @@ def deploy_single_agent(
         json.dumps(result, indent=2, default=str), content_type="application/json"
     )
 
-    metrics.log_metric("elapsed_seconds", float(result.get("elapsed", 0)))
+    # Read through a typed local: `result` now also carries the `health` dict,
+    # which widens its inferred value type enough that float() no longer
+    # type-checks against the union.
+    elapsed_seconds: float = result.get("elapsed", 0) or 0  # ty: ignore[invalid-assignment]
+    metrics.log_metric("elapsed_seconds", float(elapsed_seconds))
     with open(summary.path, "w") as f:
         f.write(f"## Deploy: {pair_id}\n\n")
         f.write(f"- **Model**: {model}\n")
