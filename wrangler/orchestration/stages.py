@@ -229,6 +229,89 @@ def _manifest_dir(exp: Experiment) -> Path:
 # ── Stage functions ────────────────────────────────────────────
 
 
+def health_gate_config(config: dict) -> dict:
+    """Resolve health-gate settings, defaulting to the values Campaign 01 measured."""
+    from ..tools.boot_probe import GATE_ATTEMPTS, GATE_THRESHOLD
+
+    raw = (config or {}).get("health_gate", {}) or {}
+    return {
+        "enabled": raw.get("enabled", True),
+        "attempts": raw.get("attempts", GATE_ATTEMPTS),
+        "threshold": raw.get("threshold", GATE_THRESHOLD),
+        # Two, because a reroll is a fresh draw from the same distribution
+        # rather than a repair. Campaign 01 saw ~60% of deployments land healthy,
+        # so three draws clear the bar ~94% of the time; more than that is
+        # usually a signal the whole region is unhappy, not this engine.
+        "max_rerolls": raw.get("max_rerolls", 2),
+        # Reused engines are not re-probed by default: at ~60 attempts that is
+        # ~12 minutes per pair on every stage run, for an engine whose health
+        # was already established when it was deployed.
+        "gate_existing": raw.get("gate_existing", False),
+    }
+
+
+def gate_engine_health(
+    engine_id: str,
+    redeploy_fn,
+    probe_fn=None,
+    attempts: int = 0,
+    threshold: float = 0.0,
+    max_rerolls: int = 2,
+) -> dict:
+    """Probe a freshly-deployed engine and redeploy it while it fails the bar.
+
+    Campaign 01 measured ten byte-identical engines at 0%-100% reach: six
+    effectively perfect, two effectively dead. A dead engine answers HTTP 200
+    with no inference rather than an error, so nothing downstream notices until
+    a third of an eval run has silently gone missing -- and every delta computed
+    from it is measuring dropout rather than the prompt.
+
+    Redeploying in place redraws the rate (measured: 0%->50%, 6%->56%), so a bad
+    engine is worth replacing rather than working around. It is a fresh draw,
+    not a repair, hence a bounded number of them.
+
+    Never raises. The deploy itself succeeded; a failing gate is information the
+    run should carry, not a crash. See docs/doe/01-engine-lottery.md.
+    """
+    from ..tools.boot_probe import GATE_ATTEMPTS, GATE_THRESHOLD, gate_report
+
+    probe = probe_fn or _default_probe
+    n = attempts or GATE_ATTEMPTS
+    bar = threshold or GATE_THRESHOLD
+
+    current, rerolls, error = engine_id, 0, ""
+    while True:
+        decision = probe(current, n=n, threshold=bar)
+        for line in gate_report(current, decision):
+            print(line, flush=True)
+        if decision["passed"] or rerolls >= max_rerolls:
+            break
+        rerolls += 1
+        print(f"  Rerolling ({rerolls}/{max_rerolls})...", flush=True)
+        try:
+            current = redeploy_fn() or current
+        except Exception as exc:
+            error = f"{type(exc).__name__}: {exc}"
+            print(f"  Reroll failed: {error}", flush=True)
+            break
+
+    return {
+        "engine_id": current,
+        "passed": bool(decision["passed"]),
+        "rate": decision["rate"],
+        "n": decision["n"],
+        "threshold": bar,
+        "rerolls": rerolls,
+        "error": error,
+    }
+
+
+def _default_probe(engine_id: str, n: int, threshold: float) -> dict:
+    from ..tools.boot_probe import probe_engine
+
+    return probe_engine(engine_id, n=n, threshold=threshold, label="deploy-gate")
+
+
 def stage_deploy(exp: Experiment, pair_id: str | None = None) -> None:
     ok, msg = exp.check_gate("deploy", pair_id)
     if not ok:
@@ -269,16 +352,55 @@ def stage_deploy(exp: Experiment, pair_id: str | None = None) -> None:
                 display_name=display,
             )
             print(f" {_fmt_duration(time.time() - t0)}")
-            exp.merge_pair(
-                "deploy",
-                pair.id,
-                {
-                    "engine_id": engine_id,
-                    "model": pair.model,
-                    "original_prompt": pair.system_prompt,
-                    "source": "deployed",
-                },
-            )
+
+            record = {
+                "engine_id": engine_id,
+                "model": pair.model,
+                "original_prompt": pair.system_prompt,
+                "source": "deployed",
+            }
+
+            # Roughly four in ten deployments come up unable to serve, and they
+            # fail by returning 200 with no inference -- so an ungated deploy
+            # hands the eval an engine that quietly drops a third of its cases.
+            gate_cfg = health_gate_config(exp.config)
+            if gate_cfg["enabled"]:
+                # Bound explicitly rather than closed over: the call happens in
+                # this iteration today, but a lambda capturing loop variables is
+                # one refactor away from redeploying the wrong pair's agent.
+                def _redeploy(
+                    _module=str(mdir / agent_ref),
+                    _model=pair.model,
+                    _instruction=pair.system_prompt,
+                    _display=display,
+                ):
+                    return deployer.deploy_agent_from_source(
+                        agent_module=_module,
+                        model=_model,
+                        instruction=_instruction,
+                        display_name=_display,
+                    )
+
+                health = gate_engine_health(
+                    engine_id,
+                    redeploy_fn=_redeploy,
+                    attempts=gate_cfg["attempts"],
+                    threshold=gate_cfg["threshold"],
+                    max_rerolls=gate_cfg["max_rerolls"],
+                )
+                # The gate may have replaced the engine. Recording the rejected
+                # id would point every later stage at the engine just refused.
+                record["engine_id"] = health["engine_id"]
+                record["health"] = health
+                if not health["passed"]:
+                    print(
+                        f"  {tag} WARNING: engine below the health bar after "
+                        f"{health['rerolls']} reroll(s). Its eval coverage will be poor; "
+                        f"see docs/doe/01-engine-lottery.md.",
+                        flush=True,
+                    )
+
+            exp.merge_pair("deploy", pair.id, record)
 
 
 def stage_eval(

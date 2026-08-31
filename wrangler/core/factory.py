@@ -52,6 +52,12 @@ class Manifest:
     # notably max_metric_calls, GEPA's search budget.
     pipeline: dict[str, Any] = field(default_factory=dict)
 
+    # The manifest's `health_gate:` block. Roughly four in ten deployments come
+    # up unable to serve and fail by returning 200 with no inference, so the
+    # deploy stage probes and rerolls by default; this is how a manifest tunes
+    # or disables that. See docs/notes/engine-lifecycle.md.
+    health_gate: dict[str, Any] = field(default_factory=dict)
+
     @property
     def pair_ids(self) -> list[str]:
         return [p.id for p in self.pairs]
@@ -134,4 +140,5 @@ class PairFactory:
             pairs=pairs,
             eval_config=raw.get("eval_config", {}),
             pipeline=raw.get("pipeline", {}),
+            health_gate=raw.get("health_gate", {}),
         )

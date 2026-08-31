@@ -87,6 +87,41 @@ recoverable rather than a mystery.
 protected engine survived and every referenced id still resolves. Per-engine dispositions
 are in [engine-inventory-2026-08-24.md](engine-inventory-2026-08-24.md).
 
+## The deploy-time health gate
+
+Campaign 01 measured ten byte-identical engines at 0%–100% reach: six effectively perfect,
+two effectively dead, two in between. A dead engine returns HTTP 200 with no inference
+rather than an error, so nothing downstream notices until a third of an eval run has quietly
+gone missing — and every delta computed from it is measuring dropout rather than the prompt.
+
+Phase B showed redeploying in place **redraws** the rate (0%→50%, 6%→56%), so a bad engine is
+both detectable in ~60 one-line requests and fixable. `stage_deploy` therefore probes every
+freshly-deployed engine and rerolls it while it is below the bar.
+
+```yaml
+# manifest.yaml — all keys optional; these are the defaults
+health_gate:
+  enabled: true        # probe after each fresh deploy
+  attempts: 60         # ~12 min per pair; separates 97% from 55% many times over
+  threshold: 0.8       # sits in the measured gap — nothing landed between 56% and 97%
+  max_rerolls: 2       # a reroll is a fresh draw, not a repair
+  gate_existing: false # do not re-probe a reused engine on every stage run
+```
+
+Four things worth knowing before changing any of them:
+
+- **The threshold is a gap, not a preference.** Reach clustered at 0–6%, 35–55% and 97–100%.
+  0.8 separates two populations; a value inside a cluster would not.
+- **`max_rerolls: 2` follows from the hit rate.** ~60% of deployments land healthy, so three
+  draws clear the bar ~94% of the time. More than that usually means the region is unhappy
+  rather than this engine.
+- **A failing gate warns, it does not raise.** The deploy succeeded; the health verdict is
+  information the run should carry. It is written to the deploy stage under `health`.
+- **The recorded engine id is the post-reroll one.** Recording the rejected id would point
+  every later stage at the engine the gate just refused.
+
+Ad-hoc: `wrangler probe --engine-id <id> --gate` exits non-zero below the bar.
+
 ## Rules to keep it from recurring
 
 1. **A campaign is not complete until its engines are gone.** They are the last step of the

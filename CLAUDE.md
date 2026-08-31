@@ -185,6 +185,15 @@ For multi-model agents: `SEARCH_MCP_SERVER`, `BOOKING_MCP_SERVER`, `EXPENSE_MCP_
   and why an age-based sweep would have deleted someone else's live work, is in
   [docs/notes/engine-lifecycle.md](docs/notes/engine-lifecycle.md).
 
+- **A fresh deploy is health-gated, and it is on by default.** Roughly four in ten
+  deployments come up unable to serve, failing by returning 200 with no inference — so an
+  ungated deploy hands the eval an engine that silently drops a third of its cases, and the
+  resulting delta measures dropout rather than the prompt. `stage_deploy` probes each new
+  engine (~60 one-line requests, ~12 min per pair) and redeploys while it is below 80%
+  reach, because redeploying redraws the rate. Tune or disable with a `health_gate:` block
+  in the manifest; the verdict is written to the deploy stage under `health`, and the
+  recorded engine id is the post-reroll one.
+
 - **Every optimization sweep carries a control arm whose prompt does not change.** Run
   `eval_before` and `eval_after` against the *same* prompt, with no optimize stage between
   them, alongside the real arms and under identical conditions. Whatever that arm's deltas

@@ -87,6 +87,12 @@ class Experiment:
             },
             "pairs": [],
             "eval_config": manifest.eval_config,
+            # Read at the top level by stages.health_gate_config(). Carried
+            # from the manifest for the same reason max_metric_calls is: the
+            # experiment config is what the local path actually reads, so a
+            # setting the manifest cannot reach here is a setting that silently
+            # does nothing.
+            "health_gate": manifest.health_gate,
         }
 
         for pair in manifest.pairs:
