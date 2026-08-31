@@ -331,6 +331,65 @@ class TestBuildWithoutMcp:
         assert "get_mcp_tools" in (Path(build_dir) / "app.py").read_text()
 
 
+class TestMcpProbeTimeout:
+    """30s was too tight and manufactured a defect that was not there.
+
+    Measured 2026-08-31 on the v4 engines: workers whose MCP probe passed
+    reached their summary a median 6.3s after import; workers that "failed"
+    took a median 109s and up to 834s. The MCP servers returned 200 throughout
+    — on one worker the handshake completed five seconds *after* the probe had
+    already logged failure. The containers were starved; MCP was fine.
+    """
+
+    def test_the_probe_timeout_is_not_thirty_seconds(self):
+        from wrangler.core.deploy import _APP_PY_TEMPLATE
+
+        assert "timeout=30.0" not in _APP_PY_TEMPLATE
+        assert "_MCP_PROBE_TIMEOUT" in _APP_PY_TEMPLATE
+
+    def test_it_matches_the_local_registry(self):
+        """The two implementations diverging is a documented trap."""
+        import re
+        from pathlib import Path
+
+        from wrangler.core.deploy import _APP_PY_TEMPLATE
+
+        shipped = float(
+            re.search(r'MCP_PROBE_TIMEOUT_SECONDS", "(\d+)"', _APP_PY_TEMPLATE).group(1)
+        )
+        local = float(
+            re.search(
+                r"MCP_TIMEOUT_SECONDS = ([\d.]+)",
+                Path("examples/multi_model_agents/registry.py").read_text(),
+            ).group(1)
+        )
+        assert shipped == local, f"shipped probe timeout {shipped}s != local {local}s"
+
+    def test_the_all_failed_message_does_not_claim_the_agent_is_broken(self):
+        """It describes throwaway probe toolsets, not the serving ones.
+
+        Verified live: an engine that logged this line still called
+        search_flights correctly. A fatal error that is not one stops the real
+        ones being believed.
+        """
+        from wrangler.core.deploy import _APP_PY_TEMPLATE
+
+        # Scoped to the log call, not the whole template: the registry's
+        # "no MCP server URLs configured" case really is fatal (it raises),
+        # and the comment above this log line quotes the old wording.
+        i = _APP_PY_TEMPLATE.index("MCP probe failed for all")
+        message = _APP_PY_TEMPLATE[i : i + 400]
+        assert "agent cannot use tools" not in message
+        assert "not the serving toolsets" in message
+        assert "may still work" in message
+
+    def test_the_summary_reports_how_long_the_probe_took(self):
+        """A starved container should be legible as a starved container."""
+        from wrangler.core.deploy import _APP_PY_TEMPLATE
+
+        assert "MCP summary: %d OK, %d failed (%.1fs)" in _APP_PY_TEMPLATE
+
+
 class TestStartupCheckLogging:
     """An empty error message is indistinguishable from no error at all.
 
