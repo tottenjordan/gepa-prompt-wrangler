@@ -244,3 +244,52 @@ def test_eval_cases_structural_integrity():
         f"{len(violations)} eval-case structural violation(s) found:\n"
         + "\n".join(f"  - {v}" for v in violations)
     )
+
+
+class TestFlightDatesMatchTheFixture:
+    """An eval case asking for a date the mock DB has no flight for scores as a
+    failure that is really a fixture gap.
+
+    The search MCP filters flights by exact date, and the fixture only holds
+    2026-06-15 to 2026-06-22 -- all now in the past. Every case today lines up,
+    but a new case written with a realistic future date would return an empty
+    result, and the judge would mark a correctly tool-using agent down for
+    "no flights found". That is a metric artifact, not agent behaviour, and it
+    is the same shape as the tool_use_quality floor in CLAUDE.md.
+    """
+
+    @staticmethod
+    def _fixture_dates() -> set[str]:
+        import re
+        from pathlib import Path
+
+        db = Path("examples/multi_model_agents/mcp_servers/search/mock_db.py").read_text()
+        return set(re.findall(r'"date": "([0-9-]+)"', db))
+
+    def test_the_fixture_has_dates_at_all(self):
+        """Guards the guard: a regex that stops matching would pass vacuously."""
+        assert len(self._fixture_dates()) >= 3
+
+    def test_every_prompt_date_has_a_flight(self):
+        import re
+        from pathlib import Path
+
+        import yaml
+
+        fixture = self._fixture_dates()
+        raw = yaml.safe_load(
+            Path("examples/multi_model_agents/eval_data/eval_cases.yaml").read_text()
+        )
+        rows = raw if isinstance(raw, list) else raw.get("cases", raw.get("eval_cases", []))
+        assert rows, "premise: eval cases loaded"
+
+        missing = [
+            (d, str(c.get("prompt", ""))[:60])
+            for c in rows
+            for d in re.findall(r"20[0-9]{2}-[0-9]{2}-[0-9]{2}", str(c.get("prompt", "")))
+            if d not in fixture
+        ]
+        assert not missing, (
+            "eval prompts name dates the search fixture has no flight for, so the "
+            f"agent will correctly return nothing and be scored down for it: {missing}"
+        )
