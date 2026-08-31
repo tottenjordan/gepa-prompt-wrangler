@@ -334,7 +334,12 @@ async def _startup_checks():
                       server, len(tool_names), tool_names[:3])
             mcp_ok += 1
         except Exception as exc:
-            _log.error("[GEAP startup] MCP FAILED: %s -> %s", server, exc)
+            # Log the exception *type*, not just str(exc). The most common
+            # failure here is the wait_for above, and TimeoutError's str() is
+            # the empty string -- which rendered every one of these as
+            # "MCP FAILED: <server> -> " and said nothing about what happened.
+            _log.error("[GEAP startup] MCP FAILED: %s -> %s: %s",
+                       server, type(exc).__name__, exc or "(no detail)")
             mcp_fail += 1
         finally:
             # Close on the same loop that opened it, so nothing outlives this

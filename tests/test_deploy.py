@@ -331,6 +331,27 @@ class TestBuildWithoutMcp:
         assert "get_mcp_tools" in (Path(build_dir) / "app.py").read_text()
 
 
+class TestStartupCheckLogging:
+    """An empty error message is indistinguishable from no error at all.
+
+    The MCP startup probe wraps `get_tools()` in `asyncio.wait_for`, and
+    TimeoutError's str() is the empty string. Every timeout therefore logged
+    "MCP FAILED: <server> -> " with nothing after the arrow. Measured on the
+    v4 engines 2026-08-25: 4-17% of workers boot with an incomplete toolset and
+    one opus worker booted with none at all, and the logs could not say why.
+    """
+
+    def test_the_failure_log_includes_the_exception_type(self):
+        from wrangler.core.deploy import _APP_PY_TEMPLATE
+
+        assert "type(exc).__name__" in _APP_PY_TEMPLATE
+
+    def test_an_empty_exception_still_renders_something(self):
+        from wrangler.core.deploy import _APP_PY_TEMPLATE
+
+        assert "(no detail)" in _APP_PY_TEMPLATE
+
+
 class TestOwnershipLabels:
     """`wrangler engines` refuses to delete anything without the ownership label,
     so an engine that loses it becomes unreapable. Callers add to it, never
