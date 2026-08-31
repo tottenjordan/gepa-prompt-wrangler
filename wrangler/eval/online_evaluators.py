@@ -255,6 +255,56 @@ def prune_evaluators(
     return {"orphans": orphans, "deleted": deleted, "failed": failed, "dry_run": False}
 
 
+def duplicate_evaluators(evaluators: list[dict]) -> dict[str, list[str]]:
+    """Engines watched by more than one evaluator.
+
+    Reported, not auto-deleted: which of two to keep depends on their metric
+    sets, and that is a judgement rather than a rule.
+    """
+    by_agent: dict[str, list[str]] = {}
+    for ev in evaluators:
+        agent = (ev.get("agentResource") or "").split("/")[-1]
+        if agent:
+            by_agent.setdefault(agent, []).append(ev["name"].split("/")[-1])
+    return {a: ids for a, ids in by_agent.items() if len(ids) > 1}
+
+
+def prune_command(args: list[str]):
+    """CLI: report orphaned evaluators; delete them only with --yes."""
+    from ..core.env_ids import read_engine_ids
+    from ..tools.engines import list_engines
+
+    confirm = "--yes" in args
+    evaluators = list_evaluators()
+    live = {r["id"] for r in list_engines()}
+    result = prune_evaluators(evaluators, live, delete_evaluator, confirm=confirm)
+
+    print(f"\n=== Evaluator prune ({len(evaluators)} total) ===")
+    print(f"  orphaned (target a deleted engine): {len(result['orphans'])}")
+    for o in result["orphans"]:
+        print(f"    evaluator {o['evaluator_id']} -> engine {o['engine_id']} ({o['state']})")
+
+    cov = evaluator_coverage(evaluators, read_engine_ids())
+    if cov["unwatched"]:
+        print(f"  live engines with NO evaluator: {sorted(cov['unwatched'])}")
+        print("    run `create` to add them")
+
+    dupes = duplicate_evaluators(evaluators)
+    if dupes:
+        print(f"  engines watched by more than one evaluator: {len(dupes)}")
+        for agent, ids in list(dupes.items())[:10]:
+            print(f"    engine {agent}: {ids}")
+
+    if not result["orphans"]:
+        print("  nothing to delete.")
+    elif result["dry_run"]:
+        print(f"\n  DRY RUN — re-run with --yes to delete {len(result['orphans'])}.")
+    else:
+        print(f"\n  deleted {len(result['deleted'])}")
+        for eid, err in result["failed"].items():
+            print(f"    FAILED {eid}: {err}")
+
+
 def create_evaluators():
     print("=== Step 1: Register Custom Metrics ===")
     custom_metric_names = register_custom_metrics()
@@ -470,6 +520,7 @@ COMMANDS = {
     "create": lambda args: create_evaluators(),
     "verify": lambda args: verify_evaluators(),
     "trace-health": trace_health,
+    "prune": prune_command,
     "delete": lambda args: (
         delete_evaluator(args[0]) if args else print("Usage: delete <evaluator_id>")
     ),
