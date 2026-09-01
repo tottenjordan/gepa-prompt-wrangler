@@ -147,6 +147,40 @@ def wait_for_jobs(job_ids: list[str], sleep_fn=time.sleep, state_fn=None) -> dic
     return final
 
 
+def state_name(state) -> str:
+    """Normalise a PipelineState to its enum *name*.
+
+    `str()` on the proto-plus enum yields the bare ordinal -- a FAILED job
+    stringifies to `"5"`, not `"PIPELINE_STATE_FAILED"`. Matching `_DONE`
+    against that never hits, so `wait_for_jobs` polled a finished job forever:
+    the campaign gate held (it never released) but it also never returned.
+    An overnight chain would have stalled after batch 1 on *any* outcome,
+    success included.
+    """
+    name = getattr(state, "name", None)
+    if isinstance(name, str) and name:
+        return name
+    try:
+        return _PIPELINE_STATES[int(state)]
+    except (ValueError, TypeError, KeyError, IndexError):
+        return str(state)
+
+
+# Ordinals of google.cloud.aiplatform_v1.PipelineState, so a numeric state is
+# still readable if the enum object is not available.
+_PIPELINE_STATES = {
+    0: "PIPELINE_STATE_UNSPECIFIED",
+    1: "PIPELINE_STATE_QUEUED",
+    2: "PIPELINE_STATE_PENDING",
+    3: "PIPELINE_STATE_RUNNING",
+    4: "PIPELINE_STATE_SUCCEEDED",
+    5: "PIPELINE_STATE_FAILED",
+    6: "PIPELINE_STATE_CANCELLING",
+    7: "PIPELINE_STATE_CANCELLED",
+    8: "PIPELINE_STATE_PAUSED",
+}
+
+
 def _job_state(job_id: str) -> str:
     from google.cloud import aiplatform
 
@@ -154,7 +188,7 @@ def _job_state(job_id: str) -> str:
 
     name = f"projects/{GCP_PROJECT_ID}/locations/{GCP_REGION}/pipelineJobs/{job_id}"
     try:
-        return str(aiplatform.PipelineJob.get(resource_name=name).state)
+        return state_name(aiplatform.PipelineJob.get(resource_name=name).state)
     except Exception as exc:
         # A lookup failure must not be read as "finished" -- that would release
         # the next batch on top of a still-running one.

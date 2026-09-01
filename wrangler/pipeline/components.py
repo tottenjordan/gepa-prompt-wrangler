@@ -305,15 +305,27 @@ def eval_single_agent(
     deploy_data = json.loads(deploy_blob.download_as_text())
     engine_id = deploy_data["engine_id"]
 
-    # Resolve the prompt being evaluated
+    # Resolve the prompt being evaluated.
+    #
+    # A control arm runs phase="after" with no optimize stage: that is the whole
+    # point of it, the prompt does not change. Downloading the optimize artifact
+    # unconditionally is what failed the second validation run, after deploy and
+    # eval_before had both succeeded. Absent means unchanged, so fall back to the
+    # prompt deploy recorded -- which is the correct answer for a control arm and
+    # not a guess.
+    original_prompt = deploy_data.get("original_prompt", pair.get("system_prompt", ""))
+    active_prompt = original_prompt
     if phase == "after":
         opt_blob = gcs.bucket(bucket_name).blob(
             f"pipeline-runs/{run_id}/stages/optimize/{pair_id}.json"
         )
-        opt_data = json.loads(opt_blob.download_as_text())
-        active_prompt = opt_data.get("optimized_prompt", "")
-    else:
-        active_prompt = deploy_data.get("original_prompt", pair.get("system_prompt", ""))
+        if opt_blob.exists():
+            opt_data = json.loads(opt_blob.download_as_text())
+            active_prompt = opt_data.get("optimized_prompt", "") or original_prompt
+        else:
+            logging.info(
+                f"[{pair_id}] no optimize stage — control arm, evaluating the unchanged prompt"
+            )
 
     eval_cases = load_eval_file(f"/app/{eval_data_path}")
     logging.info(f"[{pair_id}] {phase} eval: {len(eval_cases)} cases, {num_runs} runs")

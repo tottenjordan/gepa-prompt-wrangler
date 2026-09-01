@@ -1,6 +1,7 @@
 """Tests for the Vertex AI Pipeline package."""
 
 import json
+import re
 
 import yaml
 
@@ -294,6 +295,53 @@ class TestSkipOptimize:
         block = before[before.rfind("cachingOptions") :]
         # KFP writes `cachingOptions: {}` for disabled, not `enableCache: false`.
         assert block.startswith("cachingOptions: {}"), block[:80]
+
+    def test_the_eval_component_tolerates_a_missing_optimize_stage(self):
+        """A control arm runs phase="after" with no optimize stage.
+
+        That is the point of it -- the prompt does not change. Downloading the
+        optimize artifact unconditionally failed the second validation run,
+        after deploy and eval_before had both succeeded. This is the third
+        instance of the same class: an eval-only run meeting a component that
+        assumes optimization happened.
+        """
+        from pathlib import Path
+
+        src = Path("wrangler/pipeline/components.py").read_text()
+        i = src.index("def eval_single_agent")
+        body = src[i : i + 6000]
+        j = body.index("stages/optimize")
+        window = body[max(0, j - 500) : j + 500]
+        assert "opt_blob.exists()" in window, "the optimize read must be guarded"
+
+    def test_no_component_reads_the_optimize_stage_unguarded(self):
+        """Fix the class, not the instance -- this was the third round of it.
+
+        Every component that can run in the eval-only branch must tolerate a
+        missing optimize artifact. Only `redeploy` may read it unconditionally:
+        it runs solely inside the optimize branch, so it is always there.
+        """
+        from pathlib import Path
+
+        src = Path("wrangler/pipeline/components.py").read_text()
+        lines = src.splitlines()
+        allowed_unguarded = {"redeploy_single_agent"}
+
+        for n, line in enumerate(lines):
+            if "stages/optimize" not in line:
+                continue
+            # Which component is this line in? Scan back to the enclosing def.
+            owner = next(
+                (m.group(1) for k in range(n, -1, -1) if (m := re.match(r"def (\w+)", lines[k]))),
+                "<module>",
+            )
+            window = "\n".join(lines[max(0, n - 10) : n + 10])
+            writes = "upload_from_string" in window
+            guarded = ".exists()" in window or "required=False" in window
+            assert writes or guarded or owner in allowed_unguarded, (
+                f"{owner} (line {n + 1}) reads the optimize stage unguarded; "
+                f"an eval-only run has no such artifact"
+            )
 
     def test_the_analysis_tolerates_a_missing_optimize_stage(self):
         from pathlib import Path

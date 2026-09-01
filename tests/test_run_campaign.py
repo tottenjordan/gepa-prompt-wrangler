@@ -278,3 +278,56 @@ class TestAdoptARunningArm:
         )
         assert vtr.main("06", tmp_path, watch_job="job-abc") == 1
         assert released == []
+
+
+class TestJobStateIsReadAsAName:
+    """`str(job.state)` yields the bare ordinal, not the enum name.
+
+    A FAILED job stringifies to "5", so `_DONE` never matched and
+    `wait_for_jobs` polled a finished job forever. The gate held -- it never
+    released the campaign -- but it never returned either, so an overnight
+    chain would have stalled after batch 1 on any outcome, success included.
+    Found on the campaign-06 validation arm, which sat in a poll loop for
+    ~80 min after the job had already failed.
+    """
+
+    def test_a_numeric_state_becomes_its_enum_name(self):
+        from scripts.run_campaign import state_name
+
+        assert state_name(5) == "PIPELINE_STATE_FAILED"
+        assert state_name(4) == "PIPELINE_STATE_SUCCEEDED"
+
+    def test_an_enum_object_uses_its_name(self):
+        from scripts.run_campaign import state_name
+
+        class FakeEnum:
+            name = "PIPELINE_STATE_SUCCEEDED"
+
+        assert state_name(FakeEnum()) == "PIPELINE_STATE_SUCCEEDED"
+
+    def test_every_terminal_state_is_recognised_as_terminal(self):
+        """The bug in one line: a terminal job must end the poll loop."""
+        from scripts.run_campaign import _DONE, state_name
+
+        for ordinal in (4, 5, 7):  # SUCCEEDED, FAILED, CANCELLED
+            assert any(t in state_name(ordinal) for t in _DONE), ordinal
+
+    def test_a_running_state_is_not_terminal(self):
+        from scripts.run_campaign import _DONE, state_name
+
+        for ordinal in (1, 2, 3):
+            assert not any(t in state_name(ordinal) for t in _DONE), ordinal
+
+    def test_wait_returns_when_a_job_fails_rather_than_polling_forever(self):
+        from scripts.run_campaign import state_name, wait_for_jobs
+
+        slept = []
+        final = wait_for_jobs(["j1"], sleep_fn=slept.append, state_fn=lambda _: state_name(5))
+        assert final == {"j1": "PIPELINE_STATE_FAILED"}
+        assert slept == [], "a job that is already terminal must not sleep"
+
+    def test_an_unreadable_state_keeps_waiting_rather_than_releasing(self):
+        """A lookup failure must never be read as 'finished'."""
+        from scripts.run_campaign import _DONE
+
+        assert not any(t in "UNKNOWN" for t in _DONE)
