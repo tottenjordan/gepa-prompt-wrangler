@@ -62,12 +62,21 @@ Rules the test suite enforces:
 
 - **No model id literals anywhere in `wrangler/` outside the registry.** `tests/test_models.py`
   walks the AST of every module — docstrings and comments are exempt, so prose may name a
-  model but code may not. The one legitimate exemption is `pipeline/components.py`: KFP
-  serializes each `@dsl.component` body in isolation, so a component cannot import the
-  registry at runtime. Exemptions are listed with their reason in `LITERAL_EXCEPTIONS`.
+  model but code may not. `LITERAL_EXCEPTIONS` is **empty, and worth keeping empty**.
+  It used to exempt `pipeline/components.py` on the grounds that KFP serialization stops a
+  component importing the registry at runtime; that was checked on 2026-09-01 and is false.
+  Every component extracts the tarball and calls `sys.path.insert(0, "/app")` first, then
+  imports from `wrangler` freely. The real isolation rule is narrower — a component cannot
+  call a *module-level helper* defined in `components.py`, because only the function body
+  is serialized — and it has no bearing on importing an unpacked package.
 - **Every named-role default must be a registered model**, must be listed in the guard's
   own `DEFAULT_ROLES` table, and must be more than 30 days from its retirement date. The
   last one turns a vendor shutdown into a red build instead of a 404 mid-run.
+  `DEFAULT_FIGURE_IMAGE_MODEL` is the one role exempt from *registration* (PaperBanana
+  draws with it; nothing infers against it, so it has no cost, RPM or retirement date). It
+  is listed in `ROLES_EXEMPT_FROM_REGISTRATION` with a reason, stays in `DEFAULT_ROLES` so
+  the completeness check still sees it, and a test fails if it ever gains a `ModelSpec`
+  without the exemption being removed.
 
 Retirement dates are the *earliest announced* shutdown. Anthropic's are "not sooner than"
 and apply to Anthropic-operated platforms — Google Cloud sets its own schedule for partner
@@ -350,6 +359,25 @@ Keep them in sync — the multi-model agents import from their **local** config,
 wrangler's, and `build_source_package()` copies that local file into `_geap_build_pkg/`, so
 it is the version that actually runs on GEAP. A fix applied only to `wrangler/core/` will
 appear to work locally in the CLI and still ship broken to every deployed agent.
+
+**`tests/test_shared_source_drift.py` now enforces this**, so drift is a red build rather
+than a deploy-time surprise. It compares the two by **behaviour**, not by source: every
+registered id plus a Gemini 2.x, the `models/` form and an unknown id go through both, and
+the three fields that decide routing (type, model id, pinned location) must match. Source
+comparison was rejected because the two already differ in docstrings, so it would need an
+allowlist that eventually gets widened to let a real difference through.
+
+The same file guards two more hand-synced pairs that had only comments: the generated
+`_REGISTRY_PY_TEMPLATE` in `deploy.py` against `examples/multi_model_agents/registry.py`
+(no `tool_name_prefix` on either, matching cache TTL, read timeout and startup-probe
+budget, and every `*_MCP_*` var `config.py` declares must be read by the generated
+registry), and that all three templates parse as Python.
+
+Read the environment at **call** time in both files, never into a module constant. The
+example config used to bind `GCP_REGION` and `GCP_PROJECT_ID` at import; the pipeline
+components set both *inside* the component body, after the tarball is extracted, so the
+deployed copy could route on a stale region or build a Claude resource path against a
+stale project.
 
 ### Optimizer Prompt Flow
 
