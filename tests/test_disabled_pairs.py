@@ -99,13 +99,17 @@ class TestExperimentExcludesDisabledPairs:
     """The phantom-arm bug: a disabled pair used to get a results row anyway.
 
     `Experiment.create` used to copy `manifest.pairs` (the raw list)
-    verbatim into `config["pairs"]`, and `enabled`/`disabled_reason` are not
-    among the fields that dict carries -- so a disabled pair survived into
+    verbatim into `config["pairs"]`, and `enabled`/`disabled_reason` were not
+    among the fields that dict carried -- so a disabled pair survived into
     every experiment as if it were a normal arm, with `model: ""` and empty
     before/after scores once eval skipped it. That row fed the cost-benefit
-    table, the ordering, and the analyzer's noise-floor logic. Filtering at
-    creation time is the only point that can fix this, because the disabled
-    flag has nowhere to live past it.
+    table, the ordering, and the analyzer's noise-floor logic.
+
+    The fix carries `enabled`/`disabled_reason` into config.yaml (see
+    `TestExplicitPairStillOverridesADisabledOne` below for why they have to
+    travel rather than being dropped at creation) and filters them back out
+    only in `Experiment.pair_ids`, which is what a report, gate, or tracking
+    entry reads.
     """
 
     def _experiment(self, tmp_path):
@@ -149,6 +153,56 @@ class TestExperimentExcludesDisabledPairs:
 
         assert "opus" not in captured["results"]
         assert "kept" in captured["results"]
+
+
+class TestExplicitPairStillOverridesADisabledOne:
+    """`wrangler run manifest.yaml --pair opus` must still reach opus.
+
+    The first fix for the phantom-arm bug dropped disabled pairs from
+    `config["pairs"]` entirely at `Experiment.create` time. That closed the
+    phantom-row bug but broke the other half of the same requirement: every
+    stage function calls `_filter_pairs(exp.manifest, pair_id)`, and with the
+    disabled pair gone from config.yaml there was nothing left for a named
+    `--pair opus` to find -- `_filter_pairs` raises `KeyError` via
+    `manifest.get_pair()` instead of running it. `enabled`/`disabled_reason`
+    must survive into config.yaml so the raw pair is still there for an
+    explicit override, even though `pair_ids` (unfiltered sweeps, reports,
+    gates) excludes it.
+    """
+
+    def test_naming_a_disabled_pair_reaches_it_through_the_experiment(self, tmp_path):
+        (tmp_path / "agents" / "x").mkdir(parents=True)
+        (tmp_path / "eval.yaml").write_text(
+            yaml.safe_dump([{"query": "hi", "expected_response": "hi"}])
+        )
+        manifest_path = tmp_path / "manifest.yaml"
+        manifest_path.write_text(
+            yaml.safe_dump(
+                {
+                    "name": "m",
+                    "agent_module": "agents/x",
+                    "eval_data": "eval.yaml",
+                    "pairs": [
+                        _pair("kept"),
+                        _pair("opus", enabled=False, disabled_reason="0-50% reach"),
+                    ],
+                }
+            )
+        )
+        from wrangler.orchestration.experiment import Experiment
+        from wrangler.orchestration.stages import _filter_pairs
+
+        exp = Experiment.create(manifest_path, name="exp", base_dir=tmp_path / "experiments")
+
+        # The disabled pair is still reachable by name on the reconstructed
+        # manifest -- this is what every stage function calls with pair_id
+        # threaded from `--pair`.
+        selected = _filter_pairs(exp.manifest, "opus")
+        assert [p.id for p in selected] == ["opus"]
+
+        # And an unfiltered sweep still skips it -- the other half of the
+        # same requirement, unchanged by this fix.
+        assert [p.id for p in _filter_pairs(exp.manifest, None)] == ["kept"]
 
 
 class TestOpusIsActuallyDisabled:

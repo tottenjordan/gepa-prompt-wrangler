@@ -10,6 +10,18 @@ and neither the local `wrangler deploy manifest.yaml` path nor
 This walks the AST rather than grepping, the same shape as
 tests/test_models.py's literal-model-id guard: comments and docstrings that
 narrate the history above (like this one) don't trip it, only code does.
+
+Like that guard, this is a heuristic, not a type checker, and it has real
+blind spots: it only recognizes `.pairs` on the bare name `manifest`, a
+variable assigned straight from `PairFactory.load(...)`, or an attribute
+chain ending in `.manifest`. It will miss a same-scope alias
+(`m = manifest; m.pairs`), a directly chained call
+(`PairFactory.load(path).pairs`), and a parameter named anything other than
+`manifest` (`def helper(m): return m.pairs`) -- none of those match the
+patterns above, and there is no data-flow analysis backing this up. It
+catches every real manifest.pairs site in this codebase today, checked by
+hand, but a determined or careless rewrite can still get a raw `.pairs` read
+past it.
 """
 
 import ast
@@ -19,6 +31,14 @@ from pathlib import Path
 # Keep this small: anything not listed here must go through
 # `Manifest.enabled_pairs`, or `manifest.get_pair()` for a single named pair.
 PAIRS_READ_EXCEPTIONS: dict[tuple[str, int], str] = {
+    ("wrangler/orchestration/experiment.py", 108): (
+        "Experiment.create persists every declared pair, disabled ones "
+        "included, with their enabled/disabled_reason fields -- dropping "
+        "disabled pairs here instead broke `--pair <disabled-id>` on every "
+        "stage function, which reconstructs the manifest from this config "
+        "and calls _filter_pairs on it. pair_ids (below) filters enabled "
+        "back out for anything that chooses what to run unfiltered."
+    ),
     ("wrangler/orchestration/stages.py", 246): (
         "_filter_pairs() is what implements enabled_pairs' semantics for a "
         "named --pair override -- an explicitly-named disabled pair must "
@@ -61,6 +81,12 @@ def _manifest_pairs_reads() -> list[tuple[str, int]]:
     variable assigned straight from `PairFactory.load(...)`, or an attribute
     chain ending in `.manifest` (`self.manifest`, `exp.manifest`,
     `pipeline.manifest`).
+
+    That narrowing is also this function's blind spot: it does no data-flow
+    tracing past a single direct assignment, so `m = manifest` followed by
+    `m.pairs`, a chained `PairFactory.load(path).pairs` with no intermediate
+    name, or a function parameter named anything other than `manifest` (e.g.
+    `def helper(m): return m.pairs`) all pass through undetected.
     """
     found: list[tuple[str, int]] = []
 
