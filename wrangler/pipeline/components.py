@@ -83,6 +83,7 @@ def deploy_single_agent(
     agent_module: str,
     secret_id: str,
     cache_bust: str,
+    health_gate_json: str,
     metrics: Output[Metrics],
     summary: Output[Markdown],
     agent_prompt: Output[Markdown],
@@ -176,7 +177,15 @@ def deploy_single_agent(
         #
         # Imported inside the component body: KFP serializes each @dsl.component
         # in isolation, so a module-level helper is not available at runtime.
-        from wrangler.orchestration.stages import gate_engine_health
+        from wrangler.orchestration.stages import (
+            enforce_health_gate,
+            gate_engine_health,
+            health_gate_config,
+        )
+
+        gate_cfg = health_gate_config(
+            {"health_gate": json.loads(health_gate_json) if health_gate_json else {}}
+        )
 
         def _redeploy():
             return deploy_agent_from_source(
@@ -189,7 +198,14 @@ def deploy_single_agent(
 
         from wrangler.tools.engines import delete_engine
 
-        health = gate_engine_health(engine_id, redeploy_fn=_redeploy, discard_fn=delete_engine)
+        health = gate_engine_health(
+            engine_id,
+            redeploy_fn=_redeploy,
+            discard_fn=delete_engine,
+            attempts=gate_cfg["attempts"],
+            threshold=gate_cfg["threshold"],
+            max_rerolls=gate_cfg["max_rerolls"],
+        )
         # This path always deploys fresh, so a rejected first draw is ours.
         for stale in health["rejected"]:
             if stale != health["engine_id"]:
@@ -198,11 +214,9 @@ def deploy_single_agent(
                 except Exception as exc:
                     logging.warning(f"[{pair_id}] could not discard {stale}: {exc}")
         engine_id = health["engine_id"]
-        if not health["passed"]:
-            logging.warning(
-                f"[{pair_id}] engine below the health bar after {health['rerolls']} "
-                f"reroll(s) at {health['rate']:.0%} reach — eval will lose cases"
-            )
+        # Same enforcement as the local path. Hand-rolling it here is how the
+        # two diverged over enabled_pairs.
+        enforce_health_gate(health, gate_cfg["required"], pair_id)
         elapsed = time.time() - t0
 
         result = {
@@ -346,11 +360,23 @@ def eval_single_agent(
     input_cost = input_tokens * costs["input"] / 1_000_000
     output_cost = output_tokens * costs["output"] / 1_000_000
 
+    # Coverage, recorded rather than left derivable.
+    #
+    # It was only ever `len(per_case)`, which is why nobody noticed that eval
+    # coverage swings up to 42 points between the two sides of one arm (sonnet
+    # 47% -> 89%, flash 94% -> 56% on 2026-08-31). A before/after delta computed
+    # across a swing that size is measuring dropout, not the prompt.
+    cases_scored = len(result.per_case or [])
+    cases_total = len(eval_cases)
+
     stage_data = {
         "scores": result.scores,
         "per_case": result.per_case,
         "scores_std": result.scores_std,
         "num_runs": result.num_runs,
+        "cases_scored": cases_scored,
+        "cases_total": cases_total,
+        "coverage": cases_scored / cases_total if cases_total else 0.0,
         "elapsed": elapsed,
         "token_usage": result.token_usage,
         "costs": {"input_usd": input_cost, "output_usd": output_cost},
@@ -926,6 +952,18 @@ def generate_analysis(
             "num_runs": eval_before.get("num_runs", 1),
             "optimized_prompt": optimize_data.get("optimized_prompt", ""),
             "thresholds": optimize_data.get("thresholds", {}),
+            # Coverage on both sides, and whether they are comparable at all.
+            # A delta between a 47%-covered before and an 89%-covered after is
+            # mostly dropout; averaging the two sides silently hides that.
+            "before_coverage": eval_before.get("coverage"),
+            "after_coverage": eval_after.get("coverage"),
+            "coverage_gap": (
+                abs(eval_before["coverage"] - eval_after["coverage"])
+                if eval_before.get("coverage") is not None
+                and eval_after.get("coverage") is not None
+                else None
+            ),
+            "health": deploy_data.get("health", {}),
         }
 
         for stage_data in [eval_before, optimize_data, eval_after]:

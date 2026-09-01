@@ -29,3 +29,8 @@ pipeline:
 
 health_gate:
   enabled: true
+  # This arm's only output is a noise floor. Measured on an engine the gate
+  # rejected, that floor describes the engine's dropout rather than the
+  # pipeline's noise -- which is exactly what happened on 2026-09-01, when
+  # three draws all failed at 1.7% reach and the eval ran anyway.
+  required: true

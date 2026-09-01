@@ -425,4 +425,84 @@ class TestAllThreeDeployPathsAreGated:
         i = src.index("def deploy_single_agent")
         body = src[i : i + 6000]
         assert "gate_engine_health" in body
-        assert "from wrangler.orchestration.stages import gate_engine_health" in body
+        # Parsed rather than string-matched: the import is legitimately
+        # multi-line now that the component also pulls in enforce_health_gate
+        # and health_gate_config, and an exact-text assertion just breaks on
+        # formatting without checking anything more.
+        import ast
+
+        tree = ast.parse(body[: body.rindex("\n")] + "\n    pass\n")
+        imported = {
+            alias.name
+            for node in ast.walk(tree)
+            if isinstance(node, ast.ImportFrom) and node.module == "wrangler.orchestration.stages"
+            for alias in node.names
+        }
+        assert "gate_engine_health" in imported, (
+            "the gate must be imported inside the component body -- KFP "
+            "serializes each component in isolation"
+        )
+
+
+class TestRequiredGateStopsTheRun:
+    """A characterisation run may not proceed on an engine the gate rejected.
+
+    The gate has always been advisory: both call sites checked
+    `if not health["passed"]` and then only warned. The campaign-06 validation
+    arm drew three engines, all failed (1.7% reach after two rerolls), and the
+    eval ran against the worst of them anyway -- producing 88% coverage whose
+    missing 12% is non-random dropout on a known-sick engine.
+
+    Advisory is right for a production sweep, which may reasonably proceed on a
+    degraded engine and say so. It is wrong for a run whose entire output is a
+    noise measurement, because the noise it measures is then the engine's.
+    Hence a manifest key rather than a change of default.
+    """
+
+    def test_required_is_off_by_default(self):
+        assert stages.health_gate_config({})["required"] is False
+
+    def test_required_can_be_turned_on(self):
+        cfg = stages.health_gate_config({"health_gate": {"required": True}})
+        assert cfg["required"] is True
+
+    def test_a_failing_gate_raises_when_required(self):
+        import pytest
+
+        health = {"passed": False, "rate": 0.017, "n": 60, "rerolls": 2, "engine_id": "e1"}
+        with pytest.raises(stages.EngineHealthError, match="c06-ctrl"):
+            stages.enforce_health_gate(health, required=True, pair_id="c06-ctrl")
+
+    def test_a_failing_gate_only_warns_when_not_required(self):
+        health = {"passed": False, "rate": 0.017, "n": 60, "rerolls": 2, "engine_id": "e1"}
+        assert stages.enforce_health_gate(health, required=False, pair_id="p") is False
+
+    def test_a_passing_gate_never_raises(self):
+        health = {"passed": True, "rate": 0.99, "n": 60, "rerolls": 0, "engine_id": "e1"}
+        assert stages.enforce_health_gate(health, required=True, pair_id="p") is True
+
+    def test_both_paths_use_the_same_enforcement(self):
+        """The local and KFP paths have diverged before -- `enabled_pairs` did.
+
+        Neither may hand-roll the decision; both call the one function.
+        """
+        from pathlib import Path
+
+        for path in ("wrangler/orchestration/stages.py", "wrangler/pipeline/components.py"):
+            src = Path(path).read_text()
+            assert "enforce_health_gate" in src, f"{path} must route through the shared check"
+
+    def test_the_campaign_06_manifests_require_it(self):
+        """The arms whose only output is a noise floor must not run on a sick engine."""
+        import glob
+        import pathlib
+
+        import yaml
+
+        manifests = sorted(glob.glob("manifests/c06-*_manifest.yaml"))
+        assert manifests, "expected the campaign 06 manifests"
+        for path in manifests:
+            cfg = yaml.safe_load(pathlib.Path(path).read_text())
+            assert cfg.get("health_gate", {}).get("required") is True, (
+                f"{path} measures a noise floor; it may not run on a rejected engine"
+            )

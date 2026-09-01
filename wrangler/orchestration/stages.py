@@ -278,7 +278,47 @@ def health_gate_config(config: dict) -> dict:
         # ~12 minutes per pair on every stage run, for an engine whose health
         # was already established when it was deployed.
         "gate_existing": raw.get("gate_existing", False),
+        # Whether a failing gate stops the run or merely says so.
+        #
+        # Advisory by default, and that is the right default: a production
+        # sweep may reasonably proceed on a degraded engine as long as it
+        # records the fact. It is the wrong default for a run whose entire
+        # output is a measurement of noise, because the noise then measured is
+        # the engine's dropout rather than the pipeline's. Campaign 06's
+        # validation arm drew three engines, all failed at 1.7% reach, and
+        # evaluated against the worst one anyway.
+        "required": raw.get("required", False),
     }
+
+
+class EngineHealthError(RuntimeError):
+    """A required health gate rejected every engine it drew."""
+
+
+def enforce_health_gate(health: dict, required: bool, pair_id: str) -> bool:
+    """Act on a gate verdict. Returns whether it passed; raises when it must not proceed.
+
+    Both the local and the KFP deploy paths call this. They previously each
+    hand-rolled `if not health["passed"]: warn(...)`, which is how the two
+    diverged over `enabled_pairs` -- the local path filtered disabled pairs and
+    the pipeline path did not.
+    """
+    if health.get("passed"):
+        return True
+
+    rate, rerolls = health.get("rate", 0.0), health.get("rerolls", 0)
+    detail = (
+        f"engine {health.get('engine_id', '?')} for pair {pair_id} is below the health "
+        f"bar after {rerolls} reroll(s): {rate:.1%} reach ({rate})"
+    )
+    if required:
+        raise EngineHealthError(
+            f"{detail}. This run sets health_gate.required, so it stops here rather "
+            f"than measure that engine's dropout. See docs/doe/01-engine-lottery.md "
+            f"and docs/analysis/2026-09-01-health-gate-vs-eval-coverage.md."
+        )
+    print(f"  WARNING: {detail}. Its eval coverage will be poor.", flush=True)
+    return False
 
 
 def gate_engine_health(
@@ -468,13 +508,7 @@ def stage_deploy(exp: Experiment, pair_id: str | None = None) -> None:
                 # state on 2026-08-31.
                 if health["engine_id"] != engine_id:
                     _sync_env_engine_id(pair.id, health["engine_id"])
-                if not health["passed"]:
-                    print(
-                        f"  {tag} WARNING: engine below the health bar after "
-                        f"{health['rerolls']} reroll(s). Its eval coverage will be poor; "
-                        f"see docs/doe/01-engine-lottery.md.",
-                        flush=True,
-                    )
+                enforce_health_gate(health, gate_cfg["required"], pair.id)
 
             exp.merge_pair("deploy", pair.id, record)
 

@@ -155,6 +155,22 @@ def _tool_use_metric() -> "types.LLMMetric":
 # Pinning v1 keeps us on versions the service actually serves. Revisit when the
 # service catches up (symptom of over-pinning is the opposite error: the service
 # reporting the v1 name as retired).
+# Retries per case inside `client.evals.run_inference`.
+#
+# The SDK default is lower; this override exists because an engine that answers
+# HTTP 200 with no inference loses the case outright. The number matters more
+# than it looks: single-attempt reach on a healthy engine is 97-100%, but a
+# degraded one measured 25%, and coverage is 1-(1-reach)^attempts. At 25% reach,
+# 7 attempts gives 87% and 16 gives 99% -- which is the difference between a
+# noise floor that measures dropout and one that measures noise.
+#
+# On a healthy engine the first attempt succeeds, so raising this costs nothing
+# in the good case. It is not a substitute for the health gate: it absorbs the
+# dropout without fixing it, so `health_gate.required` and the recorded coverage
+# fields are what keep the sickness visible.
+# See docs/analysis/2026-09-01-health-gate-vs-eval-coverage.md
+EVAL_MAX_RETRIES = 16
+
 DEFAULT_METRICS = [
     types.RubricMetric.FINAL_RESPONSE_QUALITY(version="v1"),
     types.RubricMetric.HALLUCINATION(version="v1"),
@@ -592,7 +608,7 @@ def _run_batched_inference(
         _evals_common.AGENT_MAX_WORKERS = min(max_workers, batch_size)  # ty: ignore[invalid-assignment]
 
         @functools.wraps(original_retry_fn)
-        def _patched_retry(*args, max_retries=6, **kwargs):
+        def _patched_retry(*args, max_retries=EVAL_MAX_RETRIES, **kwargs):
             return original_retry_fn(*args, max_retries=max_retries, **kwargs)
 
         # Deliberate monkey-patch: the functools.wraps wrapper is not the same type.

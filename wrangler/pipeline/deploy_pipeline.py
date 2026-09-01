@@ -413,6 +413,13 @@ def deploy_pipeline(
             # lets this pipeline be used for characterisation rather than only
             # for optimization runs.
             "skip_optimize": bool((manifest.pipeline or {}).get("skip_optimize", False)),
+            # The whole health_gate block, forwarded verbatim. Sent as JSON
+            # rather than one KFP parameter per knob so a new knob does not
+            # need a change in four files -- and because the pipeline path
+            # previously read none of them, running on gate_engine_health's
+            # bare defaults while the manifest's settings were silently
+            # dropped. `required` is the one that must not be droppable.
+            "health_gate_json": json.dumps(getattr(manifest, "health_gate", None) or {}),
         },
         labels={"solution": "promp-wrangler"},
     )
