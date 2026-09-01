@@ -20,6 +20,13 @@ outcome would mean *before* looking is what stops that.
 | [06](06-pipeline-noise-floor.md) | What is the noise floor, on the pipeline? | **Running 2026-09-01** | ~6 h, 4 arms (n=5 trimmed) |
 | [07](07-cost-quality-frontier.md) | What does a model tier cost per unit of quality? | **Ready** | ~10.6 h/arm, 4 arms, 2 at a time |
 | [08](08-gepa-budget-curve.md) | What does a GEPA budget buy? (scoped to fit) | Conditional on 06 | 1 optimize arm per batch |
+| [09](09-lottery-recheck.md) | Has the deploy lottery got worse? | **Running 2026-09-01** | 10 engines, ~4 h |
+
+**09 now runs before 06.** The campaign-06 validation arm drew three engines and
+all three failed the health gate at 1.7% reach; the eval then ran against the worst
+of them and scored 88% coverage, whose missing 12% is dropout on a known-sick
+engine. A noise floor measured that way describes the engine. 09 says whether the
+~60% healthy fraction that `max_rerolls` is sized from still holds.
 
 Run order is dependency order. 01 stands alone and is the cheapest. 02 needs
 `wrangler capture` / `wrangler score`. 03 needs 02's variance split and the multi-run
