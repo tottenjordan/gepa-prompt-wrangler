@@ -7,6 +7,7 @@ import pytest
 from wrangler.core.models import (
     DEFAULT_AGENT_MODEL,
     DEFAULT_AGENT_MODEL_ALT,
+    DEFAULT_FIGURE_IMAGE_MODEL,
     DEFAULT_FIGURE_VLM_MODEL,
     DEFAULT_JUDGE_ENSEMBLE,
     DEFAULT_JUDGE_MODEL,
@@ -85,6 +86,20 @@ DEFAULT_ROLES = {
     "DEFAULT_AGENT_MODEL": [DEFAULT_AGENT_MODEL],
     "DEFAULT_AGENT_MODEL_ALT": [DEFAULT_AGENT_MODEL_ALT],
     "DEFAULT_FIGURE_VLM_MODEL": [DEFAULT_FIGURE_VLM_MODEL],
+    "DEFAULT_FIGURE_IMAGE_MODEL": [DEFAULT_FIGURE_IMAGE_MODEL],
+}
+
+# Roles whose model is deliberately absent from MODELS, so the "is it
+# registered" and "is it near retirement" guards cannot apply. They stay in
+# DEFAULT_ROLES above so the completeness check still sees them -- the point of
+# that check is that no named role escapes notice, and dropping these from the
+# table entirely would defeat it.
+#
+# Only for models the framework never runs an agent or a judge on, and so has
+# no cost, RPM or retirement date for. Keep this in step with
+# UNREGISTERED_MODEL_IDS below.
+ROLES_EXEMPT_FROM_REGISTRATION = {
+    "DEFAULT_FIGURE_IMAGE_MODEL": "PaperBanana's image renderer — drawn, never inferred against.",
 }
 
 # How much warning the deadline guard gives before a default stops working.
@@ -94,8 +109,26 @@ RETIREMENT_WARNING = dt.timedelta(days=30)
 def test_every_default_role_names_a_registered_model():
     """A typo in a default is otherwise a 404 at run time, not at import."""
     for role, models in DEFAULT_ROLES.items():
+        if role in ROLES_EXEMPT_FROM_REGISTRATION:
+            continue
         for model in models:
             assert model in MODELS, f"{role} points at unregistered {model!r}"
+
+
+def test_every_registration_exemption_is_a_real_role():
+    """An exemption for a role that no longer exists silently covers nothing."""
+    stale = set(ROLES_EXEMPT_FROM_REGISTRATION) - set(DEFAULT_ROLES)
+    assert not stale, f"{sorted(stale)} are exempted but are not roles"
+
+
+def test_exempt_roles_really_are_unregistered():
+    """If one gains a ModelSpec, delete the exemption rather than keep both."""
+    for role in ROLES_EXEMPT_FROM_REGISTRATION:
+        for model in DEFAULT_ROLES[role]:
+            assert model not in MODELS, (
+                f"{role} -> {model!r} is registered now; drop it from "
+                f"ROLES_EXEMPT_FROM_REGISTRATION so the retirement guard covers it"
+            )
 
 
 def test_no_default_role_is_missing_from_the_guard():
@@ -132,6 +165,7 @@ def test_default_models_are_not_near_retirement():
     overdue = [
         f"{role} -> {model} (retires {MODELS[model].retirement_date})"
         for role, models in DEFAULT_ROLES.items()
+        if role not in ROLES_EXEMPT_FROM_REGISTRATION
         for model in models
         if MODELS[model].retirement_date and MODELS[model].retirement_date <= deadline
     ]
@@ -226,24 +260,26 @@ def test_model_spec_is_immutable():
 
 # Sites that intentionally keep a literal model id, with the reason. Anything
 # not listed here must import from the registry instead.
-LITERAL_EXCEPTIONS = {
-    (
-        "wrangler/pipeline/components.py",
-        "gemini-3.5-flash",
-    ): "KFP serializes each @dsl.component body in isolation, so the component "
-    "cannot import the registry at runtime.",
-    (
-        "wrangler/pipeline/components.py",
-        "gemini-3.1-flash-image",
-    ): "Same KFP isolation rule; also a PaperBanana image model rather than an "
-    "agent or judge model, so it has no cost or RPM to register.",
-    (
-        "wrangler/reporting/charts.py",
-        "gemini-3.1-flash-image",
-    ): "A PaperBanana figure renderer, not an agent or judge model: no cost, RPM "
-    "or retirement date to register. Its VLM counterpart IS registered, as "
-    "DEFAULT_FIGURE_VLM_MODEL.",
-}
+# Empty, and worth keeping empty.
+#
+# This used to exempt two literals in `wrangler/pipeline/components.py` on the
+# grounds that "KFP serializes each @dsl.component body in isolation, so the
+# component cannot import the registry at runtime." That reason was checked and
+# is false. Every component extracts the code tarball and calls
+# `sys.path.insert(0, "/app")` before doing anything else, then imports from
+# `wrangler` freely -- `core.deploy`, `orchestration.stages`, `eval.evaluator`,
+# `reporting.reporter`. The two exempted literals sat *after* that insert and
+# four lines above one of those imports.
+#
+# The isolation rule it appealed to is real but says something narrower: a
+# component cannot call a module-level helper defined in `components.py`,
+# because only the function body is serialized. That has no bearing on whether
+# it can import an installed-and-unpacked package.
+#
+# So: before adding an entry here, check that the code genuinely cannot reach
+# the registry, rather than assuming KFP means it cannot. A wrong reason in
+# this table outlives the person who wrote it and licenses the next literal.
+LITERAL_EXCEPTIONS: dict[tuple[str, str], str] = {}
 
 # Ids allowed to be absent from MODELS. Only for models the framework never
 # runs an agent or a judge on, so they have no cost or rate limit to record.

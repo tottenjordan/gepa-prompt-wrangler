@@ -269,9 +269,15 @@ DEFAULT_AGENT_MODEL_ALT = "claude-sonnet-4-6"
 # Currently the same id as the judge, but a separate role on purpose: moving the
 # judge should not silently re-point figure generation. PaperBanana's own default
 # here is gemini-2.5-flash, so this must be set explicitly or charts run on it.
-# The matching *image* model is not registered — see LITERAL_EXCEPTIONS in
-# tests/test_models.py for why an image model has no cost or RPM to record.
 DEFAULT_FIGURE_VLM_MODEL = "gemini-3.5-flash"
+
+# PaperBanana's image stage — the renderer that draws the figure the VLM planned.
+# Deliberately absent from MODELS: the framework never runs an agent or a judge
+# on it, so it has no cost, RPM or retirement date to record. It is named here
+# anyway, because the registry is the one place a model id may be written and a
+# constant is what lets every caller stop writing the literal. See
+# UNREGISTERED_MODEL_IDS in tests/test_models.py.
+DEFAULT_FIGURE_IMAGE_MODEL = "gemini-3.1-flash-image"
 
 # --- Derived views -------------------------------------------------------
 

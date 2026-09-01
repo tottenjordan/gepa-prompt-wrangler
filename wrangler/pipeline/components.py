@@ -865,8 +865,14 @@ def generate_analysis(
     os.environ["GOOGLE_CLOUD_PROJECT"] = project_id
     os.environ["GOOGLE_CLOUD_LOCATION"] = "global"
     os.environ["GOOGLE_GENAI_USE_VERTEXAI"] = "1"
-    os.environ["VLM_MODEL"] = os.getenv("VLM_MODEL", "gemini-3.5-flash")
-    os.environ["IMAGE_MODEL"] = os.getenv("IMAGE_MODEL", "gemini-3.1-flash-image")
+    # The tarball is on sys.path by now, so the registry is importable and
+    # these defaults do not need to be written out again here. models.py has no
+    # heavy imports, and both vars must be set before reporting.charts is
+    # imported below, which reads them.
+    from wrangler.core.models import DEFAULT_FIGURE_IMAGE_MODEL, DEFAULT_FIGURE_VLM_MODEL
+
+    os.environ["VLM_MODEL"] = os.getenv("VLM_MODEL", DEFAULT_FIGURE_VLM_MODEL)
+    os.environ["IMAGE_MODEL"] = os.getenv("IMAGE_MODEL", DEFAULT_FIGURE_IMAGE_MODEL)
 
     import matplotlib as mpl
 
