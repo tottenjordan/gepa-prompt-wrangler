@@ -21,7 +21,7 @@ eval_config:
 
 pipeline:
   secret_id: wrangler-agent-env
-  cache_bust: "c06-v1"
+  cache_bust: "c06-v2"
   # No optimization at all: this arm exists to measure what an UNCHANGED prompt
   # scores twice. Any delta is the floor.
   skip_optimize: true
