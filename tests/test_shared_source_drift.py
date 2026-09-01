@@ -34,6 +34,7 @@ from __future__ import annotations
 import ast
 import importlib.util
 import pathlib
+import re
 
 import pytest
 
@@ -179,3 +180,161 @@ class TestEnvIsReadAtCallTimeOnBothSides:
             cfg.resolve_model("claude-sonnet-4-6")
         )
         assert "project-set-late" in describe(cfg.resolve_model("claude-sonnet-4-6"))[1]
+
+
+# --- Pair B/C: the generated registry template vs the local registry --------
+
+
+def extract_template(name: str) -> str:
+    """Pull a triple-quoted template constant out of wrangler/core/deploy.py."""
+    src = DEPLOY_PY.read_text()
+    match = re.search(rf"{name}\s*=\s*[a-z]*(\"{{3}}|'{{3}})(.*?)\1", src, re.DOTALL)
+    assert match, f"{name} not found in {DEPLOY_PY.name}"
+    return match.group(2)
+
+
+def module_constants(tree: ast.Module) -> dict:
+    """Module-level `NAME = <literal>` assignments."""
+    out = {}
+    for node in tree.body:
+        if isinstance(node, ast.Assign) and isinstance(node.value, ast.Constant):
+            for target in node.targets:
+                if isinstance(target, ast.Name):
+                    out[target.id] = node.value.value
+    return out
+
+
+def call_keywords(tree: ast.AST, func_name: str) -> dict:
+    """Keyword arguments of the first call to `func_name`, literals only."""
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call):
+            name = getattr(node.func, "id", None) or getattr(node.func, "attr", None)
+            if name == func_name:
+                return {
+                    kw.arg: kw.value.value
+                    for kw in node.keywords
+                    if isinstance(kw.value, ast.Constant)
+                }
+    return {}
+
+
+def keyword_value(tree: ast.AST, keyword: str):
+    """First literal value passed as `keyword=` anywhere in the tree.
+
+    Some of the values that must agree sit on a nested call --
+    `sse_read_timeout` is a keyword of the connection params inside
+    `McpToolset(...)`, not of `McpToolset` itself.
+    """
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call):
+            for kw in node.keywords:
+                if kw.arg == keyword and isinstance(kw.value, ast.Constant):
+                    return kw.value.value
+    raise AssertionError(f"no literal `{keyword}=` found")
+
+
+def has_keyword(tree: ast.AST, func_name: str, keyword: str) -> bool:
+    """True if any call to `func_name` passes `keyword`, commented-out or not.
+
+    Checked on the AST rather than by substring: grepping for the name matches
+    a line that is commented out, and would pass while the real call drifted.
+    """
+    return any(
+        kw.arg == keyword
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        and (getattr(node.func, "id", None) or getattr(node.func, "attr", None)) == func_name
+        for kw in node.keywords
+    )
+
+
+def mcp_env_names(tree: ast.AST) -> set:
+    """Every `*_MCP_*` string passed to an `os.environ.get`-shaped call."""
+    return {
+        node.args[0].value
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        and getattr(node.func, "attr", None) == "get"
+        and node.args
+        and isinstance(node.args[0], ast.Constant)
+        and isinstance(node.args[0].value, str)
+        and "_MCP_" in node.args[0].value
+    }
+
+
+class TestTheGeneratedRegistryTracksTheLocalOne:
+    """Pair B and C.
+
+    `_REGISTRY_PY_TEMPLATE` is a string, so it cannot be imported and compared
+    by behaviour the way the config pair is. It is valid Python though, so it
+    is parsed and checked on the invariants the two must share -- not on being
+    identical, which they deliberately are not: the generated one authenticates
+    with ADC against direct Cloud Run URLs, the local one reads config.py.
+    """
+
+    def test_the_template_is_valid_python(self):
+        """A corrupted template fails at container import, minutes into a deploy."""
+        ast.parse(extract_template("_REGISTRY_PY_TEMPLATE"))
+
+    def test_all_three_templates_are_valid_python(self):
+        for name in ("_APP_PY_TEMPLATE", "_APP_PY_TEMPLATE_NO_TOOLS", "_REGISTRY_PY_TEMPLATE"):
+            ast.parse(extract_template(name)), name
+
+    def test_neither_registry_sets_a_tool_name_prefix(self):
+        """Prompts name bare tools; a prefix makes every one of them undeclared.
+
+        `tests/test_prompt_tool_names.py` documents the failure -- prompts had
+        drifted to `wrangler_search_mcp_search_hotels` while the deployed
+        toolset serves `search_hotels`, and naming an undeclared tool is a
+        documented trigger for MALFORMED_FUNCTION_CALL. That test cites this
+        template in a docstring but never asserted on it.
+        """
+        template = ast.parse(extract_template("_REGISTRY_PY_TEMPLATE"))
+        local = ast.parse(EXAMPLE_REGISTRY.read_text())
+        assert not has_keyword(template, "McpToolset", "tool_name_prefix")
+        assert not has_keyword(local, "McpToolset", "tool_name_prefix")
+
+    def test_the_tool_list_cache_ttl_agrees(self):
+        """deploy.py:569 says "Keep in sync with examples/.../registry.py"."""
+        template = call_keywords(ast.parse(extract_template("_REGISTRY_PY_TEMPLATE")), "McpToolset")
+        local = module_constants(ast.parse(EXAMPLE_REGISTRY.read_text()))
+        assert template["tool_list_cache_ttl_seconds"] == local["MCP_TOOL_LIST_CACHE_TTL_SECONDS"]
+
+    def test_the_read_timeout_agrees(self):
+        """`sse_read_timeout` sits on the nested connection params, not on McpToolset."""
+        template = ast.parse(extract_template("_REGISTRY_PY_TEMPLATE"))
+        local = module_constants(ast.parse(EXAMPLE_REGISTRY.read_text()))
+        assert keyword_value(template, "sse_read_timeout") == local["MCP_READ_TIMEOUT_SECONDS"]
+
+    def test_the_startup_probe_budget_matches_the_local_handshake_timeout(self):
+        """deploy.py:276 says it "Matches ... MCP_TIMEOUT_SECONDS -- keep the two in step".
+
+        The probe decides whether a fresh engine is judged able to reach its
+        MCP servers. Set below the handshake budget it would fail workers that
+        were merely slow, which is the fake defect the 30s value produced.
+        """
+        app = ast.parse(extract_template("_APP_PY_TEMPLATE"))
+        probe_default = next(
+            node.args[1].value
+            for node in ast.walk(app)
+            if isinstance(node, ast.Call)
+            and getattr(node.func, "attr", None) == "get"
+            and len(node.args) == 2
+            and getattr(node.args[0], "value", None) == "MCP_PROBE_TIMEOUT_SECONDS"
+        )
+        local = module_constants(ast.parse(EXAMPLE_REGISTRY.read_text()))
+        assert float(probe_default) == float(local["MCP_TIMEOUT_SECONDS"])
+
+    def test_the_template_knows_every_mcp_service_config_declares(self):
+        """A fourth MCP service added to config.py must reach the generated registry.
+
+        The local registry reads its URLs from config.py, so adding a service
+        there works locally and silently ships an agent that cannot see it.
+        """
+        template_vars = mcp_env_names(ast.parse(extract_template("_REGISTRY_PY_TEMPLATE")))
+        config_vars = mcp_env_names(ast.parse(EXAMPLE_CONFIG.read_text()))
+        missing = config_vars - template_vars
+        assert not missing, (
+            f"config.py declares {sorted(missing)} but the generated registry.py "
+            f"never reads them, so a deployed agent cannot reach those servers"
+        )
