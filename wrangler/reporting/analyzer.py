@@ -317,7 +317,7 @@ class GepaRunStats:
 def _resolve_app_name(pair_id: str, exp: Experiment) -> str:
     """Map pair_id to the GEPA app_name (the *_opt directory name)."""
     manifest = exp.manifest
-    for pair in manifest.pairs:
+    for pair in manifest.enabled_pairs:
         if pair.id == pair_id:
             agent_ref = pair.agent_module or manifest.agent_module
             stem = Path(agent_ref).stem.replace("_agent", "")

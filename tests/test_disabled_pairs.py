@@ -95,6 +95,62 @@ class TestFiltering:
         assert _filter_pairs(m, None) == []
 
 
+class TestExperimentExcludesDisabledPairs:
+    """The phantom-arm bug: a disabled pair used to get a results row anyway.
+
+    `Experiment.create` used to copy `manifest.pairs` (the raw list)
+    verbatim into `config["pairs"]`, and `enabled`/`disabled_reason` are not
+    among the fields that dict carries -- so a disabled pair survived into
+    every experiment as if it were a normal arm, with `model: ""` and empty
+    before/after scores once eval skipped it. That row fed the cost-benefit
+    table, the ordering, and the analyzer's noise-floor logic. Filtering at
+    creation time is the only point that can fix this, because the disabled
+    flag has nowhere to live past it.
+    """
+
+    def _experiment(self, tmp_path):
+        (tmp_path / "agents" / "x").mkdir(parents=True)
+        eval_path = tmp_path / "eval.yaml"
+        eval_path.write_text(yaml.safe_dump([{"query": "hi", "expected_response": "hi"}]))
+        manifest_path = tmp_path / "manifest.yaml"
+        manifest_path.write_text(
+            yaml.safe_dump(
+                {
+                    "name": "m",
+                    "agent_module": "agents/x",
+                    "eval_data": "eval.yaml",
+                    "pairs": [
+                        _pair("kept"),
+                        _pair("opus", enabled=False, disabled_reason="0-50% reach"),
+                    ],
+                }
+            )
+        )
+        from wrangler.orchestration.experiment import Experiment
+
+        return Experiment.create(manifest_path, name="exp", base_dir=tmp_path / "experiments")
+
+    def test_disabled_pair_is_absent_from_pair_ids(self, tmp_path):
+        exp = self._experiment(tmp_path)
+        assert exp.pair_ids == ["kept"]
+
+    def test_disabled_pair_is_absent_from_a_generated_report(self, tmp_path, monkeypatch):
+        exp = self._experiment(tmp_path)
+
+        captured = {}
+        monkeypatch.setattr(
+            "wrangler.orchestration.stages._generate_report",
+            lambda results, name, **kw: captured.update(results=results),
+        )
+
+        from wrangler.orchestration.stages import stage_report
+
+        stage_report(exp, use_paperbanana=False)
+
+        assert "opus" not in captured["results"]
+        assert "kept" in captured["results"]
+
+
 class TestOpusIsActuallyDisabled:
     """The point of the exercise. Named so re-enabling is a deliberate diff."""
 

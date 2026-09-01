@@ -95,7 +95,13 @@ class Experiment:
             "health_gate": manifest.health_gate,
         }
 
-        for pair in manifest.pairs:
+        # enabled_pairs, not pairs: the dict below has no `enabled` field, so a
+        # disabled pair copied in here would survive as an ordinary arm for
+        # the rest of the experiment's life -- with model: "" once nothing
+        # deploys or evaluates it, dragging the cost-benefit table and the
+        # noise-floor analysis down with an empty row. There is no later point
+        # this can be filtered, because the flag has nowhere to persist.
+        for pair in manifest.enabled_pairs:
             config["pairs"].append(
                 {
                     "id": pair.id,
