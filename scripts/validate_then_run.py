@@ -42,7 +42,29 @@ VALIDATION_ARM = {
 }
 
 
-def main(campaign: str, log_dir: Path) -> int:
+def main(campaign: str, log_dir: Path, watch_job: str = "") -> int:
+    """Validate, then release. ``watch_job`` adopts a validation arm already running.
+
+    The campaign list is read into memory at import, so editing it cannot change
+    a chain that is already running. Trimming a batch mid-flight therefore means
+    stopping that process and starting this one, which waits on the Vertex job
+    the old chain submitted instead of paying for it twice.
+    """
+    if watch_job:
+        print("=" * 70)
+        print(f"STEP 1 — adopting the validation arm already running: {watch_job}")
+        print("=" * 70)
+        final = wait_for_jobs([watch_job])
+        state = final.get(watch_job, "UNKNOWN")
+        if "SUCCEEDED" not in state:
+            print(f"\nValidation arm ended {state}. NOT releasing the campaign.")
+            return 1
+        print(f"\nValidation arm SUCCEEDED ({watch_job}).")
+        print("=" * 70)
+        print(f"STEP 2 — releasing campaign {campaign}: {len(CAMPAIGNS[campaign])} batches")
+        print("=" * 70)
+        return run_campaign(campaign, confirm=True, log_dir=log_dir)
+
     arm = VALIDATION_ARM[campaign]
     print("=" * 70)
     print(f"STEP 1 — validation arm for campaign {campaign}: {Path(arm).name}")
@@ -80,8 +102,14 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Validate one arm, then run the campaign")
     parser.add_argument("--campaign", default="06", choices=sorted(VALIDATION_ARM))
     parser.add_argument("--log-dir", default="outputs/campaigns")
+    parser.add_argument(
+        "--watch-job",
+        default="",
+        help="Adopt a validation arm already running on Vertex instead of submitting "
+        "a new one. Used when the campaign list changed mid-flight.",
+    )
     args = parser.parse_args()
     started = time.time()
-    code = main(args.campaign, Path(args.log_dir))
+    code = main(args.campaign, Path(args.log_dir), watch_job=args.watch_job)
     print(f"\nTotal wall clock: {(time.time() - started) / 3600:.1f} h")
     sys.exit(code)

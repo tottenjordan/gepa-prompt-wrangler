@@ -43,6 +43,13 @@ OPTIMIZE_STAGGER = 90 * 60
 CAMPAIGNS: dict[str, list[tuple[str, str]]] = {
     # Campaign 06 -- eval-only control arms. Paired by publisher at each
     # num_runs level. No optimize phase, so no stagger needed.
+    # n=1 and n=3 only. The n=5 batch is deliberately absent: restoring the
+    # second eval (a floor needs two evals of an unchanged prompt) doubled every
+    # arm, and num_runs multiplies on top -- n=5 means ten eval passes per arm,
+    # about six hours, which took the campaign from ~5h to ~12h. n=3 is the
+    # figure CLAUDE.md actually cites and the one campaign 07 needs; the third
+    # point on the sqrt(n) curve can be extrapolated. The manifests are kept so
+    # re-adding the batch is one line.
     "06": [
         (
             "manifests/c06-ctrl-claude-n1_manifest.yaml",
@@ -51,10 +58,6 @@ CAMPAIGNS: dict[str, list[tuple[str, str]]] = {
         (
             "manifests/c06-ctrl-claude-n3_manifest.yaml",
             "manifests/c06-ctrl-gemini-n3_manifest.yaml",
-        ),
-        (
-            "manifests/c06-ctrl-claude-n5_manifest.yaml",
-            "manifests/c06-ctrl-gemini-n5_manifest.yaml",
         ),
     ],
     # Campaign 07 -- cost/quality frontier. Cost tier is crossed with batch

@@ -27,6 +27,8 @@ Six arms, ~1.5 h each, two concurrent ≈ **5 h**.
 ## Pre-registration
 
 - Two replicates per level where the window allows; report both before pooling.
+- With only two levels, the √n check is a two-point comparison rather than a
+  fitted curve. Say so when reporting it — two points always look like a line.
 - Per-metric floors, **paired and unpaired**, so the value of pairing is visible
   rather than asserted at "~15%".
 - Do not drop a level for looking noisy. A noisy level is the finding.
