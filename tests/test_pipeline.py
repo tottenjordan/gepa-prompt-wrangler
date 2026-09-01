@@ -1,6 +1,7 @@
 """Tests for the Vertex AI Pipeline package."""
 
 import json
+import re
 
 import yaml
 
@@ -244,3 +245,188 @@ class TestImageTag:
         dockerfile.write_text('RUN pip install "google-adk>=2.7.1"\n')
 
         assert _compute_image_tag(pyproject, lock, dockerfile) != tag_before
+
+
+class TestSkipOptimize:
+    """Without this the DAG is a fixed chain and a control arm cannot exist.
+
+    A control arm is the same prompt evaluated twice with no optimization
+    between -- CLAUDE.md requires one in every sweep. The pipeline had no way
+    to express it, and every run dragged in ~10h of GEPA per pair, which is why
+    nobody used the pipeline for characterisation.
+    """
+
+    def _compile(self, tmp_path):
+        from kfp import compiler
+
+        from wrangler.pipeline.dag import build_pipeline
+
+        out = tmp_path / "p.yaml"
+        compiler.Compiler().compile(build_pipeline("python:3.11"), str(out))
+        return out.read_text()
+
+    def test_the_pipeline_still_compiles(self, tmp_path):
+        assert len(self._compile(tmp_path)) > 1000
+
+    def test_skip_optimize_is_a_pipeline_parameter(self, tmp_path):
+        text = self._compile(tmp_path)
+        assert "skip-optimize" in text or "skip_optimize" in text
+
+    def test_a_control_arm_still_runs_both_evaluations(self, tmp_path):
+        """The floor is the delta between two evals of an UNCHANGED prompt.
+
+        The first version skipped eval_after along with optimize, which would
+        have produced one evaluation and no delta at all -- a noise-floor
+        campaign that cannot measure a noise floor. What gets skipped is
+        optimize and redeploy, not the second eval.
+        """
+        text = self._compile(tmp_path)
+        assert "control, no optimization" in text
+
+    def test_the_control_eval_does_not_cache(self, tmp_path):
+        """Its inputs match eval_before byte for byte.
+
+        A cache hit would return that exact result and the floor would come out
+        as precisely zero -- a measurement of KFP's cache, not of the noise.
+        """
+        text = self._compile(tmp_path)
+        i = text.index("control, no optimization")
+        before = text[max(0, i - 4000) : i]
+        block = before[before.rfind("cachingOptions") :]
+        # KFP writes `cachingOptions: {}` for disabled, not `enableCache: false`.
+        assert block.startswith("cachingOptions: {}"), block[:80]
+
+    def test_the_eval_component_tolerates_a_missing_optimize_stage(self):
+        """A control arm runs phase="after" with no optimize stage.
+
+        That is the point of it -- the prompt does not change. Downloading the
+        optimize artifact unconditionally failed the second validation run,
+        after deploy and eval_before had both succeeded. This is the third
+        instance of the same class: an eval-only run meeting a component that
+        assumes optimization happened.
+        """
+        from pathlib import Path
+
+        src = Path("wrangler/pipeline/components.py").read_text()
+        i = src.index("def eval_single_agent")
+        body = src[i : i + 6000]
+        j = body.index("stages/optimize")
+        window = body[max(0, j - 500) : j + 500]
+        assert "opt_blob.exists()" in window, "the optimize read must be guarded"
+
+    def test_no_component_reads_the_optimize_stage_unguarded(self):
+        """Fix the class, not the instance -- this was the third round of it.
+
+        Every component that can run in the eval-only branch must tolerate a
+        missing optimize artifact. Only `redeploy` may read it unconditionally:
+        it runs solely inside the optimize branch, so it is always there.
+        """
+        from pathlib import Path
+
+        src = Path("wrangler/pipeline/components.py").read_text()
+        lines = src.splitlines()
+        allowed_unguarded = {"redeploy_single_agent"}
+
+        for n, line in enumerate(lines):
+            if "stages/optimize" not in line:
+                continue
+            # Which component is this line in? Scan back to the enclosing def.
+            owner = next(
+                (m.group(1) for k in range(n, -1, -1) if (m := re.match(r"def (\w+)", lines[k]))),
+                "<module>",
+            )
+            window = "\n".join(lines[max(0, n - 10) : n + 10])
+            writes = "upload_from_string" in window
+            guarded = ".exists()" in window or "required=False" in window
+            assert writes or guarded or owner in allowed_unguarded, (
+                f"{owner} (line {n + 1}) reads the optimize stage unguarded; "
+                f"an eval-only run has no such artifact"
+            )
+
+    def test_the_analysis_tolerates_a_missing_optimize_stage(self):
+        from pathlib import Path
+
+        src = Path("wrangler/pipeline/components.py").read_text()
+        assert '_read_stage("optimize", pair_id, required=False)' in src
+
+    def test_both_branches_produce_an_analysis(self, tmp_path):
+        """Analysis sits inside each branch: a task outside a dsl.If cannot
+        depend on one inside it."""
+        text = self._compile(tmp_path)
+        assert "Generate Analysis (eval only)" in text
+        assert "Generate Analysis" in text
+
+    def test_the_manifest_can_set_it(self):
+        from pathlib import Path
+
+        src = Path("wrangler/pipeline/deploy_pipeline.py").read_text()
+        assert '"skip_optimize"' in src
+        assert 'get("skip_optimize"' in src
+
+
+class TestTheDagCompilesAndItsParametersLineUp:
+    """A parameter added in one layer and not the next fails at submission.
+
+    `health_gate_json` has to be declared on the component, on the pipeline
+    function, and in the dict `deploy_pipeline` sends. Miss the middle one and
+    KFP raises at compile; miss the last and the component silently receives
+    the default -- which is exactly how the pipeline path came to read no gate
+    config at all, running on bare defaults while the manifest's attempts,
+    threshold and max_rerolls were dropped.
+
+    Neither failure is reachable from a unit test of the component body, and
+    the round trip to find out costs a pipeline submission.
+    """
+
+    def _compiled_spec(self):
+        import tempfile
+        from pathlib import Path
+
+        import yaml
+        from kfp import compiler
+
+        from wrangler.pipeline.dag import build_pipeline
+
+        pipeline_func = build_pipeline("us-central1-docker.pkg.dev/p/r/i:tag")
+        out = Path(tempfile.mkdtemp()) / "pipeline.yaml"
+        compiler.Compiler().compile(pipeline_func=pipeline_func, package_path=str(out))
+        return yaml.safe_load(out.read_text())
+
+    def test_the_dag_compiles(self):
+        assert self._compiled_spec()["root"]
+
+    def test_every_parameter_the_submitter_sends_is_accepted(self):
+        """The submitter's dict and the pipeline signature must agree.
+
+        Read out of the source rather than by calling `deploy_pipeline`, which
+        would need a project, a bucket and a built image.
+        """
+        import re
+        from pathlib import Path
+
+        src = Path("wrangler/pipeline/deploy_pipeline.py").read_text()
+        # The parameter_values dict literal passed to the PipelineJob.
+        block = src[src.index('"project_id": project_id') :]
+        block = block[: block.index("},")]
+        sent = set(re.findall(r'^\s*"(\w+)":', block, re.MULTILINE))
+
+        declared = set(self._compiled_spec()["root"]["inputDefinitions"]["parameters"])
+        unknown = sent - declared
+        assert not unknown, (
+            f"deploy_pipeline sends {sorted(unknown)}, which the pipeline does not "
+            f"declare. KFP rejects the submission."
+        )
+        assert "health_gate_json" in sent & declared, (
+            "the health gate config must reach the pipeline; the KFP path "
+            "previously read none of it"
+        )
+        # Guard against the reverse: a required parameter nobody sends.
+        params = self._compiled_spec()["root"]["inputDefinitions"]["parameters"]
+        required_unsent = {
+            name
+            for name, spec in params.items()
+            if "defaultValue" not in spec and not spec.get("isOptional")
+        } - sent
+        assert not required_unsent, (
+            f"nothing supplies required parameter(s) {sorted(required_unsent)}"
+        )

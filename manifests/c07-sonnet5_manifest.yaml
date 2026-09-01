@@ -1,0 +1,33 @@
+name: "c07-sonnet5"
+description: >
+  Campaign 07 — cost/quality frontier. cheap Claude: claude-sonnet-5.
+  Identical generic seed across all four arms so the model is the only variable.
+  See docs/doe/07-cost-quality-frontier.md
+
+agent_module: "examples/multi_model_agents/agents/sonnet_agent"
+eval_data: "examples/multi_model_agents/eval_data/eval_cases.yaml"
+
+pairs:
+  - id: "c07-sonnet5"
+    model: "claude-sonnet-5"
+    description: "cheap Claude — claude-sonnet-5"
+    agent_module: "examples/multi_model_agents/agents/sonnet_agent"
+    # The generic seed, held byte-identical across all four arms. GEPA has
+    # produced a real prompt change exactly once and that run started here,
+    # from maximum headroom; runs seeded from an already-optimized prompt
+    # returned it unchanged.
+    system_prompt: "You are a helpful assistant. Use the available tools to answer user questions."
+
+eval_config:
+  response_match_threshold: 0.5
+  safety_threshold: 0.8
+
+pipeline:
+  secret_id: wrangler-agent-env
+  cache_bust: "c07-v1"
+  # 600, not 800. Per-arm arithmetic: deploy 0.3h + eval 1.5h + optimize ~7h +
+  # redeploy 0.3h + eval 1.5h = ~10.6h, which fits a night. 800 would not.
+  max_metric_calls: 600
+
+health_gate:
+  enabled: true

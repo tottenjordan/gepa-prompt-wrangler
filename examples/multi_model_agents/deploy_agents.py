@@ -61,7 +61,22 @@ def update_env(key: str, value: str):
         f.writelines(lines)
 
 
-def deploy_single(name: str, generic: bool = False, update: bool = False, version: str = "v4"):
+def deploy_single(
+    name: str,
+    generic: bool = False,
+    update: bool = False,
+    version: str = "v4",
+    gate: bool = True,
+):
+    """Deploy or update one tier, then check it can actually serve.
+
+    The gate is on by default because a deploy is a lottery: ten byte-identical
+    engines measured 0%-100% reach (docs/doe/01-engine-lottery.md), and a dead
+    one answers HTTP 200 with no inference rather than an error. This script
+    shipped exactly that on 2026-08-31 -- an in-place update rerolled `lite`
+    to 0/15 and `opus` to 4/15, and nothing noticed until they were probed by
+    hand. Redeploying redraws the rate, so a failure here is worth retrying.
+    """
     from wrangler.core.deploy import deploy_agent_from_source, update_agent_from_source
 
     module_name, model = AGENTS[name]
@@ -98,6 +113,42 @@ def deploy_single(name: str, generic: bool = False, update: bool = False, versio
             display_name=display_name,
         )
 
+    if gate:
+        from wrangler.orchestration.stages import gate_engine_health
+
+        def _redeploy():
+            # Always a *fresh* deploy, never an in-place update: the point is a
+            # new draw, and an update of a bad engine is what produced one.
+            return deploy_agent_from_source(
+                agent_module=agent_module,
+                model=model,
+                instruction=instruction,
+                display_name=display_name,
+            )
+
+        from wrangler.tools.engines import delete_engine
+
+        was_update = bool(update)
+        health = gate_engine_health(engine_id, redeploy_fn=_redeploy, discard_fn=delete_engine)
+        # The gate never discards the engine handed to it. On a fresh deploy we
+        # made that one too, so a rejected first draw is ours to clean up; on
+        # --update it is a pre-existing deployment and must be left alone.
+        if not was_update:
+            for stale in health["rejected"]:
+                if stale != health["engine_id"]:
+                    try:
+                        delete_engine(stale)
+                        print(f"  Discarded rejected engine {stale}")
+                    except Exception as exc:
+                        print(f"  Could not discard {stale}: {type(exc).__name__}: {exc}")
+        engine_id = health["engine_id"]
+        if not health["passed"]:
+            print(
+                f"  WARNING: {name} is below the health bar after {health['rerolls']} "
+                f"reroll(s) at {health['rate']:.0%} reach. Evals against it will lose "
+                f"cases. See docs/doe/01-engine-lottery.md."
+            )
+
     env_key = f"{name.upper()}_ENGINE_ID"
     update_env(env_key, engine_id)
     print(f"  .env: {env_key}={engine_id}")
@@ -118,6 +169,12 @@ if __name__ == "__main__":
     parser.add_argument(
         "--version", default="v4", help="Version tag for display name (default: v4)"
     )
+    parser.add_argument(
+        "--no-gate",
+        action="store_true",
+        help="Skip the post-deploy health check. Off by default because a deploy is "
+        "a lottery and a dead engine returns 200 with no inference.",
+    )
     args = parser.parse_args()
 
     print(f"Project: {GCP_PROJECT_ID}")
@@ -131,6 +188,12 @@ if __name__ == "__main__":
             continue
         action = "Updating" if args.update else "Deploying"
         print(f"\n--- {action} {name} {'(generic prompt)' if args.generic else ''} ---")
-        deploy_single(name, generic=args.generic, update=args.update, version=args.version)
+        deploy_single(
+            name,
+            generic=args.generic,
+            update=args.update,
+            version=args.version,
+            gate=not args.no_gate,
+        )
 
     print("\nDone.")

@@ -16,7 +16,17 @@ outcome would mean *before* looking is what stops that.
 | [01](01-engine-lottery.md) | Is the engine failure rate a deployment lottery? | **Complete 2026-08-24 — yes, and it is a per-worker property** | 1,400 attempts, ~6 h |
 | [02](02-judge-variance.md) | How much of the noise floor is the judge? | **Not started** | One capture, then scoring only |
 | [03](03-noise-floor.md) | What is the noise floor, really? | **Not started** | Moderate |
-| [04](04-gepa-budget-and-criteria.md) | What does a GEPA budget buy? | **Not started** | ~90 h wall-clock |
+| [04](04-gepa-budget-and-criteria.md) | What does a GEPA budget buy? | Superseded by [08](08-gepa-budget-curve.md) | ~90 h wall-clock |
+| [06](06-pipeline-noise-floor.md) | What is the noise floor, on the pipeline? | **Running 2026-09-01** | ~6 h, 4 arms (n=5 trimmed) |
+| [07](07-cost-quality-frontier.md) | What does a model tier cost per unit of quality? | **Ready** | ~10.6 h/arm, 4 arms, 2 at a time |
+| [08](08-gepa-budget-curve.md) | What does a GEPA budget buy? (scoped to fit) | Conditional on 06 | 1 optimize arm per batch |
+| [09](09-lottery-recheck.md) | Has the deploy lottery got worse? | **Complete 2026-09-01 — no, 5/10 vs 6/10, p=1.000** | 10 engines, ~4 h |
+
+**09 now runs before 06.** The campaign-06 validation arm drew three engines and
+all three failed the health gate at 1.7% reach; the eval then ran against the worst
+of them and scored 88% coverage, whose missing 12% is dropout on a known-sick
+engine. A noise floor measured that way describes the engine. 09 says whether the
+~60% healthy fraction that `max_rerolls` is sized from still holds.
 
 Run order is dependency order. 01 stands alone and is the cheapest. 02 needs
 `wrangler capture` / `wrangler score`. 03 needs 02's variance split and the multi-run
@@ -28,7 +38,11 @@ averaging fix. 04 needs 03's floor, or its results cannot be read.
 - **Every optimization sweep carries an unchanged-prompt control arm**, run first, as a
   gate, at the same `num_runs` as the real arms (CLAUDE.md).
 - **Run arms sequentially, never concurrently**, where they share an engine or a rate
-  limit. The 2026-08-22 sweep broke its own plan on this.
+  limit. The 2026-08-22 sweep broke its own plan on this. **Across publishers is the
+  exception**: Anthropic and Google are separate Vertex quota pools, so one Claude arm and
+  one Gemini arm can run at once. Their GEPA judge is shared (`gemini-3.5-flash`), so
+  stagger the starts by ~90 min rather than varying the judge, which would confound the
+  comparison.
 - **Report a null as readily as a hit.** Several of these are designed so that "no effect"
   is the more useful answer.
 - **State what was dropped.** A silent truncation reads as full coverage.

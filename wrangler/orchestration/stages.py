@@ -90,6 +90,31 @@ def _validate_sampler_config(
                 )
 
 
+def _sum_token_usage(*stages) -> dict:
+    """Total tokens across the stages of one arm.
+
+    The eval stages each record their own `token_usage`, and the optimize stage
+    records an estimate. Spend for an arm is the sum, so the reporter is handed
+    one figure rather than being left to add up artifacts it never sees.
+
+    Returns {} when no stage recorded anything, which the reporter prints as
+    "n/a" -- printing $0.00 would read as "this run was free" rather than "we
+    did not measure it".
+    """
+    total = {"input_tokens": 0, "output_tokens": 0}
+    seen = False
+    for stage in stages:
+        usage = (stage or {}).get("token_usage") or {}
+        if not usage:
+            continue
+        seen = True
+        total["input_tokens"] += usage.get("input_tokens", 0) or 0
+        total["output_tokens"] += usage.get("output_tokens", 0) or 0
+        if usage.get("is_estimate"):
+            total["is_estimate"] = True
+    return total if seen else {}
+
+
 def _post_eval_sanity_check(
     stage_name: str,
     stage_data: dict,
@@ -207,9 +232,24 @@ def _resolve_eval_path(manifest: Manifest, manifest_dir: Path | None = None) -> 
 
 
 def _filter_pairs(manifest: Manifest, pair_id: str | None) -> list[AgentPromptPair]:
+    """Select the pairs a stage should act on.
+
+    Naming a pair explicitly runs it even if disabled: `--pair opus` is a
+    deliberate act and silently ignoring the flag would be worse than running
+    something known to be unhealthy. A sweep, which names nothing, skips
+    disabled pairs and says why.
+    """
     if pair_id:
         return [manifest.get_pair(pair_id)]
-    return list(manifest.pairs)
+
+    enabled = []
+    for pair in manifest.pairs:
+        if pair.enabled:
+            enabled.append(pair)
+        else:
+            why = pair.disabled_reason or "no reason recorded"
+            print(f"  Skipping [{pair.id}] — disabled: {why}", flush=True)
+    return enabled
 
 
 def _manifest_dir(exp: Experiment) -> Path:
@@ -227,6 +267,181 @@ def _manifest_dir(exp: Experiment) -> Path:
 
 
 # ── Stage functions ────────────────────────────────────────────
+
+
+def _sync_env_engine_id(pair_id: str, engine_id: str) -> None:
+    """Point the example .env at a rerolled engine, if the pair maps to a tier."""
+    from ..core.env_ids import ENGINE_LABELS, set_engine_id
+
+    label = next((x for x in ENGINE_LABELS if x in pair_id.lower()), "")
+    if not label:
+        print(
+            f"  Note: pair {pair_id!r} matches no known model tier, so .env was not "
+            f"updated. Point anything that references the old id at {engine_id}.",
+            flush=True,
+        )
+        return
+    if set_engine_id(label, engine_id):
+        print(f"  Updated {label.upper()}_ENGINE_ID -> {engine_id} in .env", flush=True)
+
+
+def health_gate_config(config: dict) -> dict:
+    """Resolve health-gate settings, defaulting to the values Campaign 01 measured."""
+    from ..tools.boot_probe import GATE_ATTEMPTS, GATE_THRESHOLD
+
+    raw = (config or {}).get("health_gate", {}) or {}
+    return {
+        "enabled": raw.get("enabled", True),
+        "attempts": raw.get("attempts", GATE_ATTEMPTS),
+        "threshold": raw.get("threshold", GATE_THRESHOLD),
+        # Four, because a reroll is a fresh draw from the same distribution
+        # rather than a repair. Campaigns 01 and 09 pooled put 11 of 20
+        # byte-identical deploys at >=97% reach, so at 55% healthy three draws
+        # still fail together 9.1% of the time -- which is what happened to the
+        # campaign-06 validation arm. Five draws bring that to 1.8%, and the
+        # extra deploys are only paid in the runs that need them.
+        # See docs/doe/09-lottery-recheck.md.
+        "max_rerolls": raw.get("max_rerolls", 4),
+        # Reused engines are not re-probed by default: at ~60 attempts that is
+        # ~12 minutes per pair on every stage run, for an engine whose health
+        # was already established when it was deployed.
+        "gate_existing": raw.get("gate_existing", False),
+        # Whether a failing gate stops the run or merely says so.
+        #
+        # Advisory by default, and that is the right default: a production
+        # sweep may reasonably proceed on a degraded engine as long as it
+        # records the fact. It is the wrong default for a run whose entire
+        # output is a measurement of noise, because the noise then measured is
+        # the engine's dropout rather than the pipeline's. Campaign 06's
+        # validation arm drew three engines, all failed at 1.7% reach, and
+        # evaluated against the worst one anyway.
+        "required": raw.get("required", False),
+    }
+
+
+class EngineHealthError(RuntimeError):
+    """A required health gate rejected every engine it drew."""
+
+
+def enforce_health_gate(health: dict, required: bool, pair_id: str) -> bool:
+    """Act on a gate verdict. Returns whether it passed; raises when it must not proceed.
+
+    Both the local and the KFP deploy paths call this. They previously each
+    hand-rolled `if not health["passed"]: warn(...)`, which is how the two
+    diverged over `enabled_pairs` -- the local path filtered disabled pairs and
+    the pipeline path did not.
+    """
+    if health.get("passed"):
+        return True
+
+    rate, rerolls = health.get("rate", 0.0), health.get("rerolls", 0)
+    detail = (
+        f"engine {health.get('engine_id', '?')} for pair {pair_id} is below the health "
+        f"bar after {rerolls} reroll(s): {rate:.1%} reach ({rate})"
+    )
+    if required:
+        raise EngineHealthError(
+            f"{detail}. This run sets health_gate.required, so it stops here rather "
+            f"than measure that engine's dropout. See docs/doe/01-engine-lottery.md "
+            f"and docs/analysis/2026-09-01-health-gate-vs-eval-coverage.md."
+        )
+    print(f"  WARNING: {detail}. Its eval coverage will be poor.", flush=True)
+    return False
+
+
+def gate_engine_health(
+    engine_id: str,
+    redeploy_fn,
+    probe_fn=None,
+    attempts: int = 0,
+    threshold: float = 0.0,
+    max_rerolls: int = 2,
+    discard_fn=None,
+) -> dict:
+    """Probe a freshly-deployed engine and redeploy it while it fails the bar.
+
+    Campaign 01 measured ten byte-identical engines at 0%-100% reach: six
+    effectively perfect, two effectively dead. A dead engine answers HTTP 200
+    with no inference rather than an error, so nothing downstream notices until
+    a third of an eval run has silently gone missing -- and every delta computed
+    from it is measuring dropout rather than the prompt.
+
+    Redeploying in place redraws the rate (measured: 0%->50%, 6%->56%), so a bad
+    engine is worth replacing rather than working around. It is a fresh draw,
+    not a repair, hence a bounded number of them.
+
+    Every rejected draw leaves an engine behind, so ``discard_fn`` is called on
+    each one the gate itself created -- two reroll rounds otherwise leak two
+    engines per pair, which is how four engines ended up sharing the display
+    name ``wrangler-opus-agent-v5`` on 2026-08-31.
+
+    **The engine passed in is never discarded**, only ones the gate deployed.
+    The caller may have handed us a pre-existing engine it wants kept (an
+    ``--update`` against a live deployment), and deleting that on a bad health
+    draw would destroy something we were only asked to check. Its id comes back
+    in ``rejected`` so a caller that does own it can decide for itself.
+
+    Never raises. The deploy itself succeeded; a failing gate is information the
+    run should carry, not a crash. See docs/doe/01-engine-lottery.md.
+    """
+    from ..tools.boot_probe import GATE_ATTEMPTS, GATE_THRESHOLD, gate_report
+
+    probe = probe_fn or _default_probe
+    n = attempts or GATE_ATTEMPTS
+    bar = threshold or GATE_THRESHOLD
+
+    current, rerolls, error = engine_id, 0, ""
+    rejected: list[str] = []
+    gate_created: set[str] = set()
+    while True:
+        decision = probe(current, n=n, threshold=bar)
+        for line in gate_report(current, decision):
+            print(line, flush=True)
+        if decision["passed"] or rerolls >= max_rerolls:
+            break
+        rerolls += 1
+        print(f"  Rerolling ({rerolls}/{max_rerolls})...", flush=True)
+        try:
+            replacement = redeploy_fn()
+        except Exception as exc:
+            error = f"{type(exc).__name__}: {exc}"
+            print(f"  Reroll failed: {error}", flush=True)
+            break
+        if not replacement:
+            break
+        rejected.append(current)
+        _discard(current, gate_created, discard_fn)
+        current = replacement
+        gate_created.add(current)
+
+    return {
+        "engine_id": current,
+        "passed": bool(decision["passed"]),
+        "rate": decision["rate"],
+        "n": decision["n"],
+        "threshold": bar,
+        "rerolls": rerolls,
+        "rejected": rejected,
+        "error": error,
+    }
+
+
+def _discard(engine_id: str, gate_created: set[str], discard_fn) -> None:
+    """Delete a rejected engine, but only one this gate deployed."""
+    if discard_fn is None or engine_id not in gate_created:
+        return
+    try:
+        discard_fn(engine_id)
+        print(f"  Discarded rejected engine {engine_id}", flush=True)
+    except Exception as exc:
+        # Leaking an engine is untidy; aborting a repair over it is worse.
+        print(f"  Could not discard {engine_id}: {type(exc).__name__}: {exc}", flush=True)
+
+
+def _default_probe(engine_id: str, n: int, threshold: float) -> dict:
+    from ..tools.boot_probe import probe_engine
+
+    return probe_engine(engine_id, n=n, threshold=threshold, label="deploy-gate", quiet=True)
 
 
 def stage_deploy(exp: Experiment, pair_id: str | None = None) -> None:
@@ -269,16 +484,72 @@ def stage_deploy(exp: Experiment, pair_id: str | None = None) -> None:
                 display_name=display,
             )
             print(f" {_fmt_duration(time.time() - t0)}")
-            exp.merge_pair(
-                "deploy",
-                pair.id,
-                {
-                    "engine_id": engine_id,
-                    "model": pair.model,
-                    "original_prompt": pair.system_prompt,
-                    "source": "deployed",
-                },
-            )
+
+            record = {
+                "engine_id": engine_id,
+                "model": pair.model,
+                "original_prompt": pair.system_prompt,
+                "source": "deployed",
+            }
+
+            # Roughly four in ten deployments come up unable to serve, and they
+            # fail by returning 200 with no inference -- so an ungated deploy
+            # hands the eval an engine that quietly drops a third of its cases.
+            gate_cfg = health_gate_config(exp.config)
+            # Bound before the branch so the enforcement below has something
+            # to read when the gate is off. Empty means "not probed", which is
+            # not the same as "probed and passed".
+            health: dict = {}
+            if gate_cfg["enabled"]:
+                # Bound explicitly rather than closed over: the call happens in
+                # this iteration today, but a lambda capturing loop variables is
+                # one refactor away from redeploying the wrong pair's agent.
+                def _redeploy(
+                    _module=str(mdir / agent_ref),
+                    _model=pair.model,
+                    _instruction=pair.system_prompt,
+                    _display=display,
+                ):
+                    return deployer.deploy_agent_from_source(
+                        agent_module=_module,
+                        model=_model,
+                        instruction=_instruction,
+                        display_name=_display,
+                    )
+
+                from ..tools.engines import delete_engine
+
+                health = gate_engine_health(
+                    engine_id,
+                    redeploy_fn=_redeploy,
+                    discard_fn=delete_engine,
+                    attempts=gate_cfg["attempts"],
+                    threshold=gate_cfg["threshold"],
+                    max_rerolls=gate_cfg["max_rerolls"],
+                )
+                # The gate may have replaced the engine. Recording the rejected
+                # id would point every later stage at the engine just refused.
+                record["engine_id"] = health["engine_id"]
+                record["health"] = health
+                # A reroll changes the id, and several things read the old one
+                # out of .env: the online evaluators pick their targets there,
+                # trace-health resolves names through it, and `wrangler engines`
+                # treats a named id as referenced and refuses to delete it. Left
+                # stale, an evaluator scores a dead engine and the prune policy
+                # protects a corpse -- 10 of 28 evaluators were in exactly that
+                # state on 2026-08-31.
+                if health["engine_id"] != engine_id:
+                    _sync_env_engine_id(pair.id, health["engine_id"])
+
+            # Persist before enforcing. A required gate raises, and if that
+            # happened first the deploy record -- including the id of an engine
+            # that is up and costing money -- was never written, leaving it
+            # orphaned with nothing in the repo naming it. That is the exact
+            # situation docs/notes/engine-lifecycle.md exists about, and every
+            # c06 manifest sets required: true.
+            exp.merge_pair("deploy", pair.id, record)
+            if health:
+                enforce_health_gate(health, gate_cfg["required"], pair.id)
 
 
 def stage_eval(
@@ -399,6 +670,9 @@ def stage_optimize(exp: Experiment, pair_id: str | None = None) -> None:
             judge_model=judge,
             initial_instruction=pair.system_prompt,
             max_metric_calls=max_calls,
+            # Without this GEPA optimizes whatever model the _opt module's
+            # config names, not the one this pair declares.
+            model=pair.model,
         )
         elapsed = time.time() - t0
         print(f"  [{pair.id}] Done ({_fmt_duration(elapsed)}) — {len(optimized)} chars")
@@ -574,6 +848,14 @@ def stage_report(exp: Experiment, use_paperbanana: bool = True) -> None:
             "after_std": eval_after.get(pair_id, {}).get("scores_std", {}),
             "num_runs": eval_before.get(pair_id, {}).get("num_runs", 1),
             "optimized_prompt": optimize_data.get(pair_id, {}).get("optimized_prompt", ""),
+            # Forwarded so the reporter's measured-spend column has something
+            # to read. It lived only in the per-stage artifacts, so both new
+            # cost columns rendered "n/a" on every real report.
+            "token_usage": _sum_token_usage(
+                eval_before.get(pair_id, {}),
+                optimize_data.get(pair_id, {}),
+                eval_after.get(pair_id, {}),
+            ),
         }
 
     eval_path = _resolve_eval_path(exp.manifest, _manifest_dir(exp))

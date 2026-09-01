@@ -83,6 +83,7 @@ def deploy_single_agent(
     agent_module: str,
     secret_id: str,
     cache_bust: str,
+    health_gate_json: str,
     metrics: Output[Metrics],
     summary: Output[Markdown],
     agent_prompt: Output[Markdown],
@@ -168,6 +169,65 @@ def deploy_single_agent(
             display_name=f"gepa-{pair_id}",
             env_vars=mcp_env,
         )
+        # Health-gate the fresh engine. A deploy is a lottery -- ten
+        # byte-identical engines measured 0%-100% reach -- and a bad one
+        # answers HTTP 200 with no inference rather than an error, so the
+        # eval_before that follows would measure dropout instead of the
+        # prompt. Redeploying redraws the rate, so retry while below the bar.
+        #
+        # Imported inside the component body: KFP serializes each @dsl.component
+        # in isolation, so a module-level helper is not available at runtime.
+        from wrangler.orchestration.stages import (
+            enforce_health_gate,
+            gate_engine_health,
+            health_gate_config,
+        )
+
+        gate_cfg = health_gate_config(
+            {"health_gate": json.loads(health_gate_json) if health_gate_json else {}}
+        )
+        health = {"engine_id": engine_id, "passed": True, "skipped": True}
+
+        def _redeploy():
+            return deploy_agent_from_source(
+                agent_module=f"/app/{agent_module}",
+                model=model,
+                instruction=pair["system_prompt"],
+                display_name=f"gepa-{pair_id}",
+                env_vars=mcp_env,
+            )
+
+        from wrangler.tools.engines import delete_engine
+
+        # `enabled` is checked here for the same reason stage_deploy checks it:
+        # a manifest that turns the gate off should not pay ~12 min of probing
+        # per pair, nor reroll, nor delete anything. Reading the config but
+        # ignoring this key is the local/pipeline divergence this component was
+        # refactored to stop having.
+        if gate_cfg["enabled"]:
+            health = gate_engine_health(
+                engine_id,
+                redeploy_fn=_redeploy,
+                discard_fn=delete_engine,
+                attempts=gate_cfg["attempts"],
+                threshold=gate_cfg["threshold"],
+                max_rerolls=gate_cfg["max_rerolls"],
+            )
+            # Only the engine the gate was *handed* needs deleting here: it
+            # discards every draw it created itself. Looping over all of
+            # `rejected` re-deletes those, which is a guaranteed NotFound
+            # logged as "could not discard" -- a warning that reads like a leak
+            # and is the opposite. This path always deploys fresh, so the
+            # handed-in engine is unambiguously ours to reap.
+            if health["rejected"] and health["rejected"][0] != health["engine_id"]:
+                stale = health["rejected"][0]
+                try:
+                    delete_engine(stale)
+                except Exception as exc:
+                    logging.warning(f"[{pair_id}] could not discard {stale}: {exc}")
+            engine_id = health["engine_id"]
+            # Same enforcement as the local path.
+            enforce_health_gate(health, gate_cfg["required"], pair_id)
         elapsed = time.time() - t0
 
         result = {
@@ -177,6 +237,7 @@ def deploy_single_agent(
             "original_prompt": pair["system_prompt"],
             "source": "deployed",
             "elapsed": elapsed,
+            "health": health,
         }
         logging.info(f"[{pair_id}] Deployed in {elapsed:.0f}s: {engine_id}")
 
@@ -186,7 +247,11 @@ def deploy_single_agent(
         json.dumps(result, indent=2, default=str), content_type="application/json"
     )
 
-    metrics.log_metric("elapsed_seconds", float(result.get("elapsed", 0)))
+    # Read through a typed local: `result` now also carries the `health` dict,
+    # which widens its inferred value type enough that float() no longer
+    # type-checks against the union.
+    elapsed_seconds: float = result.get("elapsed", 0) or 0  # ty: ignore[invalid-assignment]
+    metrics.log_metric("elapsed_seconds", float(elapsed_seconds))
     with open(summary.path, "w") as f:
         f.write(f"## Deploy: {pair_id}\n\n")
         f.write(f"- **Model**: {model}\n")
@@ -265,15 +330,27 @@ def eval_single_agent(
     deploy_data = json.loads(deploy_blob.download_as_text())
     engine_id = deploy_data["engine_id"]
 
-    # Resolve the prompt being evaluated
+    # Resolve the prompt being evaluated.
+    #
+    # A control arm runs phase="after" with no optimize stage: that is the whole
+    # point of it, the prompt does not change. Downloading the optimize artifact
+    # unconditionally is what failed the second validation run, after deploy and
+    # eval_before had both succeeded. Absent means unchanged, so fall back to the
+    # prompt deploy recorded -- which is the correct answer for a control arm and
+    # not a guess.
+    original_prompt = deploy_data.get("original_prompt", pair.get("system_prompt", ""))
+    active_prompt = original_prompt
     if phase == "after":
         opt_blob = gcs.bucket(bucket_name).blob(
             f"pipeline-runs/{run_id}/stages/optimize/{pair_id}.json"
         )
-        opt_data = json.loads(opt_blob.download_as_text())
-        active_prompt = opt_data.get("optimized_prompt", "")
-    else:
-        active_prompt = deploy_data.get("original_prompt", pair.get("system_prompt", ""))
+        if opt_blob.exists():
+            opt_data = json.loads(opt_blob.download_as_text())
+            active_prompt = opt_data.get("optimized_prompt", "") or original_prompt
+        else:
+            logging.info(
+                f"[{pair_id}] no optimize stage — control arm, evaluating the unchanged prompt"
+            )
 
     eval_cases = load_eval_file(f"/app/{eval_data_path}")
     logging.info(f"[{pair_id}] {phase} eval: {len(eval_cases)} cases, {num_runs} runs")
@@ -294,11 +371,23 @@ def eval_single_agent(
     input_cost = input_tokens * costs["input"] / 1_000_000
     output_cost = output_tokens * costs["output"] / 1_000_000
 
+    # Coverage, recorded rather than left derivable.
+    #
+    # It was only ever `len(per_case)`, which is why nobody noticed that eval
+    # coverage swings up to 42 points between the two sides of one arm (sonnet
+    # 47% -> 89%, flash 94% -> 56% on 2026-08-31). A before/after delta computed
+    # across a swing that size is measuring dropout, not the prompt.
+    cases_scored = len(result.per_case or [])
+    cases_total = len(eval_cases)
+
     stage_data = {
         "scores": result.scores,
         "per_case": result.per_case,
         "scores_std": result.scores_std,
         "num_runs": result.num_runs,
+        "cases_scored": cases_scored,
+        "cases_total": cases_total,
+        "coverage": cases_scored / cases_total if cases_total else 0.0,
         "elapsed": elapsed,
         "token_usage": result.token_usage,
         "costs": {"input_usd": input_cost, "output_usd": output_cost},
@@ -519,6 +608,12 @@ def optimize_single_agent(
         judge_model=judge_model,
         max_metric_calls=max_metric_calls if max_metric_calls > 0 else None,
         initial_instruction=original_prompt,
+        # The manifest's model, not the one the _opt module happens to import.
+        # stage_optimize has passed this since 7219295; this path did not, so
+        # two c07 arms pointing at sonnet_agent -- claude-sonnet-5 and
+        # claude-sonnet-4-6 -- both optimized whatever config.py pins, and the
+        # frontier the campaign measures would have differed only by label.
+        model=model,
     )
     elapsed = time.time() - t0
 
@@ -813,8 +908,14 @@ def generate_analysis(
     os.environ["GOOGLE_CLOUD_PROJECT"] = project_id
     os.environ["GOOGLE_CLOUD_LOCATION"] = "global"
     os.environ["GOOGLE_GENAI_USE_VERTEXAI"] = "1"
-    os.environ["VLM_MODEL"] = os.getenv("VLM_MODEL", "gemini-3.5-flash")
-    os.environ["IMAGE_MODEL"] = os.getenv("IMAGE_MODEL", "gemini-3.1-flash-image")
+    # The tarball is on sys.path by now, so the registry is importable and
+    # these defaults do not need to be written out again here. models.py has no
+    # heavy imports, and both vars must be set before reporting.charts is
+    # imported below, which reads them.
+    from wrangler.core.models import DEFAULT_FIGURE_IMAGE_MODEL, DEFAULT_FIGURE_VLM_MODEL
+
+    os.environ["VLM_MODEL"] = os.getenv("VLM_MODEL", DEFAULT_FIGURE_VLM_MODEL)
+    os.environ["IMAGE_MODEL"] = os.getenv("IMAGE_MODEL", DEFAULT_FIGURE_IMAGE_MODEL)
 
     import matplotlib as mpl
 
@@ -823,8 +924,37 @@ def generate_analysis(
     from wrangler.core.converter import load_eval_file
     from wrangler.reporting.reporter import generate_report
 
-    def _read_stage(stage, pair_id):
+    def _summed_usage(*stages):
+        """Total tokens across an arm's stages. {} when nothing recorded any.
+
+        Defined inline: KFP serializes each component body in isolation, so a
+        module-level helper in this file does not exist at runtime.
+        """
+        total = {"input_tokens": 0, "output_tokens": 0}
+        seen = False
+        for stage in stages:
+            usage = (stage or {}).get("token_usage") or {}
+            if not usage:
+                continue
+            seen = True
+            total["input_tokens"] += usage.get("input_tokens", 0) or 0
+            total["output_tokens"] += usage.get("output_tokens", 0) or 0
+            if usage.get("is_estimate"):
+                total["is_estimate"] = True
+        return total if seen else {}
+
+    def _read_stage(stage, pair_id, required=True):
+        """Load one stage artifact. Optional stages return {} when absent.
+
+        An eval-only run (skip_optimize) has no optimize artifact, and
+        downloading it unconditionally is what failed the first control arm:
+        the component exited 1 on a NotFound after deploy and both evals had
+        already succeeded.
+        """
         blob = gcs.bucket(bucket_name).blob(f"pipeline-runs/{run_id}/stages/{stage}/{pair_id}.json")
+        if not required and not blob.exists():
+            logging.info(f"stage {stage} absent for {pair_id} — eval-only run")
+            return {}
         return json.loads(blob.download_as_text())
 
     manifest = json.loads(manifest_json)
@@ -842,7 +972,7 @@ def generate_analysis(
 
         deploy_data = _read_stage("deploy", pair_id)
         eval_before = _read_stage("eval_before", pair_id)
-        optimize_data = _read_stage("optimize", pair_id)
+        optimize_data = _read_stage("optimize", pair_id, required=False)
         eval_after = _read_stage("eval_after", pair_id)
 
         results[pair_id] = {
@@ -858,6 +988,24 @@ def generate_analysis(
             "num_runs": eval_before.get("num_runs", 1),
             "optimized_prompt": optimize_data.get("optimized_prompt", ""),
             "thresholds": optimize_data.get("thresholds", {}),
+            # Coverage on both sides, and whether they are comparable at all.
+            # A delta between a 47%-covered before and an 89%-covered after is
+            # mostly dropout; averaging the two sides silently hides that.
+            "before_coverage": eval_before.get("coverage"),
+            "after_coverage": eval_after.get("coverage"),
+            "coverage_gap": (
+                abs(eval_before["coverage"] - eval_after["coverage"])
+                if eval_before.get("coverage") is not None
+                and eval_after.get("coverage") is not None
+                else None
+            ),
+            "health": deploy_data.get("health", {}),
+            # Same forwarding as the local report path. token_usage lived only
+            # in the per-stage artifacts, so the measured-spend and
+            # $/quality-point columns rendered "n/a" on every real report.
+            # Inlined rather than imported: KFP serializes this body alone, so
+            # a module-level helper in components.py is absent at runtime.
+            "token_usage": _summed_usage(eval_before, optimize_data, eval_after),
         }
 
         for stage_data in [eval_before, optimize_data, eval_after]:

@@ -295,7 +295,7 @@ def deploy_pipeline(
 
         cache_key = hashlib.md5(
             f"{manifest.name}:{manifest.agent_module}:{manifest.eval_data}:"
-            f"{','.join(p.id for p in manifest.pairs)}".encode(),
+            f"{','.join(p.id for p in manifest.enabled_pairs)}".encode(),
             usedforsecurity=False,
         ).hexdigest()[:10]
         run_id = f"run-{cache_key}"
@@ -321,7 +321,7 @@ def deploy_pipeline(
                 "agent_module": p.agent_module,
                 "costs": p.costs,
             }
-            for p in manifest.pairs
+            for p in manifest.enabled_pairs
         ],
     }
     manifest_json = json.dumps(manifest_dict)
@@ -335,7 +335,7 @@ def deploy_pipeline(
             "agent_module": p.agent_module,
             "costs": p.costs,
         }
-        for p in manifest.pairs
+        for p in manifest.enabled_pairs
     ]
 
     # Step 1: Build pipeline base image (skips if deps unchanged)
@@ -380,7 +380,9 @@ def deploy_pipeline(
     logger.info(f"  Run ID:         {run_id}")
     logger.info(f"  Image:          {image_uri}")
     logger.info(f"  Pipeline Root:  {pipeline_root}")
-    logger.info(f"  Pairs:          {len(manifest.pairs)}")
+    n_disabled = len(manifest.pairs) - len(manifest.enabled_pairs)
+    disabled_note = f" ({n_disabled} disabled)" if n_disabled else ""
+    logger.info(f"  Pairs:          {len(manifest.enabled_pairs)}{disabled_note}")
     logger.info(f"  Num Runs:       {num_runs}")
     logger.info(f"  Judge Model:    {judge_model}")
     logger.info(f"  Bucket:         {bucket_name}")
@@ -406,6 +408,18 @@ def deploy_pipeline(
             "secret_id": secret_id,
             "max_metric_calls": max_metric_calls,
             "cache_bust": cache_bust,
+            # A manifest can turn the optimize->redeploy->eval_after chain off
+            # entirely, which is what makes a control arm expressible and what
+            # lets this pipeline be used for characterisation rather than only
+            # for optimization runs.
+            "skip_optimize": bool((manifest.pipeline or {}).get("skip_optimize", False)),
+            # The whole health_gate block, forwarded verbatim. Sent as JSON
+            # rather than one KFP parameter per knob so a new knob does not
+            # need a change in four files -- and because the pipeline path
+            # previously read none of them, running on gate_engine_health's
+            # bare defaults while the manifest's settings were silently
+            # dropped. `required` is the one that must not be droppable.
+            "health_gate_json": json.dumps(getattr(manifest, "health_gate", None) or {}),
         },
         labels={"solution": "promp-wrangler"},
     )

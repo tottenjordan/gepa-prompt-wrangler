@@ -69,3 +69,24 @@ class TestGateReport:
         text = " ".join(lines)
         assert "98" in text or "0.98" in text
         assert "redeploy" not in text.lower()
+
+
+class TestQuietMode:
+    """gate_engine_health renders the verdict itself, so probe_engine must not.
+
+    Without this every health line printed twice in the deploy output.
+    """
+
+    def test_probe_engine_accepts_quiet(self):
+        import inspect
+
+        from wrangler.tools.boot_probe import probe_engine
+
+        assert "quiet" in inspect.signature(probe_engine).parameters
+
+    def test_the_deploy_gate_probe_is_quiet(self):
+        from pathlib import Path
+
+        src = Path("wrangler/orchestration/stages.py").read_text()
+        i = src.index("def _default_probe")
+        assert "quiet=True" in src[i : i + 400]

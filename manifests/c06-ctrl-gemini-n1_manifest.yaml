@@ -1,0 +1,36 @@
+name: "c06-ctrl-gemini-n1"
+description: >
+  Campaign 06 — noise floor control arm at num_runs=1. The prompt is
+  byte-identical on both sides and skip_optimize is on, so every delta this
+  produces is measurement noise and nothing else.
+  See docs/doe/06-pipeline-noise-floor.md
+
+agent_module: "examples/multi_model_agents/agents/flash_agent"
+eval_data: "examples/multi_model_agents/eval_data/eval_cases.yaml"
+
+pairs:
+  - id: "c06-ctrl-gemini-n1"
+    model: "gemini-3.5-flash"
+    description: "control arm, num_runs=1 — no optimization"
+    agent_module: "examples/multi_model_agents/agents/flash_agent"
+    system_prompt: "You are a helpful assistant. Use the available tools to answer user questions."
+
+eval_config:
+  response_match_threshold: 0.5
+  safety_threshold: 0.8
+
+pipeline:
+  secret_id: wrangler-agent-env
+  cache_bust: "c06-v2"
+  # No optimization at all: this arm exists to measure what an UNCHANGED prompt
+  # scores twice. Any delta is the floor.
+  skip_optimize: true
+  num_runs: 1
+
+health_gate:
+  enabled: true
+  # This arm's only output is a noise floor. Measured on an engine the gate
+  # rejected, that floor describes the engine's dropout rather than the
+  # pipeline's noise -- which is exactly what happened on 2026-09-01, when
+  # three draws all failed at 1.7% reach and the eval ran anyway.
+  required: true

@@ -257,6 +257,7 @@ _APP_PY_TEMPLATE = '''\
 import os
 import asyncio
 import logging as _log
+import time as _time
 from pathlib import Path
 
 from google.adk.agents import LlmAgent
@@ -270,6 +271,11 @@ _log.basicConfig(level=_log.INFO)
 _here = Path(__file__).parent
 INSTRUCTION = (_here / "instruction.txt").read_text().strip()
 MODEL = os.environ.get("AGENT_MODEL", "{model}")
+
+# Budget for one MCP handshake in the startup CHECK. Not 30s: see the comment
+# in _startup_checks. Matches examples/multi_model_agents/registry.py's
+# MCP_TIMEOUT_SECONDS -- keep the two in step.
+_MCP_PROBE_TIMEOUT = float(os.environ.get("MCP_PROBE_TIMEOUT_SECONDS", "120"))
 
 _log.info("[GEAP startup] model=%s, location=%s, project=%s",
           MODEL, os.environ.get("GOOGLE_CLOUD_LOCATION", "unset"),
@@ -321,6 +327,14 @@ async def _startup_checks():
     #
     # A health check must not share mutable connection state with the thing it
     # is checking.
+    # 30s was too tight and produced a fake defect. Measured 2026-08-31 on the
+    # v4 engines: workers that passed reached their MCP summary a median 6.3s
+    # after import, while workers that "failed" took a median 109s and up to
+    # 834s -- the containers were starved, not the MCP servers, which returned
+    # 200 throughout. On one worker the handshake completed five seconds AFTER
+    # the probe had already logged a failure. Matches the 120s the local
+    # registry.py uses; keep the two in step.
+    _t0 = _time.monotonic()
     mcp_ok, mcp_fail = 0, 0
     for server in (SEARCH_MCP_SERVER, BOOKING_MCP_SERVER, EXPENSE_MCP_SERVER):
         if not server:
@@ -328,13 +342,18 @@ async def _startup_checks():
         probe = None
         try:
             probe = get_mcp_tools(server)
-            tools = await asyncio.wait_for(probe.get_tools(), timeout=30.0)
+            tools = await asyncio.wait_for(probe.get_tools(), timeout=_MCP_PROBE_TIMEOUT)
             tool_names = [t.name for t in tools] if tools else []
             _log.info("[GEAP startup] MCP OK: %s -> %d tools %s",
                       server, len(tool_names), tool_names[:3])
             mcp_ok += 1
         except Exception as exc:
-            _log.error("[GEAP startup] MCP FAILED: %s -> %s", server, exc)
+            # Log the exception *type*, not just str(exc). The most common
+            # failure here is the wait_for above, and TimeoutError's str() is
+            # the empty string -- which rendered every one of these as
+            # "MCP FAILED: <server> -> " and said nothing about what happened.
+            _log.error("[GEAP startup] MCP FAILED: %s -> %s: %s",
+                       server, type(exc).__name__, exc or "(no detail)")
             mcp_fail += 1
         finally:
             # Close on the same loop that opened it, so nothing outlives this
@@ -344,9 +363,21 @@ async def _startup_checks():
                     await probe.close()
                 except Exception as exc:
                     _log.debug("[GEAP startup] probe close failed for %s: %s", server, exc)
-    _log.info("[GEAP startup] MCP summary: %d OK, %d failed", mcp_ok, mcp_fail)
+    _log.info("[GEAP startup] MCP summary: %d OK, %d failed (%.1fs)",
+              mcp_ok, mcp_fail, _time.monotonic() - _t0)
     if mcp_ok == 0 and mcp_fail > 0:
-        _log.error("[GEAP startup] FATAL: no MCP tools connected — agent cannot use tools")
+        # Deliberately NOT "the agent cannot use tools". These are throwaway
+        # probe toolsets; the serving agent builds its own and connects lazily
+        # on first use. The old wording said the agent was broken, and it was
+        # not -- verified 2026-08-31 by sending a tool-requiring query to an
+        # engine that had logged exactly this line: it called search_flights
+        # correctly. Claiming a fatal error that is not one is how a real one
+        # stops being believed.
+        _log.error("[GEAP startup] MCP probe failed for all %d server(s) in %.1fs. "
+                   "This is the startup CHECK, not the serving toolsets -- the agent "
+                   "may still work. A slow container is the usual cause; compare this "
+                   "duration against the ~6s a healthy worker takes.",
+                   mcp_fail, _time.monotonic() - _t0)
 
     # 2. Model ping — send a trivial request to verify the model endpoint works.
     #

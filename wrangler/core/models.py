@@ -269,9 +269,15 @@ DEFAULT_AGENT_MODEL_ALT = "claude-sonnet-4-6"
 # Currently the same id as the judge, but a separate role on purpose: moving the
 # judge should not silently re-point figure generation. PaperBanana's own default
 # here is gemini-2.5-flash, so this must be set explicitly or charts run on it.
-# The matching *image* model is not registered — see LITERAL_EXCEPTIONS in
-# tests/test_models.py for why an image model has no cost or RPM to record.
 DEFAULT_FIGURE_VLM_MODEL = "gemini-3.5-flash"
+
+# PaperBanana's image stage — the renderer that draws the figure the VLM planned.
+# Deliberately absent from MODELS: the framework never runs an agent or a judge
+# on it, so it has no cost, RPM or retirement date to record. It is named here
+# anyway, because the registry is the one place a model id may be written and a
+# constant is what lets every caller stop writing the literal. See
+# UNREGISTERED_MODEL_IDS in tests/test_models.py.
+DEFAULT_FIGURE_IMAGE_MODEL = "gemini-3.1-flash-image"
 
 # --- Derived views -------------------------------------------------------
 
@@ -304,6 +310,44 @@ def blended_cost(model: str, custom_costs: dict[str, float] | None = None) -> fl
         inp, out = spec.input_cost, spec.output_cost
     weight = BLENDED_INPUT_WEIGHT + BLENDED_OUTPUT_WEIGHT
     return (BLENDED_INPUT_WEIGHT * inp + BLENDED_OUTPUT_WEIGHT * out) / weight
+
+
+def measured_cost(
+    model: str,
+    input_tokens: int,
+    output_tokens: int,
+    custom_costs: dict[str, float] | None = None,
+) -> dict:
+    """Dollars actually spent, from tokens actually used.
+
+    ``blended_cost`` answers "what does this model list at" against an assumed
+    4:1 input:output ratio. This answers "what did this run cost", which is a
+    different question and the one a tier comparison needs: a cheap-per-token
+    model that answers verbosely can cost more per run than an expensive terse
+    one, and a list-price comparison cannot see that at all.
+
+    An unregistered model returns zeros with ``priced=False`` rather than
+    raising, so a report spanning ten pairs is not lost to one ad-hoc id -- but
+    the flag has to be rendered, because a $0.00 row with no explanation is how
+    an unpriced model gets read as a free one.
+    """
+    if custom_costs is not None:
+        inp, out, priced = custom_costs["input"], custom_costs["output"], True
+    else:
+        try:
+            spec = get_spec(model)
+            inp, out, priced = spec.input_cost, spec.output_cost, True
+        except KeyError:
+            inp, out, priced = 0.0, 0.0, False
+
+    input_usd = (input_tokens or 0) * inp / 1_000_000
+    output_usd = (output_tokens or 0) * out / 1_000_000
+    return {
+        "input_usd": input_usd,
+        "output_usd": output_usd,
+        "total_usd": input_usd + output_usd,
+        "priced": priced,
+    }
 
 
 def blended_cost_for_report(model: str) -> float:

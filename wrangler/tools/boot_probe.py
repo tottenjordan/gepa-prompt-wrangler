@@ -328,6 +328,7 @@ def probe_engine(
     threshold: float = GATE_THRESHOLD,
     label: str = "gate",
     out_dir: str | Path | None = "outputs/probes",
+    quiet: bool = False,
 ) -> dict:
     """Probe one engine and return a gate decision. Roughly n*(spacing+latency) seconds.
 
@@ -345,8 +346,11 @@ def probe_engine(
     rows = asyncio.run(run_arm(agent, label, engine_id, n=n, spacing=spacing, out_path=out_path))
     reached = sum(1 for r in rows if r["reached"])
     decision = gate_decision(reached, len(rows), threshold=threshold)
-    for line in gate_report(engine_id, decision):
-        print(line, flush=True)
+    # `quiet` for callers that render the verdict themselves -- gate_engine_health
+    # does, and without this every health line printed twice.
+    if not quiet:
+        for line in gate_report(engine_id, decision):
+            print(line, flush=True)
     return decision
 
 

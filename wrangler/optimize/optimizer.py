@@ -267,6 +267,34 @@ async def _prewarm_mcp_toolsets(agent, tag: str = "  ", max_retries: int = 3) ->
     return warmed
 
 
+def _apply_model_override(root_agent, model: str, tag: str = "") -> None:
+    """Point the loaded agent at ``model``, if one was named.
+
+    GEPA optimizes whatever agent the ``_opt`` module builds, and that module
+    reads its model from ``config.py`` -- so without this a manifest pair
+    declaring ``model: claude-sonnet-5`` would deploy sonnet-5 and optimize
+    sonnet-4-6, then label the result sonnet-5. Nothing failed when that
+    happened; the number was just about a different model than its label.
+
+    Routed through ``resolve_model`` for the same reason every other call site
+    is: a bare Claude id is not servable, it needs the global resource path.
+    An unregistered id raises rather than falling back to the module's model,
+    because falling back is exactly the silent substitution being fixed.
+    """
+    if not model:
+        return
+    from ..core.config import resolve_model
+    from ..core.models import get_spec
+
+    # Validate before resolving. `resolve_model` does not raise on an unknown
+    # id -- it falls through to the Gemini branch and hands back
+    # Gemini(model="definitely-not-a-model"), so a typo would quietly optimize
+    # a nonexistent Gemini model instead of the Claude one intended.
+    get_spec(model)
+    root_agent.model = resolve_model(model)
+    print(f"{tag}  Model override: {model} (from manifest)", flush=True)
+
+
 def optimize(
     agent_module_path: str,
     evalset_path: str | None = None,
@@ -277,6 +305,7 @@ def optimize(
     judge_model: str = DEFAULT_JUDGE_MODEL,
     max_metric_calls: int | None = None,
     initial_instruction: str | None = None,
+    model: str = "",
 ) -> str:
     """Run GEPA optimization. Returns the optimized instruction string.
 
@@ -365,7 +394,10 @@ def optimize(
             f"{tag}  Instruction: {len(root_agent.instruction)} chars (from _opt module)",
             flush=True,
         )
-    print(f"{tag}  Agent: {root_agent.name}", flush=True)
+    # Before anything reads the agent: the model must match the manifest, or the
+    # whole run is attributed to the wrong one.
+    _apply_model_override(root_agent, model, tag)
+    print(f"{tag}  Agent: {root_agent.name} | model: {root_agent.model}", flush=True)
 
     app_name = os.path.basename(agent_module_path)
     agents_dir = os.path.dirname(agent_module_path)

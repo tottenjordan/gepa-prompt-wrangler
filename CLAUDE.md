@@ -62,12 +62,21 @@ Rules the test suite enforces:
 
 - **No model id literals anywhere in `wrangler/` outside the registry.** `tests/test_models.py`
   walks the AST of every module — docstrings and comments are exempt, so prose may name a
-  model but code may not. The one legitimate exemption is `pipeline/components.py`: KFP
-  serializes each `@dsl.component` body in isolation, so a component cannot import the
-  registry at runtime. Exemptions are listed with their reason in `LITERAL_EXCEPTIONS`.
+  model but code may not. `LITERAL_EXCEPTIONS` is **empty, and worth keeping empty**.
+  It used to exempt `pipeline/components.py` on the grounds that KFP serialization stops a
+  component importing the registry at runtime; that was checked on 2026-09-01 and is false.
+  Every component extracts the tarball and calls `sys.path.insert(0, "/app")` first, then
+  imports from `wrangler` freely. The real isolation rule is narrower — a component cannot
+  call a *module-level helper* defined in `components.py`, because only the function body
+  is serialized — and it has no bearing on importing an unpacked package.
 - **Every named-role default must be a registered model**, must be listed in the guard's
   own `DEFAULT_ROLES` table, and must be more than 30 days from its retirement date. The
   last one turns a vendor shutdown into a red build instead of a 404 mid-run.
+  `DEFAULT_FIGURE_IMAGE_MODEL` is the one role exempt from *registration* (PaperBanana
+  draws with it; nothing infers against it, so it has no cost, RPM or retirement date). It
+  is listed in `ROLES_EXEMPT_FROM_REGISTRATION` with a reason, stays in `DEFAULT_ROLES` so
+  the completeness check still sees it, and a test fails if it ever gains a `ModelSpec`
+  without the exemption being removed.
 
 Retirement dates are the *earliest announced* shutdown. Anthropic's are "not sooner than"
 and apply to Anthropic-operated platforms — Google Cloud sets its own schedule for partner
@@ -184,6 +193,26 @@ For multi-model agents: `SEARCH_MCP_SERVER`, `BOOKING_MCP_SERVER`, `EXPENSE_MCP_
   treat teardown as the last step of a campaign rather than a separate chore. The policy,
   and why an age-based sweep would have deleted someone else's live work, is in
   [docs/notes/engine-lifecycle.md](docs/notes/engine-lifecycle.md).
+
+- **A manifest pair can be switched off with `enabled: false`.** Deleting a pair loses its
+  model id, agent module and the reason; commenting it out loses the reason and rots. A
+  disabled pair stays parsed and carries a `disabled_reason`. A sweep skips it and prints
+  why; naming it explicitly (`--pair opus`) still runs it, because that is a deliberate act.
+  Read `manifest.enabled_pairs`, never `manifest.pairs`, when choosing what to run — the
+  local path filtered and the pipeline path did not, so a disabled pair still ran there.
+  **The opus tier is currently disabled** across every manifest: 15 gated deploys across
+  three model versions and two prompts produced nothing above 50% reach against a concurrent
+  control of four tiers at 93–100%, so evals against it measure dropout rather than the
+  prompt ([docs/analysis/2026-09-01-opus-serving-failure.md](docs/analysis/2026-09-01-opus-serving-failure.md)).
+
+- **A fresh deploy is health-gated, and it is on by default.** Roughly four in ten
+  deployments come up unable to serve, failing by returning 200 with no inference — so an
+  ungated deploy hands the eval an engine that silently drops a third of its cases, and the
+  resulting delta measures dropout rather than the prompt. `stage_deploy` probes each new
+  engine (~60 one-line requests, ~12 min per pair) and redeploys while it is below 80%
+  reach, because redeploying redraws the rate. Tune or disable with a `health_gate:` block
+  in the manifest; the verdict is written to the deploy stage under `health`, and the
+  recorded engine id is the post-reroll one.
 
 - **Every optimization sweep carries a control arm whose prompt does not change.** Run
   `eval_before` and `eval_after` against the *same* prompt, with no optimize stage between
@@ -330,6 +359,25 @@ Keep them in sync — the multi-model agents import from their **local** config,
 wrangler's, and `build_source_package()` copies that local file into `_geap_build_pkg/`, so
 it is the version that actually runs on GEAP. A fix applied only to `wrangler/core/` will
 appear to work locally in the CLI and still ship broken to every deployed agent.
+
+**`tests/test_shared_source_drift.py` now enforces this**, so drift is a red build rather
+than a deploy-time surprise. It compares the two by **behaviour**, not by source: every
+registered id plus a Gemini 2.x, the `models/` form and an unknown id go through both, and
+the three fields that decide routing (type, model id, pinned location) must match. Source
+comparison was rejected because the two already differ in docstrings, so it would need an
+allowlist that eventually gets widened to let a real difference through.
+
+The same file guards two more hand-synced pairs that had only comments: the generated
+`_REGISTRY_PY_TEMPLATE` in `deploy.py` against `examples/multi_model_agents/registry.py`
+(no `tool_name_prefix` on either, matching cache TTL, read timeout and startup-probe
+budget, and every `*_MCP_*` var `config.py` declares must be read by the generated
+registry), and that all three templates parse as Python.
+
+Read the environment at **call** time in both files, never into a module constant. The
+example config used to bind `GCP_REGION` and `GCP_PROJECT_ID` at import; the pipeline
+components set both *inside* the component body, after the tarball is extracted, so the
+deployed copy could route on a stale region or build a Claude resource path against a
+stale project.
 
 ### Optimizer Prompt Flow
 

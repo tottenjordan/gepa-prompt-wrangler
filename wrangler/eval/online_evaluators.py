@@ -21,6 +21,7 @@ import datetime as dt
 import os
 import sys
 import textwrap
+import time
 
 import google.auth
 import google.auth.transport.requests
@@ -194,6 +195,117 @@ def list_evaluators():
     return evaluators
 
 
+def orphaned_evaluators(evaluators: list[dict], live_engine_ids: set[str] | None) -> list[dict]:
+    """Evaluators whose target engine no longer exists.
+
+    An orphan stays ACTIVE and keeps waking every 10 minutes to score an engine
+    that is gone. 10 of 28 were in that state on 2026-08-31 while the five live
+    v4 engines had none at all. ``cleanup()`` cannot reach them: it only deletes
+    evaluators whose agent is listed in ``.env``, and a deleted engine is
+    precisely the thing that is not.
+
+    ``live_engine_ids=None`` means the lookup failed, and returns nothing --
+    "we could not list engines" must never read as "every engine is deleted".
+    """
+    if live_engine_ids is None:
+        return []
+    out = []
+    for ev in evaluators:
+        agent = (ev.get("agentResource") or "").split("/")[-1]
+        if not agent:
+            continue  # unattributable; report, do not guess
+        if agent not in live_engine_ids:
+            out.append(
+                {
+                    "evaluator_id": ev["name"].split("/")[-1],
+                    "engine_id": agent,
+                    "display_name": ev.get("displayName", ""),
+                    "state": ev.get("state", ""),
+                }
+            )
+    return out
+
+
+def evaluator_coverage(evaluators: list[dict], engine_ids: dict[str, str]) -> dict:
+    """Which of ``engine_ids`` (label -> id) have an evaluator, and which do not."""
+    watched_agents = {(ev.get("agentResource") or "").split("/")[-1] for ev in evaluators}
+    watched = {k: v for k, v in engine_ids.items() if v in watched_agents}
+    return {
+        "watched": watched,
+        "unwatched": {k: v for k, v in engine_ids.items() if v not in watched_agents},
+    }
+
+
+def prune_evaluators(
+    evaluators: list[dict],
+    live_engine_ids: set[str] | None,
+    delete_fn,
+    confirm: bool = False,
+) -> dict:
+    """Delete orphaned evaluators. **Does nothing unless ``confirm``.**"""
+    orphans = orphaned_evaluators(evaluators, live_engine_ids)
+    if not confirm:
+        return {"orphans": orphans, "deleted": [], "failed": {}, "dry_run": True}
+    deleted, failed = [], {}
+    for o in orphans:
+        try:
+            delete_fn(o["evaluator_id"])
+            deleted.append(o["evaluator_id"])
+        except Exception as exc:
+            failed[o["evaluator_id"]] = f"{type(exc).__name__}: {exc}"
+    return {"orphans": orphans, "deleted": deleted, "failed": failed, "dry_run": False}
+
+
+def duplicate_evaluators(evaluators: list[dict]) -> dict[str, list[str]]:
+    """Engines watched by more than one evaluator.
+
+    Reported, not auto-deleted: which of two to keep depends on their metric
+    sets, and that is a judgement rather than a rule.
+    """
+    by_agent: dict[str, list[str]] = {}
+    for ev in evaluators:
+        agent = (ev.get("agentResource") or "").split("/")[-1]
+        if agent:
+            by_agent.setdefault(agent, []).append(ev["name"].split("/")[-1])
+    return {a: ids for a, ids in by_agent.items() if len(ids) > 1}
+
+
+def prune_command(args: list[str]):
+    """CLI: report orphaned evaluators; delete them only with --yes."""
+    from ..core.env_ids import read_engine_ids
+    from ..tools.engines import list_engines
+
+    confirm = "--yes" in args
+    evaluators = list_evaluators()
+    live = {r["id"] for r in list_engines()}
+    result = prune_evaluators(evaluators, live, delete_evaluator, confirm=confirm)
+
+    print(f"\n=== Evaluator prune ({len(evaluators)} total) ===")
+    print(f"  orphaned (target a deleted engine): {len(result['orphans'])}")
+    for o in result["orphans"]:
+        print(f"    evaluator {o['evaluator_id']} -> engine {o['engine_id']} ({o['state']})")
+
+    cov = evaluator_coverage(evaluators, read_engine_ids())
+    if cov["unwatched"]:
+        print(f"  live engines with NO evaluator: {sorted(cov['unwatched'])}")
+        print("    run `create` to add them")
+
+    dupes = duplicate_evaluators(evaluators)
+    if dupes:
+        print(f"  engines watched by more than one evaluator: {len(dupes)}")
+        for agent, ids in list(dupes.items())[:10]:
+            print(f"    engine {agent}: {ids}")
+
+    if not result["orphans"]:
+        print("  nothing to delete.")
+    elif result["dry_run"]:
+        print(f"\n  DRY RUN — re-run with --yes to delete {len(result['orphans'])}.")
+    else:
+        print(f"\n  deleted {len(result['deleted'])}")
+        for eid, err in result["failed"].items():
+            print(f"    FAILED {eid}: {err}")
+
+
 def create_evaluators():
     print("=== Step 1: Register Custom Metrics ===")
     custom_metric_names = register_custom_metrics()
@@ -354,14 +466,37 @@ def count_span_export_errors(engine_id: str, minutes: int = 60) -> dict:
         ),
         "pageSize": 200,
     }
-    resp = http_requests.post(_LOGGING_API, headers=_get_headers(), json=body, timeout=HTTP_TIMEOUT)
-    resp.raise_for_status()
+    # The Logging API rate-limits this at five engines in quick succession, and
+    # an unhandled 429 took the whole health check down mid-run -- a monitoring
+    # tool that dies under load reports nothing, which is the exact failure it
+    # exists to catch. Back off, then give up on *this engine* rather than the
+    # run, and say the result is unknown instead of implying clean.
+    for attempt in range(4):
+        resp = http_requests.post(
+            _LOGGING_API, headers=_get_headers(), json=body, timeout=HTTP_TIMEOUT
+        )
+        if resp.status_code != 429:
+            break
+        wait = 5 * (attempt + 1)
+        print(f"  (rate limited reading logs for {engine_id}, retrying in {wait}s)", flush=True)
+        time.sleep(wait)
+
+    if resp.status_code != 200:
+        return {
+            "engine_id": engine_id,
+            "window_minutes": minutes,
+            "dropped_batches": 0,
+            "truncated": False,
+            "error": f"HTTP {resp.status_code}",
+        }
+
     entries = resp.json().get("entries", [])
     return {
         "engine_id": engine_id,
         "window_minutes": minutes,
         "dropped_batches": len(entries),
         "truncated": len(entries) >= body["pageSize"],
+        "error": "",
     }
 
 
@@ -383,9 +518,18 @@ def trace_health(args: list[str]):
         return
 
     print(f"=== Span export health (last {minutes} min) ===")
-    degraded = []
+    degraded, unknown = [], []
     for name, eid in sorted(agents.items()):
-        result = count_span_export_errors(eid, minutes)
+        try:
+            result = count_span_export_errors(eid, minutes)
+        except Exception as exc:
+            unknown.append(name)
+            print(f"  {name:8} {eid}: UNKNOWN — {type(exc).__name__}: {exc}")
+            continue
+        if result.get("error"):
+            unknown.append(name)
+            print(f"  {name:8} {eid}: UNKNOWN — {result['error']}")
+            continue
         n = result["dropped_batches"]
         more = "+" if result["truncated"] else ""
         if n:
@@ -393,6 +537,12 @@ def trace_health(args: list[str]):
             print(f"  {name:8} {eid}: {n}{more} DROPPED span batches")
         else:
             print(f"  {name:8} {eid}: clean")
+
+    if unknown:
+        print(
+            f"\n  Could not read span health for: {', '.join(unknown)}. "
+            "Unknown is not clean — re-run before trusting an online-eval number."
+        )
 
     if degraded:
         print(
@@ -409,6 +559,7 @@ COMMANDS = {
     "create": lambda args: create_evaluators(),
     "verify": lambda args: verify_evaluators(),
     "trace-health": trace_health,
+    "prune": prune_command,
     "delete": lambda args: (
         delete_evaluator(args[0]) if args else print("Usage: delete <evaluator_id>")
     ),

@@ -1,0 +1,333 @@
+"""Tests for the campaign runner's pairing rule.
+
+Two pipelines run at once, and the rule that makes that safe is that they must
+straddle both publishers: Anthropic and Google are separate Vertex quota pools,
+so a Claude arm and a Gemini arm do not contend, while two Claude arms would
+just race each other into 429s.
+
+That rule is the only thing standing between "double throughput for free" and
+"half the requests fail", so it is checked before anything is submitted rather
+than discovered in a log.
+"""
+
+from pathlib import Path
+
+import pytest
+
+from scripts.run_campaign import CAMPAIGNS, run_campaign, validate
+
+
+class TestPairingRule:
+    @pytest.mark.parametrize("campaign", sorted(CAMPAIGNS))
+    def test_every_batch_straddles_both_publishers(self, campaign):
+        assert validate(CAMPAIGNS[campaign]) == []
+
+    def test_a_same_publisher_batch_is_rejected(self):
+        bad = [("manifests/c07-sonnet5_manifest.yaml", "manifests/c07-sonnet46_manifest.yaml")]
+        problems = validate(bad)
+        assert problems
+        assert "quota" in problems[0].lower()
+
+    def test_a_missing_manifest_is_reported_not_crashed(self):
+        problems = validate([("manifests/nope.yaml", "manifests/c07-pro_manifest.yaml")])
+        assert any("missing" in p for p in problems)
+
+    def test_every_referenced_manifest_exists(self):
+        for batches in CAMPAIGNS.values():
+            for a, b in batches:
+                assert Path(a).is_file(), a
+                assert Path(b).is_file(), b
+
+
+class TestDryRunByDefault:
+    def test_dry_run_submits_nothing(self, tmp_path, monkeypatch):
+        launched = []
+        monkeypatch.setattr("scripts.run_campaign.submit", lambda m, d: launched.append(m))
+        assert run_campaign("07", confirm=False, log_dir=tmp_path) == 0
+        assert launched == []
+
+    def test_a_bad_pairing_refuses_even_with_yes(self, tmp_path, monkeypatch):
+        launched = []
+        monkeypatch.setattr("scripts.run_campaign.submit", lambda m, d: launched.append(m))
+        monkeypatch.setitem(
+            CAMPAIGNS,
+            "bad",
+            [("manifests/c07-sonnet5_manifest.yaml", "manifests/c07-sonnet46_manifest.yaml")],
+        )
+        assert run_campaign("bad", confirm=True, log_dir=tmp_path) == 1
+        assert launched == []
+
+
+class TestBatchesActuallySerialise:
+    """`job.submit()` is non-blocking, so waiting on the submission waits ~90s.
+
+    An earlier version did exactly that: `proc.wait()` on the CLI subprocess.
+    All six campaign-06 arms would have been submitted within minutes and run
+    concurrently on Vertex -- three Claude and three Gemini at once, which is
+    the same-publisher contention the pairing exists to prevent. The runner has
+    to wait for the *job*, not the submission.
+    """
+
+    def test_the_next_batch_waits_for_the_previous_jobs(self, tmp_path, monkeypatch):
+        order = []
+
+        def _submit(manifest, _log_dir):
+            order.append(("submit", Path(manifest).stem))
+            return f"job-{len(order)}"
+
+        def _wait(job_ids, sleep_fn=None, state_fn=None):
+            order.append(("wait", tuple(job_ids)))
+            return dict.fromkeys(job_ids, "PipelineState.PIPELINE_STATE_SUCCEEDED")
+
+        monkeypatch.setattr("scripts.run_campaign.submit", _submit)
+        monkeypatch.setattr("scripts.run_campaign.wait_for_jobs", _wait)
+        run_campaign("06", confirm=True, log_dir=tmp_path, sleep_fn=lambda _s: None)
+
+        kinds = [k for k, _ in order]
+        # submit, submit, wait — three times over, never two waits in a row and
+        # never a third submit before the first wait.
+        assert kinds == ["submit", "submit", "wait"] * 2
+
+    def test_a_lookup_failure_is_not_treated_as_finished(self):
+        """Otherwise the next batch launches on top of a running one."""
+        from scripts.run_campaign import wait_for_jobs
+
+        states = iter(["UNKNOWN", "PipelineState.PIPELINE_STATE_SUCCEEDED"])
+        out = wait_for_jobs(["j1"], sleep_fn=lambda _s: None, state_fn=lambda _j: next(states))
+        assert "SUCCEEDED" in out["j1"]
+
+    def test_a_failed_job_does_not_stop_the_campaign(self, tmp_path, monkeypatch):
+        """A half-finished campaign that says which half beats one that stops silently."""
+        monkeypatch.setattr("scripts.run_campaign.submit", lambda m, d: "j")
+        monkeypatch.setattr(
+            "scripts.run_campaign.wait_for_jobs",
+            lambda ids, **kw: dict.fromkeys(ids, "PipelineState.PIPELINE_STATE_FAILED"),
+        )
+        assert run_campaign("07", confirm=True, log_dir=tmp_path, sleep_fn=lambda _s: None) == 0
+
+    def test_every_terminal_state_ends_the_wait(self):
+        from scripts.run_campaign import wait_for_jobs
+
+        for state in (
+            "PIPELINE_STATE_SUCCEEDED",
+            "PIPELINE_STATE_FAILED",
+            "PIPELINE_STATE_CANCELLED",
+        ):
+            out = wait_for_jobs(["j"], sleep_fn=lambda _s: None, state_fn=lambda _j, s=state: s)
+            assert out["j"] == state
+
+
+class TestStagger:
+    def test_an_optimize_batch_staggers(self, tmp_path, monkeypatch):
+        """Both arms judge with gemini-3.5-flash, so their optimize phases share quota."""
+        naps, procs = [], []
+
+        monkeypatch.setattr("scripts.run_campaign.submit", lambda m, d: procs.append(m) or "j")
+        monkeypatch.setattr(
+            "scripts.run_campaign.wait_for_jobs",
+            lambda ids, **kw: dict.fromkeys(ids, "PIPELINE_STATE_SUCCEEDED"),
+        )
+        run_campaign("07", confirm=True, log_dir=tmp_path, sleep_fn=naps.append)
+        assert naps, "campaign 07 optimizes; it must stagger"
+        assert all(n > 0 for n in naps)
+
+    def test_an_eval_only_batch_does_not_stagger(self, tmp_path, monkeypatch):
+        """Campaign 06 skips optimize, so there is no shared-judge collision to avoid."""
+        naps, procs = [], []
+
+        monkeypatch.setattr("scripts.run_campaign.submit", lambda m, d: procs.append(m) or "j")
+        monkeypatch.setattr(
+            "scripts.run_campaign.wait_for_jobs",
+            lambda ids, **kw: dict.fromkeys(ids, "PIPELINE_STATE_SUCCEEDED"),
+        )
+        run_campaign("06", confirm=True, log_dir=tmp_path, sleep_fn=naps.append)
+        assert naps == []
+        assert len(procs) == 4, "two batches of two arms (n=5 trimmed)"
+
+
+class TestTheN5BatchIsTrimmed:
+    """n=5 means ten eval passes per arm once the second eval is restored.
+
+    Sizing campaign 06 at ~5h assumed one eval per arm. A floor needs two, and
+    num_runs multiplies on top, which put the campaign at ~12h. n=3 is the
+    figure CLAUDE.md cites and the one campaign 07 depends on.
+    """
+
+    def test_campaign_06_runs_two_batches(self):
+        assert len(CAMPAIGNS["06"]) == 2
+
+    def test_no_n5_arm_is_scheduled(self):
+        scheduled = [m for batch in CAMPAIGNS["06"] for m in batch]
+        assert not any("n5" in m for m in scheduled), scheduled
+
+    def test_the_n5_manifests_still_exist_so_it_can_be_re_added(self):
+        for side in ("claude", "gemini"):
+            assert Path(f"manifests/c06-ctrl-{side}-n5_manifest.yaml").is_file()
+
+
+class TestValidateThenRun:
+    """The campaign is released only if the validation arm actually succeeded.
+
+    Six copies of a broken run cost five hours and teach nothing, and the two
+    new code paths here (the skip_optimize branch, the in-component health gate)
+    have never met the real service.
+    """
+
+    def test_a_successful_arm_releases_the_campaign(self, tmp_path, monkeypatch):
+        from scripts import validate_then_run as vtr
+
+        released = []
+        monkeypatch.setattr(vtr, "submit", lambda m, d: "job-1")
+        monkeypatch.setattr(
+            vtr, "wait_for_jobs", lambda ids: dict.fromkeys(ids, "PIPELINE_STATE_SUCCEEDED")
+        )
+        monkeypatch.setattr(
+            vtr, "run_campaign", lambda c, confirm, log_dir: released.append(c) or 0
+        )
+        assert vtr.main("06", tmp_path) == 0
+        assert released == ["06"]
+
+    def test_a_failed_arm_holds_everything_back(self, tmp_path, monkeypatch):
+        from scripts import validate_then_run as vtr
+
+        released = []
+        monkeypatch.setattr(vtr, "submit", lambda m, d: "job-1")
+        monkeypatch.setattr(
+            vtr, "wait_for_jobs", lambda ids: dict.fromkeys(ids, "PIPELINE_STATE_FAILED")
+        )
+        monkeypatch.setattr(
+            vtr, "run_campaign", lambda c, confirm, log_dir: released.append(c) or 0
+        )
+        assert vtr.main("06", tmp_path) == 1
+        assert released == []
+
+    def test_an_unreadable_state_holds_everything_back(self, tmp_path, monkeypatch):
+        """UNKNOWN is not success, and must not be read as one."""
+        from scripts import validate_then_run as vtr
+
+        released = []
+        monkeypatch.setattr(vtr, "submit", lambda m, d: "job-1")
+        monkeypatch.setattr(vtr, "wait_for_jobs", lambda ids: {})
+        monkeypatch.setattr(
+            vtr, "run_campaign", lambda c, confirm, log_dir: released.append(c) or 0
+        )
+        assert vtr.main("06", tmp_path) == 1
+        assert released == []
+
+    def test_a_submit_failure_holds_everything_back(self, tmp_path, monkeypatch):
+        from scripts import validate_then_run as vtr
+
+        released = []
+
+        def _boom(_m, _d):
+            raise RuntimeError("quota")
+
+        monkeypatch.setattr(vtr, "submit", _boom)
+        monkeypatch.setattr(
+            vtr, "run_campaign", lambda c, confirm, log_dir: released.append(c) or 0
+        )
+        assert vtr.main("06", tmp_path) == 1
+        assert released == []
+
+    def test_the_validation_arm_is_the_cheapest_one(self):
+        """It must be eval-only and num_runs=1, or it is not cheap validation."""
+        from scripts.validate_then_run import VALIDATION_ARM
+        from wrangler.core.factory import PairFactory
+
+        m = PairFactory.load(VALIDATION_ARM["06"])
+        assert m.pipeline.get("skip_optimize") is True
+        assert m.pipeline.get("num_runs") == 1
+
+
+class TestAdoptARunningArm:
+    """Trimming a batch mid-flight means restarting the chain process.
+
+    CAMPAIGNS is read at import, so editing it cannot reach a chain already
+    running. --watch-job lets the replacement wait on the Vertex job the old
+    chain submitted rather than paying for the validation arm twice.
+    """
+
+    def test_it_waits_on_the_given_job_and_does_not_submit(self, tmp_path, monkeypatch):
+        from scripts import validate_then_run as vtr
+
+        submitted, released, watched = [], [], []
+        monkeypatch.setattr(vtr, "submit", lambda m, d: submitted.append(m))
+        monkeypatch.setattr(
+            vtr,
+            "wait_for_jobs",
+            lambda ids: watched.extend(ids) or dict.fromkeys(ids, "PIPELINE_STATE_SUCCEEDED"),
+        )
+        monkeypatch.setattr(
+            vtr, "run_campaign", lambda c, confirm, log_dir: released.append(c) or 0
+        )
+
+        assert vtr.main("06", tmp_path, watch_job="job-abc") == 0
+        assert submitted == [], "must not re-submit an arm already running"
+        assert watched == ["job-abc"]
+        assert released == ["06"]
+
+    def test_an_adopted_failure_still_holds_the_campaign_back(self, tmp_path, monkeypatch):
+        from scripts import validate_then_run as vtr
+
+        released = []
+        monkeypatch.setattr(
+            vtr, "wait_for_jobs", lambda ids: dict.fromkeys(ids, "PIPELINE_STATE_FAILED")
+        )
+        monkeypatch.setattr(
+            vtr, "run_campaign", lambda c, confirm, log_dir: released.append(c) or 0
+        )
+        assert vtr.main("06", tmp_path, watch_job="job-abc") == 1
+        assert released == []
+
+
+class TestJobStateIsReadAsAName:
+    """`str(job.state)` yields the bare ordinal, not the enum name.
+
+    A FAILED job stringifies to "5", so `_DONE` never matched and
+    `wait_for_jobs` polled a finished job forever. The gate held -- it never
+    released the campaign -- but it never returned either, so an overnight
+    chain would have stalled after batch 1 on any outcome, success included.
+    Found on the campaign-06 validation arm, which sat in a poll loop for
+    ~80 min after the job had already failed.
+    """
+
+    def test_a_numeric_state_becomes_its_enum_name(self):
+        from scripts.run_campaign import state_name
+
+        assert state_name(5) == "PIPELINE_STATE_FAILED"
+        assert state_name(4) == "PIPELINE_STATE_SUCCEEDED"
+
+    def test_an_enum_object_uses_its_name(self):
+        from scripts.run_campaign import state_name
+
+        class FakeEnum:
+            name = "PIPELINE_STATE_SUCCEEDED"
+
+        assert state_name(FakeEnum()) == "PIPELINE_STATE_SUCCEEDED"
+
+    def test_every_terminal_state_is_recognised_as_terminal(self):
+        """The bug in one line: a terminal job must end the poll loop."""
+        from scripts.run_campaign import _DONE, state_name
+
+        for ordinal in (4, 5, 7):  # SUCCEEDED, FAILED, CANCELLED
+            assert any(t in state_name(ordinal) for t in _DONE), ordinal
+
+    def test_a_running_state_is_not_terminal(self):
+        from scripts.run_campaign import _DONE, state_name
+
+        for ordinal in (1, 2, 3):
+            assert not any(t in state_name(ordinal) for t in _DONE), ordinal
+
+    def test_wait_returns_when_a_job_fails_rather_than_polling_forever(self):
+        from scripts.run_campaign import state_name, wait_for_jobs
+
+        slept = []
+        final = wait_for_jobs(["j1"], sleep_fn=slept.append, state_fn=lambda _: state_name(5))
+        assert final == {"j1": "PIPELINE_STATE_FAILED"}
+        assert slept == [], "a job that is already terminal must not sleep"
+
+    def test_an_unreadable_state_keeps_waiting_rather_than_releasing(self):
+        """A lookup failure must never be read as 'finished'."""
+        from scripts.run_campaign import _DONE
+
+        assert not any(t in "UNKNOWN" for t in _DONE)
