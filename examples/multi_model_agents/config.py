@@ -65,8 +65,16 @@ def model_location(model_str: str) -> str:
 
     Kept in sync with wrangler/core/models.py:model_location — see that
     docstring for why this cannot be driven by GOOGLE_CLOUD_LOCATION.
+
+    Reads the environment at *call* time, not the module constant bound at
+    import. The pipeline components set GCP_REGION inside the component body,
+    after the tarball is extracted and possibly after this module was already
+    imported; binding at import made the deployed copy route on a stale region
+    while wrangler's copy — which always read at call time — did not.
     """
-    return GCP_REGION if is_regional_model(model_str) else GLOBAL_LOCATION
+    if is_regional_model(model_str):
+        return os.environ.get("GCP_REGION", "us-central1")
+    return GLOBAL_LOCATION
 
 
 def resolve_model(model_str: str):
@@ -80,7 +88,10 @@ def resolve_model(model_str: str):
         return model_str
 
     location = model_location(model_str)
-    project = GCP_PROJECT_ID or os.environ.get("GOOGLE_CLOUD_PROJECT", "")
+    # Env at call time, not the import-time constant -- same reason as
+    # model_location above. A project set after import lands in the Claude
+    # resource path here, and getting it wrong routes to the wrong project.
+    project = os.environ.get("GCP_PROJECT_ID") or os.environ.get("GOOGLE_CLOUD_PROJECT", "")
 
     if model_str.startswith("claude"):
         from google.adk.models.anthropic_llm import Claude
