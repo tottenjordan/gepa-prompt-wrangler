@@ -60,6 +60,9 @@ INSTRUCTION = (
 MIN_INSTANCES = 2
 
 # Stamped onto every probe engine, so a sweeper knows which campaign owns it.
+# Overridable, because Campaign 01 is worth repeating: its distribution is what
+# `max_rerolls` is sized from, and a repeat labelled "01" would be
+# indistinguishable from the original at teardown.
 CAMPAIGN = "01"
 
 ARMS = {
@@ -70,7 +73,7 @@ ARMS = {
 }
 
 
-def deploy_arm(arm: str) -> str:
+def deploy_arm(arm: str, campaign: str = CAMPAIGN) -> str:
     spec = ARMS[arm]
     print(f"\n{'=' * 64}\n{arm}: model={spec['model']}, mcp={spec['include_mcp']}\n{'=' * 64}")
     t0 = time.time()
@@ -84,7 +87,7 @@ def deploy_arm(arm: str) -> str:
         # Scratch by construction. `wrangler engines` finds these by label
         # rather than by matching a name prefix, so a campaign's engines are
         # reapable even if nobody remembers what they were called.
-        labels={"lifecycle": "ephemeral", "campaign": CAMPAIGN},
+        labels={"lifecycle": "ephemeral", "campaign": campaign},
     )
     print(f"  {arm}: {engine_id}  ({time.time() - t0:.0f}s)")
     return engine_id
@@ -110,6 +113,14 @@ if __name__ == "__main__":
             "one. See docs/doe/01-engine-lottery.md"
         ),
     )
+    parser.add_argument(
+        "--campaign",
+        default=CAMPAIGN,
+        help=(
+            "Campaign label stamped on every engine, so `wrangler engines prune` can "
+            f"find this batch specifically (default: {CAMPAIGN})"
+        ),
+    )
     args = parser.parse_args()
 
     if args.replicates:
@@ -127,7 +138,7 @@ if __name__ == "__main__":
     failed: dict[str, str] = {}
     for arm in wanted:
         try:
-            deployed[arm] = deploy_arm(arm)
+            deployed[arm] = deploy_arm(arm, campaign=args.campaign)
         except Exception as exc:
             # Keep going: three arms plus a stated gap beats losing the run to
             # one bad deploy and having to redo the others.
