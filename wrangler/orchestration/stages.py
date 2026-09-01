@@ -597,6 +597,9 @@ def stage_optimize(exp: Experiment, pair_id: str | None = None) -> None:
             judge_model=judge,
             initial_instruction=pair.system_prompt,
             max_metric_calls=max_calls,
+            # Without this GEPA optimizes whatever model the _opt module's
+            # config names, not the one this pair declares.
+            model=pair.model,
         )
         elapsed = time.time() - t0
         print(f"  [{pair.id}] Done ({_fmt_duration(elapsed)}) — {len(optimized)} chars")
