@@ -185,6 +185,17 @@ For multi-model agents: `SEARCH_MCP_SERVER`, `BOOKING_MCP_SERVER`, `EXPENSE_MCP_
   and why an age-based sweep would have deleted someone else's live work, is in
   [docs/notes/engine-lifecycle.md](docs/notes/engine-lifecycle.md).
 
+- **A manifest pair can be switched off with `enabled: false`.** Deleting a pair loses its
+  model id, agent module and the reason; commenting it out loses the reason and rots. A
+  disabled pair stays parsed and carries a `disabled_reason`. A sweep skips it and prints
+  why; naming it explicitly (`--pair opus`) still runs it, because that is a deliberate act.
+  Read `manifest.enabled_pairs`, never `manifest.pairs`, when choosing what to run — the
+  local path filtered and the pipeline path did not, so a disabled pair still ran there.
+  **The opus tier is currently disabled** across every manifest: 15 gated deploys across
+  three model versions and two prompts produced nothing above 50% reach against a concurrent
+  control of four tiers at 93–100%, so evals against it measure dropout rather than the
+  prompt ([docs/analysis/2026-09-01-opus-serving-failure.md](docs/analysis/2026-09-01-opus-serving-failure.md)).
+
 - **A fresh deploy is health-gated, and it is on by default.** Roughly four in ten
   deployments come up unable to serve, failing by returning 200 with no inference — so an
   ungated deploy hands the eval an engine that silently drops a third of its cases, and the

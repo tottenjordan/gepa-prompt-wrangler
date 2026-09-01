@@ -11,6 +11,9 @@ pairs:
     model: "claude-opus-4-8"
     description: "Claude Opus 4.8 — optimized"
     agent_module: "examples/multi_model_agents/agents/opus48_agent"
+    enabled: false
+    disabled_reason: >-
+      opus cannot be deployed healthily: 15 gated deploys across claude-opus-4-6/-4-8/-5 and two prompts produced nothing above 50% reach, against a concurrent control of four tiers at 93-100%. Evals against it measure dropout, not the prompt. Re-enable when the reach recovers. See docs/analysis/2026-09-01-opus-serving-failure.md
     system_prompt: |
       You are a corporate travel and expense assistant. Always use tools before responding — never guess information. Before submitting any expense, call check_expense_policy first. For multi-step requests, complete all tool calls before summarizing. Include specific details from tool results: flight numbers, prices, policy limits, and booking confirmations. Keep responses concise and factual. For flight searches, convert city names to primary airport codes (New York→JFK, Chicago→ORD, San Francisco→SFO, Los Angeles→LAX, Denver→DEN, Boston→BOS, Miami→MIA, London→LHR, Tokyo→NRT).
 

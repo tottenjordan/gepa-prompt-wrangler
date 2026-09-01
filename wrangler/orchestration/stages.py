@@ -207,9 +207,24 @@ def _resolve_eval_path(manifest: Manifest, manifest_dir: Path | None = None) -> 
 
 
 def _filter_pairs(manifest: Manifest, pair_id: str | None) -> list[AgentPromptPair]:
+    """Select the pairs a stage should act on.
+
+    Naming a pair explicitly runs it even if disabled: `--pair opus` is a
+    deliberate act and silently ignoring the flag would be worse than running
+    something known to be unhealthy. A sweep, which names nothing, skips
+    disabled pairs and says why.
+    """
     if pair_id:
         return [manifest.get_pair(pair_id)]
-    return list(manifest.pairs)
+
+    enabled = []
+    for pair in manifest.pairs:
+        if pair.enabled:
+            enabled.append(pair)
+        else:
+            why = pair.disabled_reason or "no reason recorded"
+            print(f"  Skipping [{pair.id}] — disabled: {why}", flush=True)
+    return enabled
 
 
 def _manifest_dir(exp: Experiment) -> Path:

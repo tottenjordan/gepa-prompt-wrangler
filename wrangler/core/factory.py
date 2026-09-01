@@ -31,6 +31,13 @@ class AgentPromptPair:
     agent_module: str = ""
     costs: dict[str, float] | None = None
 
+    # A pair can be switched off without deleting it. Deleting loses the model
+    # id, the agent module and the reason; commenting it out loses the reason
+    # too, and a commented block rots. `enabled: false` with a reason keeps the
+    # configuration honest and makes re-enabling a one-line diff.
+    enabled: bool = True
+    disabled_reason: str = ""
+
     def summary(self) -> str:
         """One-line summary for display."""
         trunc = self.system_prompt[:60].replace("\n", " ")
@@ -61,6 +68,18 @@ class Manifest:
     @property
     def pair_ids(self) -> list[str]:
         return [p.id for p in self.pairs]
+
+    @property
+    def enabled_pairs(self) -> list[AgentPromptPair]:
+        """Pairs a sweep should act on. Use this, not ``pairs``.
+
+        ``pairs`` is everything the manifest declares, including entries
+        switched off with ``enabled: false``. Reading it directly is how a
+        disabled pair gets run anyway -- the local path filtered and the
+        pipeline path did not, so `wrangler pipeline run` would still have
+        deployed and evaluated opus after it was disabled everywhere else.
+        """
+        return [p for p in self.pairs if p.enabled]
 
     def get_pair(self, pair_id: str) -> AgentPromptPair:
         """Look up a pair by ID, raising KeyError if not found."""
@@ -129,6 +148,8 @@ class PairFactory:
                     engine_id=entry.get("engine_id", ""),
                     agent_module=entry.get("agent_module", ""),
                     costs=costs,
+                    enabled=entry.get("enabled", True),
+                    disabled_reason=entry.get("disabled_reason", ""),
                 )
             )
 

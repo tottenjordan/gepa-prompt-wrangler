@@ -361,6 +361,8 @@ def _stub_experiment(tmp_path, config=None, engine_id=""):
         model = "m"
         system_prompt = "prompt"
         agent_module = "agents/x"
+        enabled = True
+        disabled_reason = ""
 
         def __init__(self, eid):
             self.engine_id = eid

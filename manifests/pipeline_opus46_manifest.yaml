@@ -11,6 +11,9 @@ pairs:
     model: "claude-opus-4-6"
     description: "Claude Opus 4.6 — optimized"
     agent_module: "examples/multi_model_agents/agents/opus_agent"
+    enabled: false
+    disabled_reason: >-
+      opus cannot be deployed healthily: 15 gated deploys across claude-opus-4-6/-4-8/-5 and two prompts produced nothing above 50% reach, against a concurrent control of four tiers at 93-100%. Evals against it measure dropout, not the prompt. Re-enable when the reach recovers. See docs/analysis/2026-09-01-opus-serving-failure.md
     system_prompt: "You are a helpful assistant. Use the available tools to answer user questions."
 
 eval_config:

@@ -36,11 +36,14 @@ pairs:
     system_prompt: "You are a helpful assistant. Use the available tools to answer user questions."
 
   - id: "opus-claude-4"
-    model: "claude-opus-4-6"
+    model: "claude-opus-5"
     description: "Tier 5 — expert-level planning ($75/M output tokens)"
     agent_module: "examples/multi_model_agents/agents/opus_agent.py"
     engine_id: "7807397323104845824"
     system_prompt: "You are a helpful assistant. Use the available tools to answer user questions."
+    enabled: false
+    disabled_reason: >-
+      cannot be deployed healthily: 15 gated deploys across claude-opus-4-6/-4-8/-5 and two prompts produced nothing above 50% reach, against a concurrent control of four tiers at 93-100%. Evals against it measure dropout, not the prompt. See docs/analysis/2026-09-01-opus-serving-failure.md
 
 eval_config:
   judge_model: "gemini-3.5-flash"
