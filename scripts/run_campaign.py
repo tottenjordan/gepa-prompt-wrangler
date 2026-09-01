@@ -21,7 +21,6 @@ Usage:
 from __future__ import annotations
 
 import argparse
-import subprocess
 import sys
 import time
 from pathlib import Path
@@ -94,17 +93,70 @@ def validate(batches: list[tuple[str, str]]) -> list[str]:
     return problems
 
 
-def launch(manifest_path: str, log_dir: Path) -> subprocess.Popen:
+# Terminal PipelineJob states. Anything else means still working.
+_DONE = ("SUCCEEDED", "FAILED", "CANCELLED")
+
+# Vertex bills by the minute, not the poll, so this only needs to be often
+# enough to keep the next batch moving.
+POLL_SECONDS = 120
+
+
+def submit(manifest_path: str, log_dir: Path) -> str:
+    """Submit one arm and return its Vertex job id.
+
+    Calls ``deploy_pipeline`` in process rather than shelling out to the CLI:
+    the job id has to come back so the batch can be waited on, and scraping it
+    out of stdout would be one string-format change away from silently
+    returning nothing.
+    """
+    from wrangler.pipeline.deploy_pipeline import deploy_pipeline
+
     log_dir.mkdir(parents=True, exist_ok=True)
-    log = log_dir / f"{Path(manifest_path).stem}.log"
-    handle = log.open("w")
-    proc = subprocess.Popen(
-        ["uv", "run", "wrangler", "pipeline", "run", manifest_path],
-        stdout=handle,
-        stderr=subprocess.STDOUT,
-    )
-    print(f"    submitted {Path(manifest_path).name}  (pid {proc.pid}, log {log})", flush=True)
-    return proc
+    result = deploy_pipeline(manifest_path=manifest_path)
+    job_id = result["job_id"]
+    print(f"    submitted {Path(manifest_path).name} -> job {job_id}", flush=True)
+    print(f"      {result['dashboard_uri']}", flush=True)
+    (log_dir / f"{Path(manifest_path).stem}.job").write_text(job_id + "\n")
+    return job_id
+
+
+def wait_for_jobs(job_ids: list[str], sleep_fn=time.sleep, state_fn=None) -> dict[str, str]:
+    """Block until every job reaches a terminal state. Returns id -> final state.
+
+    This is the whole reason the runner exists. ``job.submit()`` is
+    non-blocking, so waiting on the *submission* -- which is what an earlier
+    version did -- waits about ninety seconds and then launches the next batch
+    on top of the last. Six arms would have run at once, three per publisher,
+    which is exactly the contention the pairing is meant to avoid.
+    """
+    state_of = state_fn or _job_state
+    pending = list(job_ids)
+    final: dict[str, str] = {}
+    while pending:
+        for job_id in list(pending):
+            state = state_of(job_id)
+            if any(t in state for t in _DONE):
+                final[job_id] = state
+                pending.remove(job_id)
+                print(f"    job {job_id}: {state}", flush=True)
+        if pending:
+            sleep_fn(POLL_SECONDS)
+    return final
+
+
+def _job_state(job_id: str) -> str:
+    from google.cloud import aiplatform
+
+    from wrangler.core.config import GCP_PROJECT_ID, GCP_REGION
+
+    name = f"projects/{GCP_PROJECT_ID}/locations/{GCP_REGION}/pipelineJobs/{job_id}"
+    try:
+        return str(aiplatform.PipelineJob.get(resource_name=name).state)
+    except Exception as exc:
+        # A lookup failure must not be read as "finished" -- that would release
+        # the next batch on top of a still-running one.
+        print(f"    job {job_id}: state unreadable ({type(exc).__name__}), still waiting")
+        return "UNKNOWN"
 
 
 def run_campaign(campaign: str, confirm: bool, log_dir: Path, sleep_fn=time.sleep) -> int:
@@ -130,16 +182,23 @@ def run_campaign(campaign: str, confirm: bool, log_dir: Path, sleep_fn=time.slee
         return 0
 
     for i, (a, b) in enumerate(batches, 1):
-        print(f"\n--- batch {i} ---", flush=True)
-        first = launch(a, log_dir)
+        print(f"\n--- batch {i} of {len(batches)} ---", flush=True)
+        jobs = [submit(a, log_dir)]
         if _needs_stagger(a) or _needs_stagger(b):
             mins = OPTIMIZE_STAGGER // 60
             print(f"    staggering {mins} min — both arms judge with gemini-3.5-flash", flush=True)
             sleep_fn(OPTIMIZE_STAGGER)
-        second = launch(b, log_dir)
-        for proc in (first, second):
-            proc.wait()
-        print(f"--- batch {i} submitted ---", flush=True)
+        jobs.append(submit(b, log_dir))
+
+        print(f"    waiting for {len(jobs)} job(s) to finish before the next batch", flush=True)
+        final = wait_for_jobs(jobs, sleep_fn=sleep_fn)
+        failed = [j for j, st in final.items() if "SUCCEEDED" not in st]
+        if failed:
+            # Report and continue: a later batch may still be worth having, and
+            # a half-finished campaign that says which half is better than one
+            # that stops silently.
+            print(f"    batch {i} had {len(failed)} non-successful job(s): {failed}", flush=True)
+        print(f"--- batch {i} complete ---", flush=True)
     return 0
 
 

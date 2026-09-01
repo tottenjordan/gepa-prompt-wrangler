@@ -42,13 +42,13 @@ class TestPairingRule:
 class TestDryRunByDefault:
     def test_dry_run_submits_nothing(self, tmp_path, monkeypatch):
         launched = []
-        monkeypatch.setattr("scripts.run_campaign.launch", lambda m, d: launched.append(m))
+        monkeypatch.setattr("scripts.run_campaign.submit", lambda m, d: launched.append(m))
         assert run_campaign("07", confirm=False, log_dir=tmp_path) == 0
         assert launched == []
 
     def test_a_bad_pairing_refuses_even_with_yes(self, tmp_path, monkeypatch):
         launched = []
-        monkeypatch.setattr("scripts.run_campaign.launch", lambda m, d: launched.append(m))
+        monkeypatch.setattr("scripts.run_campaign.submit", lambda m, d: launched.append(m))
         monkeypatch.setitem(
             CAMPAIGNS,
             "bad",
@@ -58,16 +58,75 @@ class TestDryRunByDefault:
         assert launched == []
 
 
+class TestBatchesActuallySerialise:
+    """`job.submit()` is non-blocking, so waiting on the submission waits ~90s.
+
+    An earlier version did exactly that: `proc.wait()` on the CLI subprocess.
+    All six campaign-06 arms would have been submitted within minutes and run
+    concurrently on Vertex -- three Claude and three Gemini at once, which is
+    the same-publisher contention the pairing exists to prevent. The runner has
+    to wait for the *job*, not the submission.
+    """
+
+    def test_the_next_batch_waits_for_the_previous_jobs(self, tmp_path, monkeypatch):
+        order = []
+
+        def _submit(manifest, _log_dir):
+            order.append(("submit", Path(manifest).stem))
+            return f"job-{len(order)}"
+
+        def _wait(job_ids, sleep_fn=None, state_fn=None):
+            order.append(("wait", tuple(job_ids)))
+            return dict.fromkeys(job_ids, "PipelineState.PIPELINE_STATE_SUCCEEDED")
+
+        monkeypatch.setattr("scripts.run_campaign.submit", _submit)
+        monkeypatch.setattr("scripts.run_campaign.wait_for_jobs", _wait)
+        run_campaign("06", confirm=True, log_dir=tmp_path, sleep_fn=lambda _s: None)
+
+        kinds = [k for k, _ in order]
+        # submit, submit, wait — three times over, never two waits in a row and
+        # never a third submit before the first wait.
+        assert kinds == ["submit", "submit", "wait"] * 3
+
+    def test_a_lookup_failure_is_not_treated_as_finished(self):
+        """Otherwise the next batch launches on top of a running one."""
+        from scripts.run_campaign import wait_for_jobs
+
+        states = iter(["UNKNOWN", "PipelineState.PIPELINE_STATE_SUCCEEDED"])
+        out = wait_for_jobs(["j1"], sleep_fn=lambda _s: None, state_fn=lambda _j: next(states))
+        assert "SUCCEEDED" in out["j1"]
+
+    def test_a_failed_job_does_not_stop_the_campaign(self, tmp_path, monkeypatch):
+        """A half-finished campaign that says which half beats one that stops silently."""
+        monkeypatch.setattr("scripts.run_campaign.submit", lambda m, d: "j")
+        monkeypatch.setattr(
+            "scripts.run_campaign.wait_for_jobs",
+            lambda ids, **kw: dict.fromkeys(ids, "PipelineState.PIPELINE_STATE_FAILED"),
+        )
+        assert run_campaign("07", confirm=True, log_dir=tmp_path, sleep_fn=lambda _s: None) == 0
+
+    def test_every_terminal_state_ends_the_wait(self):
+        from scripts.run_campaign import wait_for_jobs
+
+        for state in (
+            "PIPELINE_STATE_SUCCEEDED",
+            "PIPELINE_STATE_FAILED",
+            "PIPELINE_STATE_CANCELLED",
+        ):
+            out = wait_for_jobs(["j"], sleep_fn=lambda _s: None, state_fn=lambda _j, s=state: s)
+            assert out["j"] == state
+
+
 class TestStagger:
     def test_an_optimize_batch_staggers(self, tmp_path, monkeypatch):
         """Both arms judge with gemini-3.5-flash, so their optimize phases share quota."""
         naps, procs = [], []
 
-        class _P:
-            def wait(self):
-                return 0
-
-        monkeypatch.setattr("scripts.run_campaign.launch", lambda m, d: procs.append(m) or _P())
+        monkeypatch.setattr("scripts.run_campaign.submit", lambda m, d: procs.append(m) or "j")
+        monkeypatch.setattr(
+            "scripts.run_campaign.wait_for_jobs",
+            lambda ids, **kw: dict.fromkeys(ids, "PIPELINE_STATE_SUCCEEDED"),
+        )
         run_campaign("07", confirm=True, log_dir=tmp_path, sleep_fn=naps.append)
         assert naps, "campaign 07 optimizes; it must stagger"
         assert all(n > 0 for n in naps)
@@ -76,11 +135,11 @@ class TestStagger:
         """Campaign 06 skips optimize, so there is no shared-judge collision to avoid."""
         naps, procs = [], []
 
-        class _P:
-            def wait(self):
-                return 0
-
-        monkeypatch.setattr("scripts.run_campaign.launch", lambda m, d: procs.append(m) or _P())
+        monkeypatch.setattr("scripts.run_campaign.submit", lambda m, d: procs.append(m) or "j")
+        monkeypatch.setattr(
+            "scripts.run_campaign.wait_for_jobs",
+            lambda ids, **kw: dict.fromkeys(ids, "PIPELINE_STATE_SUCCEEDED"),
+        )
         run_campaign("06", confirm=True, log_dir=tmp_path, sleep_fn=naps.append)
         assert naps == []
         assert len(procs) == 6, "three batches of two arms"
