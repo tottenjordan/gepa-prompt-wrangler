@@ -143,3 +143,77 @@ class TestStagger:
         run_campaign("06", confirm=True, log_dir=tmp_path, sleep_fn=naps.append)
         assert naps == []
         assert len(procs) == 6, "three batches of two arms"
+
+
+class TestValidateThenRun:
+    """The campaign is released only if the validation arm actually succeeded.
+
+    Six copies of a broken run cost five hours and teach nothing, and the two
+    new code paths here (the skip_optimize branch, the in-component health gate)
+    have never met the real service.
+    """
+
+    def test_a_successful_arm_releases_the_campaign(self, tmp_path, monkeypatch):
+        from scripts import validate_then_run as vtr
+
+        released = []
+        monkeypatch.setattr(vtr, "submit", lambda m, d: "job-1")
+        monkeypatch.setattr(
+            vtr, "wait_for_jobs", lambda ids: dict.fromkeys(ids, "PIPELINE_STATE_SUCCEEDED")
+        )
+        monkeypatch.setattr(
+            vtr, "run_campaign", lambda c, confirm, log_dir: released.append(c) or 0
+        )
+        assert vtr.main("06", tmp_path) == 0
+        assert released == ["06"]
+
+    def test_a_failed_arm_holds_everything_back(self, tmp_path, monkeypatch):
+        from scripts import validate_then_run as vtr
+
+        released = []
+        monkeypatch.setattr(vtr, "submit", lambda m, d: "job-1")
+        monkeypatch.setattr(
+            vtr, "wait_for_jobs", lambda ids: dict.fromkeys(ids, "PIPELINE_STATE_FAILED")
+        )
+        monkeypatch.setattr(
+            vtr, "run_campaign", lambda c, confirm, log_dir: released.append(c) or 0
+        )
+        assert vtr.main("06", tmp_path) == 1
+        assert released == []
+
+    def test_an_unreadable_state_holds_everything_back(self, tmp_path, monkeypatch):
+        """UNKNOWN is not success, and must not be read as one."""
+        from scripts import validate_then_run as vtr
+
+        released = []
+        monkeypatch.setattr(vtr, "submit", lambda m, d: "job-1")
+        monkeypatch.setattr(vtr, "wait_for_jobs", lambda ids: {})
+        monkeypatch.setattr(
+            vtr, "run_campaign", lambda c, confirm, log_dir: released.append(c) or 0
+        )
+        assert vtr.main("06", tmp_path) == 1
+        assert released == []
+
+    def test_a_submit_failure_holds_everything_back(self, tmp_path, monkeypatch):
+        from scripts import validate_then_run as vtr
+
+        released = []
+
+        def _boom(_m, _d):
+            raise RuntimeError("quota")
+
+        monkeypatch.setattr(vtr, "submit", _boom)
+        monkeypatch.setattr(
+            vtr, "run_campaign", lambda c, confirm, log_dir: released.append(c) or 0
+        )
+        assert vtr.main("06", tmp_path) == 1
+        assert released == []
+
+    def test_the_validation_arm_is_the_cheapest_one(self):
+        """It must be eval-only and num_runs=1, or it is not cheap validation."""
+        from scripts.validate_then_run import VALIDATION_ARM
+        from wrangler.core.factory import PairFactory
+
+        m = PairFactory.load(VALIDATION_ARM["06"])
+        assert m.pipeline.get("skip_optimize") is True
+        assert m.pipeline.get("num_runs") == 1
