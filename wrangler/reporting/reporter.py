@@ -9,7 +9,7 @@ import matplotlib as mpl
 mpl.use("Agg")
 
 from ..core.config import MODEL_COSTS
-from ..core.models import AGENT_ORDER, PROVIDERS
+from ..core.models import AGENT_ORDER, PROVIDERS, blended_cost_for_report, measured_cost
 from ..core.models import blended_cost_for_report as blended_cost
 from .analysis import (
     METRIC_LABELS,
@@ -413,30 +413,58 @@ def _cost_benefit_section(results: dict, ordered: list[str]) -> list[str]:
     """Cost-benefit analysis with quality/$ ranking."""
     lines = []
     lines.append("## Cost-Benefit Analysis\n")
+    # Two cost bases, deliberately side by side. Blended $/M is the price list
+    # against an assumed 4:1 ratio -- arithmetic you can do without running
+    # anything. Spend $ is what this run actually cost, from the tokens it used.
+    # They answer different questions and reporting only one hides the other:
+    # a cheap-per-token model that answers verbosely can outspend a dear terse
+    # one, which the list-price column cannot show.
     lines.append(
-        "| Agent | Model | Input $/M | Output $/M | Blended $/M | Before | After | Delta | Quality/$ |"
+        "| Agent | Model | Blended $/M | Spend $ | Before | After | Delta | Quality/$ | $/quality pt |"
     )
     lines.append(
-        "|-------|-------|-----------|------------|-------------|--------|-------|-------|----------|"
+        "|-------|-------|-------------|---------|--------|-------|-------|-----------|--------------|"
     )
 
     for name in ordered:
         model = results[name].get("model", "unknown")
-        cost = MODEL_COSTS.get(model, {"input": 0, "output": 0})
-        blend = blended_cost(model)
+        blend = blended_cost_for_report(model)
         before = results[name].get("before", {})
         after = results[name].get("after", before)
         avg_b = sum(before.values()) / max(len(before), 1) if before else 0
         avg_a = sum(after.values()) / max(len(after), 1) if after else 0
         delta = avg_a - avg_b
         qpd = avg_a / max(blend, 0.01)
+
+        usage = results[name].get("token_usage") or {}
+        if usage:
+            spent = measured_cost(
+                model,
+                usage.get("input_tokens", 0),
+                usage.get("output_tokens", 0),
+                custom_costs=results[name].get("costs_per_million"),
+            )
+            spend_col = f"${spent['total_usd']:.4f}" if spent["priced"] else "unpriced"
+            per_pt = (
+                f"${spent['total_usd'] / avg_a:.4f}" if spent["priced"] and avg_a > 0 else "n/a"
+            )
+        else:
+            # No token data recorded. Printing $0.00 would read as "this run
+            # was free" rather than "we did not measure it".
+            spend_col, per_pt = "n/a", "n/a"
+
         lines.append(
-            f"| {name.title()} | `{model}` | ${cost['input']:.2f} | ${cost['output']:.2f} | ${blend:.2f} | {avg_b:.2f} | {avg_a:.2f} | {delta:+.02f} | {qpd:.3f} |"
+            f"| {name.title()} | `{model}` | ${blend:.2f} | {spend_col} | "
+            f"{avg_b:.2f} | {avg_a:.2f} | {delta:+.02f} | {qpd:.3f} | {per_pt} |"
         )
 
     lines.append("")
     lines.append(
-        "*Blended $/M = weighted average assuming 4:1 input:output token ratio. Quality/$ = avg quality / blended cost.*\n"
+        "*Blended $/M = list price at an assumed 4:1 input:output ratio. "
+        "Spend $ = this run's actual cost from measured token usage. "
+        "Quality/$ uses list price; $/quality pt uses measured spend — a model can "
+        "look cheap on one and dear on the other, which is the point of showing both. "
+        "`n/a` means no token usage was recorded, not that the run was free.*\n"
     )
     return lines
 
