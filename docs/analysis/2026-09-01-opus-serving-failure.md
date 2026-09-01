@@ -1,7 +1,7 @@
 # Opus fails on Agent Engine, and it is not the model id, the region, or the prompt
 
 **Investigated 2026-08-31 → 2026-09-01.** Prompted by opus failing six consecutive
-health-gated deploys while the other four tiers sat at 93–100%.
+health-gated deploys while the other four tiers sat at 97–100%.
 
 **Conclusion: opus-tier models have a systematically elevated empty-stream rate on the
 Agent Engine serving path.** Twelve deploys across three opus versions produced **zero**
@@ -33,15 +33,15 @@ it is the newest and no worse — but the change did not fix anything.
 | Wrong region | `.env` and `model_location()` | already `global` |
 | Model not servable | direct `AnthropicVertex(region="global")` call to all three | all answer `OK` |
 | Model too slow for a deadline | tool-using turn, `max_tokens=8192`, 3 reps each | 1.6–3.9s mean, comparable to sonnet |
-| Claude family generally | sonnet is Claude | 93% healthy, concurrently |
+| Claude family generally | sonnet is Claude | 97% healthy, concurrently |
 | Scaling config drift | `min_instances` on every engine | all `2` |
-| **Time-of-day / regional load** | **control probe on 4 engines in the same window** | **flash 100%, lite 100%, pro 93%, sonnet 93%** |
+| **Time-of-day / regional load** | **control probe on 4 engines in the same window** | **flash 30/30, lite 30/30, pro 29/30, sonnet 29/30 — 97–100%** |
 | **Measurement artifact** | **nonce join vs client count on a 60-request gate probe** | **29 = 29, exact** |
 | Agent module differs | `diff opus_agent.py sonnet_agent.py` | identical but for model + prompt |
 | **The opus prompt** | **redeploy with the generic prompt** | **51.7% — still fails** |
 
 The two in bold are the ones worth dwelling on. The **control** is what rules out "the whole
-region is unhappy tonight" — four engines measured 93–100% in the same hours opus was at
+region is unhappy tonight" — four engines measured 97–100% in the same hours opus was at
 0–50%. The **nonce join** rules out the possibility that opus was answering and the probe
 was failing to count it: Agent Engine's structured log stream recorded exactly 29 inferences
 for 60 requests, and the client independently counted 29. The empty streams really are
@@ -73,3 +73,17 @@ engines than on any other tier.
 - [../doe/01-engine-lottery.md](../doe/01-engine-lottery.md) — the per-deployment lottery this is *not*
 - [../notes/silent-failures.md](../notes/silent-failures.md) #5 — the empty-stream defect itself
 - [../escalations/2026-08-23-geap-empty-stream.md](../escalations/2026-08-23-geap-empty-stream.md)
+
+---
+
+## Correction, 2026-09-01
+
+The control figures above originally read "pro 93%, sonnet 93%". The archived
+probe (`docs/data/probes/time_control.jsonl.gz`) records 29/30 for both, which is
+97%, not 93% — the write-up was made from a partial read while the probe was
+still running and 28 of 30 attempts had landed.
+
+The conclusion is unaffected and slightly strengthened: opus reached ≤50%
+against a concurrent control that was **97–100%**, not 93–100%. Corrected here
+rather than silently, because the number is cited as evidence against the
+"the region is unhappy tonight" explanation.

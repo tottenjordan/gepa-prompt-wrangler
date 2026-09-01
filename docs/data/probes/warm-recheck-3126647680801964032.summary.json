@@ -1,0 +1,11 @@
+{
+  "reached": 15,
+  "n": 60,
+  "rate": 0.25,
+  "ci_low": 0.15776522530056675,
+  "ci_high": 0.37232070077047824,
+  "threshold": 0.8,
+  "passed": false
+}
+
+[exited with code 0]
