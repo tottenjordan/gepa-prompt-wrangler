@@ -643,3 +643,71 @@ persists `coverage` and `scoring` (`submitted` / `scored` / `source`, where sour
 or `gcs_recovery`), and the experiment stage records the same. A run that has to be
 interpreted from a log file is not a durable measurement — the same mistake as the counts
 above, one level up.
+
+## 10. A finished pipeline job polls forever, because its state stringifies to a number
+
+Found 2026-09-01 on the campaign-06 validation arm. The arm had already failed;
+the watcher sat in its poll loop for another ~80 minutes.
+
+`aiplatform.PipelineJob.state` is a proto-plus enum. `str()` on it yields the
+bare **ordinal**, not the name:
+
+```python
+str(job.state)        # '5'   -- not 'PIPELINE_STATE_FAILED'
+job.state.name        # 'PIPELINE_STATE_FAILED'
+```
+
+The campaign runner tested `any(t in state for t in ("SUCCEEDED", "FAILED",
+"CANCELLED"))`. Against `'5'` that is never true, so a terminal job read as
+still-running and `wait_for_jobs` never returned.
+
+**Why it is a silent failure and not just a hang.** The gate held — the campaign
+was never released off a failed arm, which is the safety-critical half — so the
+symptom looked like "the arm is still going", indistinguishable from a slow but
+healthy run. It would have bitten identically on **success**: the overnight chain
+stalls after batch 1 and the remaining batches never launch, with nothing in the
+log saying so. A gate that cannot say *yes* is as broken as one that cannot say
+*no*; only one of the two shows up as a wasted night.
+
+Fix: `state_name()` in `scripts/run_campaign.py` reads `.name` and falls back to
+an ordinal table. Ordinals: 1 QUEUED, 2 PENDING, 3 RUNNING, 4 SUCCEEDED,
+5 FAILED, 6 CANCELLING, 7 CANCELLED, 8 PAUSED.
+
+**Generalisation worth keeping:** any string match against a GCP enum is suspect.
+Compare on `.name`, and prefer a test that asserts every terminal ordinal is
+classified terminal over one that asserts a single happy path.
+
+## 11. An eval-only run meets a component that assumes optimization happened
+
+Three separate instances of one class, fixed one at a time across three
+pipeline submissions — roughly two hours of Vertex each to discover the next.
+
+`skip_optimize: true` produces a run with **no `stages/optimize/{pair}.json`**.
+That is the point: a control arm evaluates an unchanged prompt twice, and the
+noise floor is the delta. Every component reachable in that branch must tolerate
+the artifact's absence.
+
+| # | Component | What it did | Found by |
+| --- | --- | --- | --- |
+| 1 | `generate_analysis` | `_read_stage("optimize")` unconditional | run 1 |
+| 2 | `eval_single_agent` | downloaded the optimize blob when `phase="after"` | run 2 |
+| 3 | `redeploy_single_agent` | reads it unconditionally — **legitimate**, it runs only inside the optimize branch | — |
+
+The eval one is the instructive failure: `redeploy_output=""` was *fine* (the
+engine id comes from the deploy stage regardless; the parameter is only a KFP
+data dependency), and `eval_before` had already passed through the same function
+with the same empty value. Only `phase="after"` took the branch that reached for
+the missing blob. A parameter being harmless in one phase says nothing about the
+other.
+
+Absent now means **unchanged**, so the prompt falls back to the one deploy
+recorded — the right answer for a control arm rather than a placeholder.
+
+**The lesson is about the fix, not the bug.** After instance 1 the correct move
+was to grep every reader of the optimize stage and check them together; instead
+each was fixed where it surfaced, and the pipeline charged ~2 h to reveal the
+next one. `tests/test_pipeline.py::test_no_component_reads_the_optimize_stage_unguarded`
+now walks all of them and requires each to be a write, guarded by `exists()`, or
+inside `redeploy`. When a defect is positional rather than logical — "this code
+path assumed a file exists" — enumerate the positions before fixing the one you
+can see.
