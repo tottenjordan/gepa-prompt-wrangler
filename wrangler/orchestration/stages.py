@@ -90,6 +90,31 @@ def _validate_sampler_config(
                 )
 
 
+def _sum_token_usage(*stages) -> dict:
+    """Total tokens across the stages of one arm.
+
+    The eval stages each record their own `token_usage`, and the optimize stage
+    records an estimate. Spend for an arm is the sum, so the reporter is handed
+    one figure rather than being left to add up artifacts it never sees.
+
+    Returns {} when no stage recorded anything, which the reporter prints as
+    "n/a" -- printing $0.00 would read as "this run was free" rather than "we
+    did not measure it".
+    """
+    total = {"input_tokens": 0, "output_tokens": 0}
+    seen = False
+    for stage in stages:
+        usage = (stage or {}).get("token_usage") or {}
+        if not usage:
+            continue
+        seen = True
+        total["input_tokens"] += usage.get("input_tokens", 0) or 0
+        total["output_tokens"] += usage.get("output_tokens", 0) or 0
+        if usage.get("is_estimate"):
+            total["is_estimate"] = True
+    return total if seen else {}
+
+
 def _post_eval_sanity_check(
     stage_name: str,
     stage_data: dict,
@@ -471,6 +496,10 @@ def stage_deploy(exp: Experiment, pair_id: str | None = None) -> None:
             # fail by returning 200 with no inference -- so an ungated deploy
             # hands the eval an engine that quietly drops a third of its cases.
             gate_cfg = health_gate_config(exp.config)
+            # Bound before the branch so the enforcement below has something
+            # to read when the gate is off. Empty means "not probed", which is
+            # not the same as "probed and passed".
+            health: dict = {}
             if gate_cfg["enabled"]:
                 # Bound explicitly rather than closed over: the call happens in
                 # this iteration today, but a lambda capturing loop variables is
@@ -511,9 +540,16 @@ def stage_deploy(exp: Experiment, pair_id: str | None = None) -> None:
                 # state on 2026-08-31.
                 if health["engine_id"] != engine_id:
                     _sync_env_engine_id(pair.id, health["engine_id"])
-                enforce_health_gate(health, gate_cfg["required"], pair.id)
 
+            # Persist before enforcing. A required gate raises, and if that
+            # happened first the deploy record -- including the id of an engine
+            # that is up and costing money -- was never written, leaving it
+            # orphaned with nothing in the repo naming it. That is the exact
+            # situation docs/notes/engine-lifecycle.md exists about, and every
+            # c06 manifest sets required: true.
             exp.merge_pair("deploy", pair.id, record)
+            if health:
+                enforce_health_gate(health, gate_cfg["required"], pair.id)
 
 
 def stage_eval(
@@ -812,6 +848,14 @@ def stage_report(exp: Experiment, use_paperbanana: bool = True) -> None:
             "after_std": eval_after.get(pair_id, {}).get("scores_std", {}),
             "num_runs": eval_before.get(pair_id, {}).get("num_runs", 1),
             "optimized_prompt": optimize_data.get(pair_id, {}).get("optimized_prompt", ""),
+            # Forwarded so the reporter's measured-spend column has something
+            # to read. It lived only in the per-stage artifacts, so both new
+            # cost columns rendered "n/a" on every real report.
+            "token_usage": _sum_token_usage(
+                eval_before.get(pair_id, {}),
+                optimize_data.get(pair_id, {}),
+                eval_after.get(pair_id, {}),
+            ),
         }
 
     eval_path = _resolve_eval_path(exp.manifest, _manifest_dir(exp))

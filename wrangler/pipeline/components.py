@@ -186,6 +186,7 @@ def deploy_single_agent(
         gate_cfg = health_gate_config(
             {"health_gate": json.loads(health_gate_json) if health_gate_json else {}}
         )
+        health = {"engine_id": engine_id, "passed": True, "skipped": True}
 
         def _redeploy():
             return deploy_agent_from_source(
@@ -198,25 +199,35 @@ def deploy_single_agent(
 
         from wrangler.tools.engines import delete_engine
 
-        health = gate_engine_health(
-            engine_id,
-            redeploy_fn=_redeploy,
-            discard_fn=delete_engine,
-            attempts=gate_cfg["attempts"],
-            threshold=gate_cfg["threshold"],
-            max_rerolls=gate_cfg["max_rerolls"],
-        )
-        # This path always deploys fresh, so a rejected first draw is ours.
-        for stale in health["rejected"]:
-            if stale != health["engine_id"]:
+        # `enabled` is checked here for the same reason stage_deploy checks it:
+        # a manifest that turns the gate off should not pay ~12 min of probing
+        # per pair, nor reroll, nor delete anything. Reading the config but
+        # ignoring this key is the local/pipeline divergence this component was
+        # refactored to stop having.
+        if gate_cfg["enabled"]:
+            health = gate_engine_health(
+                engine_id,
+                redeploy_fn=_redeploy,
+                discard_fn=delete_engine,
+                attempts=gate_cfg["attempts"],
+                threshold=gate_cfg["threshold"],
+                max_rerolls=gate_cfg["max_rerolls"],
+            )
+            # Only the engine the gate was *handed* needs deleting here: it
+            # discards every draw it created itself. Looping over all of
+            # `rejected` re-deletes those, which is a guaranteed NotFound
+            # logged as "could not discard" -- a warning that reads like a leak
+            # and is the opposite. This path always deploys fresh, so the
+            # handed-in engine is unambiguously ours to reap.
+            if health["rejected"] and health["rejected"][0] != health["engine_id"]:
+                stale = health["rejected"][0]
                 try:
                     delete_engine(stale)
                 except Exception as exc:
                     logging.warning(f"[{pair_id}] could not discard {stale}: {exc}")
-        engine_id = health["engine_id"]
-        # Same enforcement as the local path. Hand-rolling it here is how the
-        # two diverged over enabled_pairs.
-        enforce_health_gate(health, gate_cfg["required"], pair_id)
+            engine_id = health["engine_id"]
+            # Same enforcement as the local path.
+            enforce_health_gate(health, gate_cfg["required"], pair_id)
         elapsed = time.time() - t0
 
         result = {
@@ -597,6 +608,12 @@ def optimize_single_agent(
         judge_model=judge_model,
         max_metric_calls=max_metric_calls if max_metric_calls > 0 else None,
         initial_instruction=original_prompt,
+        # The manifest's model, not the one the _opt module happens to import.
+        # stage_optimize has passed this since 7219295; this path did not, so
+        # two c07 arms pointing at sonnet_agent -- claude-sonnet-5 and
+        # claude-sonnet-4-6 -- both optimized whatever config.py pins, and the
+        # frontier the campaign measures would have differed only by label.
+        model=model,
     )
     elapsed = time.time() - t0
 
@@ -907,6 +924,25 @@ def generate_analysis(
     from wrangler.core.converter import load_eval_file
     from wrangler.reporting.reporter import generate_report
 
+    def _summed_usage(*stages):
+        """Total tokens across an arm's stages. {} when nothing recorded any.
+
+        Defined inline: KFP serializes each component body in isolation, so a
+        module-level helper in this file does not exist at runtime.
+        """
+        total = {"input_tokens": 0, "output_tokens": 0}
+        seen = False
+        for stage in stages:
+            usage = (stage or {}).get("token_usage") or {}
+            if not usage:
+                continue
+            seen = True
+            total["input_tokens"] += usage.get("input_tokens", 0) or 0
+            total["output_tokens"] += usage.get("output_tokens", 0) or 0
+            if usage.get("is_estimate"):
+                total["is_estimate"] = True
+        return total if seen else {}
+
     def _read_stage(stage, pair_id, required=True):
         """Load one stage artifact. Optional stages return {} when absent.
 
@@ -964,6 +1000,12 @@ def generate_analysis(
                 else None
             ),
             "health": deploy_data.get("health", {}),
+            # Same forwarding as the local report path. token_usage lived only
+            # in the per-stage artifacts, so the measured-spend and
+            # $/quality-point columns rendered "n/a" on every real report.
+            # Inlined rather than imported: KFP serializes this body alone, so
+            # a module-level helper in components.py is absent at runtime.
+            "token_usage": _summed_usage(eval_before, optimize_data, eval_after),
         }
 
         for stage_data in [eval_before, optimize_data, eval_after]:

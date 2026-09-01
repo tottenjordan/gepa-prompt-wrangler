@@ -506,3 +506,126 @@ class TestRequiredGateStopsTheRun:
             assert cfg.get("health_gate", {}).get("required") is True, (
                 f"{path} measures a noise floor; it may not run on a rejected engine"
             )
+
+
+class TestTheFourBlockersFoundInReview:
+    """Regressions for defects a 953-test suite did not catch.
+
+    All four lived where the tests do not look: three in the KFP component
+    bodies, which are serialized in isolation and never executed by a unit
+    test, and one in the wiring between a stage artifact and the reporter.
+    Each test below fails against the code as it was before the fix.
+    """
+
+    def _component_body(self, name: str) -> str:
+        from pathlib import Path
+
+        src = Path("wrangler/pipeline/components.py").read_text()
+        i = src.index(f"def {name}")
+        rest = src[i:]
+        j = rest.find("\n@dsl.component", 1)
+        return rest[: j if j != -1 else len(rest)]
+
+    def test_the_kfp_optimize_component_pins_the_manifests_model(self):
+        """Otherwise two c07 arms on the same agent module optimize one model.
+
+        `stage_optimize` has passed `model=` since 7219295; this path did not,
+        so claude-sonnet-5 and claude-sonnet-4-6 -- both riding sonnet_agent --
+        would have differed only by label, confounding the frontier campaign 07
+        exists to measure.
+        """
+        import ast
+
+        body = self._component_body("optimize_single_agent")
+        tree = ast.parse("def _f():\n" + "\n".join("    " + ln for ln in body.splitlines()))
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Call) and getattr(node.func, "id", None) == "optimize":
+                assert any(kw.arg == "model" for kw in node.keywords), (
+                    "optimize() must be told the manifest's model, not the "
+                    "one the _opt module imports"
+                )
+                return
+        raise AssertionError("no optimize() call found in the component")
+
+    def test_the_kfp_deploy_component_honours_enabled(self):
+        """A manifest that turns the gate off must not pay 12 min of probing."""
+        body = self._component_body("deploy_single_agent")
+        assert 'gate_cfg["enabled"]' in body, (
+            "the KFP path reads the gate config but must also honour `enabled`; "
+            "the local path guards the whole gate with it"
+        )
+
+    def test_the_kfp_deploy_component_does_not_double_delete(self):
+        """gate_engine_health already discards the draws it created.
+
+        Re-deleting all of `rejected` guarantees a NotFound logged as
+        'could not discard', a warning that reads like a leak and is not one.
+        """
+        body = self._component_body("deploy_single_agent")
+        assert 'for stale in health["rejected"]' not in body, (
+            "only the handed-in engine (rejected[0]) needs deleting here"
+        )
+
+    def test_a_required_gate_failure_still_records_the_engine(self, tmp_path):
+        """Otherwise the engine is up, costing money, and named nowhere.
+
+        Every c06 manifest sets required: true, so this fires on exactly the
+        runs where an orphan is most likely.
+        """
+        import pytest
+
+        from wrangler.orchestration import stages
+
+        exp = _stub_experiment(
+            tmp_path,
+            config={"health_gate": {"required": True, "max_rerolls": 0, "attempts": 5}},
+        )
+        with (
+            patch.object(stages.deployer, "deploy_agent_from_source", return_value="eng-sick"),
+            patch.object(stages, "_default_probe", _Probe([0.0])),
+            patch.object(stages, "_sync_env_engine_id", lambda *_a, **_k: None),
+            pytest.raises(stages.EngineHealthError),
+        ):
+            stages.stage_deploy(exp)
+
+        recorded = exp.written.get("deploy", {}).get("p1", {})
+        assert recorded.get("engine_id"), (
+            "the deploy record must be persisted before the gate raises, or the "
+            "engine it names is orphaned"
+        )
+
+    def test_the_report_results_carry_token_usage(self):
+        """The measured-spend columns read a key nothing produced.
+
+        token_usage was written into the eval stage artifacts and never
+        forwarded into the dict the reporter reads, so both new cost columns
+        rendered n/a on every real report -- while the unit test passed,
+        because it built the dict with token_usage already in it.
+        """
+        from wrangler.orchestration.stages import _sum_token_usage
+
+        summed = _sum_token_usage(
+            {"token_usage": {"input_tokens": 10, "output_tokens": 5}},
+            {},
+            {"token_usage": {"input_tokens": 1, "output_tokens": 2}},
+        )
+        assert summed == {"input_tokens": 11, "output_tokens": 7}
+
+    def test_no_token_data_stays_absent_rather_than_zero(self):
+        """$0.00 reads as 'this run was free', not 'we did not measure it'."""
+        from wrangler.orchestration.stages import _sum_token_usage
+
+        assert _sum_token_usage({}, {}, {}) == {}
+
+    def test_stage_report_forwards_token_usage(self):
+        """The wiring, not the summer -- this is the half that was missing."""
+        import ast
+        from pathlib import Path
+
+        src = Path("wrangler/orchestration/stages.py").read_text()
+        i = src.index("def stage_report")
+        body = src[i : src.index("\ndef ", i + 1) if "\ndef " in src[i + 1 :] else len(src)]
+        assert "_sum_token_usage(" in body, (
+            "stage_report must forward token usage into the results dict the reporter reads"
+        )
+        _ = ast
