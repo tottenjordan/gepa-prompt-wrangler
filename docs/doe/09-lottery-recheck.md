@@ -1,6 +1,6 @@
 # Campaign 09 — Has the deploy lottery got worse?
 
-**Status:** Running 2026-09-01 · **Blocks:** campaign 06, and therefore 07 and 08
+**Status:** **Complete 2026-09-01 — the lottery has not shifted; it was bad luck** · **Blocks:** campaign 06, and therefore 07 and 08
 **Repeat of:** [01-engine-lottery.md](01-engine-lottery.md) Phase A, unchanged
 
 ## Question
@@ -78,4 +78,75 @@ Engines carry `lifecycle: ephemeral` and `campaign: 01r`, and teardown via
 
 ## Result
 
-_Not yet run._
+**Run 2026-09-01. Ten engines deployed clean, 1,000 attempts, n=100 each as registered.**
+
+| engine | reach | 95% CI | | engine | reach | 95% CI |
+| --- | --- | --- | --- | --- | --- | --- |
+| lottery-07 | **100%** | 0.963–1.000 | | lottery-08 | 75% | 0.657–0.825 |
+| lottery-03 | **99%** | 0.946–0.998 | | lottery-04 | 53% | 0.433–0.625 |
+| lottery-05 | **99%** | 0.946–0.998 | | lottery-01 | 49% | 0.394–0.587 |
+| lottery-09 | **99%** | 0.946–0.998 | | lottery-02 | 49% | 0.394–0.587 |
+| lottery-06 | **98%** | 0.930–0.994 | | lottery-10 | **0%** | 0.000–0.037 |
+
+**Healthy fraction: 5/10 at ≥97%**, against Campaign 01's 6/10.
+
+### The lottery has not shifted
+
+Fisher exact on 5/10 vs 6/10 gives **p = 1.000**. There is no evidence of a change,
+and with n=10 per campaign there could not have been unless the shift were enormous.
+The pre-registered reading is the first row: bad luck.
+
+The three consecutive failures that prompted this are unremarkable at the pooled
+rate — `0.45³ = 9.1%`. Unlucky, not diagnostic.
+
+**Pooled estimate across both campaigns: 11/20 = 55% healthy.** That is the number
+to size budgets from, not either campaign alone.
+
+The shape reproduces too, and it is the more useful finding: the distribution is
+**bimodal, not continuous**. Five engines at 98–100%, then a gap, then 75/53/49/49/0.
+Nothing sits between 75% and 98%. An engine is either fine or it is not, which is
+what makes a threshold at 0.8 a sensible instrument rather than an arbitrary cut.
+
+### Reroll budget
+
+| max_rerolls | draws | P(all fail) at 55% healthy |
+| --- | --- | --- |
+| 2 (current) | 3 | 9.1% |
+| 3 | 4 | 4.1% |
+| **4** | **5** | **1.8%** |
+| 5 | 6 | 0.8% |
+
+Set to **4**. Nine percent is too high for an overnight campaign where a failure
+costs the night; 1.8% is acceptable and each extra reroll costs ~5 min of deploy
+plus ~5 min of probe only in the cases that need it.
+
+### Secondary: reach does not improve with age
+
+Registered in advance because two earlier observations disagreed. Both new
+measurements say **flat**:
+
+- **By worker age at request** (nonce join): 0–2 s 66.7%, 30–90 s 61.3%, 90 s+ 72.6%.
+  Overlapping intervals throughout.
+- **By attempt index**, pooled over all ten engines: 69% in the first ten attempts,
+  71% in the last, never leaving 66–76% in between.
+
+This kills the warming explanation for the health gate. Engine
+`3126647680801964032` did go 1.7% → 25% over three hours, and that remains
+unexplained, but it is not an instance of a general effect — there is no general
+effect. **A gate verdict taken immediately after deploy is therefore valid**, and
+the earlier suggestion of adding a warmup wait before probing is withdrawn.
+
+### The join agrees with the client
+
+Client-side `reached` and the nonce join match exactly on every engine checked
+(lottery-10 0/100 both ways, lottery-04 53/100, lottery-08 75/100). The cheap
+client-side measurement can be trusted; the join is needed for per-worker
+attribution, not for the reach rate itself.
+
+Raw and joined rows archived at `docs/data/probes/lottery_01r{,.joined}.jsonl.gz`.
+
+### What this means for campaign 06
+
+It clears it to run. The gate is a valid instrument, the threshold is achievable
+by half of all deploys, and `max_rerolls: 4` makes a wholly-failed arm a 1.8%
+event rather than a 9% one.

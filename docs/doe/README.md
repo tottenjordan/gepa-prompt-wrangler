@@ -20,7 +20,7 @@ outcome would mean *before* looking is what stops that.
 | [06](06-pipeline-noise-floor.md) | What is the noise floor, on the pipeline? | **Running 2026-09-01** | ~6 h, 4 arms (n=5 trimmed) |
 | [07](07-cost-quality-frontier.md) | What does a model tier cost per unit of quality? | **Ready** | ~10.6 h/arm, 4 arms, 2 at a time |
 | [08](08-gepa-budget-curve.md) | What does a GEPA budget buy? (scoped to fit) | Conditional on 06 | 1 optimize arm per batch |
-| [09](09-lottery-recheck.md) | Has the deploy lottery got worse? | **Running 2026-09-01** | 10 engines, ~4 h |
+| [09](09-lottery-recheck.md) | Has the deploy lottery got worse? | **Complete 2026-09-01 — no, 5/10 vs 6/10, p=1.000** | 10 engines, ~4 h |
 
 **09 now runs before 06.** The campaign-06 validation arm drew three engines and
 all three failed the health gate at 1.7% reach; the eval then ran against the worst

@@ -269,11 +269,14 @@ def health_gate_config(config: dict) -> dict:
         "enabled": raw.get("enabled", True),
         "attempts": raw.get("attempts", GATE_ATTEMPTS),
         "threshold": raw.get("threshold", GATE_THRESHOLD),
-        # Two, because a reroll is a fresh draw from the same distribution
-        # rather than a repair. Campaign 01 saw ~60% of deployments land healthy,
-        # so three draws clear the bar ~94% of the time; more than that is
-        # usually a signal the whole region is unhappy, not this engine.
-        "max_rerolls": raw.get("max_rerolls", 2),
+        # Four, because a reroll is a fresh draw from the same distribution
+        # rather than a repair. Campaigns 01 and 09 pooled put 11 of 20
+        # byte-identical deploys at >=97% reach, so at 55% healthy three draws
+        # still fail together 9.1% of the time -- which is what happened to the
+        # campaign-06 validation arm. Five draws bring that to 1.8%, and the
+        # extra deploys are only paid in the runs that need them.
+        # See docs/doe/09-lottery-recheck.md.
+        "max_rerolls": raw.get("max_rerolls", 4),
         # Reused engines are not re-probed by default: at ~60 attempts that is
         # ~12 minutes per pair on every stage run, for an engine whose health
         # was already established when it was deployed.

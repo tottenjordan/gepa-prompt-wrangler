@@ -41,6 +41,7 @@ matching each request's nonce against the engine's structured log stream:
 | `time_control` | 120 | 2026-09-01 | [Opus serving failure](../../analysis/2026-09-01-opus-serving-failure.md) — the concurrent 4-tier control. flash 100%, lite 100%, pro 97%, sonnet 97% |
 | `v4_health` | 150 | 2026-08-31 | [MCP flakiness](../../analysis/2026-08-31-mcp-flakiness.md) — the v4 baseline |
 | `v5_health` | 90 | 2026-08-31 | Opus analysis — opus 27%, and **lite 0/30** |
+| `lottery_01r{,.joined}` | 1000 | 2026-09-01 | [Campaign 09](../../doe/09-lottery-recheck.md) — the Phase A repeat. 5/10 healthy against Campaign 01's 6/10, p=1.000 |
 | `warm-recheck_3126647680801964032` | 60 | 2026-09-01 | Health-gate analysis — the engine the gate rejected at 1.7%, re-probed warm at 25% |
 
 `warm-recheck-*.summary.json` is the four-line gate decision for that last run,
