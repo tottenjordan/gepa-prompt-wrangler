@@ -2,7 +2,7 @@
 
 **Status:** ready to file · **Filed:** _(not yet)_ · **Case:** _(none)_
 **Reported by:** GEPA Prompt Wrangler team
-**Date of measurement:** 2026-08-23, extended 2026-08-24
+**Date of measurement:** 2026-08-23, extended 2026-08-24 and 2026-09-01
 **Supporting analysis:** [../analysis/2026-08-23-geap-empty-stream-doe.md](../analysis/2026-08-23-geap-empty-stream-doe.md)
 **Worker-level follow-up:** [../doe/01-engine-lottery.md](../doe/01-engine-lottery.md)
 
@@ -142,6 +142,34 @@ This is the most actionable thing we can tell you, and it accounts for every oth
 observation below: the per-engine stability, the failure of `min_instances` to help (it
 keeps bad workers warm too), and why no client-side strategy moved the rate.
 
+### 4.2c The rate is strongly model-correlated, with a concurrent control
+
+Measured 2026-08-31 → 09-01. Fifteen health-gated deploys of the **opus** tier, across three
+model versions and two prompts, produced **zero** engines above an 80% reach bar:
+
+| model | reach per deploy |
+| --- | --- |
+| `claude-opus-4-6` | 3.3%, 50.0%, 16.7%, 28.3%, 13.3%, 0.0% |
+| `claude-opus-4-8` | 1.7%, 40.0%, 48.3% |
+| `claude-opus-5` | 6.7%, 35.0%, 21.7% |
+| `claude-opus-5`, generic prompt | 51.7%, 11.7%, 15.0% |
+
+**A control measured in the same hours shows the other four tiers healthy:** flash 100%,
+lite 100%, pro 93%, sonnet 93% (n=30 each). So this is not a regional or time-of-day effect.
+
+Eliminated by direct test: model availability (all three ids answer an
+`AnthropicVertex(region="global")` call in under 2s with tools attached), latency (1.6–3.9s
+mean, comparable to sonnet), model family (sonnet is Claude and healthy), `min_instances`
+(2 on every engine), agent code (modules differ only by model and prompt), and the prompt
+itself (a generic-prompt build still fails).
+
+On one 60-request gate probe the structured log stream recorded **exactly 29 inferences**
+where the client independently counted **29** reached — so the 31 empty responses are
+genuinely requests for which no inference ran, not a client-side counting artifact.
+
+We cannot see what differs about opus from outside. This is the sharpest reproduction we
+have and it should be the easiest for you to correlate against serving-side telemetry.
+
 ### 4.3 The workers serving these requests were fully started
 
 We initially believed the cause was requests being admitted to workers that had not finished
@@ -207,7 +235,10 @@ error-reporting path exists and is reachable.
    the whole ask; everything else below is optional.
 2. If the empty stream is intentional in some cases, **a response header or trailer** that
    distinguishes "the agent produced no output" from "we did not run the agent".
-3. **What makes a worker process permanently unable to serve** — §4.2b. Ten identical
+3. **Why the rate is model-correlated** — §4.2c. Fifteen opus deploys across three model
+   versions produced nothing above 50% reach while four other tiers sat at 93–100% in the
+   same window. Same source package, same region, same scaling.
+4. **What makes a worker process permanently unable to serve** — §4.2b. Ten identical
    deployments produced anywhere from 0% to 100% healthy workers, and we cannot see from
    outside whether the difference is the worker, its host, its placement, or something in
    provisioning. This is the root cause; items 1 and 2 are about making it survivable.
