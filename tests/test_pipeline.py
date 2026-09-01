@@ -244,3 +244,43 @@ class TestImageTag:
         dockerfile.write_text('RUN pip install "google-adk>=2.7.1"\n')
 
         assert _compute_image_tag(pyproject, lock, dockerfile) != tag_before
+
+
+class TestSkipOptimize:
+    """Without this the DAG is a fixed chain and a control arm cannot exist.
+
+    A control arm is the same prompt evaluated twice with no optimization
+    between -- CLAUDE.md requires one in every sweep. The pipeline had no way
+    to express it, and every run dragged in ~10h of GEPA per pair, which is why
+    nobody used the pipeline for characterisation.
+    """
+
+    def _compile(self, tmp_path):
+        from kfp import compiler
+
+        from wrangler.pipeline.dag import build_pipeline
+
+        out = tmp_path / "p.yaml"
+        compiler.Compiler().compile(build_pipeline("python:3.11"), str(out))
+        return out.read_text()
+
+    def test_the_pipeline_still_compiles(self, tmp_path):
+        assert len(self._compile(tmp_path)) > 1000
+
+    def test_skip_optimize_is_a_pipeline_parameter(self, tmp_path):
+        text = self._compile(tmp_path)
+        assert "skip-optimize" in text or "skip_optimize" in text
+
+    def test_both_branches_produce_an_analysis(self, tmp_path):
+        """Analysis sits inside each branch: a task outside a dsl.If cannot
+        depend on one inside it."""
+        text = self._compile(tmp_path)
+        assert "Generate Analysis (eval only)" in text
+        assert "Generate Analysis" in text
+
+    def test_the_manifest_can_set_it(self):
+        from pathlib import Path
+
+        src = Path("wrangler/pipeline/deploy_pipeline.py").read_text()
+        assert '"skip_optimize"' in src
+        assert 'get("skip_optimize"' in src

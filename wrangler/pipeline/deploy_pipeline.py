@@ -408,6 +408,11 @@ def deploy_pipeline(
             "secret_id": secret_id,
             "max_metric_calls": max_metric_calls,
             "cache_bust": cache_bust,
+            # A manifest can turn the optimize->redeploy->eval_after chain off
+            # entirely, which is what makes a control arm expressible and what
+            # lets this pipeline be used for characterisation rather than only
+            # for optimization runs.
+            "skip_optimize": bool((manifest.pipeline or {}).get("skip_optimize", False)),
         },
         labels={"solution": "promp-wrangler"},
     )

@@ -64,6 +64,7 @@ def build_pipeline(image_uri: str):
         secret_id: str = "",
         max_metric_calls: int = 50,
         cache_bust: str = "",
+        skip_optimize: bool = False,
     ):
         archive_task = archive_agent_code(
             project_id=project_id,
@@ -113,69 +114,93 @@ def build_pipeline(image_uri: str):
         # optimize's output flows as a data dependency to redeploy and
         # eval_after. This ensures KFP caching works correctly — if
         # optimize produces a new prompt, redeploy and eval_after re-run.
-        with dsl.ParallelFor(pairs_json, parallelism=1) as pair_config:
-            optimize_task = comps["optimize"](
+        #
+        # The whole block is conditional. Without `skip_optimize` there is no
+        # way to express a control arm — the same prompt evaluated twice with
+        # nothing between — and no way to use this pipeline for
+        # characterisation, since every run drags in ~10h of GEPA per pair.
+        with dsl.If(skip_optimize == False, name="optimize-enabled"):  # noqa: E712
+            with dsl.ParallelFor(pairs_json, parallelism=1) as pair_config:
+                optimize_task = comps["optimize"](
+                    project_id=project_id,
+                    location=location,
+                    bucket_name=bucket_name,
+                    run_id=run_id,
+                    pair_json=pair_config,
+                    eval_data_path=eval_data_path,
+                    agent_module=agent_module,
+                    judge_model=judge_model,
+                    secret_id=secret_id,
+                    max_metric_calls=max_metric_calls,
+                    cache_bust=cache_bust,
+                )
+                optimize_task.set_cpu_limit("8")
+                optimize_task.set_memory_limit("32G")
+                optimize_task.set_caching_options(enable_caching=True)
+                optimize_task.after(eval_before_task)
+                optimize_task.set_display_name("Optimize Agent")
+
+                redeploy_task = comps["redeploy"](
+                    project_id=project_id,
+                    location=location,
+                    bucket_name=bucket_name,
+                    run_id=run_id,
+                    pair_json=pair_config,
+                    agent_module=agent_module,
+                    secret_id=secret_id,
+                    optimize_output=optimize_task.outputs["Output"],
+                    cache_bust=cache_bust,
+                )
+                redeploy_task.set_caching_options(enable_caching=True)
+                redeploy_task.set_display_name("Re-deploy Optimized Agent")
+
+                eval_after_task = comps["eval"](
+                    project_id=project_id,
+                    location=location,
+                    bucket_name=bucket_name,
+                    run_id=run_id,
+                    pair_json=pair_config,
+                    eval_data_path=eval_data_path,
+                    phase="after",
+                    num_runs=num_runs,
+                    judge_model=judge_model,
+                    redeploy_output=redeploy_task.outputs["Output"],
+                    cache_bust=cache_bust,
+                )
+                eval_after_task.set_cpu_limit("4")
+                eval_after_task.set_memory_limit("16G")
+                eval_after_task.set_caching_options(enable_caching=True)
+                eval_after_task.set_display_name("Evaluate Agent (After)")
+
+            # Analysis lives inside each branch rather than after them: a task
+            # outside a dsl.If cannot depend on one inside it.
+            optimized_analysis = comps["analysis"](
                 project_id=project_id,
                 location=location,
                 bucket_name=bucket_name,
                 run_id=run_id,
-                pair_json=pair_config,
-                eval_data_path=eval_data_path,
-                agent_module=agent_module,
-                judge_model=judge_model,
-                secret_id=secret_id,
-                max_metric_calls=max_metric_calls,
+                manifest_json=manifest_json,
                 cache_bust=cache_bust,
             )
-            optimize_task.set_cpu_limit("8")
-            optimize_task.set_memory_limit("32G")
-            optimize_task.set_caching_options(enable_caching=True)
-            optimize_task.after(eval_before_task)
-            optimize_task.set_display_name("Optimize Agent")
+            optimized_analysis.set_caching_options(enable_caching=True)
+            optimized_analysis.after(eval_after_task)
+            optimized_analysis.set_display_name("Generate Analysis")
 
-            redeploy_task = comps["redeploy"](
+        with dsl.Else():
+            # Eval-only. A control arm reports on eval_before alone; there is no
+            # "after" to compare against and pretending otherwise would invent
+            # a delta.
+            control_analysis = comps["analysis"](
                 project_id=project_id,
                 location=location,
                 bucket_name=bucket_name,
                 run_id=run_id,
-                pair_json=pair_config,
-                agent_module=agent_module,
-                secret_id=secret_id,
-                optimize_output=optimize_task.outputs["Output"],
+                manifest_json=manifest_json,
                 cache_bust=cache_bust,
             )
-            redeploy_task.set_caching_options(enable_caching=True)
-            redeploy_task.set_display_name("Re-deploy Optimized Agent")
-
-            eval_after_task = comps["eval"](
-                project_id=project_id,
-                location=location,
-                bucket_name=bucket_name,
-                run_id=run_id,
-                pair_json=pair_config,
-                eval_data_path=eval_data_path,
-                phase="after",
-                num_runs=num_runs,
-                judge_model=judge_model,
-                redeploy_output=redeploy_task.outputs["Output"],
-                cache_bust=cache_bust,
-            )
-            eval_after_task.set_cpu_limit("4")
-            eval_after_task.set_memory_limit("16G")
-            eval_after_task.set_caching_options(enable_caching=True)
-            eval_after_task.set_display_name("Evaluate Agent (After)")
-
-        analysis_task = comps["analysis"](
-            project_id=project_id,
-            location=location,
-            bucket_name=bucket_name,
-            run_id=run_id,
-            manifest_json=manifest_json,
-            cache_bust=cache_bust,
-        )
-        analysis_task.set_caching_options(enable_caching=True)
-        analysis_task.after(eval_after_task)
-        analysis_task.set_display_name("Generate Analysis")
+            control_analysis.set_caching_options(enable_caching=True)
+            control_analysis.after(eval_before_task)
+            control_analysis.set_display_name("Generate Analysis (eval only)")
 
     return _pipeline
 
