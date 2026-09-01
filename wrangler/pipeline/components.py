@@ -863,8 +863,18 @@ def generate_analysis(
     from wrangler.core.converter import load_eval_file
     from wrangler.reporting.reporter import generate_report
 
-    def _read_stage(stage, pair_id):
+    def _read_stage(stage, pair_id, required=True):
+        """Load one stage artifact. Optional stages return {} when absent.
+
+        An eval-only run (skip_optimize) has no optimize artifact, and
+        downloading it unconditionally is what failed the first control arm:
+        the component exited 1 on a NotFound after deploy and both evals had
+        already succeeded.
+        """
         blob = gcs.bucket(bucket_name).blob(f"pipeline-runs/{run_id}/stages/{stage}/{pair_id}.json")
+        if not required and not blob.exists():
+            logging.info(f"stage {stage} absent for {pair_id} — eval-only run")
+            return {}
         return json.loads(blob.download_as_text())
 
     manifest = json.loads(manifest_json)
@@ -882,7 +892,7 @@ def generate_analysis(
 
         deploy_data = _read_stage("deploy", pair_id)
         eval_before = _read_stage("eval_before", pair_id)
-        optimize_data = _read_stage("optimize", pair_id)
+        optimize_data = _read_stage("optimize", pair_id, required=False)
         eval_after = _read_stage("eval_after", pair_id)
 
         results[pair_id] = {

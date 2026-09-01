@@ -271,6 +271,36 @@ class TestSkipOptimize:
         text = self._compile(tmp_path)
         assert "skip-optimize" in text or "skip_optimize" in text
 
+    def test_a_control_arm_still_runs_both_evaluations(self, tmp_path):
+        """The floor is the delta between two evals of an UNCHANGED prompt.
+
+        The first version skipped eval_after along with optimize, which would
+        have produced one evaluation and no delta at all -- a noise-floor
+        campaign that cannot measure a noise floor. What gets skipped is
+        optimize and redeploy, not the second eval.
+        """
+        text = self._compile(tmp_path)
+        assert "control, no optimization" in text
+
+    def test_the_control_eval_does_not_cache(self, tmp_path):
+        """Its inputs match eval_before byte for byte.
+
+        A cache hit would return that exact result and the floor would come out
+        as precisely zero -- a measurement of KFP's cache, not of the noise.
+        """
+        text = self._compile(tmp_path)
+        i = text.index("control, no optimization")
+        before = text[max(0, i - 4000) : i]
+        block = before[before.rfind("cachingOptions") :]
+        # KFP writes `cachingOptions: {}` for disabled, not `enableCache: false`.
+        assert block.startswith("cachingOptions: {}"), block[:80]
+
+    def test_the_analysis_tolerates_a_missing_optimize_stage(self):
+        from pathlib import Path
+
+        src = Path("wrangler/pipeline/components.py").read_text()
+        assert '_read_stage("optimize", pair_id, required=False)' in src
+
     def test_both_branches_produce_an_analysis(self, tmp_path):
         """Analysis sits inside each branch: a task outside a dsl.If cannot
         depend on one inside it."""

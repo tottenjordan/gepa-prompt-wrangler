@@ -187,9 +187,35 @@ def build_pipeline(image_uri: str):
             optimized_analysis.set_display_name("Generate Analysis")
 
         with dsl.Else():
-            # Eval-only. A control arm reports on eval_before alone; there is no
-            # "after" to compare against and pretending otherwise would invent
-            # a delta.
+            # A control arm still needs BOTH evaluations -- the floor is the
+            # delta between two evals of an UNCHANGED prompt, so one eval
+            # measures nothing. What is skipped is optimize and redeploy, not
+            # the second eval. `redeploy_output=""` keeps it pointed at the
+            # engine eval_before used.
+            with dsl.ParallelFor(pairs_json, parallelism=1) as pair_config:
+                control_after_task = comps["eval"](
+                    project_id=project_id,
+                    location=location,
+                    bucket_name=bucket_name,
+                    run_id=run_id,
+                    pair_json=pair_config,
+                    eval_data_path=eval_data_path,
+                    phase="after",
+                    num_runs=num_runs,
+                    judge_model=judge_model,
+                    redeploy_output="",
+                    cache_bust=cache_bust,
+                )
+                control_after_task.set_cpu_limit("4")
+                control_after_task.set_memory_limit("16G")
+                # Caching OFF, deliberately. The inputs are byte-identical to
+                # eval_before, so a cache hit would return that exact result and
+                # the "floor" would come out as precisely zero -- a measurement
+                # of the cache, not of the noise.
+                control_after_task.set_caching_options(enable_caching=False)
+                control_after_task.after(eval_before_task)
+                control_after_task.set_display_name("Evaluate Agent (control, no optimization)")
+
             control_analysis = comps["analysis"](
                 project_id=project_id,
                 location=location,
@@ -199,7 +225,7 @@ def build_pipeline(image_uri: str):
                 cache_bust=cache_bust,
             )
             control_analysis.set_caching_options(enable_caching=True)
-            control_analysis.after(eval_before_task)
+            control_analysis.after(control_after_task)
             control_analysis.set_display_name("Generate Analysis (eval only)")
 
     return _pipeline
