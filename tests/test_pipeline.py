@@ -362,3 +362,71 @@ class TestSkipOptimize:
         src = Path("wrangler/pipeline/deploy_pipeline.py").read_text()
         assert '"skip_optimize"' in src
         assert 'get("skip_optimize"' in src
+
+
+class TestTheDagCompilesAndItsParametersLineUp:
+    """A parameter added in one layer and not the next fails at submission.
+
+    `health_gate_json` has to be declared on the component, on the pipeline
+    function, and in the dict `deploy_pipeline` sends. Miss the middle one and
+    KFP raises at compile; miss the last and the component silently receives
+    the default -- which is exactly how the pipeline path came to read no gate
+    config at all, running on bare defaults while the manifest's attempts,
+    threshold and max_rerolls were dropped.
+
+    Neither failure is reachable from a unit test of the component body, and
+    the round trip to find out costs a pipeline submission.
+    """
+
+    def _compiled_spec(self):
+        import tempfile
+        from pathlib import Path
+
+        import yaml
+        from kfp import compiler
+
+        from wrangler.pipeline.dag import build_pipeline
+
+        pipeline_func = build_pipeline("us-central1-docker.pkg.dev/p/r/i:tag")
+        out = Path(tempfile.mkdtemp()) / "pipeline.yaml"
+        compiler.Compiler().compile(pipeline_func=pipeline_func, package_path=str(out))
+        return yaml.safe_load(out.read_text())
+
+    def test_the_dag_compiles(self):
+        assert self._compiled_spec()["root"]
+
+    def test_every_parameter_the_submitter_sends_is_accepted(self):
+        """The submitter's dict and the pipeline signature must agree.
+
+        Read out of the source rather than by calling `deploy_pipeline`, which
+        would need a project, a bucket and a built image.
+        """
+        import re
+        from pathlib import Path
+
+        src = Path("wrangler/pipeline/deploy_pipeline.py").read_text()
+        # The parameter_values dict literal passed to the PipelineJob.
+        block = src[src.index('"project_id": project_id') :]
+        block = block[: block.index("},")]
+        sent = set(re.findall(r'^\s*"(\w+)":', block, re.MULTILINE))
+
+        declared = set(self._compiled_spec()["root"]["inputDefinitions"]["parameters"])
+        unknown = sent - declared
+        assert not unknown, (
+            f"deploy_pipeline sends {sorted(unknown)}, which the pipeline does not "
+            f"declare. KFP rejects the submission."
+        )
+        assert "health_gate_json" in sent & declared, (
+            "the health gate config must reach the pipeline; the KFP path "
+            "previously read none of it"
+        )
+        # Guard against the reverse: a required parameter nobody sends.
+        params = self._compiled_spec()["root"]["inputDefinitions"]["parameters"]
+        required_unsent = {
+            name
+            for name, spec in params.items()
+            if "defaultValue" not in spec and not spec.get("isOptional")
+        } - sent
+        assert not required_unsent, (
+            f"nothing supplies required parameter(s) {sorted(required_unsent)}"
+        )
