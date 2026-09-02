@@ -13,7 +13,37 @@ someone has to remember is how it stays unused.
 
 from unittest.mock import patch
 
+import pytest
+
 from wrangler.orchestration import stages
+
+
+@pytest.fixture(autouse=True)
+def _delete_engine_must_be_patched_explicitly(monkeypatch):
+    """Guard against a real call to GCP from this file.
+
+    `stage_deploy` reads `health["rejected"]` unconditionally and, when it is
+    non-empty, calls `wrangler.tools.engines.delete_engine` on the stale draw.
+    A mocked `gate_engine_health` return value with `"rejected": [...]` (a
+    handful of tests here need exactly that) trips this branch, and if
+    `delete_engine` is not separately patched the call reaches
+    `vertexai.init` + `agent_engines.get(...).delete()` for real -- against a
+    made-up id, so it 400s, and `stage_deploy`'s own `except Exception` prints
+    and swallows it, so the test still passes. Green for the wrong reason,
+    network-dependent, and silent: three tests did exactly this.
+
+    `pytest.fail` raises `Failed`, a `BaseException` subclass, specifically so
+    it is not caught by that same `except Exception` -- a test that forgets to
+    patch `delete_engine` fails loudly here instead of quietly phoning home.
+    """
+
+    def _unpatched(engine_id):
+        pytest.fail(
+            f"delete_engine({engine_id!r}) reached the real implementation -- "
+            "patch wrangler.tools.engines.delete_engine in this test"
+        )
+
+    monkeypatch.setattr("wrangler.tools.engines.delete_engine", _unpatched)
 
 
 class _Probe:
@@ -22,9 +52,11 @@ class _Probe:
     def __init__(self, rates):
         self.rates = list(rates)
         self.calls = []
+        self.n_seen = []
 
     def __call__(self, engine_id, n=60, threshold=0.8, **kw):
         self.calls.append(engine_id)
+        self.n_seen.append(n)
         rate = self.rates.pop(0) if self.rates else 1.0
         return {
             "reached": int(rate * n),
@@ -334,6 +366,7 @@ class TestStageDeployIntegration:
         with (
             patch.object(stages.deployer, "deploy_agent_from_source", return_value="eng-bad"),
             patch.object(stages, "gate_engine_health") as gate,
+            patch("wrangler.tools.engines.delete_engine"),
         ):
             gate.return_value = {
                 "engine_id": "eng-good",
@@ -358,6 +391,7 @@ class TestStageDeployIntegration:
                 "wrangler.core.env_ids.set_engine_id",
                 side_effect=lambda label, eid, **kw: synced.append((label, eid)) or True,
             ),
+            patch("wrangler.tools.engines.delete_engine"),
         ):
             gate.return_value = {
                 "engine_id": "eng-good",
@@ -400,6 +434,7 @@ class TestStageDeployIntegration:
         with (
             patch.object(stages.deployer, "deploy_agent_from_source", return_value="eng-bad"),
             patch.object(stages, "gate_engine_health") as gate,
+            patch("wrangler.tools.engines.delete_engine"),
         ):
             gate.return_value = {
                 "engine_id": "eng-good",
@@ -705,3 +740,46 @@ class TestTheFourBlockersFoundInReview:
             "stage_report must forward token usage into the results dict the reporter reads"
         )
         _ = ast
+
+
+class TestExplicitZeroThresholdIsHonoured:
+    """`n = attempts or GATE_ATTEMPTS` treats an explicit 0 the same as unset.
+
+    `health_gate_config` faithfully forwards a manifest's `threshold: 0` (an
+    operator's deliberate "accept any engine"), but `or` can't tell that from
+    "nothing was passed" and silently substitutes the 0.8 default -- the
+    opposite of what was asked for. Same bug for `attempts: 0`.
+    """
+
+    def test_a_threshold_of_zero_accepts_a_dead_engine(self):
+        from wrangler.orchestration import stages
+
+        out = stages.gate_engine_health(
+            "eng1",
+            redeploy_fn=lambda: "eng1",
+            probe_fn=_Probe([0.0]),
+            threshold=0.0,
+        )
+        assert out["passed"] is True
+        assert out["threshold"] == 0.0
+
+    def test_an_attempts_of_zero_is_passed_to_the_probe(self):
+        from wrangler.orchestration import stages
+
+        probe = _Probe([1.0])
+        stages.gate_engine_health(
+            "eng1",
+            redeploy_fn=lambda: "eng1",
+            probe_fn=probe,
+            attempts=0,
+        )
+        assert probe.n_seen == [0]
+
+    def test_unset_attempts_and_threshold_still_default_to_the_measured_campaign(self):
+        from wrangler.orchestration import stages
+        from wrangler.tools.boot_probe import GATE_ATTEMPTS, GATE_THRESHOLD
+
+        probe = _Probe([1.0])
+        out = stages.gate_engine_health("eng1", redeploy_fn=lambda: "eng1", probe_fn=probe)
+        assert probe.n_seen == [GATE_ATTEMPTS]
+        assert out["threshold"] == GATE_THRESHOLD
