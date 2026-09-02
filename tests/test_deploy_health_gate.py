@@ -169,6 +169,77 @@ class TestRejectedEnginesAreDisposedOf:
         assert out["rejected"] == ["eng1"]
 
 
+class TestStageDeployReapsItsOwnRejectedDraw:
+    """B2: `stage_deploy` always deploys the engine it hands to the gate, so a
+    rejected first draw is unambiguously its to reap -- `gate_engine_health`
+    never discards the engine it was *handed* (it might be a live deployment
+    the caller only wanted checked). The pipeline component and the example
+    script both already reap it; this stage did not, leaking one engine per
+    pair on every first-draw failure (~45% of deploys, docs/doe/09-lottery-recheck.md).
+    """
+
+    def test_a_rejected_first_draw_is_deleted(self, tmp_path):
+        exp = _stub_experiment(tmp_path)
+        deleted = []
+        with (
+            patch.object(stages.deployer, "deploy_agent_from_source", return_value="eng-bad"),
+            patch.object(stages, "gate_engine_health") as gate,
+            patch("wrangler.tools.engines.delete_engine", side_effect=deleted.append),
+        ):
+            gate.return_value = {
+                "engine_id": "eng-good",
+                "passed": True,
+                "rate": 0.97,
+                "n": 60,
+                "rerolls": 1,
+                "rejected": ["eng-bad"],
+            }
+            stages.stage_deploy(exp)
+        assert deleted == ["eng-bad"]
+
+    def test_a_passing_first_draw_deletes_nothing(self, tmp_path):
+        exp = _stub_experiment(tmp_path)
+        deleted = []
+        with (
+            patch.object(stages.deployer, "deploy_agent_from_source", return_value="eng-good"),
+            patch.object(stages, "gate_engine_health") as gate,
+            patch("wrangler.tools.engines.delete_engine", side_effect=deleted.append),
+        ):
+            gate.return_value = {
+                "engine_id": "eng-good",
+                "passed": True,
+                "rate": 0.99,
+                "n": 60,
+                "rerolls": 0,
+                "rejected": [],
+            }
+            stages.stage_deploy(exp)
+        assert deleted == []
+
+    def test_a_failed_discard_does_not_abort_the_run(self, tmp_path):
+        """Leaking an engine is untidy; aborting a deploy over it is worse."""
+        exp = _stub_experiment(tmp_path)
+
+        def _boom(_eid):
+            raise RuntimeError("quota")
+
+        with (
+            patch.object(stages.deployer, "deploy_agent_from_source", return_value="eng-bad"),
+            patch.object(stages, "gate_engine_health") as gate,
+            patch("wrangler.tools.engines.delete_engine", side_effect=_boom),
+        ):
+            gate.return_value = {
+                "engine_id": "eng-good",
+                "passed": True,
+                "rate": 0.97,
+                "n": 60,
+                "rerolls": 1,
+                "rejected": ["eng-bad"],
+            }
+            stages.stage_deploy(exp)  # must not raise
+        assert exp.written["deploy"]["p1"]["engine_id"] == "eng-good"
+
+
 class TestGateConfig:
     def test_the_gate_is_on_by_default(self):
         assert stages.health_gate_config({})["enabled"] is True
@@ -251,6 +322,7 @@ class TestStageDeployIntegration:
                 "rate": 0.98,
                 "n": 60,
                 "rerolls": 0,
+                "rejected": [],
             }
             stages.stage_deploy(exp)
         gate.assert_called_once()
@@ -269,6 +341,7 @@ class TestStageDeployIntegration:
                 "rate": 0.97,
                 "n": 60,
                 "rerolls": 1,
+                "rejected": ["eng-bad"],
             }
             stages.stage_deploy(exp)
         assert exp.written["deploy"]["p1"]["engine_id"] == "eng-good"
@@ -292,6 +365,7 @@ class TestStageDeployIntegration:
                 "rate": 0.97,
                 "n": 60,
                 "rerolls": 1,
+                "rejected": ["eng-bad"],
             }
             stages.stage_deploy(exp)
         assert synced == [("sonnet", "eng-good")]
@@ -315,6 +389,7 @@ class TestStageDeployIntegration:
                 "rate": 0.99,
                 "n": 60,
                 "rerolls": 0,
+                "rejected": [],
             }
             stages.stage_deploy(exp)
         assert synced == []
@@ -332,6 +407,7 @@ class TestStageDeployIntegration:
                 "rate": 0.97,
                 "n": 60,
                 "rerolls": 1,
+                "rejected": ["eng-bad"],
             }
             stages.stage_deploy(exp)
         assert "matches no known model tier" in capsys.readouterr().out

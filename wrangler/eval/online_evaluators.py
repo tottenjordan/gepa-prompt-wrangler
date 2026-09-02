@@ -195,6 +195,39 @@ def list_evaluators():
     return evaluators
 
 
+def _refusal_reason(evaluators: list[dict], live_engine_ids: set[str] | None) -> str:
+    """Why (if at all) the engine listing must not be trusted to mean "gone".
+
+    ``None`` means the lookup raised or was never attempted -- unambiguous.
+
+    An *empty* set is not: ``list_engines()`` initialises Vertex AI at
+    ``GCP_REGION`` only, so a wrong or unset region, a credentials scope
+    problem, or evaluators pointing at engines in another location all come
+    back as "zero engines", which is indistinguishable from a real empty
+    project by return value alone. The only signal available here is whether
+    evaluators exist: a project with none has nothing for the empty listing
+    to wrongly orphan, so refusing there would change nothing and is not worth
+    doing. A project with evaluators and an apparently-empty engine listing is
+    exactly the shape that deleted 28 evaluators' worth of engines on
+    2026-08-31 with ``prune_evaluators(..., yes=True)`` -- refuse instead.
+
+    This cannot distinguish "region is wrong" from "every engine really was
+    deleted and evaluators just weren't cleaned up yet" -- both produce the
+    same (empty, evaluators-exist) shape. That is a real limitation, not a
+    solved one; the caller can only be told to check credentials/region
+    before re-running with ``--yes``.
+    """
+    if live_engine_ids is None:
+        return "engine listing failed (see the exception raised by list_engines())"
+    if not live_engine_ids and evaluators:
+        return (
+            f"engine listing came back empty while {len(evaluators)} evaluator(s) exist -- "
+            "this reads as 'we could not see the engines', not 'every engine is gone'. "
+            "Check GCP_REGION and credentials before re-running."
+        )
+    return ""
+
+
 def orphaned_evaluators(evaluators: list[dict], live_engine_ids: set[str] | None) -> list[dict]:
     """Evaluators whose target engine no longer exists.
 
@@ -204,10 +237,17 @@ def orphaned_evaluators(evaluators: list[dict], live_engine_ids: set[str] | None
     evaluators whose agent is listed in ``.env``, and a deleted engine is
     precisely the thing that is not.
 
-    ``live_engine_ids=None`` means the lookup failed, and returns nothing --
-    "we could not list engines" must never read as "every engine is deleted".
+    Refuses (returns nothing) whenever ``_refusal_reason`` finds the listing
+    untrustworthy -- "we could not list engines" and "the listing is empty
+    while evaluators are not" must never read as "every engine is deleted".
+    Use ``_refusal_reason`` directly to report *why* to the caller; this
+    function only needs the yes/no.
     """
-    if live_engine_ids is None:
+    # Checked separately from `_refusal_reason` (rather than just testing its
+    # return value) so the type checker can narrow `live_engine_ids` to
+    # `set[str]` below -- it cannot see through the helper call that `None`
+    # is impossible past this point.
+    if live_engine_ids is None or _refusal_reason(evaluators, live_engine_ids):
         return []
     out = []
     for ev in evaluators:
@@ -242,10 +282,22 @@ def prune_evaluators(
     delete_fn,
     confirm: bool = False,
 ) -> dict:
-    """Delete orphaned evaluators. **Does nothing unless ``confirm``.**"""
+    """Delete orphaned evaluators. **Does nothing unless ``confirm``.**
+
+    ``refused_reason`` carries *why* ``orphans`` came back empty when the
+    listing was untrustworthy, so a caller does not print "nothing to
+    delete" for what was actually "could not tell" -- see ``_refusal_reason``.
+    """
+    refused_reason = _refusal_reason(evaluators, live_engine_ids)
     orphans = orphaned_evaluators(evaluators, live_engine_ids)
     if not confirm:
-        return {"orphans": orphans, "deleted": [], "failed": {}, "dry_run": True}
+        return {
+            "orphans": orphans,
+            "deleted": [],
+            "failed": {},
+            "dry_run": True,
+            "refused_reason": refused_reason,
+        }
     deleted, failed = [], {}
     for o in orphans:
         try:
@@ -253,7 +305,13 @@ def prune_evaluators(
             deleted.append(o["evaluator_id"])
         except Exception as exc:
             failed[o["evaluator_id"]] = f"{type(exc).__name__}: {exc}"
-    return {"orphans": orphans, "deleted": deleted, "failed": failed, "dry_run": False}
+    return {
+        "orphans": orphans,
+        "deleted": deleted,
+        "failed": failed,
+        "dry_run": False,
+        "refused_reason": refused_reason,
+    }
 
 
 def duplicate_evaluators(evaluators: list[dict]) -> dict[str, list[str]]:
@@ -281,6 +339,8 @@ def prune_command(args: list[str]):
     result = prune_evaluators(evaluators, live, delete_evaluator, confirm=confirm)
 
     print(f"\n=== Evaluator prune ({len(evaluators)} total) ===")
+    if result["refused_reason"]:
+        print(f"  REFUSED to look for orphans: {result['refused_reason']}")
     print(f"  orphaned (target a deleted engine): {len(result['orphans'])}")
     for o in result["orphans"]:
         print(f"    evaluator {o['evaluator_id']} -> engine {o['engine_id']} ({o['state']})")

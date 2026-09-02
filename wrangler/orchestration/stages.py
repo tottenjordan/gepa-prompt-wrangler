@@ -541,6 +541,22 @@ def stage_deploy(exp: Experiment, pair_id: str | None = None) -> None:
                 if health["engine_id"] != engine_id:
                     _sync_env_engine_id(pair.id, health["engine_id"])
 
+                # gate_engine_health only discards draws it created itself --
+                # the engine it was *handed* may be a live deployment the
+                # caller only wanted checked, so it is left alone (see its
+                # docstring). This loop always deploys fresh immediately
+                # above, so that handed-in engine is unambiguously ours: if
+                # the gate rejected it, `rejected[0]` names it and nobody else
+                # will delete it. Left alone, every pair whose first draw
+                # fails leaks one engine per sweep -- ~45% of deploys by this
+                # project's own measurements (docs/doe/09-lottery-recheck.md).
+                if health["rejected"] and health["rejected"][0] != health["engine_id"]:
+                    stale = health["rejected"][0]
+                    try:
+                        delete_engine(stale)
+                    except Exception as exc:
+                        print(f"  Could not discard {stale}: {type(exc).__name__}: {exc}")
+
             # Persist before enforcing. A required gate raises, and if that
             # happened first the deploy record -- including the id of an engine
             # that is up and costing money -- was never written, leaving it

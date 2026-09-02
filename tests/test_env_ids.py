@@ -52,6 +52,32 @@ class TestUpdateEngineId:
         assert "FLASH_ENGINE_ID=5" in Path(p).read_text()
 
 
+class TestDefaultEnvPathIsAnchoredToTheRepoRoot:
+    """B3: `DEFAULT_ENV_PATH` used to be the cwd-relative literal string
+    "examples/multi_model_agents/.env". Run `wrangler run <manifest>` from
+    anywhere but the repo root and a health-gate reroll calls `set_engine_id`
+    with no explicit path, which resolves against a directory that does not
+    exist there -- `set_engine_id` then `mkdir(parents=True)`s a brand-new
+    stub `.env` right there and writes one line into it, while the real
+    `.env` (with the real credentials and every other engine id) is never
+    touched. That is exactly the silent drift this module's docstring exists
+    to prevent.
+    """
+
+    def test_the_default_path_is_absolute(self):
+        assert Path(env_ids.DEFAULT_ENV_PATH).is_absolute(), (
+            "a relative DEFAULT_ENV_PATH resolves against the process cwd, "
+            "not the repo -- wrong cwd silently creates a stub .env elsewhere"
+        )
+
+    def test_the_default_path_points_at_the_real_env_file(self):
+        # This repo ships examples/multi_model_agents/.env; assert the
+        # anchored default names that exact file rather than a stub sibling.
+        assert Path(env_ids.DEFAULT_ENV_PATH) == (
+            Path(env_ids.__file__).resolve().parents[2] / "examples" / "multi_model_agents" / ".env"
+        )
+
+
 class TestReadEngineIds:
     def test_reads_the_known_labels(self, tmp_path):
         p = _env(tmp_path, "LITE_ENGINE_ID=1\nOPUS_ENGINE_ID=2\nOTHER=3\n")
