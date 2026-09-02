@@ -201,6 +201,14 @@ class Experiment:
         reading it verbatim. Anything choosing what to run *unfiltered* wants
         this; anything honoring a named --pair override wants
         `manifest.pairs`/`_filter_pairs` instead.
+
+        **This is not `Manifest.pair_ids`.** Same name, same "an Experiment
+        wraps a Manifest" relationship, opposite filter: `Manifest.pair_ids`
+        returns every id, disabled included, because `Manifest.get_pair()`
+        needs its "Available" list to cover the pair it just failed to find.
+        Reading one where the other is meant is precisely the bug class this
+        file's disabled-pairs handling exists to close -- check which class
+        you're on before assuming parity.
         """
         return [p["id"] for p in self.config.get("pairs", []) if p.get("enabled", True)]
 

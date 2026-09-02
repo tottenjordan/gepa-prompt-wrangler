@@ -247,4 +247,7 @@ class TestBothSweepPathsRespectIt:
 
         src = Path("wrangler/orchestration/stages.py").read_text()
         i = src.index("def _filter_pairs")
-        assert "pair.enabled" in src[i : i + 900]
+        # def-to-def, not a fixed-width slice: a literal length silently stops
+        # checking anything once the function grows past it.
+        body = src[i : src.index("\ndef ", i + 1) if "\ndef " in src[i + 1 :] else len(src)]
+        assert "pair.enabled" in body
