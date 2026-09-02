@@ -291,3 +291,60 @@ class TestOptimizeBudgetIsPlumbed:
         src = inspect.getsource(stages.stage_optimize)
         assert "max_metric_calls=max_calls" in src
         assert 'defaults", {}).get("max_metric_calls' in src
+
+
+class TestEngineLabelMatchingIsTokenBased:
+    """A pair id merely containing "pro" as a substring must not steal PRO_ENGINE_ID.
+
+    The old matcher was `next((x for x in ENGINE_LABELS if x in pair_id.lower()), "")`
+    -- a bare substring test in ENGINE_LABELS's fixed order. Any id containing
+    "pro" anywhere -- "generic-prompt", "probe-arm", "prod-v2" -- matched the
+    "pro" tier and overwrote PRO_ENGINE_ID in .env with an unrelated engine.
+    Every reader of that var (online evaluators, trace-health, `wrangler engines`)
+    then targets the wrong engine, or a corpse the prune policy now protects.
+    """
+
+    def test_a_substring_that_is_not_a_whole_token_does_not_match(self):
+        from wrangler.orchestration import stages
+
+        assert stages._match_engine_label("generic-prompt") == ""
+        assert stages._match_engine_label("probe-arm") == ""
+        assert stages._match_engine_label("prod-v2") == ""
+
+    def test_a_whole_token_still_matches(self):
+        from wrangler.orchestration import stages
+
+        assert stages._match_engine_label("pro-gemini-3.1") == "pro"
+        assert stages._match_engine_label("sonnet-claude-4") == "sonnet"
+        assert stages._match_engine_label("opus-claude-4") == "opus"
+
+    def test_underscores_are_also_token_boundaries(self):
+        from wrangler.orchestration import stages
+
+        assert stages._match_engine_label("pro_gemini_3_1") == "pro"
+
+    def test_no_matching_token_returns_empty(self):
+        from wrangler.orchestration import stages
+
+        assert stages._match_engine_label("mystery-agent") == ""
+
+    def test_flash_lite_still_resolves_to_lite(self):
+        """The one existing manifest id with two matching tokens.
+
+        gemini-3.1-flash-lite is registered under alias "lite", not "flash" --
+        this must not regress just because substring matching (which happened
+        to check "lite" before "flash" in ENGINE_LABELS's fixed order) is gone.
+        """
+        from wrangler.orchestration import stages
+
+        assert stages._match_engine_label("flash-lite-gemini-3.1") == "lite"
+
+    def test_a_rerolled_engine_updates_the_correct_tier(self, monkeypatch):
+        """End-to-end: _sync_env_engine_id must not clobber an unrelated tier."""
+        from wrangler.core import env_ids
+        from wrangler.orchestration import stages
+
+        calls = []
+        monkeypatch.setattr(env_ids, "set_engine_id", lambda label, eid: calls.append((label, eid)))
+        stages._sync_env_engine_id("generic-prompt-v2", "eng-999")
+        assert calls == []

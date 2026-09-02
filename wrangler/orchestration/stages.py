@@ -269,11 +269,38 @@ def _manifest_dir(exp: Experiment) -> Path:
 # ── Stage functions ────────────────────────────────────────────
 
 
+def _match_engine_label(pair_id: str) -> str:
+    """Map a pair id to the .env tier it names, by whole token rather than substring.
+
+    The old matcher was `next((x for x in ENGINE_LABELS if x in pair_id.lower()), "")`
+    -- a bare substring test, in ENGINE_LABELS's fixed order. Any id merely
+    containing "pro" -- "generic-prompt", "probe-arm", "prod-v2" -- matched the
+    "pro" tier and overwrote PRO_ENGINE_ID with an unrelated engine. Splitting
+    on "-"/"_" and requiring an exact token match fixes all three; today's
+    manifests happen not to trip it, so it was latent rather than active.
+
+    "flash-lite-gemini-3.1" (examples/multi_model_agents/manifest.yaml) still
+    has two tokens that match -- "flash" and "lite" -- because it names
+    gemini-3.1-flash-lite, registered under alias "lite", not "flash". This
+    project's pair-id convention appends the more specific qualifier after the
+    broader family name (mirrors the model id itself), so where more than one
+    token matches, the last one wins rather than ENGINE_LABELS's fixed order.
+    """
+    from ..core.env_ids import ENGINE_LABELS
+
+    tokens = pair_id.lower().replace("_", "-").split("-")
+    label = ""
+    for token in tokens:
+        if token in ENGINE_LABELS:
+            label = token
+    return label
+
+
 def _sync_env_engine_id(pair_id: str, engine_id: str) -> None:
     """Point the example .env at a rerolled engine, if the pair maps to a tier."""
-    from ..core.env_ids import ENGINE_LABELS, set_engine_id
+    from ..core.env_ids import set_engine_id
 
-    label = next((x for x in ENGINE_LABELS if x in pair_id.lower()), "")
+    label = _match_engine_label(pair_id)
     if not label:
         print(
             f"  Note: pair {pair_id!r} matches no known model tier, so .env was not "
@@ -353,8 +380,8 @@ def gate_engine_health(
     engine_id: str,
     redeploy_fn,
     probe_fn=None,
-    attempts: int = 0,
-    threshold: float = 0.0,
+    attempts: int | None = None,
+    threshold: float | None = None,
     max_rerolls: int = 2,
     discard_fn=None,
 ) -> dict:
@@ -387,8 +414,13 @@ def gate_engine_health(
     from ..tools.boot_probe import GATE_ATTEMPTS, GATE_THRESHOLD, gate_report
 
     probe = probe_fn or _default_probe
-    n = attempts or GATE_ATTEMPTS
-    bar = threshold or GATE_THRESHOLD
+    # `or` can't tell "the caller explicitly asked for 0" from "the caller
+    # didn't pass anything" -- a manifest's threshold: 0 (accept any engine)
+    # or attempts: 0 came through health_gate_config unchanged and then got
+    # silently overwritten with the measured-campaign default here, which is
+    # the opposite of what an operator writing threshold: 0 asked for.
+    n = attempts if attempts is not None else GATE_ATTEMPTS
+    bar = threshold if threshold is not None else GATE_THRESHOLD
 
     current, rerolls, error = engine_id, 0, ""
     rejected: list[str] = []

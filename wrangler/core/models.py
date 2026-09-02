@@ -330,8 +330,17 @@ def measured_cost(
     raising, so a report spanning ten pairs is not lost to one ad-hoc id -- but
     the flag has to be rendered, because a $0.00 row with no explanation is how
     an unpriced model gets read as a free one.
+
+    A ``custom_costs`` block missing one side (e.g. a manifest ``costs:`` with
+    only ``input`` set) used to raise ``KeyError`` here, taking the same report
+    down over one malformed override. It is *not* treated as "the missing side
+    costs $0.00" -- that would compute a real number from the side that is
+    present, mark the row ``priced=True``, and render as a complete, trusted
+    price when half of it was never supplied. Instead a partial override is
+    discarded outright and treated exactly like no override was given: fall
+    back to the registry, or to unpriced if the model isn't registered either.
     """
-    if custom_costs is not None:
+    if custom_costs is not None and "input" in custom_costs and "output" in custom_costs:
         inp, out, priced = custom_costs["input"], custom_costs["output"], True
     else:
         try:
