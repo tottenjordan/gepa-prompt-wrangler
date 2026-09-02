@@ -95,6 +95,16 @@ class Experiment:
             "health_gate": manifest.health_gate,
         }
 
+        # The full list, disabled pairs included, with `enabled` and
+        # `disabled_reason` carried into the dict. Dropping disabled pairs
+        # here instead of filtering at read time looked right and wasn't: it
+        # made `wrangler run manifest.yaml --pair opus` crash with KeyError at
+        # the deploy stage, because `_filter_pairs(exp.manifest, "opus")` --
+        # the thing that is supposed to honor an explicit override -- had
+        # nothing left to find. `pair_ids` below filters `enabled` back out
+        # for anything that chooses what to run unfiltered (reports,
+        # tracking, gates); `_filter_pairs` reads the raw list precisely so a
+        # named pair can still override it.
         for pair in manifest.pairs:
             config["pairs"].append(
                 {
@@ -104,6 +114,8 @@ class Experiment:
                     "agent_module": pair.agent_module,
                     "engine_id": pair.engine_id,
                     "system_prompt": pair.system_prompt,
+                    "enabled": pair.enabled,
+                    "disabled_reason": pair.disabled_reason,
                 }
             )
 
@@ -162,6 +174,12 @@ class Experiment:
                 description=entry.get("description", ""),
                 agent_module=entry.get("agent_module", ""),
                 engine_id=entry.get("engine_id", ""),
+                # Carried through so _filter_pairs sees the real disabled
+                # state and can still honor an explicit --pair override --
+                # without these, every reconstructed pair defaulted to
+                # enabled=True regardless of what the manifest said.
+                enabled=entry.get("enabled", True),
+                disabled_reason=entry.get("disabled_reason", ""),
             )
             for entry in cfg.get("pairs", [])
         ]
@@ -176,7 +194,23 @@ class Experiment:
 
     @property
     def pair_ids(self) -> list[str]:
-        return [p["id"] for p in self.config.get("pairs", [])]
+        """Enabled pair ids -- what a report, gate, or tracking entry counts.
+
+        config["pairs"] itself holds every declared pair, disabled ones
+        included (see the comment in `create()`), so this filters rather than
+        reading it verbatim. Anything choosing what to run *unfiltered* wants
+        this; anything honoring a named --pair override wants
+        `manifest.pairs`/`_filter_pairs` instead.
+
+        **This is not `Manifest.pair_ids`.** Same name, same "an Experiment
+        wraps a Manifest" relationship, opposite filter: `Manifest.pair_ids`
+        returns every id, disabled included, because `Manifest.get_pair()`
+        needs its "Available" list to cover the pair it just failed to find.
+        Reading one where the other is meant is precisely the bug class this
+        file's disabled-pairs handling exists to close -- check which class
+        you're on before assuming parity.
+        """
+        return [p["id"] for p in self.config.get("pairs", []) if p.get("enabled", True)]
 
     # ── stage I/O ──────────────────────────────────────────────
 

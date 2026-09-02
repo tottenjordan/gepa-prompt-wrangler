@@ -67,6 +67,20 @@ class Manifest:
 
     @property
     def pair_ids(self) -> list[str]:
+        """Every declared pair's id, disabled ones included.
+
+        Deliberately unfiltered: `get_pair()` below searches the same
+        unfiltered `self.pairs`, so its KeyError's "Available" list needs to
+        cover a disabled pair too, not just the ones a sweep would run.
+
+        **This is not `Experiment.pair_ids`.** An `Experiment` wraps a
+        `Manifest` and exposes a property of the same name with the opposite
+        contract -- it filters disabled pairs out, because it answers a
+        different question (what a report/gate/tracking entry should count,
+        not what get_pair can look up). Conflating the two is exactly the
+        trap the disabled-pairs work exists to remove; use `enabled_pairs`
+        below when you mean "what a sweep runs."
+        """
         return [p.id for p in self.pairs]
 
     @property

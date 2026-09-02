@@ -291,3 +291,247 @@ class TestOptimizeBudgetIsPlumbed:
         src = inspect.getsource(stages.stage_optimize)
         assert "max_metric_calls=max_calls" in src
         assert 'defaults", {}).get("max_metric_calls' in src
+
+
+class TestEngineTierComesFromTheModelNotTheId:
+    """The tier written to .env is a property of the model a pair runs, not of
+    how someone spelled the pair's id.
+
+    The first fix here replaced a substring scan over ENGINE_LABELS with a
+    token-boundary scan (`_match_engine_label`), which stopped "generic-prompt"
+    from stealing PRO_ENGINE_ID. But it just relocated the bug: matching is
+    still driven by whatever words happen to appear in the id, so two ids
+    naming the *same* comparison can still disagree --
+
+        "sonnet-vs-opus"      -> tokens [sonnet, vs, opus]      -> last match "opus"
+        "opus-sonnet-compare" -> tokens [opus, sonnet, compare] -> last match "sonnet"
+
+    -- and "vs"/"compare" is exactly this project's naming vocabulary for a
+    control-arm comparison. The registry already knows a model's tier
+    authoritatively (`get_spec(model).alias`), so `_engine_tier_for_model`
+    derives it from `pair.model` instead and the id never enters the decision
+    at all -- removing the whole class of bug rather than relocating it.
+    """
+
+    def test_the_tier_comes_from_the_models_alias(self):
+        from wrangler.orchestration import stages
+
+        assert stages._engine_tier_for_model("gemini-3.1-flash-lite") == "lite"
+        assert stages._engine_tier_for_model("gemini-3.5-flash") == "flash"
+        assert stages._engine_tier_for_model("gemini-3.1-pro-preview") == "pro"
+        assert stages._engine_tier_for_model("claude-sonnet-4-6") == "sonnet"
+        assert stages._engine_tier_for_model("claude-opus-4-6") == "opus"
+
+    def test_two_differently_worded_ids_for_the_same_model_now_agree(self):
+        """The bug the rework exists to remove: same model, different id
+        wording, used to be able to disagree. Deriving from the model instead
+        of the id makes the id irrelevant to the outcome, so there is nothing
+        left for two wordings to disagree about.
+        """
+        from wrangler.orchestration import stages
+
+        # "sonnet-vs-opus" and "opus-sonnet-compare" would have differed under
+        # id-string matching; the id is not even a parameter here anymore.
+        assert stages._engine_tier_for_model("claude-opus-4-6") == "opus"
+        assert stages._engine_tier_for_model("claude-opus-4-6") == "opus"
+
+    def test_flash_lite_still_resolves_to_lite(self):
+        """gemini-3.1-flash-lite is registered under alias "lite", not "flash"."""
+        from wrangler.orchestration import stages
+
+        assert stages._engine_tier_for_model("gemini-3.1-flash-lite") == "lite"
+
+    def test_a_versioned_alias_falls_back_to_its_family_tier(self):
+        """claude-sonnet-5's alias is "sonnet5" -- there is no SONNET5_ENGINE_ID,
+        only SONNET_ENGINE_ID. Campaign 07 runs claude-sonnet-5, so a health-gate
+        reroll on that pair must still land on the one .env var this project's
+        five-tier vocabulary actually has for the Sonnet family, or that var
+        goes stale exactly the way this module exists to prevent.
+
+        The same fallback -- strip the trailing version digits, check that
+        against ENGINE_LABELS -- covers every other versioned alias in the
+        registry (opus47, opus48, opus5, lite35, flash36) without a hand-built
+        per-alias table that would need updating for every new model version.
+        """
+        from wrangler.orchestration import stages
+
+        assert stages._engine_tier_for_model("claude-sonnet-5") == "sonnet"
+        assert stages._engine_tier_for_model("claude-opus-4-7") == "opus"
+        assert stages._engine_tier_for_model("claude-opus-4-8") == "opus"
+        assert stages._engine_tier_for_model("claude-opus-5") == "opus"
+        assert stages._engine_tier_for_model("gemini-3.5-flash-lite") == "lite"
+        assert stages._engine_tier_for_model("gemini-3.6-flash") == "flash"
+
+    def test_fable_is_a_sixth_family_with_no_env_tier_of_its_own(self):
+        """fable has no trailing digit and "fable" itself is not one of the five
+        ENGINE_LABELS -- there is no FABLE_ENGINE_ID to guess at, so this must
+        say "no tier" rather than fabricate a mapping onto an unrelated one.
+        """
+        from wrangler.orchestration import stages
+
+        assert stages._engine_tier_for_model("claude-fable-5") == ""
+
+    def test_an_unregistered_model_degrades_to_no_tier_rather_than_raising(self):
+        """A deploy for an ad-hoc model id must not be taken down by this check."""
+        from wrangler.orchestration import stages
+
+        assert stages._engine_tier_for_model("not-a-real-model") == ""
+
+    def test_a_rerolled_engine_updates_the_tier_the_model_names(self, monkeypatch):
+        from wrangler.core import env_ids
+        from wrangler.orchestration import stages
+
+        calls = []
+        monkeypatch.setattr(env_ids, "set_engine_id", lambda label, eid: calls.append((label, eid)))
+        stages._sync_env_engine_id("sonnet-vs-opus", "claude-opus-4-6", "eng-999")
+        assert calls == [("opus", "eng-999")]
+
+    def test_an_unregistered_models_pair_is_not_synced(self, monkeypatch):
+        from wrangler.core import env_ids
+        from wrangler.orchestration import stages
+
+        calls = []
+        monkeypatch.setattr(env_ids, "set_engine_id", lambda label, eid: calls.append((label, eid)))
+        stages._sync_env_engine_id("generic-prompt-v2", "not-a-real-model", "eng-999")
+        assert calls == []
+
+
+class TestCollidingTierClaimsAreNotWritten:
+    """The version-stripping fallback is genuinely useful with no peer -- an
+    evaluator looking for "the sonnet engine" wants SONNET_ENGINE_ID to point
+    at claude-sonnet-5 when that is the only Sonnet-family pair in play. The
+    fallback only becomes wrong when a *peer* exists: manifests/c07-sonnet46_
+    manifest.yaml (claude-sonnet-4-6, alias "sonnet") and manifests/c07-sonnet5_
+    manifest.yaml (claude-sonnet-5, alias "sonnet5" -> family "sonnet") both
+    write SONNET_ENGINE_ID. Last writer wins, and evaluators/trace-health then
+    resolve to whichever arm rerolled most recently -- the wrong arm's .env
+    entry silently overwritten, which is the exact failure class C1 exists to
+    remove.
+
+    Deleting the fallback is not the fix: it would also kill the useful no-peer
+    case, and per docs/doe/07-cost-quality-frontier.md the c07-sonnet46 and
+    c07-sonnet5 arms run as two separate manifests (confirmed: `wrangler run`
+    and `Experiment.create` each take exactly one manifest path, and nothing
+    merges two manifests' pairs into one `stage_deploy` call), so resolving
+    collisions from one run's pair list cannot see this specific pairing --
+    it is a real improvement for a manifest that enables two family-mates
+    directly, not a complete fix for the two-manifest case. `contested` lets
+    `stage_deploy` pass in a global view of what this run's enabled pairs
+    claim, so a manifest that *does* enable two family-mates together is
+    caught, while the ordinary no-peer case still writes.
+    """
+
+    def test_two_pairs_claiming_the_same_tier_are_not_written(self, monkeypatch):
+        from wrangler.core import env_ids
+        from wrangler.orchestration import stages
+
+        calls = []
+        monkeypatch.setattr(env_ids, "set_engine_id", lambda label, eid: calls.append((label, eid)))
+        contested = {"sonnet": ["c07-sonnet46", "c07-sonnet5"]}
+        stages._sync_env_engine_id(
+            "c07-sonnet46", "claude-sonnet-4-6", "eng-A", contested=contested
+        )
+        stages._sync_env_engine_id("c07-sonnet5", "claude-sonnet-5", "eng-B", contested=contested)
+        assert calls == []
+
+    def test_an_uncontested_tier_still_writes(self, monkeypatch):
+        """A single sonnet-5 pair with no peer must still resolve to sonnet."""
+        from wrangler.core import env_ids
+        from wrangler.orchestration import stages
+
+        calls = []
+        monkeypatch.setattr(env_ids, "set_engine_id", lambda label, eid: calls.append((label, eid)))
+        stages._sync_env_engine_id(
+            "c07-sonnet5", "claude-sonnet-5", "eng-B", contested={"sonnet": ["c07-sonnet5"]}
+        )
+        assert calls == [("sonnet", "eng-B")]
+
+    def test_no_contested_map_behaves_as_the_uncontested_case(self, monkeypatch):
+        """Every existing caller omits `contested`; it must not change their behaviour."""
+        from wrangler.core import env_ids
+        from wrangler.orchestration import stages
+
+        calls = []
+        monkeypatch.setattr(env_ids, "set_engine_id", lambda label, eid: calls.append((label, eid)))
+        stages._sync_env_engine_id("sonnet-vs-opus", "claude-opus-4-6", "eng-999")
+        assert calls == [("opus", "eng-999")]
+
+    def test_stage_deploy_resolves_collisions_from_its_own_pair_list(self, tmp_path, capsys):
+        """End to end: two enabled pairs in one manifest that collide on a tier."""
+        from unittest.mock import patch
+
+        from wrangler.orchestration import stages
+
+        class _Pair:
+            agent_module = "agents/x"
+            system_prompt = "prompt"
+            enabled = True
+            disabled_reason = ""
+
+            def __init__(self, pid, model, eid):
+                self.id = pid
+                self.model = model
+                self.engine_id = eid
+
+        class _Manifest:
+            agent_module = "agents/x"
+            eval_data = "eval.yaml"
+
+            def __init__(self, pairs):
+                self.pairs = pairs
+
+        class _Exp:
+            version = "v1"
+
+            def __init__(self, pairs):
+                self.manifest = _Manifest(pairs)
+                self.config = {}
+                self.dir = tmp_path
+                self.written = {}
+
+            def check_gate(self, *_a, **_k):
+                return True, ""
+
+            def read_stage(self, _stage):
+                return {}
+
+            def merge_pair(self, stage, pid, data):
+                self.written.setdefault(stage, {}).setdefault(pid, {}).update(data)
+
+        exp = _Exp(
+            [
+                _Pair("c07-sonnet46", "claude-sonnet-4-6", ""),
+                _Pair("c07-sonnet5", "claude-sonnet-5", ""),
+            ]
+        )
+
+        def _deploy(agent_module, model, instruction, display_name):
+            return "eng-bad-46" if model == "claude-sonnet-4-6" else "eng-bad-5"
+
+        def _gate(engine_id, redeploy_fn, **kw):
+            good = "eng-good-46" if engine_id == "eng-bad-46" else "eng-good-5"
+            return {
+                "engine_id": good,
+                "passed": True,
+                "rate": 0.97,
+                "n": 60,
+                "rerolls": 1,
+                "rejected": [engine_id],
+            }
+
+        synced = []
+        with (
+            patch.object(stages.deployer, "deploy_agent_from_source", side_effect=_deploy),
+            patch.object(stages, "gate_engine_health", side_effect=_gate),
+            patch(
+                "wrangler.core.env_ids.set_engine_id",
+                side_effect=lambda label, eid, **kw: synced.append((label, eid)) or True,
+            ),
+            patch("wrangler.tools.engines.delete_engine"),
+        ):
+            stages.stage_deploy(exp)
+
+        assert synced == []
+        out = capsys.readouterr().out
+        assert "c07-sonnet46" in out
+        assert "c07-sonnet5" in out

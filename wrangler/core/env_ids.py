@@ -25,7 +25,16 @@ from pathlib import Path
 # this file should not invent an env var name from an arbitrary string.
 ENGINE_LABELS = ("lite", "flash", "pro", "sonnet", "opus")
 
-DEFAULT_ENV_PATH = "examples/multi_model_agents/.env"
+# Anchored to the repo root, not left as a bare relative string: `wrangler run`
+# can be invoked from any cwd, and `set_engine_id` below `mkdir(parents=True)`s
+# whatever directory the path resolves to. A relative default silently built a
+# brand-new stub `<cwd>/examples/multi_model_agents/.env` on a health-gate
+# reroll, printed "Updated ... ->", and left the real .env stale -- exactly
+# the drift this module exists to prevent. This file lives at
+# wrangler/core/env_ids.py, so parents[2] is the repo root.
+DEFAULT_ENV_PATH = str(
+    Path(__file__).resolve().parents[2] / "examples" / "multi_model_agents" / ".env"
+)
 
 
 def env_var_for(label: str) -> str:
