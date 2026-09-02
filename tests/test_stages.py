@@ -394,3 +394,144 @@ class TestEngineTierComesFromTheModelNotTheId:
         monkeypatch.setattr(env_ids, "set_engine_id", lambda label, eid: calls.append((label, eid)))
         stages._sync_env_engine_id("generic-prompt-v2", "not-a-real-model", "eng-999")
         assert calls == []
+
+
+class TestCollidingTierClaimsAreNotWritten:
+    """The version-stripping fallback is genuinely useful with no peer -- an
+    evaluator looking for "the sonnet engine" wants SONNET_ENGINE_ID to point
+    at claude-sonnet-5 when that is the only Sonnet-family pair in play. The
+    fallback only becomes wrong when a *peer* exists: manifests/c07-sonnet46_
+    manifest.yaml (claude-sonnet-4-6, alias "sonnet") and manifests/c07-sonnet5_
+    manifest.yaml (claude-sonnet-5, alias "sonnet5" -> family "sonnet") both
+    write SONNET_ENGINE_ID. Last writer wins, and evaluators/trace-health then
+    resolve to whichever arm rerolled most recently -- the wrong arm's .env
+    entry silently overwritten, which is the exact failure class C1 exists to
+    remove.
+
+    Deleting the fallback is not the fix: it would also kill the useful no-peer
+    case, and per docs/doe/07-cost-quality-frontier.md the c07-sonnet46 and
+    c07-sonnet5 arms run as two separate manifests (confirmed: `wrangler run`
+    and `Experiment.create` each take exactly one manifest path, and nothing
+    merges two manifests' pairs into one `stage_deploy` call), so resolving
+    collisions from one run's pair list cannot see this specific pairing --
+    it is a real improvement for a manifest that enables two family-mates
+    directly, not a complete fix for the two-manifest case. `contested` lets
+    `stage_deploy` pass in a global view of what this run's enabled pairs
+    claim, so a manifest that *does* enable two family-mates together is
+    caught, while the ordinary no-peer case still writes.
+    """
+
+    def test_two_pairs_claiming_the_same_tier_are_not_written(self, monkeypatch):
+        from wrangler.core import env_ids
+        from wrangler.orchestration import stages
+
+        calls = []
+        monkeypatch.setattr(env_ids, "set_engine_id", lambda label, eid: calls.append((label, eid)))
+        contested = {"sonnet": ["c07-sonnet46", "c07-sonnet5"]}
+        stages._sync_env_engine_id(
+            "c07-sonnet46", "claude-sonnet-4-6", "eng-A", contested=contested
+        )
+        stages._sync_env_engine_id("c07-sonnet5", "claude-sonnet-5", "eng-B", contested=contested)
+        assert calls == []
+
+    def test_an_uncontested_tier_still_writes(self, monkeypatch):
+        """A single sonnet-5 pair with no peer must still resolve to sonnet."""
+        from wrangler.core import env_ids
+        from wrangler.orchestration import stages
+
+        calls = []
+        monkeypatch.setattr(env_ids, "set_engine_id", lambda label, eid: calls.append((label, eid)))
+        stages._sync_env_engine_id(
+            "c07-sonnet5", "claude-sonnet-5", "eng-B", contested={"sonnet": ["c07-sonnet5"]}
+        )
+        assert calls == [("sonnet", "eng-B")]
+
+    def test_no_contested_map_behaves_as_the_uncontested_case(self, monkeypatch):
+        """Every existing caller omits `contested`; it must not change their behaviour."""
+        from wrangler.core import env_ids
+        from wrangler.orchestration import stages
+
+        calls = []
+        monkeypatch.setattr(env_ids, "set_engine_id", lambda label, eid: calls.append((label, eid)))
+        stages._sync_env_engine_id("sonnet-vs-opus", "claude-opus-4-6", "eng-999")
+        assert calls == [("opus", "eng-999")]
+
+    def test_stage_deploy_resolves_collisions_from_its_own_pair_list(self, tmp_path, capsys):
+        """End to end: two enabled pairs in one manifest that collide on a tier."""
+        from unittest.mock import patch
+
+        from wrangler.orchestration import stages
+
+        class _Pair:
+            agent_module = "agents/x"
+            system_prompt = "prompt"
+            enabled = True
+            disabled_reason = ""
+
+            def __init__(self, pid, model, eid):
+                self.id = pid
+                self.model = model
+                self.engine_id = eid
+
+        class _Manifest:
+            agent_module = "agents/x"
+            eval_data = "eval.yaml"
+
+            def __init__(self, pairs):
+                self.pairs = pairs
+
+        class _Exp:
+            version = "v1"
+
+            def __init__(self, pairs):
+                self.manifest = _Manifest(pairs)
+                self.config = {}
+                self.dir = tmp_path
+                self.written = {}
+
+            def check_gate(self, *_a, **_k):
+                return True, ""
+
+            def read_stage(self, _stage):
+                return {}
+
+            def merge_pair(self, stage, pid, data):
+                self.written.setdefault(stage, {}).setdefault(pid, {}).update(data)
+
+        exp = _Exp(
+            [
+                _Pair("c07-sonnet46", "claude-sonnet-4-6", ""),
+                _Pair("c07-sonnet5", "claude-sonnet-5", ""),
+            ]
+        )
+
+        def _deploy(agent_module, model, instruction, display_name):
+            return "eng-bad-46" if model == "claude-sonnet-4-6" else "eng-bad-5"
+
+        def _gate(engine_id, redeploy_fn, **kw):
+            good = "eng-good-46" if engine_id == "eng-bad-46" else "eng-good-5"
+            return {
+                "engine_id": good,
+                "passed": True,
+                "rate": 0.97,
+                "n": 60,
+                "rerolls": 1,
+                "rejected": [engine_id],
+            }
+
+        synced = []
+        with (
+            patch.object(stages.deployer, "deploy_agent_from_source", side_effect=_deploy),
+            patch.object(stages, "gate_engine_health", side_effect=_gate),
+            patch(
+                "wrangler.core.env_ids.set_engine_id",
+                side_effect=lambda label, eid, **kw: synced.append((label, eid)) or True,
+            ),
+            patch("wrangler.tools.engines.delete_engine"),
+        ):
+            stages.stage_deploy(exp)
+
+        assert synced == []
+        out = capsys.readouterr().out
+        assert "c07-sonnet46" in out
+        assert "c07-sonnet5" in out

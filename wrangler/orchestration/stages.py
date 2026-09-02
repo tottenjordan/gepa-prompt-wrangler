@@ -320,8 +320,27 @@ def _engine_tier_for_model(model: str) -> str:
     return family if family in ENGINE_LABELS else ""
 
 
-def _sync_env_engine_id(pair_id: str, model: str, engine_id: str) -> None:
-    """Point the example .env at a rerolled engine, if the pair's model maps to a tier."""
+def _sync_env_engine_id(
+    pair_id: str,
+    model: str,
+    engine_id: str,
+    contested: dict[str, list[str]] | None = None,
+) -> None:
+    """Point the example .env at a rerolled engine, if the pair's model maps to a tier.
+
+    `contested` is a tier -> [pair ids claiming it] map built once, up front,
+    over every enabled pair in the same run (see `stage_deploy`). It exists
+    because the version-stripping fallback in `_engine_tier_for_model` is
+    ambiguous exactly when a peer exists: manifests/c07-sonnet46_manifest.yaml
+    (claude-sonnet-4-6, alias "sonnet") and manifests/c07-sonnet5_manifest.yaml
+    (claude-sonnet-5, alias "sonnet5" -> family "sonnet") both resolve to
+    "sonnet". Writing for both, last write wins, and evaluators/trace-health
+    then resolve to whichever arm rerolled most recently -- the wrong arm's
+    .env entry silently overwritten by an unrelated engine, which is the exact
+    failure class this whole mechanism exists to prevent. Refusing for every
+    claimant is deliberate over picking one to "win": a stale but visibly
+    untouched var is detectable; a confidently wrong one is not.
+    """
     from ..core.env_ids import set_engine_id
 
     label = _engine_tier_for_model(model)
@@ -330,6 +349,16 @@ def _sync_env_engine_id(pair_id: str, model: str, engine_id: str) -> None:
             f"  Note: pair {pair_id!r} runs {model!r}, which matches no known "
             f"engine tier, so .env was not updated. Point anything that "
             f"references the old id at {engine_id}.",
+            flush=True,
+        )
+        return
+    claimants = (contested or {}).get(label, [pair_id])
+    if len(claimants) > 1:
+        print(
+            f"  Note: pairs {claimants} all resolve to the {label.upper()} tier, so "
+            f"{label.upper()}_ENGINE_ID was not updated for any of them -- writing "
+            f"one would silently overwrite the others. Point the right evaluators "
+            f"at {pair_id!r}'s engine ({engine_id}) manually.",
             flush=True,
         )
         return
@@ -511,6 +540,21 @@ def stage_deploy(exp: Experiment, pair_id: str | None = None) -> None:
     mdir = _manifest_dir(exp)
     deploy_data = exp.read_stage("deploy")
 
+    # Resolved once, up front, over every pair this run will touch -- not
+    # inside the loop below, where each pair only sees itself. Two pairs in
+    # *this* manifest that both map to the same tier (e.g. a manifest that
+    # enabled both a canonical and a versioned sibling of the same model
+    # family) must not have one silently overwrite the other's .env entry.
+    # This does not, and cannot, see a collision across two *separate*
+    # manifests/runs -- c07-sonnet46_manifest.yaml and c07-sonnet5_manifest.yaml
+    # each deploy through their own `stage_deploy` call with only their own
+    # pair in scope, so that pairing is a real, live gap this cannot close.
+    tier_claims: dict[str, list[str]] = {}
+    for p in pairs:
+        label = _engine_tier_for_model(p.model)
+        if label:
+            tier_claims.setdefault(label, []).append(p.id)
+
     for i, pair in enumerate(pairs, 1):
         tag = f"[{pair.id}] ({i}/{len(pairs)})"
         if pair.engine_id:
@@ -596,7 +640,9 @@ def stage_deploy(exp: Experiment, pair_id: str | None = None) -> None:
                 # protects a corpse -- 10 of 28 evaluators were in exactly that
                 # state on 2026-08-31.
                 if health["engine_id"] != engine_id:
-                    _sync_env_engine_id(pair.id, pair.model, health["engine_id"])
+                    _sync_env_engine_id(
+                        pair.id, pair.model, health["engine_id"], contested=tier_claims
+                    )
 
                 # gate_engine_health only discards draws it created itself --
                 # the engine it was *handed* may be a live deployment the
