@@ -293,58 +293,104 @@ class TestOptimizeBudgetIsPlumbed:
         assert 'defaults", {}).get("max_metric_calls' in src
 
 
-class TestEngineLabelMatchingIsTokenBased:
-    """A pair id merely containing "pro" as a substring must not steal PRO_ENGINE_ID.
+class TestEngineTierComesFromTheModelNotTheId:
+    """The tier written to .env is a property of the model a pair runs, not of
+    how someone spelled the pair's id.
 
-    The old matcher was `next((x for x in ENGINE_LABELS if x in pair_id.lower()), "")`
-    -- a bare substring test in ENGINE_LABELS's fixed order. Any id containing
-    "pro" anywhere -- "generic-prompt", "probe-arm", "prod-v2" -- matched the
-    "pro" tier and overwrote PRO_ENGINE_ID in .env with an unrelated engine.
-    Every reader of that var (online evaluators, trace-health, `wrangler engines`)
-    then targets the wrong engine, or a corpse the prune policy now protects.
+    The first fix here replaced a substring scan over ENGINE_LABELS with a
+    token-boundary scan (`_match_engine_label`), which stopped "generic-prompt"
+    from stealing PRO_ENGINE_ID. But it just relocated the bug: matching is
+    still driven by whatever words happen to appear in the id, so two ids
+    naming the *same* comparison can still disagree --
+
+        "sonnet-vs-opus"      -> tokens [sonnet, vs, opus]      -> last match "opus"
+        "opus-sonnet-compare" -> tokens [opus, sonnet, compare] -> last match "sonnet"
+
+    -- and "vs"/"compare" is exactly this project's naming vocabulary for a
+    control-arm comparison. The registry already knows a model's tier
+    authoritatively (`get_spec(model).alias`), so `_engine_tier_for_model`
+    derives it from `pair.model` instead and the id never enters the decision
+    at all -- removing the whole class of bug rather than relocating it.
     """
 
-    def test_a_substring_that_is_not_a_whole_token_does_not_match(self):
+    def test_the_tier_comes_from_the_models_alias(self):
         from wrangler.orchestration import stages
 
-        assert stages._match_engine_label("generic-prompt") == ""
-        assert stages._match_engine_label("probe-arm") == ""
-        assert stages._match_engine_label("prod-v2") == ""
+        assert stages._engine_tier_for_model("gemini-3.1-flash-lite") == "lite"
+        assert stages._engine_tier_for_model("gemini-3.5-flash") == "flash"
+        assert stages._engine_tier_for_model("gemini-3.1-pro-preview") == "pro"
+        assert stages._engine_tier_for_model("claude-sonnet-4-6") == "sonnet"
+        assert stages._engine_tier_for_model("claude-opus-4-6") == "opus"
 
-    def test_a_whole_token_still_matches(self):
-        from wrangler.orchestration import stages
-
-        assert stages._match_engine_label("pro-gemini-3.1") == "pro"
-        assert stages._match_engine_label("sonnet-claude-4") == "sonnet"
-        assert stages._match_engine_label("opus-claude-4") == "opus"
-
-    def test_underscores_are_also_token_boundaries(self):
-        from wrangler.orchestration import stages
-
-        assert stages._match_engine_label("pro_gemini_3_1") == "pro"
-
-    def test_no_matching_token_returns_empty(self):
-        from wrangler.orchestration import stages
-
-        assert stages._match_engine_label("mystery-agent") == ""
-
-    def test_flash_lite_still_resolves_to_lite(self):
-        """The one existing manifest id with two matching tokens.
-
-        gemini-3.1-flash-lite is registered under alias "lite", not "flash" --
-        this must not regress just because substring matching (which happened
-        to check "lite" before "flash" in ENGINE_LABELS's fixed order) is gone.
+    def test_two_differently_worded_ids_for_the_same_model_now_agree(self):
+        """The bug the rework exists to remove: same model, different id
+        wording, used to be able to disagree. Deriving from the model instead
+        of the id makes the id irrelevant to the outcome, so there is nothing
+        left for two wordings to disagree about.
         """
         from wrangler.orchestration import stages
 
-        assert stages._match_engine_label("flash-lite-gemini-3.1") == "lite"
+        # "sonnet-vs-opus" and "opus-sonnet-compare" would have differed under
+        # id-string matching; the id is not even a parameter here anymore.
+        assert stages._engine_tier_for_model("claude-opus-4-6") == "opus"
+        assert stages._engine_tier_for_model("claude-opus-4-6") == "opus"
 
-    def test_a_rerolled_engine_updates_the_correct_tier(self, monkeypatch):
-        """End-to-end: _sync_env_engine_id must not clobber an unrelated tier."""
+    def test_flash_lite_still_resolves_to_lite(self):
+        """gemini-3.1-flash-lite is registered under alias "lite", not "flash"."""
+        from wrangler.orchestration import stages
+
+        assert stages._engine_tier_for_model("gemini-3.1-flash-lite") == "lite"
+
+    def test_a_versioned_alias_falls_back_to_its_family_tier(self):
+        """claude-sonnet-5's alias is "sonnet5" -- there is no SONNET5_ENGINE_ID,
+        only SONNET_ENGINE_ID. Campaign 07 runs claude-sonnet-5, so a health-gate
+        reroll on that pair must still land on the one .env var this project's
+        five-tier vocabulary actually has for the Sonnet family, or that var
+        goes stale exactly the way this module exists to prevent.
+
+        The same fallback -- strip the trailing version digits, check that
+        against ENGINE_LABELS -- covers every other versioned alias in the
+        registry (opus47, opus48, opus5, lite35, flash36) without a hand-built
+        per-alias table that would need updating for every new model version.
+        """
+        from wrangler.orchestration import stages
+
+        assert stages._engine_tier_for_model("claude-sonnet-5") == "sonnet"
+        assert stages._engine_tier_for_model("claude-opus-4-7") == "opus"
+        assert stages._engine_tier_for_model("claude-opus-4-8") == "opus"
+        assert stages._engine_tier_for_model("claude-opus-5") == "opus"
+        assert stages._engine_tier_for_model("gemini-3.5-flash-lite") == "lite"
+        assert stages._engine_tier_for_model("gemini-3.6-flash") == "flash"
+
+    def test_fable_is_a_sixth_family_with_no_env_tier_of_its_own(self):
+        """fable has no trailing digit and "fable" itself is not one of the five
+        ENGINE_LABELS -- there is no FABLE_ENGINE_ID to guess at, so this must
+        say "no tier" rather than fabricate a mapping onto an unrelated one.
+        """
+        from wrangler.orchestration import stages
+
+        assert stages._engine_tier_for_model("claude-fable-5") == ""
+
+    def test_an_unregistered_model_degrades_to_no_tier_rather_than_raising(self):
+        """A deploy for an ad-hoc model id must not be taken down by this check."""
+        from wrangler.orchestration import stages
+
+        assert stages._engine_tier_for_model("not-a-real-model") == ""
+
+    def test_a_rerolled_engine_updates_the_tier_the_model_names(self, monkeypatch):
         from wrangler.core import env_ids
         from wrangler.orchestration import stages
 
         calls = []
         monkeypatch.setattr(env_ids, "set_engine_id", lambda label, eid: calls.append((label, eid)))
-        stages._sync_env_engine_id("generic-prompt-v2", "eng-999")
+        stages._sync_env_engine_id("sonnet-vs-opus", "claude-opus-4-6", "eng-999")
+        assert calls == [("opus", "eng-999")]
+
+    def test_an_unregistered_models_pair_is_not_synced(self, monkeypatch):
+        from wrangler.core import env_ids
+        from wrangler.orchestration import stages
+
+        calls = []
+        monkeypatch.setattr(env_ids, "set_engine_id", lambda label, eid: calls.append((label, eid)))
+        stages._sync_env_engine_id("generic-prompt-v2", "not-a-real-model", "eng-999")
         assert calls == []

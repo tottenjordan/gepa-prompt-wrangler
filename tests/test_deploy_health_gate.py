@@ -380,9 +380,15 @@ class TestStageDeployIntegration:
         assert exp.written["deploy"]["p1"]["engine_id"] == "eng-good"
 
     def test_a_reroll_syncs_the_env_engine_id(self, tmp_path, monkeypatch):
-        """Otherwise evaluators and trace-health keep pointing at the dead one."""
+        """Otherwise evaluators and trace-health keep pointing at the dead one.
+
+        The tier comes from the pair's model, not its id (see
+        TestEngineTierComesFromTheModelNotTheId in test_stages.py) -- the id
+        is set here only so the printed messages read sensibly.
+        """
         exp = _stub_experiment(tmp_path)
         exp.manifest.pairs[0].id = "sonnet"
+        exp.manifest.pairs[0].model = "claude-sonnet-4-6"
         synced = []
         with (
             patch.object(stages.deployer, "deploy_agent_from_source", return_value="eng-bad"),
@@ -429,6 +435,12 @@ class TestStageDeployIntegration:
         assert synced == []
 
     def test_a_pair_matching_no_tier_says_so_instead_of_guessing(self, tmp_path, capsys):
+        """An unregistered model, not a cleverly-worded id, is what triggers this.
+
+        _stub_experiment's default pair model ("m") is unregistered, which is
+        exactly the case this message covers now that the tier comes from
+        get_spec(model).alias rather than from parsing the id.
+        """
         exp = _stub_experiment(tmp_path)
         exp.manifest.pairs[0].id = "some-custom-arm"
         with (
@@ -445,7 +457,7 @@ class TestStageDeployIntegration:
                 "rejected": ["eng-bad"],
             }
             stages.stage_deploy(exp)
-        assert "matches no known model tier" in capsys.readouterr().out
+        assert "matches no known engine tier" in capsys.readouterr().out
 
     def test_the_gate_can_be_disabled(self, tmp_path):
         exp = _stub_experiment(tmp_path, config={"health_gate": {"enabled": False}})

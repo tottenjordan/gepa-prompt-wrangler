@@ -269,42 +269,67 @@ def _manifest_dir(exp: Experiment) -> Path:
 # ── Stage functions ────────────────────────────────────────────
 
 
-def _match_engine_label(pair_id: str) -> str:
-    """Map a pair id to the .env tier it names, by whole token rather than substring.
+def _engine_tier_for_model(model: str) -> str:
+    """Map a model id to the .env tier it belongs to, via the registry.
 
-    The old matcher was `next((x for x in ENGINE_LABELS if x in pair_id.lower()), "")`
-    -- a bare substring test, in ENGINE_LABELS's fixed order. Any id merely
-    containing "pro" -- "generic-prompt", "probe-arm", "prod-v2" -- matched the
-    "pro" tier and overwrote PRO_ENGINE_ID with an unrelated engine. Splitting
-    on "-"/"_" and requiring an exact token match fixes all three; today's
-    manifests happen not to trip it, so it was latent rather than active.
+    A pair id used to be scanned for one of ENGINE_LABELS as a substring, then
+    (after a first fix) as a whole token. Both versions inferred the tier from
+    however someone happened to spell the id, and the token version just
+    relocated the bug rather than removing it: "sonnet-vs-opus" and
+    "opus-sonnet-compare" name the same comparison but tokenize to different
+    last-matching words, so the two would resolve to different tiers and
+    overwrite different .env entries. "vs"/"compare" is exactly this project's
+    naming vocabulary for a control-arm comparison, so this was not a corner
+    case.
 
-    "flash-lite-gemini-3.1" (examples/multi_model_agents/manifest.yaml) still
-    has two tokens that match -- "flash" and "lite" -- because it names
-    gemini-3.1-flash-lite, registered under alias "lite", not "flash". This
-    project's pair-id convention appends the more specific qualifier after the
-    broader family name (mirrors the model id itself), so where more than one
-    token matches, the last one wins rather than ENGINE_LABELS's fixed order.
+    A pair's tier is a property of the model it runs, not of its id, and the
+    registry already has the answer: `get_spec(model).alias`. Deriving from
+    the model removes the id from the decision entirely, so there is nothing
+    left for two wordings of the same id to disagree about.
+
+    Two things the id-based version didn't have to handle:
+
+    - Not every alias is one of the five ENGINE_LABELS this project's example
+      .env has vars for (lite, flash, pro, sonnet, opus). Versioned aliases
+      like "sonnet5", "opus47", "opus48", "opus5", "lite35", "flash36" fall
+      back to their family by stripping the trailing version digits -- there
+      is no SONNET5_ENGINE_ID, only SONNET_ENGINE_ID, and campaign 07 runs
+      claude-sonnet-5, so this fallback is load-bearing today, not defensive
+      cruft. "fable" has no trailing digit and is not itself in ENGINE_LABELS
+      -- it is a sixth model family with no tier var at all, so it correctly
+      maps to "" rather than being guessed onto an unrelated tier.
+    - An unregistered model must not take a deploy down over an .env
+      convenience sync, so this degrades to "" the same way the rest of this
+      module degrades on an unregistered id, instead of letting get_spec's
+      KeyError propagate.
     """
+    import re
+
     from ..core.env_ids import ENGINE_LABELS
+    from ..core.models import get_spec
 
-    tokens = pair_id.lower().replace("_", "-").split("-")
-    label = ""
-    for token in tokens:
-        if token in ENGINE_LABELS:
-            label = token
-    return label
+    try:
+        alias = get_spec(model).alias
+    except KeyError:
+        return ""
+    if not alias:
+        return ""
+    if alias in ENGINE_LABELS:
+        return alias
+    family = re.sub(r"\d+$", "", alias)
+    return family if family in ENGINE_LABELS else ""
 
 
-def _sync_env_engine_id(pair_id: str, engine_id: str) -> None:
-    """Point the example .env at a rerolled engine, if the pair maps to a tier."""
+def _sync_env_engine_id(pair_id: str, model: str, engine_id: str) -> None:
+    """Point the example .env at a rerolled engine, if the pair's model maps to a tier."""
     from ..core.env_ids import set_engine_id
 
-    label = _match_engine_label(pair_id)
+    label = _engine_tier_for_model(model)
     if not label:
         print(
-            f"  Note: pair {pair_id!r} matches no known model tier, so .env was not "
-            f"updated. Point anything that references the old id at {engine_id}.",
+            f"  Note: pair {pair_id!r} runs {model!r}, which matches no known "
+            f"engine tier, so .env was not updated. Point anything that "
+            f"references the old id at {engine_id}.",
             flush=True,
         )
         return
@@ -571,7 +596,7 @@ def stage_deploy(exp: Experiment, pair_id: str | None = None) -> None:
                 # protects a corpse -- 10 of 28 evaluators were in exactly that
                 # state on 2026-08-31.
                 if health["engine_id"] != engine_id:
-                    _sync_env_engine_id(pair.id, health["engine_id"])
+                    _sync_env_engine_id(pair.id, pair.model, health["engine_id"])
 
                 # gate_engine_health only discards draws it created itself --
                 # the engine it was *handed* may be a live deployment the
@@ -582,6 +607,15 @@ def stage_deploy(exp: Experiment, pair_id: str | None = None) -> None:
                 # will delete it. Left alone, every pair whose first draw
                 # fails leaks one engine per sweep -- ~45% of deploys by this
                 # project's own measurements (docs/doe/09-lottery-recheck.md).
+                #
+                # `rejected[0] != health["engine_id"]` is always true when
+                # `rejected` is non-empty -- `current` in gate_engine_health
+                # only advances forward, so the final engine_id can never be
+                # a value already appended to `rejected`. Kept anyway as a
+                # belt against a redeploy_fn that returns the same id it was
+                # just handed (a no-op "redeploy"): without it, that id's
+                # entry in `rejected` would delete the very engine this loop
+                # ends up keeping.
                 if health["rejected"] and health["rejected"][0] != health["engine_id"]:
                     stale = health["rejected"][0]
                     try:
