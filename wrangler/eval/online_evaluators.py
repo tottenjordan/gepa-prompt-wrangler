@@ -214,8 +214,10 @@ def _refusal_reason(evaluators: list[dict], live_engine_ids: set[str] | None) ->
     This cannot distinguish "region is wrong" from "every engine really was
     deleted and evaluators just weren't cleaned up yet" -- both produce the
     same (empty, evaluators-exist) shape. That is a real limitation, not a
-    solved one; the caller can only be told to check credentials/region
-    before re-running with ``--yes``.
+    solved one, and there is deliberately no override flag: what to do when
+    both check out is written up in docs/notes/engine-lifecycle.md rather
+    than automated, because a flag that skips this check is a flag that
+    reintroduces 2026-08-31.
     """
     if live_engine_ids is None:
         return "engine listing failed (see the exception raised by list_engines())"
@@ -223,7 +225,9 @@ def _refusal_reason(evaluators: list[dict], live_engine_ids: set[str] | None) ->
         return (
             f"engine listing came back empty while {len(evaluators)} evaluator(s) exist -- "
             "this reads as 'we could not see the engines', not 'every engine is gone'. "
-            "Check GCP_REGION and credentials before re-running."
+            "Check GCP_REGION and credentials before re-running. See "
+            "docs/notes/engine-lifecycle.md#the-online-evaluator-prune-can-refuse-to-run "
+            "if both check out and the listing is still empty."
         )
     return ""
 
@@ -356,7 +360,12 @@ def prune_command(args: list[str]):
         for agent, ids in list(dupes.items())[:10]:
             print(f"    engine {agent}: {ids}")
 
-    if not result["orphans"]:
+    if result["refused_reason"]:
+        # "nothing to delete" on its own reads as "checked, all clear" --
+        # exactly the false all-clear this refusal exists to prevent, just
+        # relocated to the summary line instead of the engine listing.
+        print("  nothing to delete (refused -- see above, not a clean bill of health).")
+    elif not result["orphans"]:
         print("  nothing to delete.")
     elif result["dry_run"]:
         print(f"\n  DRY RUN — re-run with --yes to delete {len(result['orphans'])}.")

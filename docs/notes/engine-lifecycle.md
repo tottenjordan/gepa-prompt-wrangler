@@ -122,6 +122,40 @@ Four things worth knowing before changing any of them:
 
 Ad-hoc: `wrangler probe --engine-id <id> --gate` exits non-zero below the bar.
 
+## The online-evaluator prune can refuse to run
+
+`wrangler.eval.online_evaluators prune` (`orphaned_evaluators` /
+`_refusal_reason`) deletes evaluators whose target engine is gone, the same
+kind of cleanup as `wrangler engines prune` above but for the evaluator side.
+Its only engine listing is `{r["id"] for r in list_engines()}`, which
+initialises Vertex AI at `GCP_REGION` and can never come back `None` — a
+wrong or unset region, a credentials scope problem, or evaluators pointing
+at engines in another location all come back as an *empty* set, which is
+indistinguishable from a real empty project by return value alone. Reading
+that as "every engine is gone" is what deleted 28 evaluators' worth of
+engines it simply could not see on 2026-08-31.
+
+So the prune now **refuses** — prints why and deletes nothing, `--yes`
+included — whenever the listing is empty while evaluators exist. If you hit
+this:
+
+1. Check `GCP_REGION` and the credentials in use match where the evaluators'
+   engines actually live. This is the common case and fixes the listing.
+2. If both check out and the listing is still empty, the engines may
+   genuinely all be gone and the evaluators are simply stale. There is no
+   override flag on purpose — this refusal exists because "empty listing"
+   and "everything really was deleted" are the same shape from here, and a
+   flag that skips the check is a flag that reintroduces 2026-08-31. Instead,
+   list the evaluators (`prune` without `--yes`, or the `list` command) and
+   confirm by hand — e.g. `agent_engines.get(...)` on a couple of the
+   evaluators' target ids returning `NotFound` — before deleting individually
+   with `delete <evaluator_id>`.
+
+A refused run's last line reads "nothing to delete (refused -- see above,
+not a clean bill of health)" rather than plain "nothing to delete" — the
+latter, on its own, reads as "checked, all clear" to someone skimming past
+the refusal notice above it.
+
 ## Rules to keep it from recurring
 
 1. **A campaign is not complete until its engines are gone.** They are the last step of the
