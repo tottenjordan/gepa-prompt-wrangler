@@ -269,6 +269,46 @@ def engines_prune(days: int, yes: bool, snapshot: bool):
         raise SystemExit(1)
 
 
+@main.command("floor")
+@click.argument("run_ids", nargs=-1, required=True)
+@click.option("--bucket", default=None, help="GCS bucket (default: GCP_STAGING_BUCKET).")
+@click.option("--markdown/--no-markdown", default=True, help="Emit the DOE Result table.")
+def floor_cmd(run_ids: tuple[str, ...], bucket: str | None, markdown: bool):
+    """Compute the noise floor from one or more control-arm pipeline runs.
+
+    Every arm is assumed to be a control -- byte-identical prompt on both
+    sides -- so its movement is measurement noise rather than a result.
+
+    Exists because the analysis functions had no caller: the first clean floor
+    this project measured was still worked out by pasting Python into a shell,
+    which is how CLAUDE.md acquired two figures nobody can re-derive.
+
+        wrangler floor run-3aa99b8293 run-a8d4d4a2a0
+    """
+    from .core.config import GCP_STAGING_BUCKET
+    from .reporting.campaign_floor import fetch_arms, render_markdown, summarize_arms
+
+    target = bucket or GCP_STAGING_BUCKET
+    click.echo(f"Reading {len(run_ids)} run(s) from gs://{target}/pipeline-runs/")
+    arms = fetch_arms(list(run_ids), target)
+    if not arms:
+        raise click.ClickException("no control arms found — check the run ids")
+
+    click.echo(f"Found {len(arms)} arm(s): {', '.join(arms)}\n")
+    summary = summarize_arms(arms)
+
+    if markdown:
+        click.echo(render_markdown(summary))
+    else:
+        floor = summary["floor"]
+        click.echo(f"floor: {floor:.4f}" if floor is not None else "floor: n/a")
+        for metric, val in sorted(summary["pooled"].items(), key=lambda kv: -kv[1]):
+            click.echo(f"  {metric:34s} {val:.4f}")
+
+    for warning in summary["warnings"]:
+        click.echo(f"\nWARNING  {warning}", err=True)
+
+
 @main.command("probe")
 @click.option("--engine-id", required=True, help="Engine to health-check.")
 @click.option("--n", default=None, type=int, help="Attempts (default: 60).")
