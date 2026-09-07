@@ -430,3 +430,53 @@ class TestTheDagCompilesAndItsParametersLineUp:
         assert not required_unsent, (
             f"nothing supplies required parameter(s) {sorted(required_unsent)}"
         )
+
+
+class TestAnalysisSurvivesARenderingFailure:
+    """A chart renderer must not be able to destroy the run's summary.
+
+    `generate_analysis` called `generate_report` first and uploaded
+    summary.json last, so when the reporter raised inside the pipeline
+    container -- three submissions running -- the summary, the uploaded report
+    and the per-pair totals all went with it. The eval artifacts survived only
+    because a different component writes them, which is the sole reason the
+    2026-09-02 noise floor could be computed by hand afterwards.
+
+    The measurement is the artifact; the report is a rendering of it. The
+    dependency only runs one way.
+    """
+
+    def _body(self) -> str:
+        from pathlib import Path
+
+        src = Path("wrangler/pipeline/components.py").read_text()
+        return src[src.index("def generate_analysis") :]
+
+    def test_the_summary_is_written_before_the_report(self):
+        body = self._body()
+        assert body.index("summary.json") < body.index("generate_report("), (
+            "summary.json must be uploaded before the reporter runs, or a "
+            "rendering failure takes the measurement with it"
+        )
+
+    def test_the_reporter_call_is_guarded(self):
+        import ast
+
+        body = self._body()
+        tree = ast.parse("def _f():\n" + "\n".join("    " + ln for ln in body.splitlines()))
+        for node in ast.walk(tree):
+            guards_reporter = any(
+                getattr(call.func, "id", "") == "generate_report"
+                for call in ast.walk(node)
+                if isinstance(call, ast.Call)
+            )
+            if isinstance(node, ast.Try) and node.handlers and guards_reporter:
+                return
+        raise AssertionError("generate_report must run inside a try/except")
+
+    def test_a_failure_writes_a_traceback_artifact(self):
+        """Three submissions died here and `ml_job` logs came back empty each time."""
+        body = self._body()
+        why = "the worker logs do not carry one, so it must land beside the artifacts"
+        assert "traceback" in body, f"no traceback captured; {why}"
+        assert "analysis_error" in body, f"no analysis_error artifact; {why}"

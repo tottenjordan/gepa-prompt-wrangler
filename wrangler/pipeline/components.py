@@ -1037,17 +1037,6 @@ def generate_analysis(
 
     from wrangler.reporting import reporter
 
-    original_reports = reporter.REPORTS_DIR
-    original_charts = reporter.CHARTS_DIR
-    try:
-        reporter.REPORTS_DIR = reports_dir
-        reporter.CHARTS_DIR = charts_dir
-        experiment_name = manifest.get("name", run_id)
-        generate_report(results, experiment_name, use_paperbanana=True)
-    finally:
-        reporter.REPORTS_DIR = original_reports
-        reporter.CHARTS_DIR = original_charts
-
     summary_data = {
         "run_id": run_id,
         "experiment": manifest.get("name", ""),
@@ -1074,17 +1063,57 @@ def generate_analysis(
         }
 
     gcs_bucket = gcs.bucket(bucket_name)
-    for local_file in reports_dir.rglob("*"):
-        if local_file.is_file():
-            rel = local_file.relative_to(reports_dir)
-            blob_path = f"pipeline-runs/{run_id}/reports/{rel}"
-            gcs_bucket.blob(blob_path).upload_from_filename(str(local_file))
 
+    # Summary first, report second. This ordering used to be the other way
+    # round, and a reporter that raised inside the pipeline container took the
+    # summary, the uploaded report and the per-pair totals down with it --
+    # three submissions in a row. The eval artifacts survived only because a
+    # different component writes them, which is the sole reason the 2026-09-02
+    # noise floor could be reconstructed by hand. The measurement is the
+    # artifact; the report is a rendering of it.
     summary_blob = f"pipeline-runs/{run_id}/reports/summary.json"
     gcs_bucket.blob(summary_blob).upload_from_string(
         json.dumps(summary_data, indent=2),
         content_type="application/json",
     )
+
+    original_reports = reporter.REPORTS_DIR
+    original_charts = reporter.CHARTS_DIR
+    try:
+        reporter.REPORTS_DIR = reports_dir
+        reporter.CHARTS_DIR = charts_dir
+        experiment_name = manifest.get("name", run_id)
+        generate_report(results, experiment_name, use_paperbanana=True)
+        for local_file in reports_dir.rglob("*"):
+            if local_file.is_file():
+                rel = local_file.relative_to(reports_dir)
+                gcs_bucket.blob(f"pipeline-runs/{run_id}/reports/{rel}").upload_from_filename(
+                    str(local_file)
+                )
+    except Exception:
+        # Deliberately not re-raised. The summary and every eval artifact are
+        # already written, so the run's measurement is complete and a chart
+        # must not cost a campaign its analysis stage.
+        #
+        # The traceback goes to GCS because `ml_job` worker logs came back
+        # EMPTY for all three failures here -- reading the source was the only
+        # diagnostic available, and it was not enough. Beside the artifacts is
+        # where the next person will actually look.
+        import traceback
+
+        tb = traceback.format_exc()
+        gcs_bucket.blob(f"pipeline-runs/{run_id}/reports/analysis_error.txt").upload_from_string(
+            tb, content_type="text/plain"
+        )
+        logging.exception(
+            "[%s] report rendering FAILED -- summary.json and eval artifacts are "
+            "intact; traceback saved to reports/analysis_error.txt\n%s",
+            run_id,
+            tb,
+        )
+    finally:
+        reporter.REPORTS_DIR = original_reports
+        reporter.CHARTS_DIR = original_charts
 
     for pair_id, pair_summary in summary_data["pairs"].items():
         metrics.log_metric(f"{pair_id}_before_avg", pair_summary["before_avg"])
