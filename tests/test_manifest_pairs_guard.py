@@ -30,8 +30,13 @@ from pathlib import Path
 # (relative path, line number) -> reason a raw `.pairs` read is correct there.
 # Keep this small: anything not listed here must go through
 # `Manifest.enabled_pairs`, or `manifest.get_pair()` for a single named pair.
-PAIRS_READ_EXCEPTIONS: dict[tuple[str, int], str] = {
-    ("wrangler/orchestration/experiment.py", 108): (
+# Keyed on (file, enclosing function), never on a line number. A line-pinned
+# table breaks whenever anything is inserted above it -- adding the `floor`
+# command to cli.py shifted the dry-run block from 537 to 577 and failed this
+# guard for a reason that had nothing to do with disabled pairs. A guard that
+# cries wolf on unrelated edits is one people start editing reflexively.
+PAIRS_READ_EXCEPTIONS: dict[tuple[str, str], str] = {
+    ("wrangler/orchestration/experiment.py", "create"): (
         "Experiment.create persists every declared pair, disabled ones "
         "included, with their enabled/disabled_reason fields -- dropping "
         "disabled pairs here instead broke `--pair <disabled-id>` on every "
@@ -39,18 +44,18 @@ PAIRS_READ_EXCEPTIONS: dict[tuple[str, int], str] = {
         "and calls _filter_pairs on it. pair_ids (below) filters enabled "
         "back out for anything that chooses what to run unfiltered."
     ),
-    ("wrangler/orchestration/stages.py", 246): (
+    ("wrangler/orchestration/stages.py", "_filter_pairs"): (
         "_filter_pairs() is what implements enabled_pairs' semantics for a "
         "named --pair override -- an explicitly-named disabled pair must "
         "still run, which enabled_pairs alone cannot produce because it has "
         "already dropped it. This is the one place allowed to see the full "
         "list so it can print why each disabled entry was skipped."
     ),
-    ("wrangler/pipeline/deploy_pipeline.py", 383): (
+    ("wrangler/pipeline/deploy_pipeline.py", "deploy_pipeline"): (
         "Counts the total only, for the '(N disabled)' log line -- every "
         "selection above it already reads manifest.enabled_pairs."
     ),
-    ("wrangler/cli.py", 537): (
+    ("wrangler/cli.py", "run"): (
         "dry-run reports what a sweep would skip and why, the same "
         "information _filter_pairs prints at run time -- it does not select "
         "what runs."
@@ -104,6 +109,16 @@ def _manifest_pairs_reads() -> list[tuple[str, int]]:
                 if isinstance(target, ast.Name) and _looks_like_pair_factory_load(node.value):
                     manifest_like.add(target.id)
 
+        # Map each line to its enclosing function so exceptions survive edits
+        # elsewhere in the file.
+        owner_of: dict[int, str] = {}
+        for fn in ast.walk(tree):
+            if isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                for inner in ast.walk(fn):
+                    line = getattr(inner, "lineno", None)
+                    if line is not None:
+                        owner_of.setdefault(line, fn.name)
+
         for node in ast.walk(tree):
             if not (isinstance(node, ast.Attribute) and node.attr == "pairs"):
                 continue
@@ -111,16 +126,16 @@ def _manifest_pairs_reads() -> list[tuple[str, int]]:
             is_manifest_name = isinstance(base, ast.Name) and base.id in manifest_like
             is_dot_manifest = isinstance(base, ast.Attribute) and base.attr == "manifest"
             if is_manifest_name or is_dot_manifest:
-                found.append((rel, node.lineno))
+                found.append((rel, owner_of.get(node.lineno, "<module>"), node.lineno))
 
     return found
 
 
 def test_manifest_pairs_is_read_only_through_enabled_pairs_or_a_listed_exception():
     offenders = [
-        f"{path}:{line}"
-        for path, line in _manifest_pairs_reads()
-        if (path, line) not in PAIRS_READ_EXCEPTIONS
+        f"{path}:{line} (in {owner})"
+        for path, owner, line in _manifest_pairs_reads()
+        if (path, owner) not in PAIRS_READ_EXCEPTIONS
     ]
     assert not offenders, (
         "Raw manifest.pairs read outside the registry of exceptions -- switch "
@@ -135,6 +150,6 @@ def test_every_exception_still_names_a_real_pairs_read():
     A stale entry looks like coverage without being coverage -- the next
     regression at that (path, line) would pass silently.
     """
-    live = set(_manifest_pairs_reads())
+    live = {(path, owner) for path, owner, _line in _manifest_pairs_reads()}
     stale = [key for key in PAIRS_READ_EXCEPTIONS if key not in live]
     assert not stale, f"Stale PAIRS_READ_EXCEPTIONS entries (no longer a .pairs read): {stale}"
