@@ -42,6 +42,27 @@ def _get_case_metadata(results: dict) -> list[dict] | None:
     return None
 
 
+def _is_control_arm(data: dict) -> bool:
+    """True when this arm's prompt did not change between the two evals.
+
+    A control arm exists to measure noise: same prompt, evaluated twice, so
+    whatever it moves by is the floor. Detected from the artifacts rather than
+    a flag, because a `skip_optimize` run never writes an optimize stage and so
+    has no flag to read -- `optimized_prompt` is simply absent or identical to
+    the original.
+    """
+    optimized = (data.get("optimized_prompt") or "").strip()
+    original = (data.get("original_prompt") or "").strip()
+    return not optimized or optimized == original
+
+
+def _arm_delta(data: dict) -> float:
+    before, after = data.get("before", {}), data.get("after", {})
+    avg_b = sum(before.values()) / len(before) if before else 0.0
+    avg_a = sum(after.values()) / len(after) if after else 0.0
+    return avg_a - avg_b
+
+
 def _executive_summary(results: dict, ordered: list[str]) -> list[str]:
     """Auto-generate executive summary from result data."""
     lines = []
@@ -60,18 +81,58 @@ def _executive_summary(results: dict, ordered: list[str]) -> list[str]:
         avg_a = sum(after.values()) / max(len(after), 1) if after else 0
         agent_deltas[name] = avg_a - avg_b
 
-    improved = [n for n in ordered if agent_deltas[n] > 0.005]
-    regressed = [n for n in ordered if agent_deltas[n] < -0.005]
-    stable = [n for n in ordered if abs(agent_deltas[n]) <= 0.005]
+    # Which arms never had their prompt changed? Those are controls, and their
+    # movement IS the noise floor -- not a result. Reporting a control's drift
+    # as an improvement is the failure CLAUDE.md's control-arm rule exists to
+    # prevent: on 2026-08-22 a byte-identical arm drifted +0.039 and nearly got
+    # promoted as a clean win.
+    controls = [n for n in ordered if _is_control_arm(results[n])]
+    real = [n for n in ordered if n not in controls]
+    floor = max((abs(agent_deltas[n]) for n in controls), default=None)
 
-    best = max(ordered, key=lambda n: agent_deltas[n])
-    worst = min(ordered, key=lambda n: agent_deltas[n])
+    if not real:
+        # Nothing was optimized. Say what this run actually is.
+        lines.append(
+            f"**Control run — no optimization.** {len(controls)} arm(s) evaluated the same "
+            f"prompt twice, so every movement below is measurement noise, not a result.\n"
+        )
+        lines.extend(f"- **{n}**: {agent_deltas[n]:+.3f} avg (noise)" for n in controls)
+        if floor is not None:
+            lines.append(
+                f"\n**Observed noise floor: {floor:.3f}** — the bar a real delta must clear "
+                f"before it means anything.\n"
+            )
+        return lines
 
-    lines.append(f"**{len(improved)}/{len(ordered)} models improved** after GEPA optimization. ")
+    # A real sweep. Judge it against the control's floor rather than a
+    # hardcoded epsilon: the old 0.005 threshold is ~13x smaller than the
+    # floor measured on this pipeline, so it labelled pure noise "improved".
+    bar = floor if floor is not None else 0.005
+    improved = [n for n in real if agent_deltas[n] > bar]
+    regressed = [n for n in real if agent_deltas[n] < -bar]
+    stable = [n for n in real if abs(agent_deltas[n]) <= bar]
+
+    best = max(real, key=lambda n: agent_deltas[n])
+    worst = min(real, key=lambda n: agent_deltas[n])
+
+    if floor is None:
+        lines.append(
+            f"**{len(improved)}/{len(real)} models improved** after GEPA optimization — but "
+            f"this sweep carried **no control arm**, so these deltas are *uncalibrated* and "
+            f"no result here can be distinguished from noise.\n"
+        )
+    else:
+        lines.append(
+            f"**{len(improved)}/{len(real)} models improved** after GEPA optimization, "
+            f"judged against a measured noise floor of **{floor:.3f}** from "
+            f"{len(controls)} control arm(s). "
+        )
     if improved:
         lines.append(f"Best performer: **{best}** ({agent_deltas[best]:+.3f} avg). ")
     if regressed:
         lines.append(f"Largest regression: **{worst}** ({agent_deltas[worst]:+.3f} avg). ")
+    if stable and floor is not None:
+        lines.append(f"{len(stable)} arm(s) moved less than the floor and are within the noise. ")
     lines.append("")
 
     if improved:
@@ -86,10 +147,14 @@ def _executive_summary(results: dict, ordered: list[str]) -> list[str]:
         )
     lines.append("")
 
+    # Averaged over `real`, not `ordered`. Folding controls in shifts the
+    # figure toward their drift: a control moving +0.15 on one metric while a
+    # flat optimized arm moves 0.000 reports as a +0.075 "gain" belonging to a
+    # prompt nobody changed.
     metric_avg_deltas = {}
     for metric in METRIC_LABELS:
         vals = []
-        for name in ordered:
+        for name in real:
             b = results[name].get("before", {}).get(metric, 0)
             a = results[name].get("after", {}).get(metric, 0)
             vals.append(a - b)
@@ -97,11 +162,11 @@ def _executive_summary(results: dict, ordered: list[str]) -> list[str]:
 
     best_metric = max(metric_avg_deltas, key=metric_avg_deltas.__getitem__)
     worst_metric = min(metric_avg_deltas, key=metric_avg_deltas.__getitem__)
-    if metric_avg_deltas[best_metric] > 0.005:
+    if metric_avg_deltas[best_metric] > bar:
         lines.append(
             f"**Strongest metric gain:** {METRIC_LABELS[best_metric]} ({metric_avg_deltas[best_metric]:+.3f} avg across models)"
         )
-    if metric_avg_deltas[worst_metric] < -0.005:
+    if metric_avg_deltas[worst_metric] < -bar:
         lines.append(
             f"**Largest metric decline:** {METRIC_LABELS[worst_metric]} ({metric_avg_deltas[worst_metric]:+.3f} avg across models)"
         )

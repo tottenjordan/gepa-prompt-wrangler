@@ -13,7 +13,37 @@ someone has to remember is how it stays unused.
 
 from unittest.mock import patch
 
+import pytest
+
 from wrangler.orchestration import stages
+
+
+@pytest.fixture(autouse=True)
+def _delete_engine_must_be_patched_explicitly(monkeypatch):
+    """Guard against a real call to GCP from this file.
+
+    `stage_deploy` reads `health["rejected"]` unconditionally and, when it is
+    non-empty, calls `wrangler.tools.engines.delete_engine` on the stale draw.
+    A mocked `gate_engine_health` return value with `"rejected": [...]` (a
+    handful of tests here need exactly that) trips this branch, and if
+    `delete_engine` is not separately patched the call reaches
+    `vertexai.init` + `agent_engines.get(...).delete()` for real -- against a
+    made-up id, so it 400s, and `stage_deploy`'s own `except Exception` prints
+    and swallows it, so the test still passes. Green for the wrong reason,
+    network-dependent, and silent: three tests did exactly this.
+
+    `pytest.fail` raises `Failed`, a `BaseException` subclass, specifically so
+    it is not caught by that same `except Exception` -- a test that forgets to
+    patch `delete_engine` fails loudly here instead of quietly phoning home.
+    """
+
+    def _unpatched(engine_id):
+        pytest.fail(
+            f"delete_engine({engine_id!r}) reached the real implementation -- "
+            "patch wrangler.tools.engines.delete_engine in this test"
+        )
+
+    monkeypatch.setattr("wrangler.tools.engines.delete_engine", _unpatched)
 
 
 class _Probe:
@@ -22,9 +52,11 @@ class _Probe:
     def __init__(self, rates):
         self.rates = list(rates)
         self.calls = []
+        self.n_seen = []
 
     def __call__(self, engine_id, n=60, threshold=0.8, **kw):
         self.calls.append(engine_id)
+        self.n_seen.append(n)
         rate = self.rates.pop(0) if self.rates else 1.0
         return {
             "reached": int(rate * n),
@@ -169,6 +201,77 @@ class TestRejectedEnginesAreDisposedOf:
         assert out["rejected"] == ["eng1"]
 
 
+class TestStageDeployReapsItsOwnRejectedDraw:
+    """B2: `stage_deploy` always deploys the engine it hands to the gate, so a
+    rejected first draw is unambiguously its to reap -- `gate_engine_health`
+    never discards the engine it was *handed* (it might be a live deployment
+    the caller only wanted checked). The pipeline component and the example
+    script both already reap it; this stage did not, leaking one engine per
+    pair on every first-draw failure (~45% of deploys, docs/doe/09-lottery-recheck.md).
+    """
+
+    def test_a_rejected_first_draw_is_deleted(self, tmp_path):
+        exp = _stub_experiment(tmp_path)
+        deleted = []
+        with (
+            patch.object(stages.deployer, "deploy_agent_from_source", return_value="eng-bad"),
+            patch.object(stages, "gate_engine_health") as gate,
+            patch("wrangler.tools.engines.delete_engine", side_effect=deleted.append),
+        ):
+            gate.return_value = {
+                "engine_id": "eng-good",
+                "passed": True,
+                "rate": 0.97,
+                "n": 60,
+                "rerolls": 1,
+                "rejected": ["eng-bad"],
+            }
+            stages.stage_deploy(exp)
+        assert deleted == ["eng-bad"]
+
+    def test_a_passing_first_draw_deletes_nothing(self, tmp_path):
+        exp = _stub_experiment(tmp_path)
+        deleted = []
+        with (
+            patch.object(stages.deployer, "deploy_agent_from_source", return_value="eng-good"),
+            patch.object(stages, "gate_engine_health") as gate,
+            patch("wrangler.tools.engines.delete_engine", side_effect=deleted.append),
+        ):
+            gate.return_value = {
+                "engine_id": "eng-good",
+                "passed": True,
+                "rate": 0.99,
+                "n": 60,
+                "rerolls": 0,
+                "rejected": [],
+            }
+            stages.stage_deploy(exp)
+        assert deleted == []
+
+    def test_a_failed_discard_does_not_abort_the_run(self, tmp_path):
+        """Leaking an engine is untidy; aborting a deploy over it is worse."""
+        exp = _stub_experiment(tmp_path)
+
+        def _boom(_eid):
+            raise RuntimeError("quota")
+
+        with (
+            patch.object(stages.deployer, "deploy_agent_from_source", return_value="eng-bad"),
+            patch.object(stages, "gate_engine_health") as gate,
+            patch("wrangler.tools.engines.delete_engine", side_effect=_boom),
+        ):
+            gate.return_value = {
+                "engine_id": "eng-good",
+                "passed": True,
+                "rate": 0.97,
+                "n": 60,
+                "rerolls": 1,
+                "rejected": ["eng-bad"],
+            }
+            stages.stage_deploy(exp)  # must not raise
+        assert exp.written["deploy"]["p1"]["engine_id"] == "eng-good"
+
+
 class TestGateConfig:
     def test_the_gate_is_on_by_default(self):
         assert stages.health_gate_config({})["enabled"] is True
@@ -251,6 +354,7 @@ class TestStageDeployIntegration:
                 "rate": 0.98,
                 "n": 60,
                 "rerolls": 0,
+                "rejected": [],
             }
             stages.stage_deploy(exp)
         gate.assert_called_once()
@@ -262,6 +366,7 @@ class TestStageDeployIntegration:
         with (
             patch.object(stages.deployer, "deploy_agent_from_source", return_value="eng-bad"),
             patch.object(stages, "gate_engine_health") as gate,
+            patch("wrangler.tools.engines.delete_engine"),
         ):
             gate.return_value = {
                 "engine_id": "eng-good",
@@ -269,14 +374,21 @@ class TestStageDeployIntegration:
                 "rate": 0.97,
                 "n": 60,
                 "rerolls": 1,
+                "rejected": ["eng-bad"],
             }
             stages.stage_deploy(exp)
         assert exp.written["deploy"]["p1"]["engine_id"] == "eng-good"
 
     def test_a_reroll_syncs_the_env_engine_id(self, tmp_path, monkeypatch):
-        """Otherwise evaluators and trace-health keep pointing at the dead one."""
+        """Otherwise evaluators and trace-health keep pointing at the dead one.
+
+        The tier comes from the pair's model, not its id (see
+        TestEngineTierComesFromTheModelNotTheId in test_stages.py) -- the id
+        is set here only so the printed messages read sensibly.
+        """
         exp = _stub_experiment(tmp_path)
         exp.manifest.pairs[0].id = "sonnet"
+        exp.manifest.pairs[0].model = "claude-sonnet-4-6"
         synced = []
         with (
             patch.object(stages.deployer, "deploy_agent_from_source", return_value="eng-bad"),
@@ -285,6 +397,7 @@ class TestStageDeployIntegration:
                 "wrangler.core.env_ids.set_engine_id",
                 side_effect=lambda label, eid, **kw: synced.append((label, eid)) or True,
             ),
+            patch("wrangler.tools.engines.delete_engine"),
         ):
             gate.return_value = {
                 "engine_id": "eng-good",
@@ -292,6 +405,7 @@ class TestStageDeployIntegration:
                 "rate": 0.97,
                 "n": 60,
                 "rerolls": 1,
+                "rejected": ["eng-bad"],
             }
             stages.stage_deploy(exp)
         assert synced == [("sonnet", "eng-good")]
@@ -315,16 +429,24 @@ class TestStageDeployIntegration:
                 "rate": 0.99,
                 "n": 60,
                 "rerolls": 0,
+                "rejected": [],
             }
             stages.stage_deploy(exp)
         assert synced == []
 
     def test_a_pair_matching_no_tier_says_so_instead_of_guessing(self, tmp_path, capsys):
+        """An unregistered model, not a cleverly-worded id, is what triggers this.
+
+        _stub_experiment's default pair model ("m") is unregistered, which is
+        exactly the case this message covers now that the tier comes from
+        get_spec(model).alias rather than from parsing the id.
+        """
         exp = _stub_experiment(tmp_path)
         exp.manifest.pairs[0].id = "some-custom-arm"
         with (
             patch.object(stages.deployer, "deploy_agent_from_source", return_value="eng-bad"),
             patch.object(stages, "gate_engine_health") as gate,
+            patch("wrangler.tools.engines.delete_engine"),
         ):
             gate.return_value = {
                 "engine_id": "eng-good",
@@ -332,9 +454,10 @@ class TestStageDeployIntegration:
                 "rate": 0.97,
                 "n": 60,
                 "rerolls": 1,
+                "rejected": ["eng-bad"],
             }
             stages.stage_deploy(exp)
-        assert "matches no known model tier" in capsys.readouterr().out
+        assert "matches no known engine tier" in capsys.readouterr().out
 
     def test_the_gate_can_be_disabled(self, tmp_path):
         exp = _stub_experiment(tmp_path, config={"health_gate": {"enabled": False}})
@@ -629,3 +752,46 @@ class TestTheFourBlockersFoundInReview:
             "stage_report must forward token usage into the results dict the reporter reads"
         )
         _ = ast
+
+
+class TestExplicitZeroThresholdIsHonoured:
+    """`n = attempts or GATE_ATTEMPTS` treats an explicit 0 the same as unset.
+
+    `health_gate_config` faithfully forwards a manifest's `threshold: 0` (an
+    operator's deliberate "accept any engine"), but `or` can't tell that from
+    "nothing was passed" and silently substitutes the 0.8 default -- the
+    opposite of what was asked for. Same bug for `attempts: 0`.
+    """
+
+    def test_a_threshold_of_zero_accepts_a_dead_engine(self):
+        from wrangler.orchestration import stages
+
+        out = stages.gate_engine_health(
+            "eng1",
+            redeploy_fn=lambda: "eng1",
+            probe_fn=_Probe([0.0]),
+            threshold=0.0,
+        )
+        assert out["passed"] is True
+        assert out["threshold"] == 0.0
+
+    def test_an_attempts_of_zero_is_passed_to_the_probe(self):
+        from wrangler.orchestration import stages
+
+        probe = _Probe([1.0])
+        stages.gate_engine_health(
+            "eng1",
+            redeploy_fn=lambda: "eng1",
+            probe_fn=probe,
+            attempts=0,
+        )
+        assert probe.n_seen == [0]
+
+    def test_unset_attempts_and_threshold_still_default_to_the_measured_campaign(self):
+        from wrangler.orchestration import stages
+        from wrangler.tools.boot_probe import GATE_ATTEMPTS, GATE_THRESHOLD
+
+        probe = _Probe([1.0])
+        out = stages.gate_engine_health("eng1", redeploy_fn=lambda: "eng1", probe_fn=probe)
+        assert probe.n_seen == [GATE_ATTEMPTS]
+        assert out["threshold"] == GATE_THRESHOLD

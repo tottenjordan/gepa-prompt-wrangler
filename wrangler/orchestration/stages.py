@@ -269,15 +269,96 @@ def _manifest_dir(exp: Experiment) -> Path:
 # ── Stage functions ────────────────────────────────────────────
 
 
-def _sync_env_engine_id(pair_id: str, engine_id: str) -> None:
-    """Point the example .env at a rerolled engine, if the pair maps to a tier."""
-    from ..core.env_ids import ENGINE_LABELS, set_engine_id
+def _engine_tier_for_model(model: str) -> str:
+    """Map a model id to the .env tier it belongs to, via the registry.
 
-    label = next((x for x in ENGINE_LABELS if x in pair_id.lower()), "")
+    A pair id used to be scanned for one of ENGINE_LABELS as a substring, then
+    (after a first fix) as a whole token. Both versions inferred the tier from
+    however someone happened to spell the id, and the token version just
+    relocated the bug rather than removing it: "sonnet-vs-opus" and
+    "opus-sonnet-compare" name the same comparison but tokenize to different
+    last-matching words, so the two would resolve to different tiers and
+    overwrite different .env entries. "vs"/"compare" is exactly this project's
+    naming vocabulary for a control-arm comparison, so this was not a corner
+    case.
+
+    A pair's tier is a property of the model it runs, not of its id, and the
+    registry already has the answer: `get_spec(model).alias`. Deriving from
+    the model removes the id from the decision entirely, so there is nothing
+    left for two wordings of the same id to disagree about.
+
+    Two things the id-based version didn't have to handle:
+
+    - Not every alias is one of the five ENGINE_LABELS this project's example
+      .env has vars for (lite, flash, pro, sonnet, opus). Versioned aliases
+      like "sonnet5", "opus47", "opus48", "opus5", "lite35", "flash36" fall
+      back to their family by stripping the trailing version digits -- there
+      is no SONNET5_ENGINE_ID, only SONNET_ENGINE_ID, and campaign 07 runs
+      claude-sonnet-5, so this fallback is load-bearing today, not defensive
+      cruft. "fable" has no trailing digit and is not itself in ENGINE_LABELS
+      -- it is a sixth model family with no tier var at all, so it correctly
+      maps to "" rather than being guessed onto an unrelated tier.
+    - An unregistered model must not take a deploy down over an .env
+      convenience sync, so this degrades to "" the same way the rest of this
+      module degrades on an unregistered id, instead of letting get_spec's
+      KeyError propagate.
+    """
+    import re
+
+    from ..core.env_ids import ENGINE_LABELS
+    from ..core.models import get_spec
+
+    try:
+        alias = get_spec(model).alias
+    except KeyError:
+        return ""
+    if not alias:
+        return ""
+    if alias in ENGINE_LABELS:
+        return alias
+    family = re.sub(r"\d+$", "", alias)
+    return family if family in ENGINE_LABELS else ""
+
+
+def _sync_env_engine_id(
+    pair_id: str,
+    model: str,
+    engine_id: str,
+    contested: dict[str, list[str]] | None = None,
+) -> None:
+    """Point the example .env at a rerolled engine, if the pair's model maps to a tier.
+
+    `contested` is a tier -> [pair ids claiming it] map built once, up front,
+    over every enabled pair in the same run (see `stage_deploy`). It exists
+    because the version-stripping fallback in `_engine_tier_for_model` is
+    ambiguous exactly when a peer exists: manifests/c07-sonnet46_manifest.yaml
+    (claude-sonnet-4-6, alias "sonnet") and manifests/c07-sonnet5_manifest.yaml
+    (claude-sonnet-5, alias "sonnet5" -> family "sonnet") both resolve to
+    "sonnet". Writing for both, last write wins, and evaluators/trace-health
+    then resolve to whichever arm rerolled most recently -- the wrong arm's
+    .env entry silently overwritten by an unrelated engine, which is the exact
+    failure class this whole mechanism exists to prevent. Refusing for every
+    claimant is deliberate over picking one to "win": a stale but visibly
+    untouched var is detectable; a confidently wrong one is not.
+    """
+    from ..core.env_ids import set_engine_id
+
+    label = _engine_tier_for_model(model)
     if not label:
         print(
-            f"  Note: pair {pair_id!r} matches no known model tier, so .env was not "
-            f"updated. Point anything that references the old id at {engine_id}.",
+            f"  Note: pair {pair_id!r} runs {model!r}, which matches no known "
+            f"engine tier, so .env was not updated. Point anything that "
+            f"references the old id at {engine_id}.",
+            flush=True,
+        )
+        return
+    claimants = (contested or {}).get(label, [pair_id])
+    if len(claimants) > 1:
+        print(
+            f"  Note: pairs {claimants} all resolve to the {label.upper()} tier, so "
+            f"{label.upper()}_ENGINE_ID was not updated for any of them -- writing "
+            f"one would silently overwrite the others. Point the right evaluators "
+            f"at {pair_id!r}'s engine ({engine_id}) manually.",
             flush=True,
         )
         return
@@ -353,8 +434,8 @@ def gate_engine_health(
     engine_id: str,
     redeploy_fn,
     probe_fn=None,
-    attempts: int = 0,
-    threshold: float = 0.0,
+    attempts: int | None = None,
+    threshold: float | None = None,
     max_rerolls: int = 2,
     discard_fn=None,
 ) -> dict:
@@ -387,8 +468,13 @@ def gate_engine_health(
     from ..tools.boot_probe import GATE_ATTEMPTS, GATE_THRESHOLD, gate_report
 
     probe = probe_fn or _default_probe
-    n = attempts or GATE_ATTEMPTS
-    bar = threshold or GATE_THRESHOLD
+    # `or` can't tell "the caller explicitly asked for 0" from "the caller
+    # didn't pass anything" -- a manifest's threshold: 0 (accept any engine)
+    # or attempts: 0 came through health_gate_config unchanged and then got
+    # silently overwritten with the measured-campaign default here, which is
+    # the opposite of what an operator writing threshold: 0 asked for.
+    n = attempts if attempts is not None else GATE_ATTEMPTS
+    bar = threshold if threshold is not None else GATE_THRESHOLD
 
     current, rerolls, error = engine_id, 0, ""
     rejected: list[str] = []
@@ -453,6 +539,21 @@ def stage_deploy(exp: Experiment, pair_id: str | None = None) -> None:
     pairs = _filter_pairs(manifest, pair_id)
     mdir = _manifest_dir(exp)
     deploy_data = exp.read_stage("deploy")
+
+    # Resolved once, up front, over every pair this run will touch -- not
+    # inside the loop below, where each pair only sees itself. Two pairs in
+    # *this* manifest that both map to the same tier (e.g. a manifest that
+    # enabled both a canonical and a versioned sibling of the same model
+    # family) must not have one silently overwrite the other's .env entry.
+    # This does not, and cannot, see a collision across two *separate*
+    # manifests/runs -- c07-sonnet46_manifest.yaml and c07-sonnet5_manifest.yaml
+    # each deploy through their own `stage_deploy` call with only their own
+    # pair in scope, so that pairing is a real, live gap this cannot close.
+    tier_claims: dict[str, list[str]] = {}
+    for p in pairs:
+        label = _engine_tier_for_model(p.model)
+        if label:
+            tier_claims.setdefault(label, []).append(p.id)
 
     for i, pair in enumerate(pairs, 1):
         tag = f"[{pair.id}] ({i}/{len(pairs)})"
@@ -539,7 +640,34 @@ def stage_deploy(exp: Experiment, pair_id: str | None = None) -> None:
                 # protects a corpse -- 10 of 28 evaluators were in exactly that
                 # state on 2026-08-31.
                 if health["engine_id"] != engine_id:
-                    _sync_env_engine_id(pair.id, health["engine_id"])
+                    _sync_env_engine_id(
+                        pair.id, pair.model, health["engine_id"], contested=tier_claims
+                    )
+
+                # gate_engine_health only discards draws it created itself --
+                # the engine it was *handed* may be a live deployment the
+                # caller only wanted checked, so it is left alone (see its
+                # docstring). This loop always deploys fresh immediately
+                # above, so that handed-in engine is unambiguously ours: if
+                # the gate rejected it, `rejected[0]` names it and nobody else
+                # will delete it. Left alone, every pair whose first draw
+                # fails leaks one engine per sweep -- ~45% of deploys by this
+                # project's own measurements (docs/doe/09-lottery-recheck.md).
+                #
+                # `rejected[0] != health["engine_id"]` is always true when
+                # `rejected` is non-empty -- `current` in gate_engine_health
+                # only advances forward, so the final engine_id can never be
+                # a value already appended to `rejected`. Kept anyway as a
+                # belt against a redeploy_fn that returns the same id it was
+                # just handed (a no-op "redeploy"): without it, that id's
+                # entry in `rejected` would delete the very engine this loop
+                # ends up keeping.
+                if health["rejected"] and health["rejected"][0] != health["engine_id"]:
+                    stale = health["rejected"][0]
+                    try:
+                        delete_engine(stale)
+                    except Exception as exc:
+                        print(f"  Could not discard {stale}: {type(exc).__name__}: {exc}")
 
             # Persist before enforcing. A required gate raises, and if that
             # happened first the deploy record -- including the id of an engine

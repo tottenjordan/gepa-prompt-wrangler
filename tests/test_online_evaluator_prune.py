@@ -32,19 +32,41 @@ class TestOrphanDetection:
         assert oe.orphaned_evaluators([_ev("1", "here")], live_engine_ids={"here"}) == []
 
     def test_the_orphan_carries_the_engine_it_pointed_at(self):
-        out = oe.orphaned_evaluators([_ev("1", "gone")], live_engine_ids=set())
+        # live_engine_ids must be non-empty here: an *empty* set combined with
+        # a non-empty evaluators list is the ambiguous "could not list
+        # engines" shape the refusal guard below exists to catch, and it
+        # would swallow this orphan rather than report it.
+        out = oe.orphaned_evaluators([_ev("1", "gone")], live_engine_ids={"unrelated"})
         assert out[0]["engine_id"] == "gone"
 
     def test_an_evaluator_with_no_agent_resource_is_not_guessed_at(self):
         """Unattributable. Report it rather than delete it."""
         assert (
-            oe.orphaned_evaluators([{"name": ".../onlineEvaluators/1"}], live_engine_ids=set())
+            oe.orphaned_evaluators(
+                [{"name": ".../onlineEvaluators/1"}], live_engine_ids={"unrelated"}
+            )
             == []
         )
 
     def test_an_empty_live_set_does_not_orphan_everything(self):
         """A failed engine lookup must not read as 'every engine is deleted'."""
         out = oe.orphaned_evaluators([_ev("1", "a")], live_engine_ids=None)
+        assert out == []
+
+    def test_an_empty_live_set_with_no_evaluators_is_not_refused(self):
+        """A genuinely empty project has nothing for the guard to protect."""
+        assert oe.orphaned_evaluators([], live_engine_ids=set()) == []
+
+    def test_an_empty_live_set_with_evaluators_present_refuses_everything(self):
+        """B1: the only caller does ``{r["id"] for r in list_engines()}``, which
+
+        is never None -- it is empty on a wrong/unset GCP_REGION, a
+        credentials scope problem, or evaluators pointing at engines in
+        another location. Reading that as "every engine is gone" is what let
+        `prune_evaluators(..., yes=True)` delete 28 evaluators' worth of
+        engines it could simply not see.
+        """
+        out = oe.orphaned_evaluators([_ev("1", "a"), _ev("2", "b")], live_engine_ids=set())
         assert out == []
 
 
@@ -74,15 +96,37 @@ class TestPruneIsDryByDefault:
             if eid == "1":
                 raise RuntimeError("boom")
 
+        # live_engine_ids non-empty and disjoint from {"a", "b"}: both are
+        # orphans, but an *empty* live set here would trip the B1 refusal
+        # guard instead and this test would stop exercising the retry path.
         out = oe.prune_evaluators(
             [_ev("1", "a"), _ev("2", "b")],
-            live_engine_ids=set(),
+            live_engine_ids={"unrelated"},
             delete_fn=_flaky,
             confirm=True,
         )
         assert seen == ["1", "2"]
         assert out["deleted"] == ["2"]
         assert "1" in out["failed"]
+
+    def test_an_empty_listing_with_evaluators_present_is_refused_not_deleted(self):
+        """B1: this combination means 'we could not see the engines'.
+
+        28 evaluators were deleted this way on 2026-08-31 -- ``list_engines()``
+        returning empty (wrong/unset GCP_REGION, a credentials scope problem)
+        was indistinguishable from every engine being gone, and
+        ``prune_evaluators(..., yes=True)`` deleted all of them.
+        """
+        deleted = []
+        out = oe.prune_evaluators(
+            [_ev("1", "a"), _ev("2", "b")],
+            live_engine_ids=set(),
+            delete_fn=deleted.append,
+            confirm=True,
+        )
+        assert deleted == []
+        assert out["orphans"] == []
+        assert out["refused_reason"], "the caller must be told why nothing was deleted"
 
 
 class TestCoverageReport:

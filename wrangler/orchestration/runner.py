@@ -35,6 +35,11 @@ def _fmt_duration(seconds: float) -> str:
 
 
 class WranglerPipeline:
+    # Every phase below reads self.manifest.enabled_pairs, never .pairs. This
+    # runner has no --pair override (unlike stages.py's _filter_pairs), so
+    # there's no case where a disabled pair should run through it -- reading
+    # the raw list here is exactly the bug that let `wrangler deploy
+    # manifest.yaml` deploy opus after it was disabled everywhere else.
     def __init__(
         self,
         manifest_path: str,
@@ -74,7 +79,7 @@ class WranglerPipeline:
                 self.results[key] = value
                 continue
             self.results[key] = value
-            for pair in self.manifest.pairs:
+            for pair in self.manifest.enabled_pairs:
                 if pair.id == key:
                     if "engine_id" in value:
                         pair.engine_id = value["engine_id"]
@@ -222,8 +227,8 @@ class WranglerPipeline:
 
     def _run_optimize_sequential(self):
         """Run GEPA optimization for all agents sequentially."""
-        n_pairs = len(self.manifest.pairs)
-        for i, pair in enumerate(self.manifest.pairs, 1):
+        n_pairs = len(self.manifest.enabled_pairs)
+        for i, pair in enumerate(self.manifest.enabled_pairs, 1):
             print(f"\n  [{pair.id}] ({i}/{n_pairs}) Optimizing...", flush=True)
             agent_path = self._resolve_optimize_module(pair)
             eval_path = self.manifest_dir / self.manifest.eval_data
@@ -271,7 +276,7 @@ class WranglerPipeline:
                 std_str = f" +/- {std:.3f}" if std else ""
                 print(f"    {m:40s} {s:.2f}{std_str}")
 
-        pairs = list(self.manifest.pairs)
+        pairs = list(self.manifest.enabled_pairs)
         mc = self.max_concurrent
 
         if mc <= 1:
@@ -326,15 +331,15 @@ class WranglerPipeline:
         print("GEPA PROMPT WRANGLER")
         print(f"{'=' * 60}")
         print(f"  Experiment: {self.manifest.name}")
-        print(f"  Pairs:      {len(self.manifest.pairs)}")
+        print(f"  Pairs:      {len(self.manifest.enabled_pairs)}")
         if from_phase > 0:
             print(f"  Resuming:   from phase {from_phase}")
         print()
 
         eval_cases = self._load_eval_cases()
-        n_pairs = len(self.manifest.pairs)
+        n_pairs = len(self.manifest.enabled_pairs)
 
-        for pair in self.manifest.pairs:
+        for pair in self.manifest.enabled_pairs:
             self.results.setdefault(
                 pair.id,
                 {
@@ -363,7 +368,7 @@ class WranglerPipeline:
 
         if from_phase <= 1:
             with self._phase("Phase 1: Deploy to GEAP"):
-                for i, pair in enumerate(self.manifest.pairs, 1):
+                for i, pair in enumerate(self.manifest.enabled_pairs, 1):
                     if pair.engine_id:
                         print(
                             f"  [{pair.id}] ({i}/{n_pairs}) Using existing engine: {pair.engine_id}"
@@ -386,7 +391,7 @@ class WranglerPipeline:
 
         if from_phase <= 4:
             with self._phase("Phase 4: Redeploy with Optimized Prompt"):
-                for i, pair in enumerate(self.manifest.pairs, 1):
+                for i, pair in enumerate(self.manifest.enabled_pairs, 1):
                     print(f"  [{pair.id}] ({i}/{n_pairs}) Redeploying...", end="", flush=True)
                     t0 = time.time()
                     engine_id = self.results[pair.id]["engine_id"]

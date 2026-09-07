@@ -343,6 +343,44 @@ class TestSkipOptimize:
                 f"an eval-only run has no such artifact"
             )
 
+    def test_no_read_stage_call_reads_optimize_unguarded(self):
+        """The call sites, not just where the GCS path is built.
+
+        `test_no_component_reads_the_optimize_stage_unguarded` matches the
+        literal "stages/optimize", which appears only where the blob path is
+        constructed. It never saw `_read_stage("optimize", pair_id)` -- a call
+        reaching the same blob through a helper. That hole cost four pipeline
+        submissions: the analysis component had exactly one such call, in its
+        markdown tail, and it raised NotFound on every eval-only run while the
+        guard reported the class as closed.
+
+        Walks the AST rather than grepping, so comments and docstrings are
+        exempt -- the same reason tests/test_models.py walks it. A regex
+        version of this test flagged the code comment explaining the bug.
+        """
+        import ast
+        from pathlib import Path
+
+        src = Path("wrangler/pipeline/components.py").read_text()
+        offenders = []
+        for node in ast.walk(ast.parse(src)):
+            if not isinstance(node, ast.Call):
+                continue
+            if getattr(node.func, "id", None) != "_read_stage":
+                continue
+            first = node.args[0] if node.args else None
+            if not (isinstance(first, ast.Constant) and first.value == "optimize"):
+                continue
+            guarded = any(
+                kw.arg == "required" and kw.value.value is False for kw in node.keywords
+            ) or (len(node.args) >= 3 and getattr(node.args[2], "value", None) is False)
+            if not guarded:
+                offenders.append(node.lineno)
+        assert not offenders, (
+            f'_read_stage("optimize") at line(s) {offenders} lacks required=False; '
+            f"an eval-only run has no optimize artifact and this raises NotFound"
+        )
+
     def test_the_analysis_tolerates_a_missing_optimize_stage(self):
         from pathlib import Path
 
@@ -430,3 +468,53 @@ class TestTheDagCompilesAndItsParametersLineUp:
         assert not required_unsent, (
             f"nothing supplies required parameter(s) {sorted(required_unsent)}"
         )
+
+
+class TestAnalysisSurvivesARenderingFailure:
+    """A chart renderer must not be able to destroy the run's summary.
+
+    `generate_analysis` called `generate_report` first and uploaded
+    summary.json last, so when the reporter raised inside the pipeline
+    container -- three submissions running -- the summary, the uploaded report
+    and the per-pair totals all went with it. The eval artifacts survived only
+    because a different component writes them, which is the sole reason the
+    2026-09-02 noise floor could be computed by hand afterwards.
+
+    The measurement is the artifact; the report is a rendering of it. The
+    dependency only runs one way.
+    """
+
+    def _body(self) -> str:
+        from pathlib import Path
+
+        src = Path("wrangler/pipeline/components.py").read_text()
+        return src[src.index("def generate_analysis") :]
+
+    def test_the_summary_is_written_before_the_report(self):
+        body = self._body()
+        assert body.index("summary.json") < body.index("generate_report("), (
+            "summary.json must be uploaded before the reporter runs, or a "
+            "rendering failure takes the measurement with it"
+        )
+
+    def test_the_reporter_call_is_guarded(self):
+        import ast
+
+        body = self._body()
+        tree = ast.parse("def _f():\n" + "\n".join("    " + ln for ln in body.splitlines()))
+        for node in ast.walk(tree):
+            guards_reporter = any(
+                getattr(call.func, "id", "") == "generate_report"
+                for call in ast.walk(node)
+                if isinstance(call, ast.Call)
+            )
+            if isinstance(node, ast.Try) and node.handlers and guards_reporter:
+                return
+        raise AssertionError("generate_report must run inside a try/except")
+
+    def test_a_failure_writes_a_traceback_artifact(self):
+        """Three submissions died here and `ml_job` logs came back empty each time."""
+        body = self._body()
+        why = "the worker logs do not carry one, so it must land beside the artifacts"
+        assert "traceback" in body, f"no traceback captured; {why}"
+        assert "analysis_error" in body, f"no analysis_error artifact; {why}"

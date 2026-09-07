@@ -1037,17 +1037,6 @@ def generate_analysis(
 
     from wrangler.reporting import reporter
 
-    original_reports = reporter.REPORTS_DIR
-    original_charts = reporter.CHARTS_DIR
-    try:
-        reporter.REPORTS_DIR = reports_dir
-        reporter.CHARTS_DIR = charts_dir
-        experiment_name = manifest.get("name", run_id)
-        generate_report(results, experiment_name, use_paperbanana=True)
-    finally:
-        reporter.REPORTS_DIR = original_reports
-        reporter.CHARTS_DIR = original_charts
-
     summary_data = {
         "run_id": run_id,
         "experiment": manifest.get("name", ""),
@@ -1074,71 +1063,142 @@ def generate_analysis(
         }
 
     gcs_bucket = gcs.bucket(bucket_name)
-    for local_file in reports_dir.rglob("*"):
-        if local_file.is_file():
-            rel = local_file.relative_to(reports_dir)
-            blob_path = f"pipeline-runs/{run_id}/reports/{rel}"
-            gcs_bucket.blob(blob_path).upload_from_filename(str(local_file))
 
+    # Summary first, report second. This ordering used to be the other way
+    # round, and a reporter that raised inside the pipeline container took the
+    # summary, the uploaded report and the per-pair totals down with it --
+    # three submissions in a row. The eval artifacts survived only because a
+    # different component writes them, which is the sole reason the 2026-09-02
+    # noise floor could be reconstructed by hand. The measurement is the
+    # artifact; the report is a rendering of it.
     summary_blob = f"pipeline-runs/{run_id}/reports/summary.json"
     gcs_bucket.blob(summary_blob).upload_from_string(
         json.dumps(summary_data, indent=2),
         content_type="application/json",
     )
 
-    for pair_id, pair_summary in summary_data["pairs"].items():
-        metrics.log_metric(f"{pair_id}_before_avg", pair_summary["before_avg"])
-        metrics.log_metric(f"{pair_id}_after_avg", pair_summary["after_avg"])
-        metrics.log_metric(f"{pair_id}_delta", pair_summary["delta"])
-    metrics.log_metric("total_cost_usd", round(total_input_cost + total_output_cost, 4))
+    original_reports = reporter.REPORTS_DIR
+    original_charts = reporter.CHARTS_DIR
+    try:
+        reporter.REPORTS_DIR = reports_dir
+        reporter.CHARTS_DIR = charts_dir
+        experiment_name = manifest.get("name", run_id)
+        generate_report(results, experiment_name, use_paperbanana=True)
+        for local_file in reports_dir.rglob("*"):
+            if local_file.is_file():
+                rel = local_file.relative_to(reports_dir)
+                gcs_bucket.blob(f"pipeline-runs/{run_id}/reports/{rel}").upload_from_filename(
+                    str(local_file)
+                )
+    except Exception:
+        # Deliberately not re-raised. The summary and every eval artifact are
+        # already written, so the run's measurement is complete and a chart
+        # must not cost a campaign its analysis stage.
+        #
+        # The traceback goes to GCS because `ml_job` worker logs came back
+        # EMPTY for all three failures here -- reading the source was the only
+        # diagnostic available, and it was not enough. Beside the artifacts is
+        # where the next person will actually look.
+        import traceback
 
-    m, s = divmod(int(total_elapsed), 60)
+        tb = traceback.format_exc()
+        gcs_bucket.blob(f"pipeline-runs/{run_id}/reports/analysis_error.txt").upload_from_string(
+            tb, content_type="text/plain"
+        )
+        logging.exception(
+            "[%s] report rendering FAILED -- summary.json and eval artifacts are "
+            "intact; traceback saved to reports/analysis_error.txt\n%s",
+            run_id,
+            tb,
+        )
+    finally:
+        reporter.REPORTS_DIR = original_reports
+        reporter.CHARTS_DIR = original_charts
 
-    METRIC_LABELS = {
-        "final_response_quality_v1": "Response Quality",
-        "hallucination_v1": "Hallucination",
-        "safety_v1": "Safety",
-        "tool_use_quality_v1": "Tool Use",
-        "instruction_following_v1": "Instruction Following",
-    }
+    # Everything below is presentation -- KFP metric tiles and a markdown blob
+    # for the UI. Guarded for the same reason the reporter is, and deliberately
+    # WIDE rather than tight: the first attempt wrapped only generate_report,
+    # because that was the suspect. The real fault was one unguarded
+    # _read_stage("optimize") further down the tail, so the component still
+    # died and still left no traceback to find it by. Guard the whole tail, not
+    # the part you suspect.
+    #
+    # Inline rather than extracted to a helper: KFP serializes each component
+    # body in isolation, so a module-level function does not exist at runtime.
+    try:
+        for pair_id, pair_summary in summary_data["pairs"].items():
+            metrics.log_metric(f"{pair_id}_before_avg", pair_summary["before_avg"])
+            metrics.log_metric(f"{pair_id}_after_avg", pair_summary["after_avg"])
+            metrics.log_metric(f"{pair_id}_delta", pair_summary["delta"])
+        metrics.log_metric("total_cost_usd", round(total_input_cost + total_output_cost, 4))
 
-    with open(summary.path, "w") as f:
-        f.write("## Analysis Summary\n\n")
+        m, s = divmod(int(total_elapsed), 60)
 
-        for pair_id, ps in summary_data["pairs"].items():
-            eval_b = _read_stage("eval_before", pair_id)
-            eval_a = _read_stage("eval_after", pair_id)
-            opt = _read_stage("optimize", pair_id)
-            before_scores = eval_b.get("scores", {})
-            after_scores = eval_a.get("scores", {})
-            pair_in = sum(d.get("costs", {}).get("input_usd", 0) for d in [eval_b, opt, eval_a])
-            pair_out = sum(d.get("costs", {}).get("output_usd", 0) for d in [eval_b, opt, eval_a])
+        METRIC_LABELS = {
+            "final_response_quality_v1": "Response Quality",
+            "hallucination_v1": "Hallucination",
+            "safety_v1": "Safety",
+            "tool_use_quality_v1": "Tool Use",
+            "instruction_following_v1": "Instruction Following",
+        }
 
-            f.write(f"### {pair_id} (`{ps['model']}`)\n\n")
-            f.write("| Metric | Before | After | Delta | Change |\n")
-            f.write("|--------|--------|-------|-------|--------|\n")
-            for key, label in METRIC_LABELS.items():
-                b = before_scores.get(key, 0)
-                a = after_scores.get(key, 0)
-                d = a - b
-                pct = f"{d / b * 100:+.1f}%" if b > 0 else "N/A"
-                f.write(f"| {label} | {b:.2f} | {a:.2f} | {d:+.2f} | {pct} |\n")
-            avg_b = ps["before_avg"]
-            avg_a = ps["after_avg"]
-            avg_d = ps["delta"]
-            avg_pct = f"{avg_d / avg_b * 100:+.1f}%" if avg_b > 0 else "N/A"
-            f.write(
-                f"| **Average** | **{avg_b:.2f}** | **{avg_a:.2f}** | **{avg_d:+.2f}** | **{avg_pct}** |\n\n"
-            )
-            f.write(
-                f"Cost: ${pair_in + pair_out:.3f} (in: ${pair_in:.3f} / out: ${pair_out:.3f})\n\n"
-            )
+        with open(summary.path, "w") as f:
+            f.write("## Analysis Summary\n\n")
 
-        f.write(f"**Total cost**: ${total_input_cost + total_output_cost:.4f} | ")
-        f.write(f"**Total time**: {m}m {s:02d}s\n")
-        f.write(f"\n**Reports**: `gs://{bucket_name}/pipeline-runs/{run_id}/reports/`\n")
+            for pair_id, ps in summary_data["pairs"].items():
+                eval_b = _read_stage("eval_before", pair_id)
+                eval_a = _read_stage("eval_after", pair_id)
+                # required=False: a control arm has no optimize stage. This
+                # one line raised NotFound on every eval-only run and killed
+                # the whole component, four submissions running.
+                opt = _read_stage("optimize", pair_id, required=False)
+                before_scores = eval_b.get("scores", {})
+                after_scores = eval_a.get("scores", {})
+                pair_in = sum(d.get("costs", {}).get("input_usd", 0) for d in [eval_b, opt, eval_a])
+                pair_out = sum(
+                    d.get("costs", {}).get("output_usd", 0) for d in [eval_b, opt, eval_a]
+                )
 
-    logging.info(
-        f"Analysis complete. Reports at gs://{bucket_name}/pipeline-runs/{run_id}/reports/"
-    )
+                f.write(f"### {pair_id} (`{ps['model']}`)\n\n")
+                f.write("| Metric | Before | After | Delta | Change |\n")
+                f.write("|--------|--------|-------|-------|--------|\n")
+                for key, label in METRIC_LABELS.items():
+                    b = before_scores.get(key, 0)
+                    a = after_scores.get(key, 0)
+                    d = a - b
+                    pct = f"{d / b * 100:+.1f}%" if b > 0 else "N/A"
+                    f.write(f"| {label} | {b:.2f} | {a:.2f} | {d:+.2f} | {pct} |\n")
+                avg_b = ps["before_avg"]
+                avg_a = ps["after_avg"]
+                avg_d = ps["delta"]
+                avg_pct = f"{avg_d / avg_b * 100:+.1f}%" if avg_b > 0 else "N/A"
+                f.write(
+                    f"| **Average** | **{avg_b:.2f}** | **{avg_a:.2f}** | **{avg_d:+.2f}** | **{avg_pct}** |\n\n"
+                )
+                f.write(
+                    f"Cost: ${pair_in + pair_out:.3f} (in: ${pair_in:.3f} / out: ${pair_out:.3f})\n\n"
+                )
+
+            f.write(f"**Total cost**: ${total_input_cost + total_output_cost:.4f} | ")
+            f.write(f"**Total time**: {m}m {s:02d}s\n")
+            f.write(f"\n**Reports**: `gs://{bucket_name}/pipeline-runs/{run_id}/reports/`\n")
+
+        logging.info(
+            f"Analysis complete. Reports at gs://{bucket_name}/pipeline-runs/{run_id}/reports/"
+        )
+    except Exception:
+        # summary.json, the report and every eval artifact are already durable.
+        import traceback
+
+        tb = traceback.format_exc()
+        gcs_bucket.blob(f"pipeline-runs/{run_id}/reports/analysis_error.txt").upload_from_string(
+            tb, content_type="text/plain"
+        )
+        logging.exception(
+            "[%s] analysis presentation FAILED -- the measurement is intact; "
+            "traceback saved to reports/analysis_error.txt\n%s",
+            run_id,
+            tb,
+        )
+
     return json.dumps(summary_data)

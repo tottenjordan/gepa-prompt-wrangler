@@ -81,9 +81,13 @@ def deploy(target: str, pair: str):
         stage_deploy(exp, pair_id=pair)
     else:
         from .orchestration.runner import WranglerPipeline
+        from .orchestration.stages import _filter_pairs
 
         pipeline = WranglerPipeline(target)
-        pairs = [pipeline.manifest.get_pair(pair)] if pair else pipeline.manifest.pairs
+        # _filter_pairs, not manifest.pairs: an explicit --pair still runs a
+        # disabled pair (a deliberate act), but an unfiltered sweep must not
+        # deploy opus after it was disabled everywhere else.
+        pairs = _filter_pairs(pipeline.manifest, pair)
         for p in pairs:
             click.echo(f"\n[{p.id}] Deploying {p.model}...")
             engine_id = pipeline._deploy_pair(p)
@@ -392,9 +396,10 @@ def optimize(target: str, pair: str, judge_model: str, version: str):
     else:
         from .core.factory import PairFactory
         from .optimize.optimizer import optimize as run_optimize
+        from .orchestration.stages import _filter_pairs
 
         m = PairFactory.load(target)
-        pairs = [m.get_pair(pair)] if pair else m.pairs
+        pairs = _filter_pairs(m, pair)
 
         for p in pairs:
             click.echo(f"\n[{p.id}] Optimizing with model {p.model}...")
@@ -523,9 +528,17 @@ def run(
 
         m = PairFactory.load(manifest)
         click.echo(f"Manifest: {m.name}")
-        click.echo(f"Pairs: {len(m.pairs)}")
-        for p in m.pairs:
+        click.echo(f"Pairs: {len(m.enabled_pairs)}")
+        for p in m.enabled_pairs:
             click.echo(f"  {p.summary()}")
+        # Report what a real run would skip and why, not just what it would
+        # run -- a dry-run that hid this would make `wrangler run` the first
+        # place a disabled pair's absence gets noticed.
+        disabled = [p for p in m.pairs if not p.enabled]
+        if disabled:
+            click.echo(f"\nDisabled ({len(disabled)}, skipped unless named with --pair):")
+            for p in disabled:
+                click.echo(f"  [{p.id}] {p.disabled_reason or 'no reason recorded'}")
         return
 
     from .orchestration.experiment import Experiment

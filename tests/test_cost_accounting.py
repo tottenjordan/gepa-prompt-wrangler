@@ -51,6 +51,38 @@ class TestMeasuredCost:
     def test_a_registered_model_is_marked_priced(self):
         assert measured_cost("gemini-3.5-flash", 10, 10)["priced"] is True
 
+    def test_a_partial_costs_block_does_not_raise(self):
+        """A manifest `costs:` block with only `input` set must degrade, not crash.
+
+        `custom_costs["output"]` raised a bare KeyError out of measured_cost --
+        taking down a report spanning ten pairs over one ad-hoc `costs:` block,
+        which is exactly the failure this function's own docstring says an
+        unregistered model must not cause.
+        """
+        c = measured_cost("gemini-3.5-flash", 1_000_000, 1_000_000, custom_costs={"input": 9.0})
+        assert c["total_usd"] >= 0.0
+
+    def test_a_partial_costs_block_is_not_silently_priced(self):
+        """A missing side is not a free side.
+
+        Filling the missing key with 0.0 would compute a real number for the
+        known side and mark the row `priced=True` -- read as a complete,
+        trustworthy price when half of it was never supplied. Treat a partial
+        override exactly like no override was given at all: fall back to the
+        registry (or to unpriced, if the model isn't registered there either).
+        """
+        c = measured_cost("not-a-real-model", 1_000_000, 1_000_000, custom_costs={"input": 9.0})
+        assert c["priced"] is False
+        assert c["total_usd"] == 0.0
+
+    def test_a_partial_costs_block_falls_back_to_the_registry(self):
+        """The model is registered; the partial override is discarded, not guessed."""
+        registered = measured_cost("gemini-3.5-flash", 1_000_000, 1_000_000)
+        partial = measured_cost(
+            "gemini-3.5-flash", 1_000_000, 1_000_000, custom_costs={"input": 9.0}
+        )
+        assert partial == registered
+
 
 class TestBothBasesAreReported:
     def test_the_cross_model_table_carries_list_and_measured(self):

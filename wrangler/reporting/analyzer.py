@@ -189,6 +189,65 @@ def analyze_experiment(exp: Experiment) -> ExperimentAnalysis:
     return analysis
 
 
+def floor_from_control_arm(before: dict, after: dict) -> dict:
+    """Per-metric noise floor from one control arm's two eval artifacts.
+
+    A control arm evaluates a byte-identical prompt twice with no optimization
+    between, so every delta it produces is noise by construction. This turns
+    the 2026-09-02 hand computation into something reproducible -- CLAUDE.md
+    currently carries two floor figures nobody can re-derive, both measured
+    through dropout that `EVAL_MAX_RETRIES` has since removed.
+
+    Returns ``unpaired`` (difference of the two run means) and ``paired``
+    (mean per-case difference over cases both sides scored) for every metric,
+    plus coverage, the paired-set size, and a scalar ``floor``.
+
+    Both are reported because they answer different questions and disagree by
+    a lot. On the arm this was built against, pairing cut the floor 44-64%,
+    where CLAUDE.md claims ~15%. Reporting only the smaller of the two would
+    flatter the pipeline; reporting only the larger would waste a real lever.
+
+    ``floor`` is the largest absolute *unpaired* movement -- the conservative
+    choice, since an optimization sweep is not guaranteed to score the same
+    cases on both sides. It is ``None``, never ``0.0``, when nothing was
+    scored: a zero floor asserts there is no noise, which is not something this
+    pipeline has ever exhibited.
+    """
+    b_scores = before.get("scores") or {}
+    a_scores = after.get("scores") or {}
+
+    # Only metrics both sides scored. Treating an absent metric as 0.0 would
+    # invent a full-scale delta out of a missing measurement.
+    unpaired = {m: a_scores[m] - b_scores[m] for m in b_scores.keys() & a_scores.keys()}
+
+    paired_result = paired_deltas(before.get("per_case") or [], after.get("per_case") or [])
+
+    def _coverage(side: dict) -> float | None:
+        # Older artifacts predate cases_scored/cases_total. Absent means
+        # unknown, and unknown must not render as complete.
+        total = side.get("cases_total")
+        if not total:
+            return None
+        scored = side.get("cases_scored", len(side.get("per_case") or []))
+        return scored / total
+
+    return {
+        "unpaired": unpaired,
+        "paired": paired_result["deltas"],
+        "n_paired": paired_result["n_paired"],
+        "dropped": {
+            "before": paired_result["dropped_before"],
+            "after": paired_result["dropped_after"],
+        },
+        "cases": {
+            "before": before.get("cases_scored", len(before.get("per_case") or [])),
+            "after": after.get("cases_scored", len(after.get("per_case") or [])),
+        },
+        "coverage": {"before": _coverage(before), "after": _coverage(after)},
+        "floor": max((abs(v) for v in unpaired.values()), default=None),
+    }
+
+
 def measure_noise_floor(pairs: list) -> float | None:
     """Largest movement shown by any arm whose prompt did not change.
 
@@ -209,19 +268,156 @@ def measure_noise_floor(pairs: list) -> float | None:
     return max(movements) if movements else None
 
 
-def classify_deltas(pair, floor: float | None) -> dict[str, str]:
+def measure_noise_floor_per_metric(pairs: list) -> dict[str, float] | None:
+    """Per-metric floors from the control arms, rather than one number for all.
+
+    `measure_noise_floor` collapses every control metric to a single
+    `max(|delta|)`. That stays as-is -- five callers depend on it and a single
+    conservative number is the right default when you do not know which metric
+    you are judging. But on the 2026-09-02 control arm the per-metric spread
+    was 0.0028 (instruction_following) to 0.0747 (hallucination), a 27x range,
+    so holding every metric to hallucination's floor discards most of the
+    resolution a campaign pays for.
+
+    Where several control arms measured the same metric, the **largest**
+    movement wins. Two controls disagreeing is information about how variable
+    the floor itself is; averaging it away would understate the noise, which is
+    the one direction that produces false wins.
+
+    Returns ``None``, not ``{}``, when there is no control arm -- same contract
+    as the scalar version, for the same reason: absent is not zero.
+    """
+    controls = [p for p in pairs if getattr(p, "is_control", False)]
+    if not controls:
+        return None
+    floors: dict[str, float] = {}
+    for pair in controls:
+        for metric, delta in pair.deltas.items():
+            floors[metric] = max(floors.get(metric, 0.0), abs(delta))
+    return floors
+
+
+def drift_sign_summary(arms: dict[str, dict[str, float]]) -> dict:
+    """Do control arms drift the same way? Counted per arm, not per metric.
+
+    A control arm evaluates a byte-identical prompt twice, so its deltas are
+    noise and their signs should scatter. Campaign 06's validation arm moved
+    all five metrics negative, which would mean every before/after comparison
+    in this repo is biased against the later side -- understating real
+    improvements rather than inventing them, so it produces false negatives
+    that nobody investigates.
+
+    **The metrics are not independent.** All five score the same 64 agent
+    responses via the same autorater in one call, so counting 20 metric-arm
+    cells as 20 draws would badly overstate significance. The arms are the
+    independent units: this reduces each arm to a single direction first, then
+    counts arms. With four arms, unanimity is 2 x 0.5^4 = 12.5% two-sided --
+    suggestive, not conclusive, and the caller must report it that way.
+
+    An arm with an even split gets ``direction=None``. A tie is not weak
+    evidence for either side; it is no evidence, and rounding it to one is how
+    a null becomes a finding.
+
+    Pre-registered in docs/analysis/2026-09-02-eval-order-drift.md before
+    Campaign 06 reported.
+    """
+    per_arm: dict[str, dict] = {}
+    for arm, deltas in arms.items():
+        neg = sum(1 for v in deltas.values() if v < 0)
+        pos = sum(1 for v in deltas.values() if v > 0)
+        direction = None
+        if neg > pos:
+            direction = "negative"
+        elif pos > neg:
+            direction = "positive"
+        per_arm[arm] = {
+            "negative": neg,
+            "positive": pos,
+            "zero": sum(1 for v in deltas.values() if v == 0),
+            "direction": direction,
+        }
+
+    directions = [a["direction"] for a in per_arm.values()]
+    arms_negative = directions.count("negative")
+    return {
+        "per_arm": per_arm,
+        "arms_total": len(per_arm),
+        "arms_negative": arms_negative,
+        "arms_positive": directions.count("positive"),
+        # Unanimity, not a majority. The pre-registered rule treats 3-of-4 as
+        # unresolved rather than as weak support.
+        "consistent": bool(per_arm) and arms_negative == len(per_arm),
+    }
+
+
+def minimum_detectable_effect(
+    floor: float | None,
+    measured_at_runs: int,
+    target_runs: int | None = None,
+    *,
+    scaling_exponent: float | None = None,
+) -> float | None:
+    """The smallest delta worth believing, given a measured floor.
+
+    At the level the floor was measured, the MDE *is* the floor -- a control
+    arm's largest movement on an unchanged prompt is exactly the bar a real
+    delta has to clear. The only interesting case is extrapolating to a
+    different `num_runs`, and that is where this function deliberately refuses
+    to be clever.
+
+    **It will not assume sqrt(n).** Campaign 06 exists to measure whether the
+    floor falls as sqrt(num_runs); a function that assumed it in order to
+    extrapolate would presuppose the campaign's answer and then be used to read
+    the campaign's results. Asked to extrapolate without an explicit
+    `scaling_exponent`, it returns ``None`` -- "not known" rather than a
+    plausible-looking number.
+
+    Pass `scaling_exponent=0.5` once sqrt(n) is measured rather than assumed.
+    `0.0` is a legitimate outcome too: if the residual is judge
+    non-determinism that averaging cannot cross, the floor is flat in
+    `num_runs` and a bigger budget buys nothing.
+
+    `n_cases` is deliberately not a parameter. The floor's dependence on case
+    count has never been measured here -- campaign 06 varies `num_runs`, not
+    the eval set -- and inventing a 1/sqrt(n_cases) term would be the same
+    error this docstring exists to prevent.
+    """
+    if floor is None:
+        return None
+    if target_runs is None or target_runs == measured_at_runs:
+        return floor
+    if scaling_exponent is None:
+        # Not knowable from what has been measured. See docstring.
+        return None
+    return floor * (measured_at_runs / target_runs) ** scaling_exponent
+
+
+def classify_deltas(pair, floor: float | dict[str, float] | None) -> dict[str, str]:
     """Label each metric's change against the measured noise floor.
 
     ``improved`` / ``regressed`` mean the change is larger than anything the
     control arm produced without changing its prompt. ``within-noise`` means it
-    is not, whatever its sign. ``uncalibrated`` means the sweep had no control
-    arm, so the honest answer is that we cannot tell.
+    is not, whatever its sign. ``uncalibrated`` means we cannot tell.
+
+    ``floor`` may be a single number, as it always has been, or a per-metric
+    mapping from `measure_noise_floor_per_metric`. The per-metric form matters:
+    on the 2026-09-02 control arm the floors ranged 0.0028 to 0.0747, a 27x
+    spread, so judging instruction_following against hallucination's floor
+    would dismiss a real move as noise.
+
+    A metric missing from the mapping is ``uncalibrated``, never judged against
+    0.0. Falling back to zero would call every movement real, which is the
+    exact failure this whole classification exists to prevent.
     """
     if floor is None:
         return dict.fromkeys(pair.deltas, "uncalibrated")
+
     out = {}
     for metric, delta in pair.deltas.items():
-        if abs(delta) <= floor:
+        bar = floor.get(metric) if isinstance(floor, dict) else floor
+        if bar is None:
+            out[metric] = "uncalibrated"
+        elif abs(delta) <= bar:
             out[metric] = "within-noise"
         else:
             out[metric] = "improved" if delta > 0 else "regressed"
@@ -317,7 +513,7 @@ class GepaRunStats:
 def _resolve_app_name(pair_id: str, exp: Experiment) -> str:
     """Map pair_id to the GEPA app_name (the *_opt directory name)."""
     manifest = exp.manifest
-    for pair in manifest.pairs:
+    for pair in manifest.enabled_pairs:
         if pair.id == pair_id:
             agent_ref = pair.agent_module or manifest.agent_module
             stem = Path(agent_ref).stem.replace("_agent", "")
