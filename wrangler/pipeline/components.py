@@ -1115,59 +1115,90 @@ def generate_analysis(
         reporter.REPORTS_DIR = original_reports
         reporter.CHARTS_DIR = original_charts
 
-    for pair_id, pair_summary in summary_data["pairs"].items():
-        metrics.log_metric(f"{pair_id}_before_avg", pair_summary["before_avg"])
-        metrics.log_metric(f"{pair_id}_after_avg", pair_summary["after_avg"])
-        metrics.log_metric(f"{pair_id}_delta", pair_summary["delta"])
-    metrics.log_metric("total_cost_usd", round(total_input_cost + total_output_cost, 4))
+    # Everything below is presentation -- KFP metric tiles and a markdown blob
+    # for the UI. Guarded for the same reason the reporter is, and deliberately
+    # WIDE rather than tight: the first attempt wrapped only generate_report,
+    # because that was the suspect. The real fault was one unguarded
+    # _read_stage("optimize") further down the tail, so the component still
+    # died and still left no traceback to find it by. Guard the whole tail, not
+    # the part you suspect.
+    #
+    # Inline rather than extracted to a helper: KFP serializes each component
+    # body in isolation, so a module-level function does not exist at runtime.
+    try:
+        for pair_id, pair_summary in summary_data["pairs"].items():
+            metrics.log_metric(f"{pair_id}_before_avg", pair_summary["before_avg"])
+            metrics.log_metric(f"{pair_id}_after_avg", pair_summary["after_avg"])
+            metrics.log_metric(f"{pair_id}_delta", pair_summary["delta"])
+        metrics.log_metric("total_cost_usd", round(total_input_cost + total_output_cost, 4))
 
-    m, s = divmod(int(total_elapsed), 60)
+        m, s = divmod(int(total_elapsed), 60)
 
-    METRIC_LABELS = {
-        "final_response_quality_v1": "Response Quality",
-        "hallucination_v1": "Hallucination",
-        "safety_v1": "Safety",
-        "tool_use_quality_v1": "Tool Use",
-        "instruction_following_v1": "Instruction Following",
-    }
+        METRIC_LABELS = {
+            "final_response_quality_v1": "Response Quality",
+            "hallucination_v1": "Hallucination",
+            "safety_v1": "Safety",
+            "tool_use_quality_v1": "Tool Use",
+            "instruction_following_v1": "Instruction Following",
+        }
 
-    with open(summary.path, "w") as f:
-        f.write("## Analysis Summary\n\n")
+        with open(summary.path, "w") as f:
+            f.write("## Analysis Summary\n\n")
 
-        for pair_id, ps in summary_data["pairs"].items():
-            eval_b = _read_stage("eval_before", pair_id)
-            eval_a = _read_stage("eval_after", pair_id)
-            opt = _read_stage("optimize", pair_id)
-            before_scores = eval_b.get("scores", {})
-            after_scores = eval_a.get("scores", {})
-            pair_in = sum(d.get("costs", {}).get("input_usd", 0) for d in [eval_b, opt, eval_a])
-            pair_out = sum(d.get("costs", {}).get("output_usd", 0) for d in [eval_b, opt, eval_a])
+            for pair_id, ps in summary_data["pairs"].items():
+                eval_b = _read_stage("eval_before", pair_id)
+                eval_a = _read_stage("eval_after", pair_id)
+                # required=False: a control arm has no optimize stage. This
+                # one line raised NotFound on every eval-only run and killed
+                # the whole component, four submissions running.
+                opt = _read_stage("optimize", pair_id, required=False)
+                before_scores = eval_b.get("scores", {})
+                after_scores = eval_a.get("scores", {})
+                pair_in = sum(d.get("costs", {}).get("input_usd", 0) for d in [eval_b, opt, eval_a])
+                pair_out = sum(
+                    d.get("costs", {}).get("output_usd", 0) for d in [eval_b, opt, eval_a]
+                )
 
-            f.write(f"### {pair_id} (`{ps['model']}`)\n\n")
-            f.write("| Metric | Before | After | Delta | Change |\n")
-            f.write("|--------|--------|-------|-------|--------|\n")
-            for key, label in METRIC_LABELS.items():
-                b = before_scores.get(key, 0)
-                a = after_scores.get(key, 0)
-                d = a - b
-                pct = f"{d / b * 100:+.1f}%" if b > 0 else "N/A"
-                f.write(f"| {label} | {b:.2f} | {a:.2f} | {d:+.2f} | {pct} |\n")
-            avg_b = ps["before_avg"]
-            avg_a = ps["after_avg"]
-            avg_d = ps["delta"]
-            avg_pct = f"{avg_d / avg_b * 100:+.1f}%" if avg_b > 0 else "N/A"
-            f.write(
-                f"| **Average** | **{avg_b:.2f}** | **{avg_a:.2f}** | **{avg_d:+.2f}** | **{avg_pct}** |\n\n"
-            )
-            f.write(
-                f"Cost: ${pair_in + pair_out:.3f} (in: ${pair_in:.3f} / out: ${pair_out:.3f})\n\n"
-            )
+                f.write(f"### {pair_id} (`{ps['model']}`)\n\n")
+                f.write("| Metric | Before | After | Delta | Change |\n")
+                f.write("|--------|--------|-------|-------|--------|\n")
+                for key, label in METRIC_LABELS.items():
+                    b = before_scores.get(key, 0)
+                    a = after_scores.get(key, 0)
+                    d = a - b
+                    pct = f"{d / b * 100:+.1f}%" if b > 0 else "N/A"
+                    f.write(f"| {label} | {b:.2f} | {a:.2f} | {d:+.2f} | {pct} |\n")
+                avg_b = ps["before_avg"]
+                avg_a = ps["after_avg"]
+                avg_d = ps["delta"]
+                avg_pct = f"{avg_d / avg_b * 100:+.1f}%" if avg_b > 0 else "N/A"
+                f.write(
+                    f"| **Average** | **{avg_b:.2f}** | **{avg_a:.2f}** | **{avg_d:+.2f}** | **{avg_pct}** |\n\n"
+                )
+                f.write(
+                    f"Cost: ${pair_in + pair_out:.3f} (in: ${pair_in:.3f} / out: ${pair_out:.3f})\n\n"
+                )
 
-        f.write(f"**Total cost**: ${total_input_cost + total_output_cost:.4f} | ")
-        f.write(f"**Total time**: {m}m {s:02d}s\n")
-        f.write(f"\n**Reports**: `gs://{bucket_name}/pipeline-runs/{run_id}/reports/`\n")
+            f.write(f"**Total cost**: ${total_input_cost + total_output_cost:.4f} | ")
+            f.write(f"**Total time**: {m}m {s:02d}s\n")
+            f.write(f"\n**Reports**: `gs://{bucket_name}/pipeline-runs/{run_id}/reports/`\n")
 
-    logging.info(
-        f"Analysis complete. Reports at gs://{bucket_name}/pipeline-runs/{run_id}/reports/"
-    )
+        logging.info(
+            f"Analysis complete. Reports at gs://{bucket_name}/pipeline-runs/{run_id}/reports/"
+        )
+    except Exception:
+        # summary.json, the report and every eval artifact are already durable.
+        import traceback
+
+        tb = traceback.format_exc()
+        gcs_bucket.blob(f"pipeline-runs/{run_id}/reports/analysis_error.txt").upload_from_string(
+            tb, content_type="text/plain"
+        )
+        logging.exception(
+            "[%s] analysis presentation FAILED -- the measurement is intact; "
+            "traceback saved to reports/analysis_error.txt\n%s",
+            run_id,
+            tb,
+        )
+
     return json.dumps(summary_data)

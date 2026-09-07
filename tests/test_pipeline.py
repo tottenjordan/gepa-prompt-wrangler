@@ -343,6 +343,44 @@ class TestSkipOptimize:
                 f"an eval-only run has no such artifact"
             )
 
+    def test_no_read_stage_call_reads_optimize_unguarded(self):
+        """The call sites, not just where the GCS path is built.
+
+        `test_no_component_reads_the_optimize_stage_unguarded` matches the
+        literal "stages/optimize", which appears only where the blob path is
+        constructed. It never saw `_read_stage("optimize", pair_id)` -- a call
+        reaching the same blob through a helper. That hole cost four pipeline
+        submissions: the analysis component had exactly one such call, in its
+        markdown tail, and it raised NotFound on every eval-only run while the
+        guard reported the class as closed.
+
+        Walks the AST rather than grepping, so comments and docstrings are
+        exempt -- the same reason tests/test_models.py walks it. A regex
+        version of this test flagged the code comment explaining the bug.
+        """
+        import ast
+        from pathlib import Path
+
+        src = Path("wrangler/pipeline/components.py").read_text()
+        offenders = []
+        for node in ast.walk(ast.parse(src)):
+            if not isinstance(node, ast.Call):
+                continue
+            if getattr(node.func, "id", None) != "_read_stage":
+                continue
+            first = node.args[0] if node.args else None
+            if not (isinstance(first, ast.Constant) and first.value == "optimize"):
+                continue
+            guarded = any(
+                kw.arg == "required" and kw.value.value is False for kw in node.keywords
+            ) or (len(node.args) >= 3 and getattr(node.args[2], "value", None) is False)
+            if not guarded:
+                offenders.append(node.lineno)
+        assert not offenders, (
+            f'_read_stage("optimize") at line(s) {offenders} lacks required=False; '
+            f"an eval-only run has no optimize artifact and this raises NotFound"
+        )
+
     def test_the_analysis_tolerates_a_missing_optimize_stage(self):
         from pathlib import Path
 
