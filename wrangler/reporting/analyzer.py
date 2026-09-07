@@ -189,6 +189,65 @@ def analyze_experiment(exp: Experiment) -> ExperimentAnalysis:
     return analysis
 
 
+def floor_from_control_arm(before: dict, after: dict) -> dict:
+    """Per-metric noise floor from one control arm's two eval artifacts.
+
+    A control arm evaluates a byte-identical prompt twice with no optimization
+    between, so every delta it produces is noise by construction. This turns
+    the 2026-09-02 hand computation into something reproducible -- CLAUDE.md
+    currently carries two floor figures nobody can re-derive, both measured
+    through dropout that `EVAL_MAX_RETRIES` has since removed.
+
+    Returns ``unpaired`` (difference of the two run means) and ``paired``
+    (mean per-case difference over cases both sides scored) for every metric,
+    plus coverage, the paired-set size, and a scalar ``floor``.
+
+    Both are reported because they answer different questions and disagree by
+    a lot. On the arm this was built against, pairing cut the floor 44-64%,
+    where CLAUDE.md claims ~15%. Reporting only the smaller of the two would
+    flatter the pipeline; reporting only the larger would waste a real lever.
+
+    ``floor`` is the largest absolute *unpaired* movement -- the conservative
+    choice, since an optimization sweep is not guaranteed to score the same
+    cases on both sides. It is ``None``, never ``0.0``, when nothing was
+    scored: a zero floor asserts there is no noise, which is not something this
+    pipeline has ever exhibited.
+    """
+    b_scores = before.get("scores") or {}
+    a_scores = after.get("scores") or {}
+
+    # Only metrics both sides scored. Treating an absent metric as 0.0 would
+    # invent a full-scale delta out of a missing measurement.
+    unpaired = {m: a_scores[m] - b_scores[m] for m in b_scores.keys() & a_scores.keys()}
+
+    paired_result = paired_deltas(before.get("per_case") or [], after.get("per_case") or [])
+
+    def _coverage(side: dict) -> float | None:
+        # Older artifacts predate cases_scored/cases_total. Absent means
+        # unknown, and unknown must not render as complete.
+        total = side.get("cases_total")
+        if not total:
+            return None
+        scored = side.get("cases_scored", len(side.get("per_case") or []))
+        return scored / total
+
+    return {
+        "unpaired": unpaired,
+        "paired": paired_result["deltas"],
+        "n_paired": paired_result["n_paired"],
+        "dropped": {
+            "before": paired_result["dropped_before"],
+            "after": paired_result["dropped_after"],
+        },
+        "cases": {
+            "before": before.get("cases_scored", len(before.get("per_case") or [])),
+            "after": after.get("cases_scored", len(after.get("per_case") or [])),
+        },
+        "coverage": {"before": _coverage(before), "after": _coverage(after)},
+        "floor": max((abs(v) for v in unpaired.values()), default=None),
+    }
+
+
 def measure_noise_floor(pairs: list) -> float | None:
     """Largest movement shown by any arm whose prompt did not change.
 
@@ -207,6 +266,35 @@ def measure_noise_floor(pairs: list) -> float | None:
         return None
     movements = [abs(d) for p in controls for d in p.deltas.values()]
     return max(movements) if movements else None
+
+
+def measure_noise_floor_per_metric(pairs: list) -> dict[str, float] | None:
+    """Per-metric floors from the control arms, rather than one number for all.
+
+    `measure_noise_floor` collapses every control metric to a single
+    `max(|delta|)`. That stays as-is -- five callers depend on it and a single
+    conservative number is the right default when you do not know which metric
+    you are judging. But on the 2026-09-02 control arm the per-metric spread
+    was 0.0028 (instruction_following) to 0.0747 (hallucination), a 27x range,
+    so holding every metric to hallucination's floor discards most of the
+    resolution a campaign pays for.
+
+    Where several control arms measured the same metric, the **largest**
+    movement wins. Two controls disagreeing is information about how variable
+    the floor itself is; averaging it away would understate the noise, which is
+    the one direction that produces false wins.
+
+    Returns ``None``, not ``{}``, when there is no control arm -- same contract
+    as the scalar version, for the same reason: absent is not zero.
+    """
+    controls = [p for p in pairs if getattr(p, "is_control", False)]
+    if not controls:
+        return None
+    floors: dict[str, float] = {}
+    for pair in controls:
+        for metric, delta in pair.deltas.items():
+            floors[metric] = max(floors.get(metric, 0.0), abs(delta))
+    return floors
 
 
 def classify_deltas(pair, floor: float | None) -> dict[str, str]:
