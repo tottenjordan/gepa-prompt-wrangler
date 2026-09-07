@@ -350,19 +350,74 @@ def drift_sign_summary(arms: dict[str, dict[str, float]]) -> dict:
     }
 
 
-def classify_deltas(pair, floor: float | None) -> dict[str, str]:
+def minimum_detectable_effect(
+    floor: float | None,
+    measured_at_runs: int,
+    target_runs: int | None = None,
+    *,
+    scaling_exponent: float | None = None,
+) -> float | None:
+    """The smallest delta worth believing, given a measured floor.
+
+    At the level the floor was measured, the MDE *is* the floor -- a control
+    arm's largest movement on an unchanged prompt is exactly the bar a real
+    delta has to clear. The only interesting case is extrapolating to a
+    different `num_runs`, and that is where this function deliberately refuses
+    to be clever.
+
+    **It will not assume sqrt(n).** Campaign 06 exists to measure whether the
+    floor falls as sqrt(num_runs); a function that assumed it in order to
+    extrapolate would presuppose the campaign's answer and then be used to read
+    the campaign's results. Asked to extrapolate without an explicit
+    `scaling_exponent`, it returns ``None`` -- "not known" rather than a
+    plausible-looking number.
+
+    Pass `scaling_exponent=0.5` once sqrt(n) is measured rather than assumed.
+    `0.0` is a legitimate outcome too: if the residual is judge
+    non-determinism that averaging cannot cross, the floor is flat in
+    `num_runs` and a bigger budget buys nothing.
+
+    `n_cases` is deliberately not a parameter. The floor's dependence on case
+    count has never been measured here -- campaign 06 varies `num_runs`, not
+    the eval set -- and inventing a 1/sqrt(n_cases) term would be the same
+    error this docstring exists to prevent.
+    """
+    if floor is None:
+        return None
+    if target_runs is None or target_runs == measured_at_runs:
+        return floor
+    if scaling_exponent is None:
+        # Not knowable from what has been measured. See docstring.
+        return None
+    return floor * (measured_at_runs / target_runs) ** scaling_exponent
+
+
+def classify_deltas(pair, floor: float | dict[str, float] | None) -> dict[str, str]:
     """Label each metric's change against the measured noise floor.
 
     ``improved`` / ``regressed`` mean the change is larger than anything the
     control arm produced without changing its prompt. ``within-noise`` means it
-    is not, whatever its sign. ``uncalibrated`` means the sweep had no control
-    arm, so the honest answer is that we cannot tell.
+    is not, whatever its sign. ``uncalibrated`` means we cannot tell.
+
+    ``floor`` may be a single number, as it always has been, or a per-metric
+    mapping from `measure_noise_floor_per_metric`. The per-metric form matters:
+    on the 2026-09-02 control arm the floors ranged 0.0028 to 0.0747, a 27x
+    spread, so judging instruction_following against hallucination's floor
+    would dismiss a real move as noise.
+
+    A metric missing from the mapping is ``uncalibrated``, never judged against
+    0.0. Falling back to zero would call every movement real, which is the
+    exact failure this whole classification exists to prevent.
     """
     if floor is None:
         return dict.fromkeys(pair.deltas, "uncalibrated")
+
     out = {}
     for metric, delta in pair.deltas.items():
-        if abs(delta) <= floor:
+        bar = floor.get(metric) if isinstance(floor, dict) else floor
+        if bar is None:
+            out[metric] = "uncalibrated"
+        elif abs(delta) <= bar:
             out[metric] = "within-noise"
         else:
             out[metric] = "improved" if delta > 0 else "regressed"

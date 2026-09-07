@@ -281,3 +281,99 @@ class TestDriftSignSummary:
         s = drift_sign_summary({"c06-ctrl-claude-n1": floor["unpaired"]})
         assert s["per_arm"]["c06-ctrl-claude-n1"]["negative"] == 5
         assert s["consistent"] is True
+
+
+class TestMinimumDetectableEffect:
+    """Campaign 06's stated payoff: stop relying on a remembered constant.
+
+    The subtle part is what this function must NOT do. Campaign 06 exists to
+    test whether the floor falls as sqrt(num_runs); a function that assumes
+    sqrt(n) to extrapolate would presuppose the very answer the campaign is
+    buying, and then be used to interpret the campaign's own results. So
+    extrapolation requires an explicitly supplied scaling exponent, and without
+    one the function declines rather than guessing.
+    """
+
+    def test_at_the_measured_level_the_mde_is_the_floor(self):
+        from wrangler.reporting.analyzer import minimum_detectable_effect
+
+        assert minimum_detectable_effect(0.0685, measured_at_runs=1) == pytest.approx(0.0685)
+        assert minimum_detectable_effect(
+            0.0685, measured_at_runs=3, target_runs=3
+        ) == pytest.approx(0.0685)
+
+    def test_it_refuses_to_extrapolate_without_a_stated_scaling(self):
+        """The whole point. Campaign 06 is measuring this; do not assume it."""
+        from wrangler.reporting.analyzer import minimum_detectable_effect
+
+        assert minimum_detectable_effect(0.0685, measured_at_runs=1, target_runs=3) is None
+
+    def test_it_extrapolates_when_the_scaling_is_supplied(self):
+        from wrangler.reporting.analyzer import minimum_detectable_effect
+
+        mde = minimum_detectable_effect(
+            0.06, measured_at_runs=1, target_runs=4, scaling_exponent=0.5
+        )
+        assert mde == pytest.approx(0.03)  # sqrt(4) = 2x reduction
+
+    def test_a_larger_budget_lowers_the_mde(self):
+        from wrangler.reporting.analyzer import minimum_detectable_effect
+
+        one = minimum_detectable_effect(0.06, 1, 1, scaling_exponent=0.5)
+        three = minimum_detectable_effect(0.06, 1, 3, scaling_exponent=0.5)
+        assert three < one
+
+    def test_no_floor_means_no_mde_rather_than_zero(self):
+        from wrangler.reporting.analyzer import minimum_detectable_effect
+
+        assert minimum_detectable_effect(None, measured_at_runs=1) is None
+
+    def test_a_scaling_of_zero_means_averaging_does_not_help(self):
+        """A legitimate outcome: if the residual is judge non-determinism that
+        averaging cannot cross, the floor is flat in num_runs."""
+        from wrangler.reporting.analyzer import minimum_detectable_effect
+
+        flat = minimum_detectable_effect(0.06, 1, 5, scaling_exponent=0.0)
+        assert flat == pytest.approx(0.06)
+
+
+class TestClassifyAgainstPerMetricFloors:
+    class _Pair:
+        def __init__(self, deltas):
+            self.deltas = deltas
+            self.is_control = False
+
+    def test_a_dict_floor_judges_each_metric_on_its_own(self):
+        """0.0028 to 0.0747 across metrics on one arm -- a 27x spread.
+
+        Holding instruction_following to hallucination's floor would call a
+        real 0.02 move noise.
+        """
+        from wrangler.reporting.analyzer import classify_deltas
+
+        pair = self._Pair({"tight": 0.02, "loose": 0.02})
+        got = classify_deltas(pair, {"tight": 0.005, "loose": 0.075})
+        assert got["tight"] == "improved"
+        assert got["loose"] == "within-noise"
+
+    def test_the_scalar_floor_still_works_unchanged(self):
+        from wrangler.reporting.analyzer import classify_deltas
+
+        pair = self._Pair({"a": 0.10, "b": 0.01})
+        got = classify_deltas(pair, 0.039)
+        assert got == {"a": "improved", "b": "within-noise"}
+
+    def test_none_is_still_uncalibrated_not_zero(self):
+        from wrangler.reporting.analyzer import classify_deltas
+
+        pair = self._Pair({"a": 0.10})
+        assert classify_deltas(pair, None) == {"a": "uncalibrated"}
+
+    def test_a_metric_absent_from_the_floor_dict_is_uncalibrated(self):
+        """Never silently fall back to 0.0, which would call any move real."""
+        from wrangler.reporting.analyzer import classify_deltas
+
+        pair = self._Pair({"known": 0.02, "unmeasured": 0.02})
+        got = classify_deltas(pair, {"known": 0.005})
+        assert got["known"] == "improved"
+        assert got["unmeasured"] == "uncalibrated"
