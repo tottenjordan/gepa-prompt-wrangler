@@ -297,6 +297,59 @@ def measure_noise_floor_per_metric(pairs: list) -> dict[str, float] | None:
     return floors
 
 
+def drift_sign_summary(arms: dict[str, dict[str, float]]) -> dict:
+    """Do control arms drift the same way? Counted per arm, not per metric.
+
+    A control arm evaluates a byte-identical prompt twice, so its deltas are
+    noise and their signs should scatter. Campaign 06's validation arm moved
+    all five metrics negative, which would mean every before/after comparison
+    in this repo is biased against the later side -- understating real
+    improvements rather than inventing them, so it produces false negatives
+    that nobody investigates.
+
+    **The metrics are not independent.** All five score the same 64 agent
+    responses via the same autorater in one call, so counting 20 metric-arm
+    cells as 20 draws would badly overstate significance. The arms are the
+    independent units: this reduces each arm to a single direction first, then
+    counts arms. With four arms, unanimity is 2 x 0.5^4 = 12.5% two-sided --
+    suggestive, not conclusive, and the caller must report it that way.
+
+    An arm with an even split gets ``direction=None``. A tie is not weak
+    evidence for either side; it is no evidence, and rounding it to one is how
+    a null becomes a finding.
+
+    Pre-registered in docs/analysis/2026-09-02-eval-order-drift.md before
+    Campaign 06 reported.
+    """
+    per_arm: dict[str, dict] = {}
+    for arm, deltas in arms.items():
+        neg = sum(1 for v in deltas.values() if v < 0)
+        pos = sum(1 for v in deltas.values() if v > 0)
+        direction = None
+        if neg > pos:
+            direction = "negative"
+        elif pos > neg:
+            direction = "positive"
+        per_arm[arm] = {
+            "negative": neg,
+            "positive": pos,
+            "zero": sum(1 for v in deltas.values() if v == 0),
+            "direction": direction,
+        }
+
+    directions = [a["direction"] for a in per_arm.values()]
+    arms_negative = directions.count("negative")
+    return {
+        "per_arm": per_arm,
+        "arms_total": len(per_arm),
+        "arms_negative": arms_negative,
+        "arms_positive": directions.count("positive"),
+        # Unanimity, not a majority. The pre-registered rule treats 3-of-4 as
+        # unresolved rather than as weak support.
+        "consistent": bool(per_arm) and arms_negative == len(per_arm),
+    }
+
+
 def classify_deltas(pair, floor: float | None) -> dict[str, str]:
     """Label each metric's change against the measured noise floor.
 

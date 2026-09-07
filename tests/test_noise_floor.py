@@ -192,3 +192,92 @@ class TestPerMetricFloorsAlongsideTheScalar:
             [self._Pair({"a": 0.02}), self._Pair({"a": 0.01, "rare": 0.30})]
         )
         assert floors["rare"] == pytest.approx(0.30)
+
+
+class TestDriftSignSummary:
+    """Pre-registered on 2026-09-07, before Campaign 06's arms reported.
+
+    The validation arm moved all five metrics negative on a byte-identical
+    prompt. Pure noise should scatter in sign, so this counts signs per arm and
+    reports whether the arms agree.
+
+    The counting rule matters more than the arithmetic. The five metrics are
+    NOT independent -- all five score the same 64 responses via the same
+    autorater in one call -- so treating 20 metric-arm cells as 20 draws would
+    badly overstate significance. The ARMS are the independent units, so this
+    summarises per arm first and only then across arms.
+
+    See docs/analysis/2026-09-02-eval-order-drift.md for the decision rule.
+    """
+
+    def test_an_all_negative_arm_is_reported_as_negative(self):
+        from wrangler.reporting.analyzer import drift_sign_summary
+
+        s = drift_sign_summary({"claude-n1": {"a": -0.07, "b": -0.05, "c": -0.01}})
+        assert s["per_arm"]["claude-n1"]["negative"] == 3
+        assert s["per_arm"]["claude-n1"]["direction"] == "negative"
+
+    def test_a_mixed_arm_takes_its_majority(self):
+        from wrangler.reporting.analyzer import drift_sign_summary
+
+        s = drift_sign_summary({"x": {"a": -0.07, "b": -0.05, "c": +0.01}})
+        assert s["per_arm"]["x"]["direction"] == "negative"
+        assert s["per_arm"]["x"]["positive"] == 1
+
+    def test_an_evenly_split_arm_has_no_direction(self):
+        """A tie is not weak evidence for either side; it is no evidence."""
+        from wrangler.reporting.analyzer import drift_sign_summary
+
+        s = drift_sign_summary({"x": {"a": -0.05, "b": +0.05}})
+        assert s["per_arm"]["x"]["direction"] is None
+
+    def test_unanimous_arms_are_flagged_as_consistent(self):
+        from wrangler.reporting.analyzer import drift_sign_summary
+
+        s = drift_sign_summary(
+            {
+                "a1": {"m": -0.07, "n": -0.02},
+                "a2": {"m": -0.03, "n": -0.01},
+                "a3": {"m": -0.05, "n": -0.04},
+                "a4": {"m": -0.02, "n": -0.06},
+            }
+        )
+        assert s["arms_negative"] == 4
+        assert s["arms_total"] == 4
+        assert s["consistent"] is True
+
+    def test_scattered_arms_are_not_consistent(self):
+        """The pre-registered null: the validation arm was a coincidence."""
+        from wrangler.reporting.analyzer import drift_sign_summary
+
+        s = drift_sign_summary(
+            {
+                "a1": {"m": -0.07},
+                "a2": {"m": +0.03},
+                "a3": {"m": -0.05},
+                "a4": {"m": +0.02},
+            }
+        )
+        assert s["consistent"] is False
+        assert s["arms_negative"] == 2
+
+    def test_it_reports_arms_not_cells_as_the_unit(self):
+        """Guards the statistical point the pre-registration turns on.
+
+        If this ever returned a flat count of metric-arm cells, someone would
+        compute a binomial p over it and claim significance the design does not
+        support.
+        """
+        from wrangler.reporting.analyzer import drift_sign_summary
+
+        s = drift_sign_summary({"a1": {"m": -0.1, "n": -0.1, "o": -0.1}})
+        assert s["arms_total"] == 1, "the unit of analysis is the arm, not the metric"
+
+    def test_the_validation_arm_from_the_fixture_is_all_negative(self):
+        """End-to-end against real data: floor function feeds the sign test."""
+        from wrangler.reporting.analyzer import drift_sign_summary
+
+        floor = floor_from_control_arm(*_fixture())
+        s = drift_sign_summary({"c06-ctrl-claude-n1": floor["unpaired"]})
+        assert s["per_arm"]["c06-ctrl-claude-n1"]["negative"] == 5
+        assert s["consistent"] is True
