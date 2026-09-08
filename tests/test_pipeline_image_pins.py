@@ -84,7 +84,7 @@ def test_adk_is_pinned_to_the_version_the_patches_were_verified_against():
     allowed -- with the probe re-run, and this test's expectation updated in
     the same commit, so the two cannot silently diverge.
     """
-    assert _dockerfile_pins()["google-adk"] == "2.7.1", (
+    assert _dockerfile_pins()["google-adk"] == "2.8.0", (
         "google-adk moved. Re-run the per-patch probe in "
         "docs/notes/adk-patch-status.md before changing this."
     )

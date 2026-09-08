@@ -1,7 +1,31 @@
 # ADK Monkey-Patch Status
 
-**Verified on:** 2026-08-20 against `google-adk==2.7.1` (the latest release on PyPI at
-that date).
+**Verified on:** 2026-09-08 against `google-adk==2.8.0`. Previously 2026-08-20 against
+2.7.1.
+
+**2.8.0 probe result: all five patches still required, none changed.** The probe output
+is byte-identical to 2.7.1's on every line that matters — 8 `extra="forbid"` classes,
+no `inferences is None` guard, `_extract_eval_data` present, upstream still has
+`rubric_by_id` and NFKC normalization, and `PrebuiltMetric.SAFETY` still resolves to
+`safety_v3` while the `SAFETY_V1` pin still resolves to `safety_v1`.
+
+Patch 3's note said to re-check at 2.8.x on the chance it had become removable. It has
+not: the null guard is still absent from `_evaluate_single_inference_result` at 2.8.0.
+
+**One thing did change, and it was not a patch.** 2.8.0 reworded the toolset-failure
+warning in `agents/llm_agent.py` from `"Failed to get tools from toolset ..."` to
+`"Agent <name> will run without the tools from toolset ..."`.
+`_ToolsetFailureCounter` matched the old wording with `startswith`, so on 2026-09-08 it
+reported **zero** tool losses through a live campaign in which five had occurred — five
+GEPA candidates scored on a tool-using agent with an empty toolset, feeding straight
+into the objective. The counter now matches both phrasings as substrings, and
+`tests/test_optimizer.py::TestToolsetFailureCounterTracksADKWording` fails if the
+installed ADK emits neither.
+
+That is the general lesson from this bump: the patches were fine, and the thing that
+broke was a **log-string dependency nobody thought of as a dependency**. When probing a
+future ADK, check what the code reads out of ADK's *output*, not only what it patches
+into ADK's internals.
 
 `wrangler/optimize/optimizer.py:_patch_adk()` applies five patches to ADK internals.
 CLAUDE.md said all five of the *original* patches were required at ADK 2.2.0. That stopped

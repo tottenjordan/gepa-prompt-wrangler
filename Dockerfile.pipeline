@@ -20,14 +20,16 @@ COPY pyproject.toml .
 # _ToolsetFailureCounter silently: it matches a log string 2.8.0 no longer
 # emits, so it reported 0 tool failures while 5 had occurred.
 #
-# google-adk stays at 2.7.1 until the probe in docs/notes/adk-patch-status.md
-# is re-run against a newer release. 2.8.0 exists; upgrading to it is a
-# deliberate act with that probe attached, not a side effect of a lockfile bump.
+# google-adk moved to 2.8.0 on 2026-09-08 WITH the probe in
+# docs/notes/adk-patch-status.md re-run against it: all five patches are still
+# required, unchanged. Do not move it again without re-running that probe --
+# the point is that the version changes deliberately, never as a side effect of
+# a lockfile bump.
 #
 # tests/test_pipeline_image_pins.py fails if these drift from uv.lock.
 RUN pip install --no-cache-dir \
     "google-cloud-aiplatform[adk,agent-engines,evaluation]==1.165.1" \
-    "google-adk[a2a,agent-identity,eval,mcp]==2.7.1" \
+    "google-adk[a2a,agent-identity,eval,mcp]==2.8.0" \
     "google-genai==2.20.0" \
     "litellm==1.85.7" \
     "python-dotenv==1.2.3" \
