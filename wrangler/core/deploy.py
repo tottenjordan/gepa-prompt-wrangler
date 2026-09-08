@@ -36,7 +36,18 @@ _SOURCE_REQUIREMENTS = [
     # wrapper touches are present at 1.4.0, and AsyncAnthropicVertex still
     # takes project_id/region.
     "anthropic[vertex]>=1.4.0",
-    "litellm>=1.96.2",
+    # Capped, unlike the rest. litellm >=1.96.2 requires jinja2>=3.1.6, while
+    # google-adk[eval]==2.8.0 resolves jinja2 to 3.1.5 on the GEAP builder --
+    # ResolutionImpossible, and the deploy fails after three attempts with only
+    # "Build failed ... or other dependencies" surfaced to the caller.
+    #
+    # 1.85.7 is what this repo actually validates against. uv.lock also holds a
+    # 1.96.2 entry, but that one is behind a python>=3.14 marker and GEAP runs
+    # 3.11; reading the version off the lockfile without checking the marker is
+    # what set this floor wrong in the first place. The cap mirrors the
+    # <1.86 that google-cloud-aiplatform[evaluation] applies locally but which
+    # does not reach here, because _SOURCE_REQUIREMENTS omits that extra.
+    "litellm>=1.85.7,<1.86",
     "python-dotenv>=1.0.0",
     "pydantic>=2.12.5",
     # httpx is deliberately not pinned here. google-adk and anthropic both

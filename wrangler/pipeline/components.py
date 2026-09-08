@@ -21,7 +21,11 @@ from kfp.dsl import Markdown, Metrics, Output
 
 @dsl.component(
     base_image="python:3.11",
-    packages_to_install=["google-cloud-storage>=3.0.0"],
+    # Pinned, not floored. dag.py rebuilds the five heavy components onto the
+    # pre-built image with packages_to_install=[], but this one is not in that
+    # list -- it runs on stock python:3.11 and pip-resolves fresh on every run,
+    # so a floor here drifts exactly like the Dockerfile floors did.
+    packages_to_install=["google-cloud-storage==3.13.1"],
 )
 def archive_agent_code(
     project_id: str,

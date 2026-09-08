@@ -22,3 +22,16 @@ updates:
     directory: "/"
     schedule:
       interval: "monthly"
+
+  # Base images only -- dependabot does not read the pip pins inside a RUN
+  # layer. Those are held to uv.lock by tests/test_pipeline_image_pins.py, so a
+  # uv bump that moves a version turns the build red rather than drifting the
+  # containers silently, which is what happened to google-adk on 2026-09-08.
+  - package-ecosystem: "docker"
+    directories:
+      - "/"
+      - "/examples/multi_model_agents/mcp_servers/search"
+      - "/examples/multi_model_agents/mcp_servers/booking"
+      - "/examples/multi_model_agents/mcp_servers/expense"
+    schedule:
+      interval: "monthly"
