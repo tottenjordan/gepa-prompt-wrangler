@@ -8,9 +8,9 @@ license = { text = "Apache-2.0" }
 authors = [{ name = "GEPA Team" }]
 
 dependencies = [
-    "google-cloud-aiplatform[adk,agent-engines,evaluation]>=1.154.0",
+    "google-cloud-aiplatform[adk,agent-engines,evaluation]>=2.1.0",
     "google-adk[a2a,agent-identity,eval,mcp]>=2.8.0",
-    "google-genai>=1.66.0",
+    "google-genai>=2.22.0",
     "litellm>=1.83.14",
     "python-dotenv>=1.0.0",
     "pyyaml>=6.0",
@@ -19,7 +19,7 @@ dependencies = [
     "click>=8.0.0",
     "paperbanana>=0.1.2",
     "rouge-score>=0.1.2",
-    "anthropic[vertex]>=0.49.0",
+    "anthropic[vertex]>=1.4.0",
     "kfp>=2.16.0",
     "google-cloud-storage>=3.0.0",
     "fastmcp>=2.0.0",

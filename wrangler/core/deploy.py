@@ -18,15 +18,25 @@ from .config import GCP_PROJECT_ID, GCP_REGION, GCP_STAGING_BUCKET
 # --- Source-based deployment constants ---
 
 _SOURCE_REQUIREMENTS = [
-    "google-cloud-aiplatform[adk,agent-engines]>=1.163.0",
-    "google-genai>=2",
+    # Floors, not pins -- GEAP resolves these itself. They track the versions
+    # the suite and the patch probe actually ran against, so the deployed agent
+    # can be newer than what we validated but never older. aiplatform 2.x is a
+    # major bump: the source-based deploy path is unaffected because it goes
+    # through vertexai.Client(...).agent_engines, not the module-level
+    # functions whose signature changed.
+    "google-cloud-aiplatform[adk,agent-engines]>=2.1.0",
+    "google-genai>=2.22.0",
     "google-auth>=2.52.0",
     # Pinned exactly, and must match the floor in pyproject.toml -- the
     # container and the local env otherwise run different ADK versions and
     # a bug reproduces in only one of them.
     "google-adk[a2a,agent-identity,eval,mcp]==2.8.0",
-    "anthropic[vertex]>=0.49.0",
-    "litellm>=1.83.14",
+    # anthropic 1.x is a major bump. ADK 2.8.0 declares only >=0.78, so the
+    # floor has to carry this: all 31 anthropic.types symbols ADK's Claude
+    # wrapper touches are present at 1.4.0, and AsyncAnthropicVertex still
+    # takes project_id/region.
+    "anthropic[vertex]>=1.4.0",
+    "litellm>=1.96.2",
     "python-dotenv>=1.0.0",
     "pydantic>=2.12.5",
     # httpx is deliberately not pinned here. google-adk and anthropic both

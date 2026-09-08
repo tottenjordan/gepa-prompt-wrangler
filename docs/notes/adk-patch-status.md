@@ -1,7 +1,23 @@
 # ADK Monkey-Patch Status
 
-**Verified on:** 2026-09-08 against `google-adk==2.8.0`. Previously 2026-08-20 against
-2.7.1.
+**Verified on:** 2026-09-08 against `google-adk==2.8.0` with
+`google-cloud-aiplatform==2.1.0` and `anthropic==1.4.0`. Previously 2026-09-08 against
+2.8.0 on aiplatform 1.165.1, and 2026-08-20 against 2.7.1.
+
+**Re-probe when the Vertex SDK moves, not only when ADK does.** Patch 6 does not depend
+on ADK alone: it exists because the *SDK* resolves an unversioned metric name through
+`vertexai._genai._evals_constant.METRIC_LATEST_SPEC_NAME`. A `google-cloud-aiplatform`
+major bump can therefore invalidate a patch while ADK sits still. Re-probed on the
+1.165.1 → 2.1.0 bump: the mapping is unchanged, `safety → safety_v3`, so patch 6 is
+still required.
+
+**Known gap in patch 1, pre-existing and not from any bump.** The patch sweeps the
+`eval_case` and `eval_set` modules, so it reaches the eight `extra="forbid"` classes
+visible there. `eval_rubrics` is not swept, and `RubricContent` and `RubricScore` keep
+`extra="forbid"`. Nothing has been observed failing on them — they are nested models
+that the eval facade has not so far handed an unexpected key — so this is recorded
+rather than fixed. Widening the sweep is a patch change and needs its own evidence that
+it fires, not a guess.
 
 **2.8.0 probe result: all five patches still required, none changed.** The probe output
 is byte-identical to 2.7.1's on every line that matters — 8 `extra="forbid"` classes,

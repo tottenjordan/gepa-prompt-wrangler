@@ -28,9 +28,9 @@ COPY pyproject.toml .
 #
 # tests/test_pipeline_image_pins.py fails if these drift from uv.lock.
 RUN pip install --no-cache-dir \
-    "google-cloud-aiplatform[adk,agent-engines,evaluation]==1.165.1" \
+    "google-cloud-aiplatform[adk,agent-engines,evaluation]==2.1.0" \
     "google-adk[a2a,agent-identity,eval,mcp]==2.8.0" \
-    "google-genai==2.20.0" \
+    "google-genai==2.22.0" \
     "litellm==1.85.7" \
     "python-dotenv==1.2.3" \
     "pyyaml==6.0.3" \
@@ -40,5 +40,5 @@ RUN pip install --no-cache-dir \
     "rouge-score==0.1.2" \
     "google-cloud-storage==3.13.1" \
     "google-cloud-secret-manager==2.30.0" \
-    "anthropic[vertex]==0.125.0" \
+    "anthropic[vertex]==1.4.0" \
     "fastmcp==3.4.7"
