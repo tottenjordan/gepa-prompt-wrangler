@@ -33,7 +33,7 @@ One topic per file. Keep this index under 200 lines — put detail in the topic 
 
 | Escalation | Status |
 |------------|--------|
-| [../escalations/2026-08-23-geap-empty-stream.md](../escalations/2026-08-23-geap-empty-stream.md) | **Ready to file, not yet filed.** Agent Engine returns 200 with an empty stream and runs no inference, 31.7% of requests. The ask is narrow: do not use 200 for a request the service did not serve — 1.2% of requests already return `400 Service Unavailable`, so the path exists. |
+| [../escalations/2026-08-23-geap-empty-stream.md](../escalations/2026-08-23-geap-empty-stream.md) | **Ready to file, not yet filed. Evidence re-checked 2026-09-08:** all 14 cited engine ids have been reaped, and three recent deploys showed 24/24 reach — which is *not* evidence of a fix, because the rate is per-engine (4%–68%) and the deploy health gate now selects healthy engines by construction. Agent Engine returns 200 with an empty stream and runs no inference, 31.7% of requests. The ask is narrow: do not use 200 for a request the service did not serve — 1.2% of requests already return `400 Service Unavailable`, so the path exists. |
 
 ## DOE Campaigns
 
