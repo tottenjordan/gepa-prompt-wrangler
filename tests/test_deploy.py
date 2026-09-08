@@ -532,31 +532,31 @@ class TestInstanceScaling:
         config = _build_source_config("_geap_build_pkg", "n", min_instances=1)
         assert config["min_instances"] == 1
 
-    @patch("wrangler.core.deploy.vertexai")
+    @patch("wrangler.core.deploy.vertex_init")
     @patch("wrangler.core.deploy._get_client")
     def test_reaches_the_deploy_call(self, mock_client, mock_vertexai, tmp_path):
         from wrangler.core.deploy import deploy_agent_from_source
 
-        mock_client.return_value.agent_engines.create.return_value = MagicMock(
+        mock_client.return_value.runtimes.create.return_value = MagicMock(
             resource_name="projects/p/locations/l/reasoningEngines/1"
         )
         deploy_agent_from_source(
             _make_agent_tree(tmp_path), "gemini-3.5-flash", "P", "n", min_instances=2
         )
 
-        config = mock_client.return_value.agent_engines.create.call_args.kwargs["config"]
+        config = mock_client.return_value.runtimes.create.call_args.kwargs["config"]
         assert config["min_instances"] == 2
 
 
 class TestDeployAgentFromSource:
-    @patch("wrangler.core.deploy.vertexai")
+    @patch("wrangler.core.deploy.vertex_init")
     @patch("wrangler.core.deploy._get_client")
     def test_returns_engine_id(self, mock_client, mock_vertexai, tmp_path):
         from wrangler.core.deploy import deploy_agent_from_source
 
         mock_remote = MagicMock()
         mock_remote.resource_name = "projects/p/locations/l/reasoningEngines/12345"
-        mock_client.return_value.agent_engines.create.return_value = mock_remote
+        mock_client.return_value.runtimes.create.return_value = mock_remote
 
         agent_module = _make_agent_tree(tmp_path)
         result = deploy_agent_from_source(
@@ -567,97 +567,97 @@ class TestDeployAgentFromSource:
         )
         assert result == "12345"
 
-    @patch("wrangler.core.deploy.vertexai")
+    @patch("wrangler.core.deploy.vertex_init")
     @patch("wrangler.core.deploy._get_client")
     def test_config_uses_source_packages(self, mock_client, mock_vertexai, tmp_path):
         from wrangler.core.deploy import deploy_agent_from_source
 
         mock_remote = MagicMock()
         mock_remote.resource_name = "projects/p/locations/l/reasoningEngines/99"
-        mock_client.return_value.agent_engines.create.return_value = mock_remote
+        mock_client.return_value.runtimes.create.return_value = mock_remote
 
         agent_module = _make_agent_tree(tmp_path)
         deploy_agent_from_source(agent_module, "gemini-3.5-flash", "Prompt", "test")
 
-        call_kwargs = mock_client.return_value.agent_engines.create.call_args
+        call_kwargs = mock_client.return_value.runtimes.create.call_args
         config = call_kwargs.kwargs.get("config") or call_kwargs[1].get("config")
         assert "source_packages" in config
         assert "entrypoint_module" in config
         assert config["entrypoint_object"] == "app"
         assert config["agent_framework"] == "google-adk"
 
-    @patch("wrangler.core.deploy.vertexai")
+    @patch("wrangler.core.deploy.vertex_init")
     @patch("wrangler.core.deploy._get_client")
     def test_no_agent_param(self, mock_client, mock_vertexai, tmp_path):
         from wrangler.core.deploy import deploy_agent_from_source
 
         mock_remote = MagicMock()
         mock_remote.resource_name = "projects/p/locations/l/reasoningEngines/99"
-        mock_client.return_value.agent_engines.create.return_value = mock_remote
+        mock_client.return_value.runtimes.create.return_value = mock_remote
 
         agent_module = _make_agent_tree(tmp_path)
         deploy_agent_from_source(agent_module, "gemini-3.5-flash", "Prompt", "test")
 
-        call_kwargs = mock_client.return_value.agent_engines.create.call_args
+        call_kwargs = mock_client.return_value.runtimes.create.call_args
         assert "agent" not in (call_kwargs.kwargs or {})
 
-    @patch("wrangler.core.deploy.vertexai")
+    @patch("wrangler.core.deploy.vertex_init")
     @patch("wrangler.core.deploy._get_client")
     def test_config_includes_class_methods(self, mock_client, mock_vertexai, tmp_path):
         from wrangler.core.deploy import _ADK_CLASS_METHODS, deploy_agent_from_source
 
         mock_remote = MagicMock()
         mock_remote.resource_name = "projects/p/locations/l/reasoningEngines/99"
-        mock_client.return_value.agent_engines.create.return_value = mock_remote
+        mock_client.return_value.runtimes.create.return_value = mock_remote
 
         agent_module = _make_agent_tree(tmp_path)
         deploy_agent_from_source(agent_module, "gemini-3.5-flash", "Prompt", "test")
 
-        call_kwargs = mock_client.return_value.agent_engines.create.call_args
+        call_kwargs = mock_client.return_value.runtimes.create.call_args
         config = call_kwargs.kwargs.get("config") or call_kwargs[1].get("config")
         assert config["class_methods"] == _ADK_CLASS_METHODS
         assert len(config["class_methods"]) == 13
 
-    @patch("wrangler.core.deploy.vertexai")
+    @patch("wrangler.core.deploy.vertex_init")
     @patch("wrangler.core.deploy._get_client")
     def test_config_includes_labels(self, mock_client, mock_vertexai, tmp_path):
         from wrangler.core.deploy import deploy_agent_from_source
 
         mock_remote = MagicMock()
         mock_remote.resource_name = "projects/p/locations/l/reasoningEngines/99"
-        mock_client.return_value.agent_engines.create.return_value = mock_remote
+        mock_client.return_value.runtimes.create.return_value = mock_remote
 
         agent_module = _make_agent_tree(tmp_path)
         deploy_agent_from_source(agent_module, "gemini-3.5-flash", "Prompt", "test")
 
-        call_kwargs = mock_client.return_value.agent_engines.create.call_args
+        call_kwargs = mock_client.return_value.runtimes.create.call_args
         config = call_kwargs.kwargs.get("config") or call_kwargs[1].get("config")
         assert config["labels"] == {"solution": "promp-wrangler"}
 
-    @patch("wrangler.core.deploy.vertexai")
+    @patch("wrangler.core.deploy.vertex_init")
     @patch("wrangler.core.deploy._get_client")
     def test_custom_display_name(self, mock_client, mock_vertexai, tmp_path):
         from wrangler.core.deploy import deploy_agent_from_source
 
         mock_remote = MagicMock()
         mock_remote.resource_name = "projects/p/locations/l/reasoningEngines/99"
-        mock_client.return_value.agent_engines.create.return_value = mock_remote
+        mock_client.return_value.runtimes.create.return_value = mock_remote
 
         agent_module = _make_agent_tree(tmp_path)
         deploy_agent_from_source(agent_module, "gemini-3.5-flash", "Prompt", "custom-name")
 
-        call_kwargs = mock_client.return_value.agent_engines.create.call_args
+        call_kwargs = mock_client.return_value.runtimes.create.call_args
         config = call_kwargs.kwargs.get("config") or call_kwargs[1].get("config")
         assert config["display_name"] == "custom-name"
 
-    @patch("wrangler.core.deploy.vertexai")
+    @patch("wrangler.core.deploy.vertex_init")
     @patch("wrangler.core.deploy._get_client")
     def test_cleans_up_build_dir(self, mock_client, mock_vertexai, tmp_path):
         from wrangler.core.deploy import deploy_agent_from_source
 
         mock_remote = MagicMock()
         mock_remote.resource_name = "projects/p/locations/l/reasoningEngines/99"
-        mock_client.return_value.agent_engines.create.return_value = mock_remote
+        mock_client.return_value.runtimes.create.return_value = mock_remote
 
         agent_module = _make_agent_tree(tmp_path)
         deploy_agent_from_source(agent_module, "gemini-3.5-flash", "Prompt", "test")
@@ -666,7 +666,7 @@ class TestDeployAgentFromSource:
 
 
 class TestUpdateAgentFromSource:
-    @patch("wrangler.core.deploy.vertexai")
+    @patch("wrangler.core.deploy.vertex_init")
     @patch("wrangler.core.deploy._get_client")
     @patch("wrangler.core.deploy.GCP_PROJECT_ID", "test-project")
     @patch("wrangler.core.deploy.GCP_REGION", "us-central1")
@@ -677,24 +677,24 @@ class TestUpdateAgentFromSource:
         mock_remote.resource_name = (
             "projects/test-project/locations/us-central1/reasoningEngines/12345"
         )
-        mock_client.return_value.agent_engines.update.return_value = mock_remote
+        mock_client.return_value.runtimes.update.return_value = mock_remote
 
         agent_module = _make_agent_tree(tmp_path)
         update_agent_from_source("12345", agent_module, "gemini-3.5-flash", "New prompt", "test")
 
-        call_kwargs = mock_client.return_value.agent_engines.update.call_args
+        call_kwargs = mock_client.return_value.runtimes.update.call_args
         name = call_kwargs.kwargs.get("name") or call_kwargs[1].get("name")
         assert "projects/test-project" in name
         assert "12345" in name
 
-    @patch("wrangler.core.deploy.vertexai")
+    @patch("wrangler.core.deploy.vertex_init")
     @patch("wrangler.core.deploy._get_client")
     def test_update_uses_source_packages(self, mock_client, mock_vertexai, tmp_path):
         from wrangler.core.deploy import update_agent_from_source
 
         mock_remote = MagicMock()
         mock_remote.resource_name = "projects/p/locations/l/reasoningEngines/99"
-        mock_client.return_value.agent_engines.update.return_value = mock_remote
+        mock_client.return_value.runtimes.update.return_value = mock_remote
 
         agent_module = _make_agent_tree(tmp_path)
         update_agent_from_source(
@@ -705,19 +705,19 @@ class TestUpdateAgentFromSource:
             "test",
         )
 
-        call_kwargs = mock_client.return_value.agent_engines.update.call_args
+        call_kwargs = mock_client.return_value.runtimes.update.call_args
         config = call_kwargs.kwargs.get("config") or call_kwargs[1].get("config")
         assert "source_packages" in config
         assert config["agent_framework"] == "google-adk"
 
-    @patch("wrangler.core.deploy.vertexai")
+    @patch("wrangler.core.deploy.vertex_init")
     @patch("wrangler.core.deploy._get_client")
     def test_no_agent_param_on_update(self, mock_client, mock_vertexai, tmp_path):
         from wrangler.core.deploy import update_agent_from_source
 
         mock_remote = MagicMock()
         mock_remote.resource_name = "projects/p/locations/l/reasoningEngines/99"
-        mock_client.return_value.agent_engines.update.return_value = mock_remote
+        mock_client.return_value.runtimes.update.return_value = mock_remote
 
         agent_module = _make_agent_tree(tmp_path)
         update_agent_from_source(
@@ -728,10 +728,10 @@ class TestUpdateAgentFromSource:
             "test",
         )
 
-        call_kwargs = mock_client.return_value.agent_engines.update.call_args
+        call_kwargs = mock_client.return_value.runtimes.update.call_args
         assert "agent" not in (call_kwargs.kwargs or {})
 
-    @patch("wrangler.core.deploy.vertexai")
+    @patch("wrangler.core.deploy.vertex_init")
     @patch("wrangler.core.deploy._get_client")
     def test_full_resource_name_passthrough(self, mock_client, mock_vertexai, tmp_path):
         from wrangler.core.deploy import update_agent_from_source
@@ -739,22 +739,22 @@ class TestUpdateAgentFromSource:
         full_name = "projects/p/locations/l/reasoningEngines/99"
         mock_remote = MagicMock()
         mock_remote.resource_name = full_name
-        mock_client.return_value.agent_engines.update.return_value = mock_remote
+        mock_client.return_value.runtimes.update.return_value = mock_remote
 
         agent_module = _make_agent_tree(tmp_path)
         update_agent_from_source(full_name, agent_module, "gemini-3.5-flash", "Prompt", "test")
 
-        call_kwargs = mock_client.return_value.agent_engines.update.call_args
+        call_kwargs = mock_client.return_value.runtimes.update.call_args
         assert (call_kwargs.kwargs.get("name") or call_kwargs[1].get("name")) == full_name
 
-    @patch("wrangler.core.deploy.vertexai")
+    @patch("wrangler.core.deploy.vertex_init")
     @patch("wrangler.core.deploy._get_client")
     def test_update_config_includes_labels(self, mock_client, mock_vertexai, tmp_path):
         from wrangler.core.deploy import update_agent_from_source
 
         mock_remote = MagicMock()
         mock_remote.resource_name = "projects/p/locations/l/reasoningEngines/99"
-        mock_client.return_value.agent_engines.update.return_value = mock_remote
+        mock_client.return_value.runtimes.update.return_value = mock_remote
 
         agent_module = _make_agent_tree(tmp_path)
         update_agent_from_source(
@@ -765,7 +765,7 @@ class TestUpdateAgentFromSource:
             "test",
         )
 
-        call_kwargs = mock_client.return_value.agent_engines.update.call_args
+        call_kwargs = mock_client.return_value.runtimes.update.call_args
         config = call_kwargs.kwargs.get("config") or call_kwargs[1].get("config")
         assert config["labels"] == {"solution": "promp-wrangler"}
 

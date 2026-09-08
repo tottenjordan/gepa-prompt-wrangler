@@ -17,9 +17,18 @@ warnings.filterwarnings("ignore", message=".*experimental.*")
 # before vertexai is imported, or its import-time warnings escape.
 
 import pandas as pd  # noqa: E402
-import vertexai  # noqa: E402
-from vertexai import Client, types  # noqa: E402
-from vertexai._genai import _evals_common  # noqa: E402
+from agentplatform import Client, types  # noqa: E402
+from agentplatform._genai import _evals_common  # noqa: E402
+
+# `init` sets process-global project/location/staging_bucket. vertexai
+# and agentplatform both re-export the *same* bound method on the same
+# google.cloud.aiplatform initializer object -- verified `is` identical --
+# so it is imported from the canonical source. agentplatform's re-export
+# falls back to `init = None` when the import fails, which types as
+# `... | None` and is not callable as far as ty is concerned.
+from google.cloud.aiplatform import init as vertex_init  # noqa: E402
+
+from wrangler.core.clients import agent_client  # noqa: E402
 
 from ..core.config import (  # noqa: E402
     GCP_PROJECT_ID,
@@ -495,7 +504,7 @@ def _read_raw_result(client, gcs_uri: str) -> dict:
     the code path this is standing in for. Kept as a separate function so tests
     can substitute it without patching the SDK internals.
     """
-    from vertexai._genai import _gcs_utils
+    from agentplatform._genai import _gcs_utils
 
     gcs = _gcs_utils.GcsUtils(api_client=client._api_client)
     return json.loads(gcs.read_file_contents(gcs_uri))
@@ -509,7 +518,7 @@ def _extract_per_case_via_api(evaluation_run) -> list[dict[str, float]]:
         if not run_results or not getattr(run_results, "evaluation_set", None):
             return per_case
 
-        client = Client(project=GCP_PROJECT_ID, location=GCP_REGION)
+        client = agent_client(project=GCP_PROJECT_ID, location=GCP_REGION)
         eval_set_name = run_results.evaluation_set
         eval_set = client.evals.get_evaluation_set(name=eval_set_name)
         if not eval_set or not getattr(eval_set, "evaluation_items", None):
@@ -820,12 +829,12 @@ def run_batch_eval(
     """Run batch eval against a deployed agent. Returns EvalResult with aggregate and per-case scores."""
     tag = f"[{agent_name}] " if agent_name else ""
 
-    vertexai.init(
+    vertex_init(
         project=GCP_PROJECT_ID,
         location=GCP_REGION,
         staging_bucket=f"gs://{GCP_STAGING_BUCKET}",
     )
-    client = Client(project=GCP_PROJECT_ID, location=GCP_REGION)
+    client = agent_client(project=GCP_PROJECT_ID, location=GCP_REGION)
     agent_resource = _resolve_resource_name(engine_id)
     if metrics is None:
         metrics = DEFAULT_METRICS
@@ -1106,12 +1115,12 @@ def capture_inference(
     (docs/notes/silent-failures.md #5).
     """
     tag = f"[{agent_name}] " if agent_name else ""
-    vertexai.init(
+    vertex_init(
         project=GCP_PROJECT_ID,
         location=GCP_REGION,
         staging_bucket=f"gs://{GCP_STAGING_BUCKET}",
     )
-    client = Client(project=GCP_PROJECT_ID, location=GCP_REGION)
+    client = agent_client(project=GCP_PROJECT_ID, location=GCP_REGION)
     agent_resource = _resolve_resource_name(engine_id)
 
     eval_df = _build_eval_dataset(eval_cases)
@@ -1148,12 +1157,12 @@ def score_captured(
 ) -> EvalResult:
     """Score a capture. Makes no agent calls."""
     tag = f"[{agent_name}] " if agent_name else ""
-    vertexai.init(
+    vertex_init(
         project=GCP_PROJECT_ID,
         location=GCP_REGION,
         staging_bucket=f"gs://{GCP_STAGING_BUCKET}",
     )
-    client = Client(project=GCP_PROJECT_ID, location=GCP_REGION)
+    client = agent_client(project=GCP_PROJECT_ID, location=GCP_REGION)
     frame = load_capture(capture_path)
     dataset = types.EvaluationDataset(eval_dataset_df=frame)
     return _score_dataset(

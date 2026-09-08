@@ -38,6 +38,7 @@ import subprocess
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
+from ..core.clients import agent_client
 from ..core.config import GCP_PROJECT_ID, GCP_REGION
 
 OWNER_LABEL = ("solution", "promp-wrangler")
@@ -288,25 +289,47 @@ def engine_traffic(days: int = DEFAULT_WINDOW_DAYS, project: str | None = None) 
     return counts
 
 
-def list_engines() -> list[dict]:
-    """Inventory every Agent Engine in the project, with what the policy needs."""
-    import vertexai
-    from vertexai import agent_engines
+def _resource_name(engine_id: str) -> str:
+    return (
+        engine_id
+        if engine_id.startswith("projects/")
+        else f"projects/{GCP_PROJECT_ID}/locations/{GCP_REGION}/reasoningEngines/{engine_id}"
+    )
 
-    vertexai.init(project=GCP_PROJECT_ID, location=GCP_REGION)
+
+def list_engines() -> list[dict]:
+    """Inventory every Agent Engine in the project, with what the policy needs.
+
+    Reads through agentplatform's ``runtimes``. The listed object is a
+    ``Runtime`` carrying only ``api_resource`` -- the old ``resource_name`` /
+    ``display_name`` / ``gca_resource`` wrapper attributes are gone. The
+    underlying ``ReasoningEngine`` is unchanged, so every field below still
+    exists, ``spec.deployment_spec.min_instances`` included. That one matters
+    most: it is the cost signal the prune policy weighs, and it would read as
+    ``None`` -- "not warm, safe to delete" -- if this path silently broke.
+    """
     rows = []
-    for a in agent_engines.list():
-        g = a.gca_resource
+    for a in agent_client().runtimes.list():
+        g = a.api_resource
         spec = getattr(g, "spec", None)
         dep = getattr(spec, "deployment_spec", None) if spec else None
         rows.append(
             {
-                "id": a.resource_name.split("/")[-1],
-                "resource_name": a.resource_name,
-                "display_name": a.display_name or "",
+                "id": g.name.split("/")[-1],
+                "resource_name": g.name,
+                "display_name": getattr(g, "display_name", "") or "",
                 "labels": dict(getattr(g, "labels", {}) or {}),
-                "min_instances": getattr(dep, "min_instances", None) if dep else None,
-                "create_time": str(a.create_time)[:16],
+                # Always an int; 0 means "not warm". The old path returned
+                # *both* spellings -- 0 when `gca_resource` was proto-plus with
+                # an unset int32, None when there was no deployment_spec at all
+                # -- so this is deliberately more uniform than what it replaced,
+                # not a faithful copy of it.
+                #
+                # Checked against all 31 live engines: the warm count is
+                # identical (5) under either spelling, and every consumer
+                # already reads it as `or 0`, so no disposition changes.
+                "min_instances": int(getattr(dep, "min_instances", 0) or 0) if dep else 0,
+                "create_time": str(getattr(g, "create_time", ""))[:16],
             }
         )
     return sorted(rows, key=lambda r: r["create_time"])
@@ -314,16 +337,8 @@ def list_engines() -> list[dict]:
 
 def delete_engine(engine_id: str) -> None:
     """Delete one engine. ``force`` because a deployed engine has child resources."""
-    import vertexai
-    from vertexai import agent_engines
-
-    vertexai.init(project=GCP_PROJECT_ID, location=GCP_REGION)
-    resource = (
-        engine_id
-        if engine_id.startswith("projects/")
-        else f"projects/{GCP_PROJECT_ID}/locations/{GCP_REGION}/reasoningEngines/{engine_id}"
-    )
-    agent_engines.get(resource).delete(force=True)
+    # Keyword-only on runtimes, unlike the positional agent_engines.get(...).
+    agent_client().runtimes.delete(name=_resource_name(engine_id), force=True)
 
 
 def _counts_line(plan: dict) -> str:

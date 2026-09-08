@@ -1,7 +1,7 @@
 """Tests for wrangler.traffic — pure helpers and constants."""
 
 import asyncio
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 from wrangler.tools.traffic import (
     DEFAULT_QUERIES,
@@ -190,10 +190,13 @@ class TestGenerateTraffic:
 
     @staticmethod
     def _run(agent, capsys, **kwargs):
+        # No vertexai.init to patch any more: agentplatform's client carries
+        # project and location itself, so the process-global init is gone.
+        client = MagicMock()
+        client.runtimes.get.return_value = agent
         with (
-            patch("wrangler.tools.traffic.vertexai.init"),
             patch("wrangler.tools.traffic.disable_pyopenssl"),
-            patch("wrangler.tools.traffic.agent_engines.get", return_value=agent),
+            patch("wrangler.tools.traffic.agent_client", return_value=client),
         ):
             generate_traffic(agent_ids=["123"], interval=0, **kwargs)
         return capsys.readouterr().out

@@ -10,8 +10,8 @@ No network access — all object-level inspection.
 """
 
 import pytest
+from agentplatform import types
 from pydantic import ValidationError
-from vertexai import types
 
 from wrangler.eval import evaluator
 from wrangler.eval.evaluator import (
@@ -338,7 +338,7 @@ class TestPerCaseFallsBackToRawGcs:
             ]
         }
         items = {"item-1": _StubItem("gs://bucket/result_1.json", types.EvaluationItemResult())}
-        monkeypatch.setattr(evaluator, "Client", lambda **kw: _StubClient(items))
+        monkeypatch.setattr(evaluator, "agent_client", lambda **kw: _StubClient(items))
         monkeypatch.setattr(evaluator, "_read_raw_result", lambda client, uri: raw)
 
         per_case = evaluator._extract_per_case_via_api(_StubRunWithSet())
@@ -359,7 +359,7 @@ class TestPerCaseFallsBackToRawGcs:
                 self.candidate_results = [_Candidate()]
 
         items = {"item-1": _StubItem("gs://bucket/result_1.json", _Response())}
-        monkeypatch.setattr(evaluator, "Client", lambda **kw: _StubClient(items))
+        monkeypatch.setattr(evaluator, "agent_client", lambda **kw: _StubClient(items))
 
         def _boom(client, uri):
             raise AssertionError("read GCS despite a parsed response")
@@ -375,7 +375,7 @@ class TestPerCaseFallsBackToRawGcs:
             "item-1": _StubItem("gs://bucket/a.json", types.EvaluationItemResult()),
             "item-2": _StubItem("gs://bucket/b.json", types.EvaluationItemResult()),
         }
-        monkeypatch.setattr(evaluator, "Client", lambda **kw: _StubClient(items))
+        monkeypatch.setattr(evaluator, "agent_client", lambda **kw: _StubClient(items))
 
         def _read(client, uri):
             if uri.endswith("a.json"):
@@ -392,7 +392,7 @@ class TestPerCaseFallsBackToRawGcs:
 
     def test_item_with_no_gcs_uri_is_simply_empty(self, monkeypatch):
         items = {"item-1": _StubItem(None, types.EvaluationItemResult())}
-        monkeypatch.setattr(evaluator, "Client", lambda **kw: _StubClient(items))
+        monkeypatch.setattr(evaluator, "agent_client", lambda **kw: _StubClient(items))
         got = evaluator._extract_per_case_via_api(_StubRunWithSet())
         assert [evaluator.case_metrics(r) for r in got] == [{}]
 
@@ -471,13 +471,13 @@ class TestInferenceRetryBudget:
 
     @staticmethod
     def _dataset(responses):
-        from vertexai import types
+        from agentplatform import types
 
         return types.EvaluationDataset(eval_dataset_df=TestInferenceRetryBudget._frame(responses))
 
     def _run(self, monkeypatch, initial, script):
         """`script` yields the response list each successive retry pass returns."""
-        from vertexai import types
+        from agentplatform import types
 
         from wrangler.eval import evaluator as ev
 
