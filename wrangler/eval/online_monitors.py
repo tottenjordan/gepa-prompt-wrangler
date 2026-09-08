@@ -17,7 +17,9 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import vertexai
-from vertexai import Client, types
+from vertexai import types
+
+from wrangler.core.clients import agent_client
 
 from ..core.config import GCP_PROJECT_ID, GCP_REGION, GCP_STAGING_BUCKET, OUTPUTS_DIR
 from .evaluator import _alias_tool_use_key, _tool_use_metric
@@ -60,7 +62,7 @@ def run_quick_eval(agent_id: str, num_cases: int | None = None) -> dict:
         location=GCP_REGION,
         staging_bucket=f"gs://{GCP_STAGING_BUCKET}",
     )
-    client = Client(project=GCP_PROJECT_ID, location=GCP_REGION)
+    client = agent_client(project=GCP_PROJECT_ID, location=GCP_REGION)
 
     print(f"Online Monitor: {agent_resource}")
     print(f"  Run ID: {run_id}")

@@ -18,8 +18,11 @@ warnings.filterwarnings("ignore", message=".*experimental.*")
 
 import pandas as pd  # noqa: E402
 import vertexai  # noqa: E402
-from vertexai import Client, types  # noqa: E402
+from agentplatform import Client  # noqa: E402
+from vertexai import types  # noqa: E402
 from vertexai._genai import _evals_common  # noqa: E402
+
+from wrangler.core.clients import agent_client  # noqa: E402
 
 from ..core.config import (  # noqa: E402
     GCP_PROJECT_ID,
@@ -509,7 +512,7 @@ def _extract_per_case_via_api(evaluation_run) -> list[dict[str, float]]:
         if not run_results or not getattr(run_results, "evaluation_set", None):
             return per_case
 
-        client = Client(project=GCP_PROJECT_ID, location=GCP_REGION)
+        client = agent_client(project=GCP_PROJECT_ID, location=GCP_REGION)
         eval_set_name = run_results.evaluation_set
         eval_set = client.evals.get_evaluation_set(name=eval_set_name)
         if not eval_set or not getattr(eval_set, "evaluation_items", None):
@@ -825,7 +828,7 @@ def run_batch_eval(
         location=GCP_REGION,
         staging_bucket=f"gs://{GCP_STAGING_BUCKET}",
     )
-    client = Client(project=GCP_PROJECT_ID, location=GCP_REGION)
+    client = agent_client(project=GCP_PROJECT_ID, location=GCP_REGION)
     agent_resource = _resolve_resource_name(engine_id)
     if metrics is None:
         metrics = DEFAULT_METRICS
@@ -1111,7 +1114,7 @@ def capture_inference(
         location=GCP_REGION,
         staging_bucket=f"gs://{GCP_STAGING_BUCKET}",
     )
-    client = Client(project=GCP_PROJECT_ID, location=GCP_REGION)
+    client = agent_client(project=GCP_PROJECT_ID, location=GCP_REGION)
     agent_resource = _resolve_resource_name(engine_id)
 
     eval_df = _build_eval_dataset(eval_cases)
@@ -1153,7 +1156,7 @@ def score_captured(
         location=GCP_REGION,
         staging_bucket=f"gs://{GCP_STAGING_BUCKET}",
     )
-    client = Client(project=GCP_PROJECT_ID, location=GCP_REGION)
+    client = agent_client(project=GCP_PROJECT_ID, location=GCP_REGION)
     frame = load_capture(capture_path)
     dataset = types.EvaluationDataset(eval_dataset_df=frame)
     return _score_dataset(

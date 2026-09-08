@@ -13,6 +13,7 @@ from pathlib import Path
 
 import vertexai
 
+from .clients import agent_client
 from .config import GCP_PROJECT_ID, GCP_REGION, GCP_STAGING_BUCKET
 
 # --- Source-based deployment constants ---
@@ -594,7 +595,11 @@ def get_mcp_tools(server_name):
 
 
 def _get_client():
-    return vertexai.Client(project=GCP_PROJECT_ID, location=GCP_REGION)
+    # agentplatform, not vertexai.Client -- the latter is deprecated at
+    # google-cloud-aiplatform 2.1.0. GCP_PROJECT_ID/GCP_REGION are passed
+    # rather than left to the factory's env read because the suite patches
+    # them on *this* module (@patch("wrangler.core.deploy.GCP_PROJECT_ID")).
+    return agent_client(project=GCP_PROJECT_ID, location=GCP_REGION)
 
 
 def build_source_package(

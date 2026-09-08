@@ -86,7 +86,7 @@ class TestScoringMakesNoAgentCalls:
         client.evals.get_evaluation_run.return_value = run
 
         with (
-            patch.object(evaluator, "Client", return_value=client),
+            patch.object(evaluator, "agent_client", return_value=client),
             patch.object(evaluator, "vertexai"),
             patch.object(evaluator, "_extract_aggregate_scores", return_value={"safety_v1": 1.0}),
             patch.object(evaluator, "_extract_per_case_scores", return_value=([], "sdk")),
@@ -107,7 +107,7 @@ class TestScoringMakesNoAgentCalls:
         client.evals.get_evaluation_run.return_value = run
 
         with (
-            patch.object(evaluator, "Client", return_value=client),
+            patch.object(evaluator, "agent_client", return_value=client),
             patch.object(evaluator, "vertexai"),
             patch.object(evaluator, "_extract_aggregate_scores", return_value={}),
             patch.object(evaluator, "_extract_per_case_scores", return_value=([], "sdk")),
@@ -130,7 +130,7 @@ class TestScoringMakesNoAgentCalls:
         sentinel = ["just-this-one"]
 
         with (
-            patch.object(evaluator, "Client", return_value=client),
+            patch.object(evaluator, "agent_client", return_value=client),
             patch.object(evaluator, "vertexai"),
             patch.object(evaluator, "_extract_aggregate_scores", return_value={}),
             patch.object(evaluator, "_extract_per_case_scores", return_value=([], "sdk")),

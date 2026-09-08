@@ -17,8 +17,9 @@ import time
 
 import pandas as pd
 import vertexai
-from vertexai import Client, types
+from vertexai import types
 
+from wrangler.core.clients import agent_client
 from wrangler.core.config import (
     GCP_PROJECT_ID,
     GCP_REGION,
@@ -87,7 +88,7 @@ def main() -> None:
     vertexai.init(
         project=GCP_PROJECT_ID, location=GCP_REGION, staging_bucket=f"gs://{GCP_STAGING_BUCKET}"
     )
-    client = Client(project=GCP_PROJECT_ID, location=GCP_REGION)
+    client = agent_client(project=GCP_PROJECT_ID, location=GCP_REGION)
     agent = _resource(ENGINE_ID)
 
     session_inputs = types.evals.SessionInput(user_id="tooluse-diag", state={})
