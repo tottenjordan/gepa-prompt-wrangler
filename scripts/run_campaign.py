@@ -40,7 +40,7 @@ from wrangler.core.models import get_spec  # noqa: E402
 # of step. Eval-only campaigns do not need it, so they pass 0.
 OPTIMIZE_STAGGER = 90 * 60
 
-CAMPAIGNS: dict[str, list[tuple[str, str]]] = {
+CAMPAIGNS: dict[str, list[tuple[str, ...]]] = {
     # Campaign 06 -- eval-only control arms. Paired by publisher at each
     # num_runs level. No optimize phase, so no stagger needed.
     # n=1 and n=3 only. The n=5 batch is deliberately absent: restoring the
@@ -63,9 +63,29 @@ CAMPAIGNS: dict[str, list[tuple[str, str]]] = {
     # Campaign 07 -- cost/quality frontier. Cost tier is crossed with batch
     # rather than confounded with it: each batch holds one cheap and one dear
     # arm, so an unlucky batch does not land entirely on one end of the range.
+    #
+    # Each batch also carries a CONTROL arm -- same seed, no optimize stage --
+    # running alongside under the same load. CLAUDE.md requires one in every
+    # optimization sweep and forbids reusing an earlier campaign's floor,
+    # because "the dropout that generates the noise varies with load and with
+    # how many arms run at once". Campaign 06's floor was measured on four
+    # engines that each drew a perfect health gate, a ~9% event, so it is
+    # optimistic and does not transfer.
+    #
+    # The control matches a model already in its batch, so its floor calibrates
+    # that batch directly, and the two controls between them cover both
+    # publishers.
     "07": [
-        ("manifests/c07-sonnet5_manifest.yaml", "manifests/c07-pro_manifest.yaml"),
-        ("manifests/c07-sonnet46_manifest.yaml", "manifests/c07-lite_manifest.yaml"),
+        (
+            "manifests/c07-sonnet5_manifest.yaml",
+            "manifests/c07-pro_manifest.yaml",
+            "manifests/c07-ctrl-sonnet5_manifest.yaml",
+        ),
+        (
+            "manifests/c07-sonnet46_manifest.yaml",
+            "manifests/c07-lite_manifest.yaml",
+            "manifests/c07-ctrl-lite_manifest.yaml",
+        ),
     ],
 }
 
@@ -79,20 +99,39 @@ def _needs_stagger(manifest_path: str) -> bool:
     return not (PairFactory.load(manifest_path).pipeline or {}).get("skip_optimize", False)
 
 
-def validate(batches: list[tuple[str, str]]) -> list[str]:
-    """Check every batch straddles both publishers before anything is submitted."""
+def validate(batches: list[tuple[str, ...]]) -> list[str]:
+    """No two *optimizing* arms in a batch may share a publisher.
+
+    The pairing exists because Anthropic and Google are separate Vertex quota
+    pools, so one Claude and one Gemini arm run concurrently for free where two
+    Claude arms race each other into 429s. The contended resource during a
+    sweep is the optimize phase -- both arms judge with the same
+    gemini-3.5-flash, which is why the starts are staggered.
+
+    A control arm has no optimize stage. It neither runs GEPA nor touches the
+    shared judge, so it may share a publisher with an optimizing arm; that is
+    what lets a batch carry the control CLAUDE.md requires without breaking the
+    pairing. Hence the rule is stated over optimizing arms rather than over
+    every arm in the batch.
+    """
     problems = []
-    for i, (a, b) in enumerate(batches, 1):
-        missing = [path for path in (a, b) if not Path(path).is_file()]
+    for i, batch in enumerate(batches, 1):
+        missing = [path for path in batch if not Path(path).is_file()]
         problems.extend(f"batch {i}: missing manifest {path}" for path in missing)
         if missing:
             continue
-        pa, pb = _publisher(a), _publisher(b)
-        if pa == pb:
-            problems.append(
-                f"batch {i}: both arms are {pa} — they would contend on the same "
-                f"quota pool, which is the whole thing this pairing avoids"
-            )
+        optimizing = [m for m in batch if _needs_stagger(m)]
+        seen: dict[str, str] = {}
+        for manifest in optimizing:
+            pub = _publisher(manifest)
+            if pub in seen:
+                problems.append(
+                    f"batch {i}: {Path(seen[pub]).stem} and {Path(manifest).stem} both "
+                    f"optimize on {pub} — they would contend on the same quota pool, "
+                    f"which is the whole thing this pairing avoids"
+                )
+            else:
+                seen[pub] = manifest
     return problems
 
 
@@ -200,13 +239,16 @@ def run_campaign(campaign: str, confirm: bool, log_dir: Path, sleep_fn=time.slee
     batches = CAMPAIGNS[campaign]
     problems = validate(batches)
 
-    print(f"=== Campaign {campaign}: {len(batches)} batch(es), 2 arms each ===")
-    for i, (a, b) in enumerate(batches, 1):
-        try:
-            tag = f"{_publisher(a)} ‖ {_publisher(b)}"
-        except Exception as exc:  # missing/broken manifest
-            tag = f"unreadable: {type(exc).__name__}"
-        print(f"  batch {i}: {Path(a).name}  ‖  {Path(b).name}   [{tag}]")
+    print(f"=== Campaign {campaign}: {len(batches)} batch(es) ===")
+    for i, batch in enumerate(batches, 1):
+        parts = []
+        for manifest in batch:
+            try:
+                mark = "" if _needs_stagger(manifest) else " (control)"
+                parts.append(f"{Path(manifest).stem}{mark} [{_publisher(manifest)}]")
+            except Exception as exc:  # missing/broken manifest
+                parts.append(f"{Path(manifest).stem} [unreadable: {type(exc).__name__}]")
+        print(f"  batch {i}: " + "  ‖  ".join(parts))
 
     if problems:
         print("\nREFUSING TO RUN:")
@@ -218,14 +260,26 @@ def run_campaign(campaign: str, confirm: bool, log_dir: Path, sleep_fn=time.slee
         print("\nDRY RUN — re-run with --yes to submit.")
         return 0
 
-    for i, (a, b) in enumerate(batches, 1):
+    for i, batch in enumerate(batches, 1):
         print(f"\n--- batch {i} of {len(batches)} ---", flush=True)
-        jobs = [submit(a, log_dir)]
-        if _needs_stagger(a) or _needs_stagger(b):
-            mins = OPTIMIZE_STAGGER // 60
-            print(f"    staggering {mins} min — both arms judge with gemini-3.5-flash", flush=True)
-            sleep_fn(OPTIMIZE_STAGGER)
-        jobs.append(submit(b, log_dir))
+        # Optimizing arms are staggered from each other because they share the
+        # gemini-3.5-flash judge. A control has no optimize stage, so it goes
+        # out immediately alongside them -- which is the point: it has to run
+        # under the same load as the arms it calibrates, not after them.
+        jobs = []
+        optimizing_submitted = 0
+        for manifest in batch:
+            if _needs_stagger(manifest):
+                if optimizing_submitted:
+                    mins = OPTIMIZE_STAGGER // 60
+                    print(
+                        f"    staggering {mins} min — optimizing arms share the "
+                        f"gemini-3.5-flash judge",
+                        flush=True,
+                    )
+                    sleep_fn(OPTIMIZE_STAGGER)
+                optimizing_submitted += 1
+            jobs.append(submit(manifest, log_dir))
 
         print(f"    waiting for {len(jobs)} job(s) to finish before the next batch", flush=True)
         final = wait_for_jobs(jobs, sleep_fn=sleep_fn)
