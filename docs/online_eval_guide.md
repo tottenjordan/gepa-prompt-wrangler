@@ -40,25 +40,25 @@ Online Evaluators are **always-on scoring engines** that process OTel traces fro
 
 ```bash
 # List all online evaluators
-uv run python -m wrangler.online_evaluators list
+uv run wrangler evaluators list
 
 # Create evaluators for all deployed wrangler agents
-uv run python -m wrangler.online_evaluators create
+uv run wrangler evaluators create
 
 # Verify evaluators are active and check results
-uv run python -m wrangler.online_evaluators verify
+uv run wrangler evaluators verify
 
 # Delete a specific evaluator
-uv run python -m wrangler.online_evaluators delete <evaluator_id>
+uv run wrangler evaluators delete <evaluator_id>
 
 # Remove all wrangler evaluators and custom metrics
-uv run python -m wrangler.online_evaluators cleanup
+uv run wrangler evaluators cleanup
 ```
 
 ### Prerequisites
 
 - Agents must be deployed to Agent Engine
-- `wrangler.online_evaluators` finds its agents through `*_ENGINE_ID` env vars
+- `wrangler.eval.online_evaluators` finds its agents through `*_ENGINE_ID` env vars
   (`LITE_ENGINE_ID`, `FLASH_ENGINE_ID`, …), so export the ids for the deployments you
   want evaluated. Putting them in `.env` is a convenience, not a requirement — engine
   ids are not pinned anywhere in this repo. A deployment id names one Agent Engine that
@@ -90,10 +90,10 @@ Online Monitors are **on-demand evaluation runs** that send a set of test querie
 
 ```bash
 # Run monitor against a specific agent
-uv run python -m wrangler.online_monitors <engine-id>
+uv run python -m wrangler.eval.online_monitors <engine-id>
 
 # Run with fewer cases (faster)
-uv run python -m wrangler.online_monitors <engine-id> --cases 3
+uv run python -m wrangler.eval.online_monitors <engine-id> --cases 3
 ```
 
 ### Output
@@ -118,7 +118,7 @@ Results are saved to `outputs/monitors/monitor_<timestamp>.json`:
 
 ### Console-created vs API-created evaluators
 
-**Online evaluators created via the REST API (`wrangler.online_evaluators create`) report as ACTIVE but do not produce evaluation results.** Only evaluators created through the Agent Engine console UI produce scores that appear in the Observability tab and Cloud Logging.
+**Online evaluators created via the REST API (`wrangler evaluators create`) report as ACTIVE but do not produce evaluation results.** Only evaluators created through the Agent Engine console UI produce scores that appear in the Observability tab and Cloud Logging.
 
 This is a platform limitation as of May 2026. The API-created evaluators pass all validation, show `state: ACTIVE`, and are associated with the correct agent — but they never score traces.
 
@@ -129,7 +129,7 @@ This is a platform limitation as of May 2026. The API-created evaluators pass al
 4. Select the metrics you want (quality, hallucination, safety, tool_use)
 5. Submit
 
-This must be done per agent. The `wrangler.online_evaluators` CLI is still useful for listing, verifying, and cleaning up evaluators, but `create` results should be created through the console.
+This must be done per agent. The `wrangler.eval.online_evaluators` CLI is still useful for listing, verifying, and cleaning up evaluators, but `create` results should be created through the console.
 
 ### Trace format compatibility
 
@@ -146,12 +146,12 @@ For a complete monitoring strategy:
 
 ```bash
 # One-time setup (evaluators must be created through console — see known limitations)
-# uv run python -m wrangler.online_evaluators create  # API-created don't produce results
+# uv run wrangler evaluators create  # API-created don't produce results
 
 # Periodic health check
-uv run python -m wrangler.online_monitors $LITE_ENGINE_ID
-uv run python -m wrangler.online_monitors $FLASH_ENGINE_ID
+uv run python -m wrangler.eval.online_monitors $LITE_ENGINE_ID
+uv run python -m wrangler.eval.online_monitors $FLASH_ENGINE_ID
 
 # Verify evaluators are working
-uv run python -m wrangler.online_evaluators verify
+uv run wrangler evaluators verify
 ```

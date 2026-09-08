@@ -808,5 +808,84 @@ def pipeline_status(job_id: str):
         click.echo(f"Error:  {error}")
 
 
+@main.group("evaluators")
+def evaluators_group():
+    """Manage online (trace-scoring) evaluators.
+
+    These seven commands lived behind `python -m wrangler.eval.online_evaluators`
+    and appeared nowhere in `wrangler --help`, so `trace-health` -- the
+    diagnostic for the OTel span-drop failure in docs/notes/silent-failures.md
+    #8 -- was effectively unfindable.
+    """
+
+
+@evaluators_group.command("list")
+def evaluators_list():
+    """Show every online evaluator and the engine it targets."""
+    from .eval.online_evaluators import list_evaluators
+
+    list_evaluators()
+
+
+@evaluators_group.command("create")
+def evaluators_create():
+    """Create the evaluators for the engines named in the environment."""
+    from .eval.online_evaluators import create_evaluators
+
+    create_evaluators()
+
+
+@evaluators_group.command("verify")
+def evaluators_verify():
+    """Check that each configured evaluator exists and is wired correctly."""
+    from .eval.online_evaluators import verify_evaluators
+
+    verify_evaluators()
+
+
+@evaluators_group.command("trace-health")
+@click.option("--minutes", default=60, help="Look-back window (default: 60).")
+def evaluators_trace_health(minutes: int):
+    """Report span-export health; exits non-zero if any engine drops batches.
+
+    Non-zero on failure is deliberate, so this can gate a run rather than
+    merely inform one. See docs/notes/silent-failures.md #8.
+    """
+    from .eval.online_evaluators import trace_health
+
+    trace_health([str(minutes)])
+
+
+@evaluators_group.command("prune")
+@click.option("--yes", is_flag=True, help="Actually delete. Without this, nothing happens.")
+def evaluators_prune(yes: bool):
+    """Delete evaluators whose target engine is gone. Dry run by default.
+
+    Matches `engines prune`: deleting by default is how you lose something you
+    wanted. If the evaluator listing cannot be trusted, this refuses to guess
+    and says why rather than reporting "nothing to delete".
+    """
+    from .eval.online_evaluators import prune_command
+
+    prune_command(["--yes"] if yes else [])
+
+
+@evaluators_group.command("delete")
+@click.argument("evaluator_id")
+def evaluators_delete(evaluator_id: str):
+    """Delete one evaluator by id."""
+    from .eval.online_evaluators import delete_evaluator
+
+    delete_evaluator(evaluator_id)
+
+
+@evaluators_group.command("cleanup")
+def evaluators_cleanup():
+    """Remove every evaluator this project created."""
+    from .eval.online_evaluators import cleanup
+
+    cleanup()
+
+
 if __name__ == "__main__":
     main()
