@@ -33,10 +33,12 @@ class TestPairingRule:
         assert any("missing" in p for p in problems)
 
     def test_every_referenced_manifest_exists(self):
+        # Batches are variable-length now: campaign 07 carries a control arm
+        # alongside its two optimizing arms.
         for batches in CAMPAIGNS.values():
-            for a, b in batches:
-                assert Path(a).is_file(), a
-                assert Path(b).is_file(), b
+            for batch in batches:
+                for manifest in batch:
+                    assert Path(manifest).is_file(), manifest
 
 
 class TestDryRunByDefault:
@@ -331,3 +333,97 @@ class TestJobStateIsReadAsAName:
         from scripts.run_campaign import _DONE
 
         assert not any(t in "UNKNOWN" for t in _DONE)
+
+
+class TestBatchesMayCarryAControlArm:
+    """A control arm runs alongside the optimized ones, so batches hold three.
+
+    CLAUDE.md requires a control in every optimization sweep, run "alongside
+    the real arms and under identical conditions", and forbids substituting a
+    floor measured earlier -- the dropout that generates the noise varies with
+    load and with how many arms run at once.
+
+    That collides with the publisher pairing, which existed to keep two
+    *optimizing* arms off one Vertex quota pool. The reason for that rule is
+    the shared GEPA judge: both arms judge with gemini-3.5-flash during
+    optimize, which is why the starts are staggered. A control has no optimize
+    stage, so it contends for neither the judge nor the optimize-phase quota,
+    and may share a publisher with an optimizing arm.
+
+    So the rule generalises rather than relaxes: **no two OPTIMIZING arms in a
+    batch may share a publisher.**
+    """
+
+    def test_a_batch_of_three_with_one_control_is_accepted(self):
+        from scripts.run_campaign import validate
+
+        assert (
+            validate(
+                [
+                    (
+                        "manifests/c07-sonnet5_manifest.yaml",  # Anthropic, optimizes
+                        "manifests/c07-pro_manifest.yaml",  # Google, optimizes
+                        "manifests/c07-ctrl-sonnet5_manifest.yaml",  # Anthropic, control
+                    )
+                ]
+            )
+            == []
+        )
+
+    def test_two_optimizing_arms_of_one_publisher_are_still_refused(self):
+        from scripts.run_campaign import validate
+
+        problems = validate(
+            [("manifests/c07-sonnet5_manifest.yaml", "manifests/c07-sonnet46_manifest.yaml")]
+        )
+        assert problems, "two optimizing Anthropic arms must be refused"
+        assert "quota" in problems[0].lower()
+
+    def test_two_controls_of_one_publisher_are_fine(self):
+        """Neither optimizes, so neither touches the contended resource."""
+        from scripts.run_campaign import validate
+
+        assert (
+            validate(
+                [
+                    (
+                        "manifests/c06-ctrl-claude-n1_manifest.yaml",
+                        "manifests/c06-ctrl-claude-n3_manifest.yaml",
+                    )
+                ]
+            )
+            == []
+        )
+
+    def test_a_missing_manifest_is_still_caught(self):
+        from scripts.run_campaign import validate
+
+        problems = validate([("manifests/nope.yaml", "manifests/c07-pro_manifest.yaml")])
+        assert problems, "a missing manifest must be reported"
+        assert "missing" in problems[0]
+
+    def test_campaign_07_has_a_control_in_every_batch(self):
+        """The rule this whole class exists to enforce, applied to the real campaign."""
+        from scripts.run_campaign import CAMPAIGNS, _needs_stagger
+
+        for i, batch in enumerate(CAMPAIGNS["07"], 1):
+            controls = [m for m in batch if not _needs_stagger(m)]
+            assert controls, (
+                f"c07 batch {i} has no control arm; its deltas would be uncalibrated "
+                f"and CLAUDE.md forbids reusing an earlier campaign's floor"
+            )
+
+    def test_every_campaign_07_arm_runs_at_the_same_num_runs(self):
+        """A floor measured at a different num_runs does not calibrate an arm.
+
+        Campaign 06 measured 0.058 at n=1 against 0.011-0.014 at n=3.
+        """
+        import glob
+
+        from wrangler.core.factory import PairFactory
+
+        levels = {
+            PairFactory.load(f).pipeline.get("num_runs")
+            for f in glob.glob("manifests/c07-*_manifest.yaml")
+        }
+        assert levels == {3}, f"c07 arms disagree on num_runs: {levels}"

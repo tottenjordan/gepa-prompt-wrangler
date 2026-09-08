@@ -27,7 +27,13 @@ import pytest
 from wrangler.core.factory import PairFactory
 from wrangler.core.models import get_spec
 
-C07 = sorted(glob.glob("manifests/c07-*_manifest.yaml"))
+C07_ALL = sorted(glob.glob("manifests/c07-*_manifest.yaml"))
+# The four optimized arms. Control arms are excluded from the distinctness
+# rules below on purpose: a control exists to share its twin's model and seed,
+# differing only in whether GEPA ran. Including them would make "every arm
+# declares a distinct model" fail for the very property that makes a control
+# a control.
+C07 = [f for f in C07_ALL if "ctrl" not in f]
 
 
 def _arms() -> dict[str, object]:
@@ -39,8 +45,25 @@ def _arms() -> dict[str, object]:
     return arms
 
 
-def test_the_campaign_has_its_four_arms():
-    assert len(C07) == 4, f"expected four c07 manifests, found {C07}"
+def test_the_campaign_has_its_four_optimized_arms():
+    assert len(C07) == 4, f"expected four optimized c07 manifests, found {C07}"
+
+
+def test_the_campaign_has_a_control_arm_per_batch():
+    """CLAUDE.md requires a control in every optimization sweep, and forbids
+    reusing a floor measured on an earlier run."""
+    controls = [f for f in C07_ALL if "ctrl" in f]
+    assert len(controls) == 2, f"expected one control per batch, found {controls}"
+
+
+def test_each_control_shares_a_model_with_an_optimized_arm():
+    """A floor only calibrates arms it was measured alongside on the same model."""
+    from wrangler.core.factory import PairFactory
+
+    optimized = {PairFactory.load(f).enabled_pairs[0].model for f in C07}
+    for path in (f for f in C07_ALL if "ctrl" in f):
+        model = PairFactory.load(path).enabled_pairs[0].model
+        assert model in optimized, f"{path} controls a model no arm optimizes: {model}"
 
 
 def test_every_arm_declares_a_distinct_model():

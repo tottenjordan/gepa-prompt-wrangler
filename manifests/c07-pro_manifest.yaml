@@ -37,6 +37,14 @@ pipeline:
   # 600, not 800. Per-arm arithmetic: deploy 0.3h + eval 1.5h + optimize ~7h +
   # redeploy 0.3h + eval 1.5h = ~10.6h, which fits a night. 800 would not.
   max_metric_calls: 600
+  # Set explicitly, not left to the pipeline default of 1. Campaign 06 measured
+  # the floor at 0.058 for num_runs=1 against 0.011-0.014 at 3 -- running the
+  # frontier at n=1 would measure tier differences against a floor five times
+  # larger than it needs to be, which is the outcome 06 flagged as the one that
+  # would invalidate this campaign.
+  num_runs: 3
 
 health_gate:
   enabled: true
+  # An arm that runs on a rejected engine measures dropout, not the model.
+  required: true
