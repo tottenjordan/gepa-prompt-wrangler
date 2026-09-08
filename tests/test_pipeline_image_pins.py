@@ -23,10 +23,18 @@ not install from. So the check has to be that the two agree.
 from __future__ import annotations
 
 import re
+import sys
 from importlib import metadata
 from pathlib import Path
 
 import pytest
+
+from wrangler.tools.preflight import TARGET_PYTHON
+
+# The Python every image targets and every pin is resolved for: GEAP's runtime.
+# Imported from preflight rather than redefined -- two copies of this constant
+# drifting is exactly the class of bug this file exists to catch.
+_RUNNING_ON_TARGET = f"{sys.version_info.major}.{sys.version_info.minor}" == TARGET_PYTHON
 
 DOCKERFILE = Path("Dockerfile.pipeline")
 
@@ -107,35 +115,49 @@ def test_every_image_declares_a_python_base():
         assert _base_image(path).startswith("python:"), path
 
 
-def test_pins_are_only_verified_against_a_matching_python():
-    """A pin checked against 3.11 says nothing about a 3.14 image.
+def test_images_are_built_on_the_deployment_python():
+    """Every image must target TARGET_PYTHON, or be exempted with evidence.
 
-    Every version in this file is read with `metadata.version()` -- from the
-    *local venv*. That is only evidence about the container if the container
-    runs the same Python.
+    The comparison is against the *project's* Python, not `sys.version_info`.
+    A first version of this test used the running interpreter and passed on
+    3.11 while failing the 3.12 and 3.13 CI matrix entries, where
+    Dockerfile.pipeline's correct 3.11 base looked like a mismatch. Two
+    different invariants were being conflated: what the images should target
+    (fixed) and whether this environment can verify their pins (variable).
 
-    Markers make this concrete rather than theoretical: uv.lock holds two
-    litellm entries, 1.85.7 for python<3.14 and 1.96.2 for >=3.14, and
+    Why it matters that images agree on a Python: uv.lock holds two litellm
+    entries, 1.85.7 for python<3.14 and 1.96.2 for >=3.14, and
     google-cloud-aiplatform[evaluation] flips its litellm range at exactly
-    that boundary. So an image whose base moved is an image whose correct pins
-    may have moved -- while metadata.version() keeps reporting the local
-    answer and every pin test above keeps passing.
+    that boundary. An image whose base moved is an image whose correct pins
+    may have moved.
     """
-    import sys
-
-    local = f"{sys.version_info.major}.{sys.version_info.minor}"
     mismatched = {
         path.as_posix(): _base_image(path)
         for path in [DOCKERFILE, *OTHER_DOCKERFILES]
-        if not _base_image(path).startswith(f"python:{local}")
+        if not _base_image(path).startswith(f"python:{TARGET_PYTHON}")
         and path.as_posix() not in PYTHON_MISMATCH_ACCEPTED
     }
     assert not mismatched, (
-        f"{mismatched} build on a Python other than the local {local}, so "
-        f"test_each_pin_matches_the_lockfile is comparing their pins against "
-        f"versions resolved for the wrong interpreter. Either align the base "
+        f"{mismatched} do not build on python:{TARGET_PYTHON}, the version GEAP "
+        f"runs and the one every pin here is resolved for. Either align the base "
         f"image, or add the path to PYTHON_MISMATCH_ACCEPTED with a reason and "
         f"evidence that the pin set resolves on its own base."
+    )
+
+
+def test_the_pin_comparisons_know_when_they_are_not_evidence():
+    """Guards the skip below against silently disabling everything.
+
+    `test_each_pin_matches_the_lockfile` reads `metadata.version()` from the
+    running venv, so it is only evidence when that venv is TARGET_PYTHON. On
+    the other matrix entries it skips rather than asserting something false --
+    but if TARGET_PYTHON ever stopped being a version CI actually runs, the
+    pin checks would skip everywhere and nobody would notice.
+    """
+    versions = re.findall(r'"3\.\d+"', Path(".github/workflows/ci.yml").read_text())
+    assert f'"{TARGET_PYTHON}"' in versions, (
+        f"CI no longer runs {TARGET_PYTHON}, so every pin comparison would skip. "
+        f"CI matrix: {versions}"
     )
 
 
@@ -163,6 +185,10 @@ def test_other_images_pin_every_dependency(path: Path):
     ("path", "package"),
     [(p, pkg) for p in OTHER_DOCKERFILES for pkg in sorted(_pins(p))],
     ids=lambda v: v.parent.name if isinstance(v, Path) else v,
+)
+@pytest.mark.skipif(
+    not _RUNNING_ON_TARGET,
+    reason=f"pins are resolved for python {TARGET_PYTHON}; this venv is not it",
 )
 def test_other_image_pins_match_the_lockfile(path: Path, package: str):
     """The MCP servers must speak the protocol version our client was tested on."""
@@ -212,6 +238,11 @@ def test_the_dockerfile_installs_something():
 
 
 @pytest.mark.parametrize("package", sorted(_dockerfile_pins()))
+@pytest.mark.skipif(
+    not _RUNNING_ON_TARGET,
+    reason=f"pins are resolved for python {TARGET_PYTHON}; this venv is not it, so "
+    "metadata.version() here is not evidence about the container",
+)
 def test_each_pin_matches_the_lockfile(package: str):
     """Container and local must run the same code, or local testing proves nothing."""
     if package in NOT_IN_LOCK:
