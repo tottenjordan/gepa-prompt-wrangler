@@ -17,10 +17,13 @@ outcome would mean *before* looking is what stops that.
 | [02](02-judge-variance.md) | How much of the noise floor is the judge? | **Not started** | One capture, then scoring only |
 | [03](03-noise-floor.md) | What is the noise floor, really? | **Not started** | Moderate |
 | [04](04-gepa-budget-and-criteria.md) | What does a GEPA budget buy? | Superseded by [08](08-gepa-budget-curve.md) | ~90 h wall-clock |
-| [06](06-pipeline-noise-floor.md) | What is the noise floor, on the pipeline? | **Running 2026-09-01** | ~6 h, 4 arms (n=5 trimmed) |
-| [07](07-cost-quality-frontier.md) | What does a model tier cost per unit of quality? | **Ready** | ~10.6 h/arm, 4 arms, 2 at a time |
+| [06](06-pipeline-noise-floor.md) | What is the noise floor, on the pipeline? | **Complete 2026-09-08 — 0.058 at n=1, 0.011–0.014 at n=3; averaging beats √n** | ~6 h, 4 arms (n=5 trimmed) |
+| [07](07-cost-quality-frontier.md) | What does a model tier cost per unit of quality? | **Unblocked 2026-09-08 — 06's floor measured, drift null** | ~10.6 h/arm, 4 arms, 2 at a time |
 | [08](08-gepa-budget-curve.md) | What does a GEPA budget buy? (scoped to fit) | Conditional on 06 | 1 optimize arm per batch |
 | [09](09-lottery-recheck.md) | Has the deploy lottery got worse? | **Complete 2026-09-01 — no, 5/10 vs 6/10, p=1.000** | 10 engines, ~4 h |
+
+**09 ran before 06 and cleared it.** The lottery had not shifted (5/10 vs 6/10,
+p=1.000), so `max_rerolls` went to 4 and 06 proceeded. Original note below.
 
 **09 now runs before 06.** The campaign-06 validation arm drew three engines and
 all three failed the health gate at 1.7% reach; the eval then ran against the worst

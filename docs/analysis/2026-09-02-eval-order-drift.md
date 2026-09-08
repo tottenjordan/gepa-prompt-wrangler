@@ -1,7 +1,7 @@
 # Do second evals score lower? A pre-registered sign test
 
-**Status:** Registered 2026-09-07, before Campaign 06's arms landed. Result section empty by design.
-**Gates:** Campaign 07.
+**Status:** **Resolved 2026-09-08 — null.** Registered 2026-09-07 before any arm landed.
+**Gated:** Campaign 07 — now released.
 
 ## The observation
 
@@ -110,4 +110,64 @@ flagged as speculation:
 
 ## Result
 
-_Not yet run. Campaign 06's four arms are the input._
+**Null. 2 of 4 arms drifted negative — signs scatter. Campaign 07 is unblocked.**
+
+Campaign 06's four control arms, each a byte-identical prompt evaluated twice at
+100% coverage on both sides:
+
+| arm | negative | positive | direction |
+| --- | --- | --- | --- |
+| c06-ctrl-claude-n1 | 1 | 4 | positive |
+| c06-ctrl-gemini-n1 | 4 | 1 | negative |
+| c06-ctrl-claude-n3 | 2 | 3 | positive |
+| c06-ctrl-gemini-n3 | 4 | 1 | negative |
+
+Two negative, two positive. Under the decision rule fixed before any of this
+data existed — *"signs scatter across arms → the validation arm was a
+coincidence; record the null and unblock campaign 07"* — this is the third row
+of the table, and it is recorded as such.
+
+### The original observation was a coincidence
+
+The 5-of-5 negative result that prompted this document came from a single arm.
+That same arm, re-measured four more times as the pipeline was fixed and
+re-run:
+
+| measurement | signs | scalar floor |
+| --- | --- | --- |
+| 2026-09-02 (the observation) | 5 neg | 0.0747 |
+| re-run, 100% engine | 3 pos / 2 neg | 0.0685 |
+| re-run | 4 pos / 1 neg | 0.0670 |
+| re-run | 4 pos / 1 neg | 0.0583 |
+
+The signs flipped immediately and never returned. The **floor magnitude**, by
+contrast, held between 0.058 and 0.075 across all four — the measurement is
+stable, its sign is not, which is exactly what noise looks like.
+
+Worth saying plainly: 5-of-5 on five metrics that are not independent was
+always weak evidence. The document said so at registration. It was still worth
+four arms to check, because the alternative — a systematic bias against every
+optimized arm — would have quietly understated every result campaign 07
+produces.
+
+### One pattern deliberately not claimed
+
+The two n=3 arms are 4-of-5 and 2-of-5 negative, and both Gemini arms are
+4-of-5 negative while both Claude arms lean positive. A publisher effect is a
+tempting read.
+
+It is not one this design can support. The pre-registration fixed the arm as
+the unit of analysis and unanimity as the bar; with one arm per
+publisher-per-level, "Gemini drifts negative" rests on two arms that differ in
+`num_runs` as well as publisher. Reporting it would be exactly the
+after-the-fact pattern-finding the registration exists to prevent. Recorded
+here as an observation for a future design to test properly, not as a result.
+
+### Consequences
+
+- **Campaign 07 proceeds.** Its before/after deltas need no drift correction.
+- The order-swap experiment in the next section is **not** run.
+- `drift_sign_summary()` stays in `analyzer.py` and runs on every future
+  campaign's controls, so a real drift would surface rather than being assumed
+  absent.
+

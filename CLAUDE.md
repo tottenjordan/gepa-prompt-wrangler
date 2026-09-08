@@ -229,11 +229,30 @@ For multi-model agents: `SEARCH_MCP_SERVER`, `BOOKING_MCP_SERVER`, `EXPENSE_MCP_
   That control existed only by accident: GEPA happened to return the seed for one model.
 
   **Run the control first, as a gate**, and run it at the same `num_runs` as the real
-  arms. Measured 2026-08-23: the floor is ~0.059 at `num_runs: 1` and ~0.034 at the
-  configured default of 3, because averaging cuts variance by sqrt(n). Lowering
-  `num_runs` to save wall-clock raises the floor by ~1.7x and can put it above the
-  effects being measured. Pairing before/after on case index helps too, but only by
-  ~15% -- the residual is judge and agent non-determinism, not case sampling.
+  arms. **Measured 2026-09-08 by campaign 06** (four arms, both publishers, 100%
+  coverage on every side): the floor is **~0.058 at `num_runs: 1` and ~0.011-0.014 at
+  the configured default of 3**. Per metric it ranges 0.017 (hallucination) to 0.058
+  (safety), a 3.4x spread, which is why `classify_deltas` takes a per-metric mapping —
+  holding every metric to the loosest one throws away most of the resolution.
+
+  **Averaging beats sqrt(n).** Claude fell 5.2x from n=1 to n=3 and Gemini 2.7x, against
+  the 1.73x sqrt(3) predicts, replicated independently across publishers. So `num_runs`
+  is a *stronger* lever than previously documented, not a weaker one. Report the range;
+  two levels cannot distinguish sqrt(n) from any other decreasing curve, and the two
+  arms disagree on magnitude.
+
+  These supersede the 2026-08-23 figures of ~0.059 and ~0.034. The n=1 end was about
+  right; the n=3 end was 2.4-3x too pessimistic, because it was measured through dropout
+  that `EVAL_MAX_RETRIES` has since removed.
+
+  **Pairing on case index no longer helps materially.** It was worth ~15% when evals
+  dropped cases; at 100% coverage there are no unmatched cases for it to remove, and at
+  n=3 paired is sometimes *worse* than unpaired. Pairing was compensating for dropout,
+  and the dropout is gone.
+
+  One caveat on all of the above: campaign 06's four engines each drew a perfect health
+  gate on the first attempt, which is a ~9% event at the measured 55% healthy rate.
+  These floors likely sit at the optimistic end.
 
   Do not substitute a repeat of the same arm, and do not reuse a floor measured on an
   earlier run — the dropout that generates the noise varies with load and with how many
