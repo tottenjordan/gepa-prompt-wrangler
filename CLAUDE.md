@@ -20,7 +20,14 @@ uv run pytest tests/ -v           # Run the full suite (count intentionally not 
 uv run pytest tests/test_config.py -v  # Run single test file
 uv run pytest tests/test_config.py::TestResolveModel -v  # Run single test class
 uv run wrangler --help            # CLI entry point
+uv run wrangler preflight         # Resolve both dependency sets before a campaign
+uv run wrangler engines list      # Engine inventory with per-engine disposition
+uv run wrangler evaluators --help # Online (trace-scoring) evaluators — 7 commands
 ```
+
+`wrangler evaluators trace-health` is the diagnostic for the OTel span-drop
+failure in [docs/notes/silent-failures.md](docs/notes/silent-failures.md) #8 and
+exits non-zero when an engine drops batches, so it can gate a run.
 
 ## Project Overview
 
@@ -30,14 +37,16 @@ GEPA Prompt Wrangler optimizes ADK agent system prompts using Google's GEPA (Gen
 
 ### Package Structure (`wrangler/`)
 
-Six subpackages organized by domain:
+Seven subpackages organized by domain:
 
 - **`core/`** — Model registry, config, manifest parsing, eval format conversion, agent deployment. Everything else depends on these.
 - **`eval/`** — Batch evaluation via Vertex AI Evaluation Service, online evaluators (OTel trace scoring), online monitors (health checks).
 - **`optimize/`** — GEPA optimizer wrapper with ADK patches, multi-judge ensemble.
 - **`reporting/`** — Chart generation (matplotlib + PaperBanana), markdown reports, per-pair analysis.
 - **`orchestration/`** — Experiment management (DOE campaigns), stage functions, legacy pipeline runner.
-- **`tools/`** — Agent introspection, prompt versioning, synthetic traffic generation.
+- **`tools/`** — Agent introspection, prompt versioning, synthetic traffic generation,
+  engine inventory/reaping (`engines.py`), deploy-health probing (`boot_probe.py`),
+  and the dependency-resolution pre-flight (`preflight.py`).
 - **`pipeline/`** — Vertex AI Pipeline (KFP v2) components, DAG definition, Cloud Build + submission.
 
 ### Key Data Flow
@@ -130,6 +139,42 @@ Note `resolve_model()` returns an ADK model *object* for everything except Gemin
 Anywhere a plain id string is needed — `deploy_agent_from_source(model=...)`, the build
 package — read it from config or the registry, not off a constructed agent.
 
+### The Vertex SDK surface: `agentplatform`, not `vertexai.Client`
+
+`google-cloud-aiplatform` 2.1.0 deprecates `vertexai.Client`. **All client-side
+code goes through `wrangler/core/clients.py:agent_client()`**, which returns an
+`agentplatform.Client`; `tests/test_clients.py` fails (AST-based) if any module
+constructs `vertexai.Client` again, in either spelling.
+
+`agentplatform` is **not a separate PyPI package** — it ships vendored inside
+`google-cloud-aiplatform`, so `importlib.metadata.version("agentplatform")`
+raises while `import agentplatform` succeeds. Do not use the former to test for it.
+
+- **Agent Engine CRUD is `client.runtimes`**, not `client.agent_engines`.
+  `AgentRuntimeConfig` is field-identical to `AgentEngineConfig` (measured), and
+  `runtimes.get()` binds the same ADK methods, so the move was a rename in
+  practice. `get`/`delete` are **keyword-only** (`name=...`).
+- **The module-level `vertexai.agent_engines.create()` changed shape** at 2.1.0
+  and no longer accepts `source_packages`, `class_methods`, `labels` and four
+  others. Nothing here uses it; do not reintroduce it.
+- **Mixing the two packages' objects type-checks fine and fails at runtime.**
+  Twice on 2026-09-08: patching `vertexai._genai._evals_common` while the client
+  called `agentplatform`'s made `EVAL_MAX_RETRIES` a silent no-op, and building
+  `types.evals.SessionInput` from `vertexai` made `run_inference` reject every
+  case. **The mocked unit suite stayed green through both**, so the guards in
+  `tests/test_sdk_private_surface.py` are structural.
+- **Still on `vertexai`, deliberately:** the generated build package's
+  `from vertexai.agent_engines import AdkApp`. It runs on the GEAP builder, emits
+  no warning, and is where a mistake costs a campaign.
+
+Full detail: [docs/notes/vertex-sdk-surfaces.md](docs/notes/vertex-sdk-surfaces.md).
+
+**ADK pins `mcp>=1.24,<2`** on its `mcp` extra — the extra that provides
+`McpToolset`. That cap is why `fastmcp` is held at 3.4.7 (4.x moves to the mcp
+2.x protocol) and why `google-cloud-aiplatform` 2.x was reachable at all: its
+`<2` pin lives on the `gcp`/`all`/`test` extras we do not install. Revisit
+fastmcp when ADK ships mcp 2.x support, not before.
+
 ### ADK Patches
 
 `optimize/optimizer.py:_patch_adk()` applies 5 monkey-patches to ADK internals required for GEPA to work. Patches 1–3 compensate for ADK bugs (github.com/google/adk-python issues #5906, #6071); patch 4 is local instrumentation; patch 6 pins the safety metric version. All the bug workarounds are still required at ADK 2.8.0 even though their issues are closed — the fixes are not in the release. Re-probed 2026-09-08 on the 2.7.1 → 2.8.0 bump: all five unchanged.
@@ -139,6 +184,13 @@ package — read it from config or the registry, not off a constructed agent.
 **Patch 5 was removed on 2026-08-20.** It overrode `rubric_based_evaluator._normalize_text` and `convert_auto_rater_response_to_score`. ADK 2.7.1 fixed issue #6072 and went further, adding `rubric_id`-based verdict matching and an empty-response guard; the override, written against ADK 2.2, did text-only matching and silently discarded both, corrupting the rubric scores GEPA optimizes against. A redundant patch is not harmless.
 
 Do NOT remove or add patches without re-running the per-patch probe in [docs/notes/adk-patch-status.md](docs/notes/adk-patch-status.md) against the installed ADK.
+
+**Re-probe when the Vertex SDK moves too, not only ADK.** Patch 6 depends on the
+*SDK* resolving an unversioned metric name through
+`vertexai._genai._evals_constant.METRIC_LATEST_SPEC_NAME`, so a
+`google-cloud-aiplatform` major can invalidate a patch while ADK sits still.
+Re-probed on the 1.165.1 → 2.1.0 bump: unchanged, `safety` still maps to
+`safety_v3`, all five patches still required.
 
 ### Pipeline Architecture
 
@@ -278,7 +330,7 @@ Agents deploy via `source_packages` — no cloudpickle serialization. This repla
 3. SDK creates a base64-encoded tarball and sends it to the Agent Engine API
 4. GEAP extracts to `/code/`, installs requirements, imports `_geap_build_pkg.app`, starts serving
 
-For redeploy: `update_agent_from_source()` rebuilds the package with the new instruction and calls `agent_engines.update()`. No pickle manipulation needed.
+For redeploy: `update_agent_from_source()` rebuilds the package with the new instruction and calls `runtimes.update()`. No pickle manipulation needed.
 
 ### Critical constraints (learned the hard way)
 
@@ -360,7 +412,39 @@ KFP caches each component independently based on: **(1) component function body 
 `deploy_pipeline.py` packages the **full project tree** using an exclude-list (`.venv`, `.git`, `__pycache__`, `outputs`, `experiments`, `_geap_build_pkg`). Missing directories have caused multiple pipeline failures. If you add new directories the agents depend on, they'll be included automatically. The `_geap_build_pkg` directory is excluded because it's a transient build artifact created during deployment.
 
 ### Docker Image
-Pre-built via Cloud Build, tagged by `md5(pyproject.toml + uv.lock + Dockerfile.pipeline)[:12]` (`_compute_image_tag()` in `wrangler/pipeline/deploy_pipeline.py`). Adding a dependency to any of the three triggers a rebuild (~3 min). All three are needed: `pyproject.toml` holds ranges rather than resolved versions, and `Dockerfile.pipeline` installs from its own hardcoded `pip install` list — it copies `pyproject.toml` but does not install from it. The image must include `fastmcp>=2.0.0` for local MCP servers.
+Pre-built via Cloud Build, tagged by `md5(pyproject.toml + uv.lock + Dockerfile.pipeline)[:12]` (`_compute_image_tag()` in `wrangler/pipeline/deploy_pipeline.py`). Adding a dependency to any of the three triggers a rebuild (~3 min). All three are needed: `pyproject.toml` holds ranges rather than resolved versions, and `Dockerfile.pipeline` installs from its own hardcoded `pip install` list — it copies `pyproject.toml` but does not install from it.
+
+**Every entry in that list is pinned with `==`, and a `>=` floor is a test
+failure.** `tests/test_pipeline_image_pins.py` fails on any floor, and on any
+pin that disagrees with `uv.lock`. This is not style: on 2026-09-08 a dependabot
+lockfile bump moved the image tag, the rebuild resolved the unpinned floors
+fresh, and the optimize container came up on ADK 2.8.0 while local, CI and
+`deploy.py` were all on 2.7.1 — running the five monkey-patches against an
+unverified ADK and silently miscounting tool failures. The image needs `fastmcp`
+for the local MCP servers, currently `==3.4.7`; see the `mcp<2` note below
+before changing it.
+
+### Python versions: 3.11 everywhere except the MCP images
+
+`wrangler/tools/preflight.py:TARGET_PYTHON` is the single source of truth, and
+it is **3.11** — GEAP's runtime, `Dockerfile.pipeline`'s base, and the version
+every pin in the repo is resolved for. Import it; do not redefine it.
+
+The three Cloud Run MCP images are on **`python:3.14-slim`**, arrived via
+dependabot on 2026-09-08. They are listed in
+`tests/test_pipeline_image_pins.py:PYTHON_MISMATCH_ACCEPTED` with the evidence
+that their pin set resolves and serves on that base. Two consequences worth
+knowing:
+
+- The **same MCP server code** runs on 3.14 (Cloud Run) and 3.11 (inside the
+  optimize container, which starts local copies). Both work; nobody chose it.
+- Pin-vs-installed comparisons **skip** when the running interpreter is not
+  `TARGET_PYTHON`, because `metadata.version()` from a 3.13 venv says nothing
+  about a 3.11 container. A further test asserts 3.11 is still in the CI matrix,
+  so the skip cannot silently disable everything.
+
+`Dockerfile.pipeline` may never be exempted — it runs the ADK monkey-patches,
+and moving the interpreter under them is no different from moving ADK.
 
 ### reporter.REPORTS_DIR / CHARTS_DIR
 Must be `Path` objects, not strings. The reporter calls `.mkdir()` on them. When overriding in pipeline components, pass `Path(...)` not `str(...)`.
@@ -412,6 +496,25 @@ The `_opt/__init__.py` files should NOT override `instruction` — the `initial_
 
 ### deploy.py Requirements List
 `_SOURCE_REQUIREMENTS` in `wrangler/core/deploy.py` is written into `_geap_build_pkg/requirements.txt` and installed by GEAP. Must match the ADK version in `pyproject.toml` or agents will fail to start with import errors.
+
+These are **floors**, not pins, because GEAP resolves them itself — so the
+deployed agent may be newer than what we validated, but must never be older.
+Two rules the tests enforce:
+
+- **No floor may exceed the installed version.** A floor above what this repo
+  runs is a version nothing has ever tested. Campaign 07 died on exactly that:
+  `litellm>=1.96.2` was read off `uv.lock` without noticing that entry sits
+  behind a `python>=3.14` marker, while GEAP runs 3.11 and we validate 1.85.7.
+- **`litellm` is capped `<1.86`.** Above that it needs `jinja2>=3.1.6`, and
+  `google-adk[eval]==2.8.0` resolves `jinja2` to 3.1.5 on the GEAP builder —
+  `ResolutionImpossible`, surfaced to the caller only as
+  `Build failed ... or other dependencies`. The `<1.86` that
+  `google-cloud-aiplatform[evaluation]` applies locally does **not** reach here,
+  because this list omits the `evaluation` extra.
+
+Run **`uv run wrangler preflight`** before a campaign: it resolves this list and
+the image's pins at 3.11, which is the check whose absence cost two launches.
+`scripts/validate_then_run.py` calls it automatically.
 
 ## Testing Manifests
 
