@@ -650,8 +650,16 @@ if __name__ == "__main__":
     if example_env.exists():
         load_dotenv(str(example_env), override=True)
 
+    # A shim over `wrangler evaluators`, not a second implementation. This
+    # module form is kept working because notes and muscle memory use it, but
+    # the click group is the only implementation -- two of them drifting is
+    # what left the guide pointing at a module path that had not existed since
+    # the package reorganisation, with all 14 of its examples failing.
+    from wrangler.cli import main as _cli
+
     if len(sys.argv) < 2 or sys.argv[1] not in COMMANDS:
         print("Usage: python -m wrangler.eval.online_evaluators <command>")
         print(f"Commands: {', '.join(COMMANDS)}")
+        print("Equivalent, and discoverable in --help: uv run wrangler evaluators <command>")
         sys.exit(1)
-    COMMANDS[sys.argv[1]](sys.argv[2:])
+    _cli(["evaluators", *sys.argv[1:]], standalone_mode=True)

@@ -23,10 +23,18 @@ not install from. So the check has to be that the two agree.
 from __future__ import annotations
 
 import re
+import sys
 from importlib import metadata
 from pathlib import Path
 
 import pytest
+
+from wrangler.tools.preflight import TARGET_PYTHON
+
+# The Python every image targets and every pin is resolved for: GEAP's runtime.
+# Imported from preflight rather than redefined -- two copies of this constant
+# drifting is exactly the class of bug this file exists to catch.
+_RUNNING_ON_TARGET = f"{sys.version_info.major}.{sys.version_info.minor}" == TARGET_PYTHON
 
 DOCKERFILE = Path("Dockerfile.pipeline")
 
@@ -41,6 +49,31 @@ OTHER_DOCKERFILES = sorted(Path("examples/multi_model_agents/mcp_servers").glob(
 # Installed in the image but absent from uv.lock, so it cannot be checked
 # against the lock. Pinned anyway -- an unpinned entry is what caused this.
 NOT_IN_LOCK = {"google-cloud-secret-manager", "opentelemetry-exporter-otlp-proto-grpc"}
+
+# Images whose base Python differs from the local venv, accepted with evidence.
+#
+# This is an escape hatch, not a default. An entry means somebody resolved that
+# image's pin set *on its own base* and recorded what happened -- not that the
+# mismatch was noticed and waved through. `wrangler preflight` produces that
+# evidence. LITERAL_EXCEPTIONS in test_models.py is kept empty for the same
+# reason and is the precedent: an exemption list nobody defends is worse than
+# no test at all.
+#
+# Dockerfile.pipeline must never appear here -- see
+# test_the_pipeline_image_is_never_exempted.
+_MCP_314 = (
+    "python:3.14-slim via dependabot 2026-09-08. Evidence: the pin set resolves "
+    "on 3.14 (uv, 85 packages, mcp 1.30.0 -- still under ADK's mcp<2 cap); the "
+    "server module imports on 3.14.6, initialises OTel and registers its tools; "
+    "and the deployed rev 00008 Cloud Build log shows `FROM python:3.14-slim` "
+    "with fastmcp 3.4.7 / mcp 1.30.0 / opentelemetry 1.42.1 actually installed. "
+    "Live-checked after deploy: 8 agent queries -> 8 CallToolRequests, 0 non-2xx."
+)
+PYTHON_MISMATCH_ACCEPTED: dict[str, str] = {
+    "examples/multi_model_agents/mcp_servers/search/Dockerfile": _MCP_314,
+    "examples/multi_model_agents/mcp_servers/booking/Dockerfile": _MCP_314,
+    "examples/multi_model_agents/mcp_servers/expense/Dockerfile": _MCP_314,
+}
 
 
 def _instructions(path: Path) -> str:
@@ -64,9 +97,78 @@ def _pins(path: Path) -> dict[str, str]:
     }
 
 
+def _base_image(path: Path) -> str:
+    """The `FROM` tag, e.g. 'python:3.14-slim'."""
+    for line in _instructions(path).splitlines():
+        if line.strip().upper().startswith("FROM "):
+            return line.split()[1]
+    raise AssertionError(f"{path} has no FROM line")
+
+
 def test_there_are_other_dockerfiles_to_check():
     """Guards the glob: if it silently matches nothing, the tests below vacuously pass."""
     assert len(OTHER_DOCKERFILES) == 3, OTHER_DOCKERFILES
+
+
+def test_every_image_declares_a_python_base():
+    for path in [DOCKERFILE, *OTHER_DOCKERFILES]:
+        assert _base_image(path).startswith("python:"), path
+
+
+def test_images_are_built_on_the_deployment_python():
+    """Every image must target TARGET_PYTHON, or be exempted with evidence.
+
+    The comparison is against the *project's* Python, not `sys.version_info`.
+    A first version of this test used the running interpreter and passed on
+    3.11 while failing the 3.12 and 3.13 CI matrix entries, where
+    Dockerfile.pipeline's correct 3.11 base looked like a mismatch. Two
+    different invariants were being conflated: what the images should target
+    (fixed) and whether this environment can verify their pins (variable).
+
+    Why it matters that images agree on a Python: uv.lock holds two litellm
+    entries, 1.85.7 for python<3.14 and 1.96.2 for >=3.14, and
+    google-cloud-aiplatform[evaluation] flips its litellm range at exactly
+    that boundary. An image whose base moved is an image whose correct pins
+    may have moved.
+    """
+    mismatched = {
+        path.as_posix(): _base_image(path)
+        for path in [DOCKERFILE, *OTHER_DOCKERFILES]
+        if not _base_image(path).startswith(f"python:{TARGET_PYTHON}")
+        and path.as_posix() not in PYTHON_MISMATCH_ACCEPTED
+    }
+    assert not mismatched, (
+        f"{mismatched} do not build on python:{TARGET_PYTHON}, the version GEAP "
+        f"runs and the one every pin here is resolved for. Either align the base "
+        f"image, or add the path to PYTHON_MISMATCH_ACCEPTED with a reason and "
+        f"evidence that the pin set resolves on its own base."
+    )
+
+
+def test_the_pin_comparisons_know_when_they_are_not_evidence():
+    """Guards the skip below against silently disabling everything.
+
+    `test_each_pin_matches_the_lockfile` reads `metadata.version()` from the
+    running venv, so it is only evidence when that venv is TARGET_PYTHON. On
+    the other matrix entries it skips rather than asserting something false --
+    but if TARGET_PYTHON ever stopped being a version CI actually runs, the
+    pin checks would skip everywhere and nobody would notice.
+    """
+    versions = re.findall(r'"3\.\d+"', Path(".github/workflows/ci.yml").read_text())
+    assert f'"{TARGET_PYTHON}"' in versions, (
+        f"CI no longer runs {TARGET_PYTHON}, so every pin comparison would skip. "
+        f"CI matrix: {versions}"
+    )
+
+
+def test_the_pipeline_image_is_never_exempted():
+    """Dockerfile.pipeline runs the five ADK monkey-patches.
+
+    CLAUDE.md requires the per-patch probe to be re-run whenever ADK moves
+    under those patches; moving the *interpreter* under them is no different,
+    and it must not be waivable by adding a dict entry.
+    """
+    assert DOCKERFILE.as_posix() not in PYTHON_MISMATCH_ACCEPTED
 
 
 @pytest.mark.parametrize("path", OTHER_DOCKERFILES, ids=lambda p: p.parent.name)
@@ -83,6 +185,10 @@ def test_other_images_pin_every_dependency(path: Path):
     ("path", "package"),
     [(p, pkg) for p in OTHER_DOCKERFILES for pkg in sorted(_pins(p))],
     ids=lambda v: v.parent.name if isinstance(v, Path) else v,
+)
+@pytest.mark.skipif(
+    not _RUNNING_ON_TARGET,
+    reason=f"pins are resolved for python {TARGET_PYTHON}; this venv is not it",
 )
 def test_other_image_pins_match_the_lockfile(path: Path, package: str):
     """The MCP servers must speak the protocol version our client was tested on."""
@@ -132,6 +238,11 @@ def test_the_dockerfile_installs_something():
 
 
 @pytest.mark.parametrize("package", sorted(_dockerfile_pins()))
+@pytest.mark.skipif(
+    not _RUNNING_ON_TARGET,
+    reason=f"pins are resolved for python {TARGET_PYTHON}; this venv is not it, so "
+    "metadata.version() here is not evidence about the container",
+)
 def test_each_pin_matches_the_lockfile(package: str):
     """Container and local must run the same code, or local testing proves nothing."""
     if package in NOT_IN_LOCK:
