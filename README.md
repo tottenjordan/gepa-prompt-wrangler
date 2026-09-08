@@ -138,6 +138,7 @@ gepa-prompt-wrangler/
 │   │   ├── config.py                # GCP settings, model costs, rate limits
 │   │   ├── factory.py               # Manifest parser, AgentPromptPair dataclass
 │   │   ├── converter.py             # YAML ↔ ADK evalset format auto-conversion
+│   │   ├── clients.py               # The one Vertex client (agentplatform)
 │   │   └── deploy.py               # Deploy/update agents on GEAP
 │   │
 │   ├── eval/                        # Evaluation layer
@@ -164,6 +165,9 @@ gepa-prompt-wrangler/
 │   ├── tools/                       # Standalone utilities
 │   │   ├── inspector.py             # Agent introspection + tool discovery
 │   │   ├── prompt_registry.py       # Prompt versioning
+│   │   ├── engines.py               # Engine inventory + evidence-based reaping
+│   │   ├── boot_probe.py            # Does a deployed engine actually serve?
+│   │   ├── preflight.py             # Resolve dependency sets before a campaign
 │   │   └── traffic.py              # Synthetic traffic generation for OTel traces
 │   │
 │   └── pipeline/                    # Vertex AI Pipeline (KFP v2)
@@ -414,6 +418,22 @@ The GEPA evalset uses all 64 cases with a stratified train/val split (49/15). Th
 | `wrangler experiment create <manifest>` | Create a DOE experiment campaign directory |
 | `wrangler status <experiment_dir>` | Show experiment stage completion status |
 
+**Diagnostics and lifecycle** — these existed but were missing from this table:
+
+| Command | Description |
+|---------|-------------|
+| `wrangler preflight` | Resolve the agent and pipeline-image dependency sets before a campaign. ~1s, and it catches the build failure that has twice killed a run 20 minutes in |
+| `wrangler probe <engine-id>` | Does a deployed engine actually serve? GEAP returns 200 with no inference on a share of requests, so this is the deploy-health check |
+| `wrangler engines list` | Inventory every Agent Engine with its disposition and the evidence behind it |
+| `wrangler engines prune` | Delete engines every signal agrees are disposable. **Dry run by default** — needs `--yes` |
+| `wrangler evaluators <cmd>` | Online trace-scoring evaluators: `list`, `create`, `verify`, `trace-health`, `prune`, `delete`, `cleanup` |
+| `wrangler capture <manifest>` | Run inference and save responses without scoring |
+| `wrangler score <capture>` | Score a saved capture — lets you re-score without re-running inference |
+| `wrangler floor <arms>` | Compute the noise floor from one or more control arms |
+
+`wrangler evaluators trace-health` exits non-zero when an engine is dropping OTel
+span batches, so it can gate a run rather than merely inform one.
+
 ### Options
 
 ```bash
@@ -471,19 +491,19 @@ Always-on evaluators that score OTel traces from live traffic every 10 minutes.
 
 ```bash
 # Create evaluators for all deployed agents
-uv run python -m wrangler.eval.online_evaluators create
+uv run wrangler evaluators create
 
 # Check status
-uv run python -m wrangler.eval.online_evaluators verify
+uv run wrangler evaluators verify
 
 # List all evaluators
-uv run python -m wrangler.eval.online_evaluators list
+uv run wrangler evaluators list
 
 # Delete a specific evaluator
-uv run python -m wrangler.eval.online_evaluators delete <evaluator_id>
+uv run wrangler evaluators delete <evaluator_id>
 
 # Remove all wrangler evaluators
-uv run python -m wrangler.eval.online_evaluators cleanup
+uv run wrangler evaluators cleanup
 ```
 
 **When to use:** Continuous monitoring of production traffic quality. Results appear in the Agent Engine Observability tab.
