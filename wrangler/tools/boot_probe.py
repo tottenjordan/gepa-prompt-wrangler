@@ -48,7 +48,8 @@ import uuid
 from datetime import UTC, datetime
 from pathlib import Path
 
-from ..core.config import GCP_PROJECT_ID, GCP_REGION, disable_pyopenssl
+from ..core.clients import agent_client
+from ..core.config import disable_pyopenssl
 from .traffic import _resolve_resource, _stream
 
 # Deliberately trivial and tool-free: the probe measures whether a request
@@ -260,10 +261,6 @@ def run_probe(
     out_dir: str | Path = "outputs/probes",
 ) -> dict[str, dict]:
     """Probe every arm concurrently, one request in flight per engine."""
-    import vertexai
-    from vertexai import agent_engines
-
-    vertexai.init(project=GCP_PROJECT_ID, location=GCP_REGION)
     disable_pyopenssl()
 
     rid = run_id or datetime.now(tz=UTC).strftime("probe_%Y%m%d_%H%M%S")
@@ -280,7 +277,10 @@ def run_probe(
         print(f"    {arm:16s} -> {engine_id}")
     print()
 
-    connections = {arm: agent_engines.get(_resolve_resource(eid)) for arm, eid in arms.items()}
+    client = agent_client()
+    connections = {
+        arm: client.runtimes.get(name=_resolve_resource(eid)) for arm, eid in arms.items()
+    }
 
     async def _all():
         return await asyncio.gather(
@@ -335,13 +335,9 @@ def probe_engine(
     Tighter spacing than a measurement run: this is a health check, not an
     experiment, and Campaign 01 found pacing does not affect the rate anyway.
     """
-    import vertexai
-    from vertexai import agent_engines
-
-    vertexai.init(project=GCP_PROJECT_ID, location=GCP_REGION)
     disable_pyopenssl()
 
-    agent = agent_engines.get(_resolve_resource(engine_id))
+    agent = agent_client().runtimes.get(name=_resolve_resource(engine_id))
     out_path = Path(out_dir) / f"{label}_{engine_id}.jsonl" if out_dir else None
     rows = asyncio.run(run_arm(agent, label, engine_id, n=n, spacing=spacing, out_path=out_path))
     reached = sum(1 for r in rows if r["reached"])

@@ -32,9 +32,7 @@ import asyncio
 import uuid
 from pathlib import Path
 
-import vertexai
-from vertexai import agent_engines
-
+from ..core.clients import agent_client
 from ..core.config import GCP_PROJECT_ID, GCP_REGION, disable_pyopenssl
 from ..core.converter import load_eval_file
 
@@ -224,7 +222,6 @@ def generate_traffic(
             ~1-in-4 per attempt, 6 attempts lands a trace ~82% of the time;
             the old value of 3 managed ~58%.
     """
-    vertexai.init(project=GCP_PROJECT_ID, location=GCP_REGION)
     disable_pyopenssl()
 
     if eval_data_path:
@@ -245,9 +242,10 @@ def generate_traffic(
 
     # Pre-load agent connections
     agents = {}
+    client = agent_client()
     for agent_id in agent_ids:
         resource = _resolve_resource(agent_id)
-        agents[agent_id] = agent_engines.get(resource)
+        agents[agent_id] = client.runtimes.get(name=resource)
 
     print(f"{'=' * 60}")
     print("TRAFFIC GENERATOR")
