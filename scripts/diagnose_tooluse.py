@@ -16,7 +16,14 @@ import sys
 import time
 
 import pandas as pd
-import vertexai
+
+# `init` sets process-global project/location/staging_bucket. vertexai
+# and agentplatform both re-export the *same* bound method on the same
+# google.cloud.aiplatform initializer object -- verified `is` identical --
+# so it is imported from the canonical source. agentplatform's re-export
+# falls back to `init = None` when the import fails, which types as
+# `... | None` and is not callable as far as ty is concerned.
+from google.cloud.aiplatform import init as vertex_init
 from vertexai import types
 
 from wrangler.core.clients import agent_client
@@ -85,7 +92,7 @@ def main() -> None:
     if not ENGINE_ID:
         sys.exit("Set ENGINE_ID to the Agent Engine you want to diagnose.")
     print(f"PROJECT={GCP_PROJECT_ID} REGION={GCP_REGION} ENGINE={ENGINE_ID}", flush=True)
-    vertexai.init(
+    vertex_init(
         project=GCP_PROJECT_ID, location=GCP_REGION, staging_bucket=f"gs://{GCP_STAGING_BUCKET}"
     )
     client = agent_client(project=GCP_PROJECT_ID, location=GCP_REGION)

@@ -11,7 +11,13 @@ import re
 import shutil
 from pathlib import Path
 
-import vertexai
+# `init` sets process-global project/location/staging_bucket. vertexai
+# and agentplatform both re-export the *same* bound method on the same
+# google.cloud.aiplatform initializer object -- verified `is` identical --
+# so it is imported from the canonical source. agentplatform's re-export
+# falls back to `init = None` when the import fails, which types as
+# `... | None` and is not callable as far as ty is concerned.
+from google.cloud.aiplatform import init as vertex_init
 
 from .clients import agent_client
 from .config import GCP_PROJECT_ID, GCP_REGION, GCP_STAGING_BUCKET
@@ -881,7 +887,7 @@ def deploy_agent_from_source(
     """
     import time as _time
 
-    vertexai.init(
+    vertex_init(
         project=GCP_PROJECT_ID,
         location=GCP_REGION,
         staging_bucket=f"gs://{GCP_STAGING_BUCKET}",
@@ -949,7 +955,7 @@ def update_agent_from_source(
     ``include_mcp`` must match how the agent was deployed. Leaving it at the
     default when updating a no-MCP build silently rebuilds it *with* toolsets.
     """
-    vertexai.init(
+    vertex_init(
         project=GCP_PROJECT_ID,
         location=GCP_REGION,
         staging_bucket=f"gs://{GCP_STAGING_BUCKET}",

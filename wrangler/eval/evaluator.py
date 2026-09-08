@@ -17,10 +17,17 @@ warnings.filterwarnings("ignore", message=".*experimental.*")
 # before vertexai is imported, or its import-time warnings escape.
 
 import pandas as pd  # noqa: E402
-import vertexai  # noqa: E402
 from agentplatform import Client  # noqa: E402
+from agentplatform._genai import _evals_common  # noqa: E402
+
+# `init` sets process-global project/location/staging_bucket. vertexai
+# and agentplatform both re-export the *same* bound method on the same
+# google.cloud.aiplatform initializer object -- verified `is` identical --
+# so it is imported from the canonical source. agentplatform's re-export
+# falls back to `init = None` when the import fails, which types as
+# `... | None` and is not callable as far as ty is concerned.
+from google.cloud.aiplatform import init as vertex_init  # noqa: E402
 from vertexai import types  # noqa: E402
-from vertexai._genai import _evals_common  # noqa: E402
 
 from wrangler.core.clients import agent_client  # noqa: E402
 
@@ -498,7 +505,7 @@ def _read_raw_result(client, gcs_uri: str) -> dict:
     the code path this is standing in for. Kept as a separate function so tests
     can substitute it without patching the SDK internals.
     """
-    from vertexai._genai import _gcs_utils
+    from agentplatform._genai import _gcs_utils
 
     gcs = _gcs_utils.GcsUtils(api_client=client._api_client)
     return json.loads(gcs.read_file_contents(gcs_uri))
@@ -823,7 +830,7 @@ def run_batch_eval(
     """Run batch eval against a deployed agent. Returns EvalResult with aggregate and per-case scores."""
     tag = f"[{agent_name}] " if agent_name else ""
 
-    vertexai.init(
+    vertex_init(
         project=GCP_PROJECT_ID,
         location=GCP_REGION,
         staging_bucket=f"gs://{GCP_STAGING_BUCKET}",
@@ -1109,7 +1116,7 @@ def capture_inference(
     (docs/notes/silent-failures.md #5).
     """
     tag = f"[{agent_name}] " if agent_name else ""
-    vertexai.init(
+    vertex_init(
         project=GCP_PROJECT_ID,
         location=GCP_REGION,
         staging_bucket=f"gs://{GCP_STAGING_BUCKET}",
@@ -1151,7 +1158,7 @@ def score_captured(
 ) -> EvalResult:
     """Score a capture. Makes no agent calls."""
     tag = f"[{agent_name}] " if agent_name else ""
-    vertexai.init(
+    vertex_init(
         project=GCP_PROJECT_ID,
         location=GCP_REGION,
         staging_bucket=f"gs://{GCP_STAGING_BUCKET}",
