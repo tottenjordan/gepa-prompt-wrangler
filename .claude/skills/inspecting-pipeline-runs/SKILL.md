@@ -115,6 +115,13 @@ find independent evidence of the thing that could silently be wrong:
   different version than the patches were verified against. Found this way on
   2026-09-08: container `get_tools` at line 501 vs local 2.7.1 at 536.
 
+  The image tag is **not** recoverable from `pipeline_spec` — do not try. Two
+  usable routes: recompute what the submitter would have used
+  (`_compute_image_tag(pyproject.toml, uv.lock, Dockerfile.pipeline)`) and
+  confirm that image exists, or read the versions out of the container's own
+  tracebacks as above. The second is the real evidence; the first only tells
+  you what *should* have been used.
+
 ## Interpret, do not just relay
 
 - **Coverage before scores.** Every measurement problem in this repo traces
