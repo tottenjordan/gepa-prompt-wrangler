@@ -132,7 +132,7 @@ package — read it from config or the registry, not off a constructed agent.
 
 ### ADK Patches
 
-`optimize/optimizer.py:_patch_adk()` applies 5 monkey-patches to ADK internals required for GEPA to work. Patches 1–3 compensate for ADK bugs (github.com/google/adk-python issues #5906, #6071); patch 4 is local instrumentation; patch 6 pins the safety metric version. All the bug workarounds are still required at ADK 2.7.1 even though their issues are closed — the fixes are not in the release.
+`optimize/optimizer.py:_patch_adk()` applies 5 monkey-patches to ADK internals required for GEPA to work. Patches 1–3 compensate for ADK bugs (github.com/google/adk-python issues #5906, #6071); patch 4 is local instrumentation; patch 6 pins the safety metric version. All the bug workarounds are still required at ADK 2.8.0 even though their issues are closed — the fixes are not in the release. Re-probed 2026-09-08 on the 2.7.1 → 2.8.0 bump: all five unchanged.
 
 **Patch 6 (added 2026-08-20)** — `SafetyEvaluatorV1` hands the eval facade the *unversioned* `PrebuiltMetric.SAFETY`, which the Vertex SDK resolves client-side to `safety_v3`; us-central1 does not serve v3, so every GEPA case returned `400 Unsupported predefined metric: safety_v3`, the score came back `None`, and patch 4 coerced it to `0.0`. GEPA kept running and optimized against a criterion pinned at zero. The version is chosen inside ADK — `sampler_config.json` correctly says `safety_v1` and cannot influence it.
 

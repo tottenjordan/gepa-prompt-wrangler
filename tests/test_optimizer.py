@@ -316,3 +316,81 @@ class TestFuzzyNormalize:
 
     def test_accented_chars_preserved(self):
         assert _normalize_text("réponse") == "réponse"
+
+
+class TestToolsetFailureCounterTracksADKWording:
+    """The counter matched one ADK release's phrasing and silently read zero.
+
+    2.7.1 logged "Failed to get tools from toolset ..."; 2.8.0 logs
+    "Agent <name> will run without the tools from toolset ...". On 2026-09-08
+    the optimize container was on 2.8.0 while `_ToolsetFailureCounter` matched
+    only the 2.7.1 wording with `startswith`, so a live campaign's degradation
+    summary reported zero tool losses while five had occurred -- five GEPA
+    candidates scored on a tool-using agent with an empty toolset, straight
+    into the objective being optimized.
+
+    A counter that reads zero when the thing it counts is happening is worse
+    than no counter: it is affirmative evidence of the wrong conclusion.
+    """
+
+    @staticmethod
+    def _count(*messages: str) -> int:
+        import logging
+
+        from wrangler.optimize.optimizer import _ToolsetFailureCounter
+
+        counter = _ToolsetFailureCounter()
+        for message in messages:
+            counter.emit(
+                logging.LogRecord("adk", logging.WARNING, __file__, 1, message, None, None)
+            )
+        return counter.count
+
+    def test_it_counts_the_2_7_1_wording(self):
+        assert self._count("Failed to get tools from toolset McpToolset: timeout") == 1
+
+    def test_it_counts_the_2_8_0_wording(self):
+        assert (
+            self._count(
+                "Agent sonnet_agent will run without the tools from toolset "
+                "McpToolset, which failed to load: Failed to get tools from MCP server:"
+            )
+            == 1
+        )
+
+    def test_the_2_8_0_wording_does_not_start_with_the_phrase(self):
+        """Why `startswith` failed: 2.8.0 prefixes the agent name."""
+        message = "Agent sonnet_agent will run without the tools from toolset McpToolset"
+        assert not message.startswith("Failed to get tools from toolset")
+        assert not message.startswith("will run without the tools")
+        assert self._count(message) == 1
+
+    def test_unrelated_warnings_are_not_counted(self):
+        assert self._count("Retrying get_tools due to error: transient", "MCP OK: 3 tools") == 0
+
+    def test_the_phrases_it_matches_are_stated_explicitly(self):
+        """A future ADK bump changes the wording again; make the list findable."""
+        from wrangler.optimize.optimizer import _ToolsetFailureCounter
+
+        phrases = _ToolsetFailureCounter._TOOLSET_FAILURE_PHRASES
+        assert "Failed to get tools from toolset" in phrases
+        assert "will run without the tools" in phrases
+
+    def test_the_installed_adk_emits_a_phrase_this_counter_matches(self):
+        """Pins the counter to the ADK actually installed.
+
+        Fails on the next bump that rewords the warning -- which is the whole
+        failure mode, caught at test time instead of mid-campaign.
+        """
+        import inspect
+
+        from google.adk.agents import llm_agent
+
+        from wrangler.optimize.optimizer import _ToolsetFailureCounter
+
+        source = inspect.getsource(llm_agent)
+        assert any(p in source for p in _ToolsetFailureCounter._TOOLSET_FAILURE_PHRASES), (
+            "the installed google-adk emits neither known toolset-failure phrase; "
+            "the counter will silently report zero. Find the new wording in "
+            "google/adk/agents/llm_agent.py and add it."
+        )

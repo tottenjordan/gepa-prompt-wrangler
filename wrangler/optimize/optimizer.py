@@ -41,22 +41,37 @@ class _ToolsetFailureCounter(logging.Handler):
         super().__init__(level=logging.WARNING)
         self.count = 0
 
+    # ADK words this warning differently across releases, and matching one
+    # spelling makes the counter silently useless. 2.7.1 logged "Failed to get
+    # tools from toolset ..."; 2.8.0 logs "Agent <name> will run without the
+    # tools from toolset ...". On 2026-09-08 the optimize container was on
+    # 2.8.0 while this matched only the 2.7.1 wording, so it reported zero tool
+    # losses through a live campaign in which five had occurred.
+    #
+    # Substring, not startswith: 2.8.0 prefixes the agent name, so the message
+    # no longer begins with the phrase.
+    _TOOLSET_FAILURE_PHRASES = (
+        "Failed to get tools from toolset",  # <= 2.7.1
+        "will run without the tools",  # >= 2.8.0
+    )
+
     def emit(self, record):
-        if record.getMessage().startswith("Failed to get tools from toolset"):
+        message = record.getMessage()
+        if any(p in message for p in self._TOOLSET_FAILURE_PHRASES):
             self.count += 1
 
 
 def _patch_adk():
     """Apply ADK patches for GEPA compatibility.
 
-    Verified against google-adk 2.7.1 on 2026-08-20.
+    Verified against google-adk 2.8.0 on 2026-09-08 (and 2.7.1 on 2026-08-20).
 
     Patch 1/2 — eval_case/eval_set extra="forbid" (issue #5906). Issue is
         CLOSED but extra="forbid" is still present on 8 classes at 2.7.1.
         Still required.
     Patch 3 — LocalEvalService null guard (issue #6071). Issue CLOSED
-        2026-08-06 but the fix is NOT in the 2.7.1 release. Still required;
-        re-check at 2.8.x.
+        2026-08-06 but the fix is NOT in the 2.7.1 or 2.8.0 release. Still
+        required; re-checked at 2.8.0 and the null guard is still absent.
     Patch 4 — LocalEvalSampler score coercion + logging. Local
         instrumentation, not an upstream workaround.
     Patch 5 — REMOVED. Upstream fixed #6072 in 2.7.1 and went further

@@ -24,7 +24,7 @@ _SOURCE_REQUIREMENTS = [
     # Pinned exactly, and must match the floor in pyproject.toml -- the
     # container and the local env otherwise run different ADK versions and
     # a bug reproduces in only one of them.
-    "google-adk[a2a,agent-identity,eval,mcp]==2.7.1",
+    "google-adk[a2a,agent-identity,eval,mcp]==2.8.0",
     "anthropic[vertex]>=0.49.0",
     "litellm>=1.83.14",
     "python-dotenv>=1.0.0",
