@@ -42,6 +42,31 @@ OTHER_DOCKERFILES = sorted(Path("examples/multi_model_agents/mcp_servers").glob(
 # against the lock. Pinned anyway -- an unpinned entry is what caused this.
 NOT_IN_LOCK = {"google-cloud-secret-manager", "opentelemetry-exporter-otlp-proto-grpc"}
 
+# Images whose base Python differs from the local venv, accepted with evidence.
+#
+# This is an escape hatch, not a default. An entry means somebody resolved that
+# image's pin set *on its own base* and recorded what happened -- not that the
+# mismatch was noticed and waved through. `wrangler preflight` produces that
+# evidence. LITERAL_EXCEPTIONS in test_models.py is kept empty for the same
+# reason and is the precedent: an exemption list nobody defends is worse than
+# no test at all.
+#
+# Dockerfile.pipeline must never appear here -- see
+# test_the_pipeline_image_is_never_exempted.
+_MCP_314 = (
+    "python:3.14-slim via dependabot 2026-09-08. Evidence: the pin set resolves "
+    "on 3.14 (uv, 85 packages, mcp 1.30.0 -- still under ADK's mcp<2 cap); the "
+    "server module imports on 3.14.6, initialises OTel and registers its tools; "
+    "and the deployed rev 00008 Cloud Build log shows `FROM python:3.14-slim` "
+    "with fastmcp 3.4.7 / mcp 1.30.0 / opentelemetry 1.42.1 actually installed. "
+    "Live-checked after deploy: 8 agent queries -> 8 CallToolRequests, 0 non-2xx."
+)
+PYTHON_MISMATCH_ACCEPTED: dict[str, str] = {
+    "examples/multi_model_agents/mcp_servers/search/Dockerfile": _MCP_314,
+    "examples/multi_model_agents/mcp_servers/booking/Dockerfile": _MCP_314,
+    "examples/multi_model_agents/mcp_servers/expense/Dockerfile": _MCP_314,
+}
+
 
 def _instructions(path: Path) -> str:
     """A Dockerfile's directives with `#` comments stripped.
@@ -64,9 +89,64 @@ def _pins(path: Path) -> dict[str, str]:
     }
 
 
+def _base_image(path: Path) -> str:
+    """The `FROM` tag, e.g. 'python:3.14-slim'."""
+    for line in _instructions(path).splitlines():
+        if line.strip().upper().startswith("FROM "):
+            return line.split()[1]
+    raise AssertionError(f"{path} has no FROM line")
+
+
 def test_there_are_other_dockerfiles_to_check():
     """Guards the glob: if it silently matches nothing, the tests below vacuously pass."""
     assert len(OTHER_DOCKERFILES) == 3, OTHER_DOCKERFILES
+
+
+def test_every_image_declares_a_python_base():
+    for path in [DOCKERFILE, *OTHER_DOCKERFILES]:
+        assert _base_image(path).startswith("python:"), path
+
+
+def test_pins_are_only_verified_against_a_matching_python():
+    """A pin checked against 3.11 says nothing about a 3.14 image.
+
+    Every version in this file is read with `metadata.version()` -- from the
+    *local venv*. That is only evidence about the container if the container
+    runs the same Python.
+
+    Markers make this concrete rather than theoretical: uv.lock holds two
+    litellm entries, 1.85.7 for python<3.14 and 1.96.2 for >=3.14, and
+    google-cloud-aiplatform[evaluation] flips its litellm range at exactly
+    that boundary. So an image whose base moved is an image whose correct pins
+    may have moved -- while metadata.version() keeps reporting the local
+    answer and every pin test above keeps passing.
+    """
+    import sys
+
+    local = f"{sys.version_info.major}.{sys.version_info.minor}"
+    mismatched = {
+        path.as_posix(): _base_image(path)
+        for path in [DOCKERFILE, *OTHER_DOCKERFILES]
+        if not _base_image(path).startswith(f"python:{local}")
+        and path.as_posix() not in PYTHON_MISMATCH_ACCEPTED
+    }
+    assert not mismatched, (
+        f"{mismatched} build on a Python other than the local {local}, so "
+        f"test_each_pin_matches_the_lockfile is comparing their pins against "
+        f"versions resolved for the wrong interpreter. Either align the base "
+        f"image, or add the path to PYTHON_MISMATCH_ACCEPTED with a reason and "
+        f"evidence that the pin set resolves on its own base."
+    )
+
+
+def test_the_pipeline_image_is_never_exempted():
+    """Dockerfile.pipeline runs the five ADK monkey-patches.
+
+    CLAUDE.md requires the per-patch probe to be re-run whenever ADK moves
+    under those patches; moving the *interpreter* under them is no different,
+    and it must not be waivable by adding a dict entry.
+    """
+    assert DOCKERFILE.as_posix() not in PYTHON_MISMATCH_ACCEPTED
 
 
 @pytest.mark.parametrize("path", OTHER_DOCKERFILES, ids=lambda p: p.parent.name)
