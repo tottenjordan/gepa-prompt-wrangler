@@ -108,3 +108,39 @@ def test_the_guard_can_see_a_planted_violation(tmp_path):
 def test_the_component_body_still_parses():
     """Everything above reads source; a syntax error would make it meaningless."""
     ast.parse(COMPONENTS.read_text())
+
+
+def test_the_logs_survive_a_crashing_optimize():
+    """The run that *crashes* is the one whose server logs you most want.
+
+    The first version of this change uploaded them after the `optimize()` call
+    with no `try`, so a raising optimize kept exactly the wrong half: the
+    successful runs' logs, and none of the failures'.
+    """
+    tree = ast.parse(COMPONENTS.read_text())
+    fn = next(
+        n
+        for n in ast.walk(tree)
+        if isinstance(n, ast.FunctionDef) and n.name == "optimize_single_agent"
+    )
+    for node in [n for n in ast.walk(fn) if isinstance(n, ast.Try)]:
+        calls = {
+            c.func.id
+            for c in ast.walk(node)
+            if isinstance(c, ast.Call) and isinstance(c.func, ast.Name)
+        }
+        if "optimize" not in calls or not node.finalbody:
+            continue
+        final = ast.unparse(ast.Module(body=node.finalbody, type_ignores=[]))
+        assert "upload_from_filename" in final, "log upload must be in the finally"
+        assert "_report_mcp_server_health" in final, "health report must be in the finally"
+        return
+    raise AssertionError("optimize() is not inside a try/finally that ships the MCP logs")
+
+
+def test_the_log_handles_are_closed():
+    """Three handles held for a 7-hour stage is a leak, and unflushed tail
+    output is the part you actually want to read."""
+    body = _code_only(_optimize_body())
+    assert "mcp_log_handles" in body, "no record of the handles to close"
+    assert ".close()" in body, "handles are opened and never closed"
