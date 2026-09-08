@@ -714,10 +714,13 @@ can see.
 
 ## 12. A local MCP server stops answering, and GEPA scores a toolless agent
 
-**Found 2026-09-08, live, in campaign 07's validation arm. Not yet fixed — see
-"Why it is not fixed yet" below.**
+**Found 2026-09-08, live, in campaign 07's validation arm. Observability fixed
+in PR #51; the underlying cause is still open — see "What is fixed, and what is
+not" below.**
 
-Three times in 35 GEPA generations (~8.6%), the optimize stage logged:
+**Five times in 50 GEPA generations (~10%)**, the optimize stage logged
+(first seen at 3-in-35, and the rate has held steady rather than climbing,
+which is what kept the arm running under the decision rule):
 
 ```
 Agent sonnet_agent will run without the tools from toolset McpToolset,
@@ -787,22 +790,28 @@ unknowable, because its own output is discarded. Nothing else records it: the
 liveness check (`p.poll()`) runs **once**, five seconds after start, and never
 again.
 
-### Why it is not fixed yet
+### What is fixed, and what is not
 
-The fix belongs in `components.py`, and KFP caches a component on its **function
-body hash** (CLAUDE.md, "Pipeline Caching"). Campaign 07's batch 1 re-submits
-the validation arm expecting a cache hit on `optimize-single-agent` --
-`validate_then_run.py:123` says so explicitly. Editing that component mid-campaign
-voids the hit and re-runs a ~7 hour optimize that has already been paid for.
+Steps 1 and 2 below shipped in **PR #51**. Step 3 cannot be done until a run
+produces the evidence they capture.
 
-**Do it after campaign 07 finishes:**
+1. ~~Send the servers' stdout/stderr somewhere other than `DEVNULL`.~~ **Done.**
+   Each server writes to its own log, uploaded to
+   `stages/optimize/mcp_logs/<pair>-<server>.log` so it survives the container.
+2. ~~Poll each server and report which are dead.~~ **Done.**
+   `_report_mcp_server_health()` runs before teardown -- before `terminate()`,
+   since afterwards every exit code is ours -- and dumps the tail of any that
+   exited.
+3. **Still open.** Decide whether the cause is a crash (restart it) or CPU
+   starvation (give the servers their own resources). This needs the logs from
+   step 1, so it waits for the first run that carries them.
 
-1. Send the servers' stdout/stderr to files under the component's output dir, or
-   into the component logger, instead of `DEVNULL`.
-2. Poll `p.poll()` for each server whenever a toolset load fails, and log which
-   ones are dead.
-3. Only then decide whether the cause is a crash (restart it) or starvation
-   (give the servers their own resources).
+The delay was deliberate: the fix lives in `components.py`, KFP caches a
+component on its **function body hash** (CLAUDE.md, "Pipeline Caching"), and
+campaign 07's batch 1 re-submits the validation arm expecting a cache hit on
+`optimize-single-agent` (`validate_then_run.py:123`). Merging #51 voids that hit
+and re-runs a ~7 hour optimize already paid for -- accepted deliberately rather
+than by accident.
 
 Until then, treat a campaign arm's tool-use scores as carrying roughly a
 **10% contamination rate**, and grep both wordings -- `will run without the
