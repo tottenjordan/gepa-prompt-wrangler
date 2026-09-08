@@ -103,6 +103,29 @@ def test_no_module_constructs_vertexai_client_directly():
     )
 
 
+def test_deploy_goes_through_runtimes_not_agent_engines():
+    """`agent_engines` is the surface whose `create()` already changed once.
+
+    At aiplatform 2.1.0 the module-level `vertexai.agent_engines.create` lost
+    `source_packages`, `requirements_file`, `entrypoint_module`,
+    `entrypoint_object`, `class_methods`, `agent_framework` and `labels`. We
+    survived that only because deploy used the client surface. `runtimes` is
+    the agentplatform equivalent, and its config type is field-identical --
+    measured, not assumed -- so the config dict is unchanged.
+    """
+    source = Path("wrangler/core/deploy.py").read_text()
+    tree = ast.parse(source, filename="wrangler/core/deploy.py")
+    hits = [
+        node.lineno
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Attribute) and node.attr == "agent_engines"
+    ]
+    assert not hits, (
+        f"wrangler/core/deploy.py:{hits} still reaches .agent_engines. Use "
+        f".runtimes -- see docs/notes/vertex-sdk-surfaces.md."
+    )
+
+
 def test_the_guard_can_actually_see_a_violation(tmp_path):
     """A guard that never fires is not known to work."""
     bad = tmp_path / "bad.py"

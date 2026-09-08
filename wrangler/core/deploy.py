@@ -23,8 +23,8 @@ _SOURCE_REQUIREMENTS = [
     # the suite and the patch probe actually ran against, so the deployed agent
     # can be newer than what we validated but never older. aiplatform 2.x is a
     # major bump: the source-based deploy path is unaffected because it goes
-    # through vertexai.Client(...).agent_engines, not the module-level
-    # functions whose signature changed.
+    # through a client surface (now agentplatform's `runtimes`), not the
+    # module-level `vertexai.agent_engines` functions whose signature changed.
     "google-cloud-aiplatform[adk,agent-engines]>=2.1.0",
     "google-genai>=2.22.0",
     "google-auth>=2.52.0",
@@ -904,7 +904,7 @@ def deploy_agent_from_source(
                 include_mcp=include_mcp,
                 labels=labels,
             )
-            remote = _get_client().agent_engines.create(config=config)
+            remote = _get_client().runtimes.create(config=config)
             break
         except Exception as e:
             last_err = e
@@ -977,7 +977,7 @@ def update_agent_from_source(
                 include_mcp=include_mcp,
                 labels=labels,
             )
-            remote = _get_client().agent_engines.update(name=engine_id, config=config)
+            remote = _get_client().runtimes.update(name=engine_id, config=config)
             break
         except Exception as e:
             last_err = e
