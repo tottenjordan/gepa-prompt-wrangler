@@ -17,7 +17,7 @@ warnings.filterwarnings("ignore", message=".*experimental.*")
 # before vertexai is imported, or its import-time warnings escape.
 
 import pandas as pd  # noqa: E402
-from agentplatform import Client  # noqa: E402
+from agentplatform import Client, types  # noqa: E402
 from agentplatform._genai import _evals_common  # noqa: E402
 
 # `init` sets process-global project/location/staging_bucket. vertexai
@@ -27,7 +27,6 @@ from agentplatform._genai import _evals_common  # noqa: E402
 # falls back to `init = None` when the import fails, which types as
 # `... | None` and is not callable as far as ty is concerned.
 from google.cloud.aiplatform import init as vertex_init  # noqa: E402
-from vertexai import types  # noqa: E402
 
 from wrangler.core.clients import agent_client  # noqa: E402
 

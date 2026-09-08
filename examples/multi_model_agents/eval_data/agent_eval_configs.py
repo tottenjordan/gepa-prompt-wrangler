@@ -3,7 +3,7 @@
 from pathlib import Path
 
 import yaml
-from vertexai import types
+from agentplatform import types
 
 _yaml_path = Path(__file__).parent / "eval_cases.yaml"
 with open(_yaml_path) as f:

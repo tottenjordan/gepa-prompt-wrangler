@@ -135,3 +135,46 @@ def test_the_two_evals_common_modules_are_genuinely_distinct():
     from vertexai._genai import _evals_common as vx
 
     assert ap is not vx, "the two packages now share a module; the guard above is vacuous"
+
+
+def test_no_module_imports_types_from_vertexai():
+    """The SDK `isinstance`-checks its own types, so mixing packages fails late.
+
+    `evaluator.py` builds `types.evals.SessionInput`. When the client moved to
+    agentplatform but this import did not, agentplatform's `run_inference`
+    rejected every case:
+
+        Unsupported session_inputs type:
+        <class 'vertexai._genai.types.evals.SessionInput'>
+
+    All three cases of a live batch eval failed, nine retries each, and the run
+    ended with "0 of 0 cases produced a usable response". The unit tests mock
+    `run_inference`, so the whole suite stayed green through it -- which is why
+    this guard is structural rather than behavioural.
+    """
+    import ast
+    from pathlib import Path
+
+    offenders = []
+    for root in ("wrangler", "scripts", "examples"):
+        for path in sorted(Path(root).rglob("*.py")):
+            tree = ast.parse(path.read_text(), filename=path.as_posix())
+            offenders.extend(
+                f"{path}:{node.lineno}"
+                for node in ast.walk(tree)
+                if isinstance(node, ast.ImportFrom)
+                and (node.module or "").split(".")[0] == "vertexai"
+                and any(a.name == "types" for a in node.names)
+            )
+    assert not offenders, (
+        f"{offenders} import `types` from vertexai. The client is agentplatform's "
+        f"and it isinstance-checks its own types -- use `from agentplatform import types`."
+    )
+
+
+def test_the_two_types_packages_are_genuinely_distinct():
+    """Guards the test above against becoming vacuous."""
+    from agentplatform import types as ap
+    from vertexai import types as vx
+
+    assert ap.evals.SessionInput is not vx.evals.SessionInput

@@ -16,6 +16,7 @@ import sys
 import time
 
 import pandas as pd
+from agentplatform import types
 
 # `init` sets process-global project/location/staging_bucket. vertexai
 # and agentplatform both re-export the *same* bound method on the same
@@ -24,7 +25,6 @@ import pandas as pd
 # falls back to `init = None` when the import fails, which types as
 # `... | None` and is not callable as far as ty is concerned.
 from google.cloud.aiplatform import init as vertex_init
-from vertexai import types
 
 from wrangler.core.clients import agent_client
 from wrangler.core.config import (

@@ -10,8 +10,8 @@ No network access — all object-level inspection.
 """
 
 import pytest
+from agentplatform import types
 from pydantic import ValidationError
-from vertexai import types
 
 from wrangler.eval import evaluator
 from wrangler.eval.evaluator import (
@@ -471,13 +471,13 @@ class TestInferenceRetryBudget:
 
     @staticmethod
     def _dataset(responses):
-        from vertexai import types
+        from agentplatform import types
 
         return types.EvaluationDataset(eval_dataset_df=TestInferenceRetryBudget._frame(responses))
 
     def _run(self, monkeypatch, initial, script):
         """`script` yields the response list each successive retry pass returns."""
-        from vertexai import types
+        from agentplatform import types
 
         from wrangler.eval import evaluator as ev
 
