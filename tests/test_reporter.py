@@ -429,3 +429,109 @@ class TestAControlArmIsNotReportedAsAnImprovement:
             "safety_v1 averages +0.075 only because the control arm's +0.15 "
             "drift was folded in; the optimized arm moved 0.000"
         )
+
+
+class TestPerMetricVerdictsReachTheReport:
+    """`classify_deltas` existed with no caller, so the report never used it.
+
+    The executive summary judges each arm on **one** number -- the average
+    delta across metrics -- against **one** scalar floor. Campaign 06 measured
+    a 3.4x spread between the tightest metric floor (hallucination, 0.017) and
+    the loosest (safety, 0.058), so collapsing to the loosest discards most of
+    the resolution the control arms were run to buy.
+
+    `wrangler floor` could show the per-metric view; the generated report could
+    not, which is the half nobody runs by hand.
+    """
+
+    @staticmethod
+    def _arm(before, after, optimized_prompt="", original_prompt="p"):
+        return {
+            "model": "claude-sonnet-4-6",
+            "before": before,
+            "after": after,
+            "original_prompt": original_prompt,
+            "optimized_prompt": optimized_prompt,
+        }
+
+    def test_the_same_delta_is_judged_against_its_own_metric_floor(self):
+        """The whole point. One control sets a wide floor on `safety` and a
+        narrow one on `hallucination`; a real arm then moves both by the same
+        amount, and the two must not get the same verdict."""
+        from wrangler.reporting.reporter import _executive_summary
+
+        results = {
+            # control: safety drifts 0.060, hallucination only 0.010
+            "ctrl": self._arm(
+                {"safety_v1": 0.80, "hallucination_v1": 0.90},
+                {"safety_v1": 0.86, "hallucination_v1": 0.91},
+            ),
+            # real arm: both metrics move +0.030
+            "sonnet": self._arm(
+                {"safety_v1": 0.80, "hallucination_v1": 0.90},
+                {"safety_v1": 0.83, "hallucination_v1": 0.93},
+                optimized_prompt="q",
+            ),
+        }
+        text = "\n".join(_executive_summary(results, ["ctrl", "sonnet"]))
+
+        assert "safety_v1" in text, "the report shows no per-metric breakdown"
+        assert "hallucination_v1" in text, "the report shows no per-metric breakdown"
+        # +0.030 is inside safety's 0.060 floor but outside hallucination's 0.010
+        safety_line = next(ln for ln in text.splitlines() if "safety_v1" in ln)
+        halluc_line = next(ln for ln in text.splitlines() if "hallucination_v1" in ln)
+        assert "within-noise" in safety_line, safety_line
+        assert "improved" in halluc_line, halluc_line
+
+    def test_a_metric_with_no_control_measurement_is_uncalibrated(self):
+        """Never judged against 0.0 -- that would call every movement real."""
+        from wrangler.reporting.reporter import _executive_summary
+
+        results = {
+            "ctrl": self._arm({"safety_v1": 0.80}, {"safety_v1": 0.86}),
+            "sonnet": self._arm(
+                {"safety_v1": 0.80, "tool_use_quality_v1": 0.70},
+                {"safety_v1": 0.83, "tool_use_quality_v1": 0.99},
+                optimized_prompt="q",
+            ),
+        }
+        text = "\n".join(_executive_summary(results, ["ctrl", "sonnet"]))
+        tool_line = next(ln for ln in text.splitlines() if "tool_use_quality_v1" in ln)
+        assert "uncalibrated" in tool_line, tool_line
+
+    def test_no_control_means_no_per_metric_verdicts(self):
+        """With nothing measuring the floor there is nothing to judge against."""
+        from wrangler.reporting.reporter import _executive_summary
+
+        results = {
+            "sonnet": self._arm({"safety_v1": 0.80}, {"safety_v1": 0.90}, optimized_prompt="q")
+        }
+        text = "\n".join(_executive_summary(results, ["sonnet"])).lower()
+        assert "uncalibrated" in text
+
+    def test_a_control_that_did_not_move_is_not_a_zero_floor(self):
+        """A control showing 0.000 on a metric has not measured its noise.
+
+        It means the sample was too small to see any, not that the metric is
+        noiseless. Judging against 0.0 calls every subsequent movement real --
+        the exact failure classify_deltas guards against for *absent* metrics,
+        reached by a metric that is present and happens to read zero.
+        """
+        from wrangler.reporting.reporter import _executive_summary
+
+        results = {
+            # control does not move on frq at all
+            "ctrl": self._arm(
+                {"safety_v1": 0.80, "final_response_quality_v1": 0.80},
+                {"safety_v1": 0.86, "final_response_quality_v1": 0.80},
+            ),
+            "sonnet": self._arm(
+                {"safety_v1": 0.80, "final_response_quality_v1": 0.80},
+                {"safety_v1": 0.83, "final_response_quality_v1": 0.79},
+                optimized_prompt="q",
+            ),
+        }
+        text = "\n".join(_executive_summary(results, ["ctrl", "sonnet"]))
+        frq = next(ln for ln in text.splitlines() if "final_response_quality_v1" in ln)
+        assert "regressed" not in frq, f"a -0.010 move judged real against a zero floor: {frq}"
+        assert "uncalibrated" in frq, frq

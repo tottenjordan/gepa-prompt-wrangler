@@ -16,6 +16,7 @@ from .analysis import (
     generate_all_charts,
     normalize_agent_keys,
 )
+from .analyzer import classify_deltas, measure_noise_floor_per_metric
 
 REPORTS_DIR = Path("outputs/reports")
 CHARTS_DIR = REPORTS_DIR / "charts"
@@ -61,6 +62,81 @@ def _arm_delta(data: dict) -> float:
     avg_b = sum(before.values()) / len(before) if before else 0.0
     avg_a = sum(after.values()) / len(after) if after else 0.0
     return avg_a - avg_b
+
+
+def _metric_deltas(data: dict) -> dict[str, float]:
+    """Per-metric after-minus-before, for metrics scored on *both* sides.
+
+    A metric present on only one side is skipped rather than treated as a move
+    from zero -- that would manufacture a delta the size of the whole score.
+    """
+    before = data.get("before") or {}
+    after = data.get("after") or {}
+    return {m: after[m] - before[m] for m in before if m in after}
+
+
+class _ArmView:
+    """Adapts a report `results[name]` dict to what analyzer expects.
+
+    `measure_noise_floor_per_metric` and `classify_deltas` read `.deltas` and
+    `.is_control`; the reporter holds plain dicts. This is the bridge, and it
+    is why those two functions sat with no caller for so long.
+    """
+
+    __slots__ = ("deltas", "is_control", "name")
+
+    def __init__(self, name: str, data: dict):
+        self.name = name
+        self.deltas = _metric_deltas(data)
+        self.is_control = _is_control_arm(data)
+
+
+def _per_metric_verdict_lines(results: dict, ordered: list) -> list[str]:
+    """Judge every metric against *its own* control floor, not one scalar.
+
+    The executive summary above collapses each arm to a single average delta
+    and one floor. Campaign 06 measured a 3.4x spread between the tightest
+    metric floor and the loosest, so that collapse throws away most of the
+    resolution the control arms were run to buy.
+    """
+    arms = [_ArmView(n, results[n]) for n in ordered]
+    floors = measure_noise_floor_per_metric(arms)
+    if floors:
+        # Drop metrics whose measured floor is exactly zero. A control that did
+        # not move on a metric has not measured its noise -- it means the sample
+        # was too small to see any. Keeping the 0.0 would judge every later
+        # movement against it and call all of them real, which is the failure
+        # classify_deltas already refuses for *absent* metrics. Absent and
+        # measured-as-zero deserve the same answer: uncalibrated.
+        floors = {m: f for m, f in floors.items() if f > 0.0}
+        floors = floors or None
+    real = [a for a in arms if not a.is_control]
+    if not real:
+        return []
+
+    lines = ["", "### Per-metric verdicts", ""]
+    if floors is None:
+        lines.append(
+            "No control arm, so every metric below is **uncalibrated** — a movement "
+            "cannot be told from noise without something measuring the noise."
+        )
+    else:
+        lines.append(
+            f"Each metric is judged against its own floor, from "
+            f"{len(arms) - len(real)} control arm(s). A single scalar floor would "
+            f"hold every metric to the loosest one."
+        )
+    lines.append("| arm | metric | Δ | floor | verdict |")
+    lines.append("| --- | --- | --- | --- | --- |")
+    for arm in real:
+        for metric, verdict in classify_deltas(arm, floors).items():
+            bar = (floors or {}).get(metric)
+            bar_txt = f"{bar:.4f}" if bar is not None else "—"
+            lines.append(
+                f"| {arm.name} | {metric} | {arm.deltas[metric]:+.4f} | {bar_txt} | {verdict} |"
+            )
+    lines.append("")
+    return lines
 
 
 def _executive_summary(results: dict, ordered: list[str]) -> list[str]:
@@ -146,6 +222,10 @@ def _executive_summary(results: dict, ordered: list[str]) -> list[str]:
             f"- **Regressed:** {', '.join(f'{n} ({agent_deltas[n]:+.3f})' for n in regressed)}"
         )
     lines.append("")
+
+    # The arm-level verdicts above use one average and one scalar floor. This
+    # adds the per-metric view, which is where the resolution actually is.
+    lines.extend(_per_metric_verdict_lines(results, ordered))
 
     # Averaged over `real`, not `ordered`. Folding controls in shifts the
     # figure toward their drift: a control moving +0.15 on one metric while a
