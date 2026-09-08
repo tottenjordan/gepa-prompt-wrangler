@@ -505,7 +505,9 @@ class TestCollidingTierClaimsAreNotWritten:
             ]
         )
 
-        def _deploy(agent_module, model, instruction, display_name):
+        # **kwargs so this stub does not have to track every deploy kwarg --
+        # it asserts on tier claims, not on the deploy signature.
+        def _deploy(agent_module, model, instruction, display_name, **kwargs):
             return "eng-bad-46" if model == "claude-sonnet-4-6" else "eng-bad-5"
 
         def _gate(engine_id, redeploy_fn, **kw):

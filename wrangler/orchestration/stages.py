@@ -578,11 +578,18 @@ def stage_deploy(exp: Experiment, pair_id: str | None = None) -> None:
             version_tag = exp.version.replace("_", "-") if exp.version else ""
             display = f"{pair.id}_{version_tag}" if version_tag else pair.id
             agent_ref = pair.agent_module or manifest.agent_module
+            # Merged over the standard ownership label. A manifest declaring
+            # `lifecycle: ephemeral` becomes reapable by `wrangler engines
+            # prune`, which otherwise keeps a finished campaign's engines
+            # forever on the campaign's own eval traffic.
+            engine_labels = {"solution": "promp-wrangler"}
+            engine_labels.update(getattr(manifest, "labels", None) or {})
             engine_id = deployer.deploy_agent_from_source(
                 agent_module=str(mdir / agent_ref),
                 model=pair.model,
                 instruction=pair.system_prompt,
                 display_name=display,
+                labels=engine_labels,
             )
             print(f" {_fmt_duration(time.time() - t0)}")
 
@@ -610,12 +617,14 @@ def stage_deploy(exp: Experiment, pair_id: str | None = None) -> None:
                     _model=pair.model,
                     _instruction=pair.system_prompt,
                     _display=display,
+                    _labels=engine_labels,
                 ):
                     return deployer.deploy_agent_from_source(
                         agent_module=_module,
                         model=_model,
                         instruction=_instruction,
                         display_name=_display,
+                        labels=_labels,
                     )
 
                 from ..tools.engines import delete_engine

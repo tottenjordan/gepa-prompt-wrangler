@@ -128,3 +128,45 @@ class TestBothBasesAreReported:
         }
         text = "\n".join(_cost_benefit_section(results, ["x"]))
         assert "x" in text.lower()
+
+
+class TestBlendedCostDegradesLikeMeasuredCost:
+    """The same partial-dict bug C3 fixed in measured_cost, still in its sibling.
+
+    `measured_cost` was fixed to treat a partial `custom_costs` block as no
+    override at all, rather than raising KeyError and losing a whole report to
+    one ad-hoc model id. `blended_cost` kept the unguarded subscript.
+
+    It is unreachable from production today -- every current caller passes only
+    `model` -- and the C3 reviewer judged leaving it in scope. But "unreachable"
+    is exactly what was said about measured_cost before commit 3324937 wired
+    token usage into the reporter and made it reachable overnight. A dormant
+    copy of a fixed bug is a fix that did not take.
+    """
+
+    def test_a_partial_custom_costs_block_does_not_raise(self):
+        from wrangler.core.models import blended_cost
+
+        blended_cost("gemini-3.5-flash", custom_costs={"input": 1.0})
+
+    def test_a_partial_block_falls_back_to_the_registry(self):
+        """Filling the missing side with 0.0 would produce a real-looking number
+        from half an input, which is the same trap measured_cost avoids."""
+        from wrangler.core.models import blended_cost
+
+        assert blended_cost("gemini-3.5-flash", custom_costs={"input": 999.0}) == pytest.approx(
+            blended_cost("gemini-3.5-flash")
+        )
+
+    def test_a_complete_block_is_still_honoured(self):
+        from wrangler.core.models import blended_cost
+
+        got = blended_cost("gemini-3.5-flash", custom_costs={"input": 4.0, "output": 4.0})
+        assert got == pytest.approx(4.0)
+
+    def test_an_empty_block_is_treated_as_no_override(self):
+        from wrangler.core.models import blended_cost
+
+        assert blended_cost("gemini-3.5-flash", custom_costs={}) == pytest.approx(
+            blended_cost("gemini-3.5-flash")
+        )

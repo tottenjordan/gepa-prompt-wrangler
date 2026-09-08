@@ -19,6 +19,15 @@ eval_config:
   response_match_threshold: 0.5
   safety_threshold: 0.8
 
+# Stamped onto every engine this manifest deploys, so the campaign's
+# engines can be found and reaped afterwards. `wrangler engines prune`
+# lets an ephemeral engine waive the traffic veto -- without this label a
+# finished campaign's engines read as "ours, but busy" and are kept
+# forever, which is how this project once reached 80 engines.
+labels:
+  lifecycle: "ephemeral"
+  campaign: "06"
+
 pipeline:
   secret_id: wrangler-agent-env
   cache_bust: "c06-v4"

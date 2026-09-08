@@ -66,6 +66,7 @@ def build_pipeline(image_uri: str):
         cache_bust: str = "",
         skip_optimize: bool = False,
         health_gate_json: str = "",
+        engine_labels_json: str = "",
     ):
         archive_task = archive_agent_code(
             project_id=project_id,
@@ -87,6 +88,7 @@ def build_pipeline(image_uri: str):
                 secret_id=secret_id,
                 cache_bust=cache_bust,
                 health_gate_json=health_gate_json,
+                engine_labels_json=engine_labels_json,
             )
             deploy_task.set_caching_options(enable_caching=True)
             deploy_task.after(archive_task)
