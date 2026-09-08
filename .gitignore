@@ -42,6 +42,11 @@ eval_outputs/
 .ipynb_checkpoints/
 
 # Claude Code
-.claude/
+.claude/*
+# Skills are documentation of how to work on this repo, so they version with
+# it -- they reference stage-artifact layout, the health-gate contract and
+# campaign orchestration, and would rot if kept outside the code they describe.
+# settings.local.json stays ignored: it is per-machine.
+!.claude/skills/
 
 MagicMock/
