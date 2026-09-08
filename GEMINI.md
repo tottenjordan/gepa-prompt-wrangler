@@ -78,11 +78,14 @@ uv run wrangler evaluators --help         # 6 more online-eval commands
 
 ## 📌 Dependency Pin Rules
 
-- **A `>=` floor in any Dockerfile is PROHIBITED** and is a test failure
-  (`tests/test_pipeline_image_pins.py`). A lockfile bump moves the image tag,
-  the rebuild resolves floors fresh, and the container silently diverges from
-  what CI tested. This is exactly how the optimize container ended up on an
-  unverified ADK while running five monkey-patches against it.
+- **A `>=` floor in anything a container installs is PROHIBITED** and is a test
+  failure (`tests/test_pipeline_image_pins.py`). That means every Dockerfile
+  *and* KFP `packages_to_install`, which is a pip install at pipeline runtime —
+  `archive_agent_code` runs on stock `python:3.11` and resolves fresh on every
+  run. A lockfile bump moves the image tag, the rebuild resolves floors fresh,
+  and the container silently diverges from what CI tested. This is exactly how
+  the optimize container ended up on an unverified ADK while running five
+  monkey-patches against it.
 - **Never read a version out of `uv.lock` without checking its marker.**
   `uv.lock` holds *two* entries for some packages either side of
   `python>=3.14`. Reading the wrong side set `litellm>=1.96.2` and killed a
