@@ -33,6 +33,7 @@ from scripts.run_campaign import (  # noqa: E402
     submit,
     wait_for_jobs,
 )
+from wrangler.tools.preflight import render, run_preflight  # noqa: E402
 
 # The cheapest arm that still touches every new path: eval-only (so it runs the
 # skip_optimize branch) and num_runs=1 (so it is one eval pass, not five).
@@ -42,7 +43,31 @@ VALIDATION_ARM = {
 }
 
 
-def main(campaign: str, log_dir: Path, watch_job: str = "") -> int:
+def _preflight_ok(skip: bool) -> bool:
+    """Resolve both dependency sets before committing anything to Vertex.
+
+    Both previous campaign 07 launches died in a GEAP build on a set that
+    could not resolve -- ~20 minutes in, three retries, and an error that said
+    only "Build failed ... or other dependencies". Every pin test in the suite
+    is static and cannot see a transitive conflict. This costs about a second.
+
+    Gated on the --watch-job path too: that branch releases six arms.
+    """
+    if skip:
+        print("PREFLIGHT SKIPPED (--skip-preflight). Both prior c07 launches died")
+        print("on a requirements set that did not resolve. You are choosing this.")
+        return True
+
+    results = run_preflight()
+    for line in render(results):
+        print(line)
+    if any(not r.ok for r in results):
+        print("\nNot submitting. Fix the requirements before spending a campaign on them.")
+        return False
+    return True
+
+
+def main(campaign: str, log_dir: Path, watch_job: str = "", skip_preflight: bool = False) -> int:
     """Validate, then release. ``watch_job`` adopts a validation arm already running.
 
     The campaign list is read into memory at import, so editing it cannot change
@@ -50,6 +75,9 @@ def main(campaign: str, log_dir: Path, watch_job: str = "") -> int:
     stopping that process and starting this one, which waits on the Vertex job
     the old chain submitted instead of paying for it twice.
     """
+    if not _preflight_ok(skip_preflight):
+        return 1
+
     if watch_job:
         print("=" * 70)
         print(f"STEP 1 — adopting the validation arm already running: {watch_job}")
@@ -103,6 +131,13 @@ if __name__ == "__main__":
     parser.add_argument("--campaign", default="06", choices=sorted(VALIDATION_ARM))
     parser.add_argument("--log-dir", default="outputs/campaigns")
     parser.add_argument(
+        "--skip-preflight",
+        action="store_true",
+        help="Submit without resolving the dependency sets first. Deliberate "
+        "override for a PyPI outage; both prior c07 launches died on a set "
+        "that did not resolve.",
+    )
+    parser.add_argument(
         "--watch-job",
         default="",
         help="Adopt a validation arm already running on Vertex instead of submitting "
@@ -110,6 +145,11 @@ if __name__ == "__main__":
     )
     args = parser.parse_args()
     started = time.time()
-    code = main(args.campaign, Path(args.log_dir), watch_job=args.watch_job)
+    code = main(
+        args.campaign,
+        Path(args.log_dir),
+        watch_job=args.watch_job,
+        skip_preflight=args.skip_preflight,
+    )
     print(f"\nTotal wall clock: {(time.time() - started) / 3600:.1f} h")
     sys.exit(code)

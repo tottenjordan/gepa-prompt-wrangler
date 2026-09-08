@@ -887,5 +887,27 @@ def evaluators_cleanup():
     cleanup()
 
 
+@main.command("preflight")
+def preflight_cmd():
+    """Resolve the agent and pipeline-image dependency sets before a campaign.
+
+    Both previous campaign 07 launches died in a GEAP build on a set that
+    could not resolve, ~20 minutes in, reported only as "Build failed ... or
+    other dependencies". Every pin test in the suite is static and cannot see
+    a transitive conflict. This costs about a second.
+
+    Caveat, stated rather than implied: uv resolves here, pip resolves on the
+    GEAP builder. A pass reduces the risk of a build-time ResolutionImpossible
+    -- it does not eliminate it.
+    """
+    from .tools.preflight import render, run_preflight
+
+    results = run_preflight()
+    for line in render(results):
+        click.echo(line)
+    if any(not r.ok for r in results):
+        raise SystemExit(1)
+
+
 if __name__ == "__main__":
     main()
