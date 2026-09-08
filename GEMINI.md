@@ -43,6 +43,24 @@ uv run python -m wrangler.tools.boot_probe --arm mcp-claude=<engine-id> --n 12 -
 
 **Always reap the probe engine afterwards.** See 🗑️ below.
 
+Two more silent failures worth knowing, because neither raises anything:
+
+```bash
+uv run wrangler evaluators trace-health   # dropped OTel span batches
+uv run wrangler evaluators --help         # 6 more online-eval commands
+```
+
+- **Dropped span batches.** Online eval scores traces; when OTel drops batches
+  under load, scoring silently sees fewer cases. `trace-health` exits non-zero
+  when any engine is dropping, so it can gate a run rather than merely inform
+  one. These seven commands were unreachable from `wrangler --help` until
+  2026-09-08 — if a diagnostic seems to be missing, check that it is not just
+  undiscoverable.
+- **A stage reporting SUCCEEDED is not a stage that worked.** Grep an optimize
+  run for `will run without the tools` *and* `Failed to get tools from toolset`
+  — ADK reworded it at 2.8.0, and matching only the old string reported zero
+  tool losses while five had occurred, feeding a corrupted objective into GEPA.
+
 ## 🛠️ Environment & Tooling Rules
 
 - **Package management: `uv` only.** Never invoke bare `pip`, `python`, or
@@ -75,6 +93,13 @@ uv run python -m wrangler.tools.boot_probe --arm mcp-claude=<engine-id> --n 12 -
 - **Never bump `fastmcp` past 3.4.7.** ADK pins `mcp>=1.24,<2` on the extra that
   provides `McpToolset`; fastmcp 4.x moves to the mcp 2.x protocol and the
   servers become unreachable *while still reporting healthy*.
+- **Python is 3.11 — `wrangler.tools.preflight.TARGET_PYTHON` is the one source
+  of truth.** Import it; never redefine it. The three Cloud Run MCP images are
+  the sole exception at 3.14, recorded with evidence in
+  `tests/test_pipeline_image_pins.py:PYTHON_MISMATCH_ACCEPTED`. Adding an entry
+  there means you resolved that image's pins on its own base — not that you
+  noticed the mismatch and waved it through. `Dockerfile.pipeline` may never be
+  exempted; it runs the ADK monkey-patches.
 
 ## 🤖 Vertex SDK Rules
 
