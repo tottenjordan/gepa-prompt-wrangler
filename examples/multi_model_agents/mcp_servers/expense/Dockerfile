@@ -1,4 +1,4 @@
-FROM python:3.11-slim
+FROM python:3.14-slim
 
 # Pinned, not floored. These were `fastmcp>=2.0.0` and opentelemetry 1.40.0
 # until 2026-09-08: a Cloud Run rebuild would have resolved fastmcp 4.x, which
