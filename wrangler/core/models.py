@@ -302,8 +302,20 @@ def get_spec(model: str) -> ModelSpec:
 
 
 def blended_cost(model: str, custom_costs: dict[str, float] | None = None) -> float:
-    """Estimated cost per 1M tokens assuming a 4:1 input:output token ratio."""
-    if custom_costs is not None:
+    """Estimated cost per 1M tokens assuming a 4:1 input:output token ratio.
+
+    A `custom_costs` block missing either side is treated as no override at
+    all, matching `measured_cost`. Filling the absent side with 0.0 would
+    compute a real-looking figure from half an input; raising KeyError would
+    lose a whole report to one ad-hoc model id.
+
+    This mirrors the fix `measured_cost` got in c4a5290. It was left out then
+    because no caller passed `custom_costs` -- which is exactly what was true
+    of `measured_cost` until 3324937 wired token usage into the reporter and
+    made it reachable overnight. A dormant copy of a fixed bug is a fix that
+    did not take.
+    """
+    if custom_costs and "input" in custom_costs and "output" in custom_costs:
         inp, out = custom_costs["input"], custom_costs["output"]
     else:
         spec = get_spec(model)
