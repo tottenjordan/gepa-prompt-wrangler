@@ -4,18 +4,39 @@ WORKDIR /app
 
 COPY pyproject.toml .
 
+# EXACT pins, matched to uv.lock. Not floors.
+#
+# These used to be `>=` floors, and the image tag is
+# md5(pyproject.toml + uv.lock + Dockerfile.pipeline) -- but this file installs
+# from its own list, NOT from uv.lock. So a lockfile bump moved the tag,
+# triggered a rebuild, and pip resolved fresh: on 2026-09-08 a dependabot bump
+# to uv.lock silently upgraded the optimize container to google-adk 2.8.0 while
+# local, CI and deploy.py all stayed on 2.7.1.
+#
+# That matters more here than anywhere else in the repo. optimize/optimizer.py
+# monkey-patches five ADK internals, and CLAUDE.md's rule is "do NOT remove or
+# add patches without re-running the per-patch probe" -- which the dependency
+# moving underneath them violates just as surely as editing them. It also broke
+# _ToolsetFailureCounter silently: it matches a log string 2.8.0 no longer
+# emits, so it reported 0 tool failures while 5 had occurred.
+#
+# google-adk stays at 2.7.1 until the probe in docs/notes/adk-patch-status.md
+# is re-run against a newer release. 2.8.0 exists; upgrading to it is a
+# deliberate act with that probe attached, not a side effect of a lockfile bump.
+#
+# tests/test_pipeline_image_pins.py fails if these drift from uv.lock.
 RUN pip install --no-cache-dir \
-    "google-cloud-aiplatform[adk,agent-engines,evaluation]>=1.154.0" \
-    "google-adk[a2a,agent-identity,eval,mcp]>=2.2.0" \
-    "google-genai>=1.66.0" \
-    "litellm>=1.83.14" \
-    "python-dotenv>=1.0.0" \
-    "pyyaml>=6.0" \
-    "matplotlib>=3.10.0" \
-    "pandas>=2.0.0" \
-    "paperbanana>=0.1.2" \
-    "rouge-score>=0.1.2" \
-    "google-cloud-storage>=3.0.0" \
-    "google-cloud-secret-manager>=2.0.0" \
-    "anthropic[vertex]>=0.49.0" \
-    "fastmcp>=2.0.0"
+    "google-cloud-aiplatform[adk,agent-engines,evaluation]==1.165.1" \
+    "google-adk[a2a,agent-identity,eval,mcp]==2.7.1" \
+    "google-genai==2.20.0" \
+    "litellm==1.85.7" \
+    "python-dotenv==1.2.3" \
+    "pyyaml==6.0.3" \
+    "matplotlib==3.11.1" \
+    "pandas==3.0.5" \
+    "paperbanana==0.3.0" \
+    "rouge-score==0.1.2" \
+    "google-cloud-storage==3.13.1" \
+    "google-cloud-secret-manager==2.30.0" \
+    "anthropic[vertex]==0.125.0" \
+    "fastmcp==3.4.7"
