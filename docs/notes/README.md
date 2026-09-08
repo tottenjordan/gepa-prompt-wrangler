@@ -10,6 +10,7 @@ One topic per file. Keep this index under 200 lines — put detail in the topic 
 | Note | What it covers |
 |------|----------------|
 | [adk-patch-status.md](adk-patch-status.md) | Per-patch status of the ADK monkey-patches against the installed ADK, with upstream issue outcomes. **Read before any ADK bump.** |
+| [vertex-sdk-surfaces.md](vertex-sdk-surfaces.md) | The two Agent Engine SDK surfaces this repo uses, why `deploy.py`'s choice made the aiplatform 2.x bump a drop-in, and why the `agentplatform` migration is deferred. |
 | [model-lifecycle.md](model-lifecycle.md) | Retirement dates, the Claude sampling-parameter cutoff, what the registry does *not* cover, and the **2026-08-20 judge A/B** that moved GEPA scoring to `gemini-3.5-flash`. |
 | [adk-judge-model.md](adk-judge-model.md) | Why only the GEPA path reads `judge_model` at all — batch eval cannot send one. Predicted the risks the judge A/B then measured. |
 | [toolchain-baseline.md](toolchain-baseline.md) | Measured lint/type/test baseline as of 2026-08-20, and what infrastructure does not exist yet. |
