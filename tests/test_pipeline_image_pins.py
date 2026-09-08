@@ -30,22 +30,95 @@ import pytest
 
 DOCKERFILE = Path("Dockerfile.pipeline")
 
+# Every other image we build and deploy. The 2026-09-08 sweep found all three
+# MCP images still on `fastmcp>=2.0.0` and opentelemetry 1.40.0 -- the same
+# unpinned-floor defect as above, just in the images nobody had checked because
+# the guard named only Dockerfile.pipeline. fastmcp 4.x moves to the mcp 2.x
+# protocol while ADK's client is pinned under mcp<2, so a rebuild would have
+# produced servers the agents cannot talk to.
+OTHER_DOCKERFILES = sorted(Path("examples/multi_model_agents/mcp_servers").glob("*/Dockerfile"))
+
 # Installed in the image but absent from uv.lock, so it cannot be checked
 # against the lock. Pinned anyway -- an unpinned entry is what caused this.
-NOT_IN_LOCK = {"google-cloud-secret-manager"}
+NOT_IN_LOCK = {"google-cloud-secret-manager", "opentelemetry-exporter-otlp-proto-grpc"}
+
+
+def _instructions(path: Path) -> str:
+    """A Dockerfile's directives with `#` comments stripped.
+
+    Scanning raw text matched the *comment* explaining that these used to be
+    `fastmcp>=2.0.0`, and reported the floor still present. Same trap
+    test_models.py walks the AST to avoid: prose may name a version, code may
+    not, and a regex cannot tell them apart.
+    """
+    return "\n".join(
+        line for line in path.read_text().splitlines() if not line.lstrip().startswith("#")
+    )
+
+
+def _pins(path: Path) -> dict[str, str]:
+    """Package -> version from any Dockerfile's pip install block."""
+    return {
+        m.group(1): m.group(2)
+        for m in re.finditer(r'"?([a-z0-9\-]+)(?:\[[^\]]*\])?==([^"\s\\]+)"?', _instructions(path))
+    }
+
+
+def test_there_are_other_dockerfiles_to_check():
+    """Guards the glob: if it silently matches nothing, the tests below vacuously pass."""
+    assert len(OTHER_DOCKERFILES) == 3, OTHER_DOCKERFILES
+
+
+@pytest.mark.parametrize("path", OTHER_DOCKERFILES, ids=lambda p: p.parent.name)
+def test_other_images_pin_every_dependency(path: Path):
+    floors = re.findall(r'"?([a-z0-9\-]+)(?:\[[^\]]*\])?>=([^"\s\\]+)"?', _instructions(path))
+    assert not floors, (
+        f"{[f[0] for f in floors]} use >= in {path}. Cloud Run rebuilds resolve "
+        f"these fresh, so the deployed MCP server drifts from the fastmcp the "
+        f"pipeline container and the ADK client were tested against."
+    )
+
+
+@pytest.mark.parametrize(
+    ("path", "package"),
+    [(p, pkg) for p in OTHER_DOCKERFILES for pkg in sorted(_pins(p))],
+    ids=lambda v: v.parent.name if isinstance(v, Path) else v,
+)
+def test_other_image_pins_match_the_lockfile(path: Path, package: str):
+    """The MCP servers must speak the protocol version our client was tested on."""
+    if package in NOT_IN_LOCK:
+        pytest.skip(f"{package} is not in uv.lock; pinned but unverifiable here")
+    try:
+        installed = metadata.version(package)
+    except metadata.PackageNotFoundError:
+        pytest.skip(f"{package} not installed in this environment")
+    assert _pins(path)[package] == installed, (
+        f"{path} pins {package}=={_pins(path)[package]} but uv.lock resolves {installed}."
+    )
+
+
+def test_kfp_runtime_installs_are_pinned():
+    """`packages_to_install` is a pip install at pipeline runtime.
+
+    dag.py rebuilds the five heavy components onto the pre-built image with
+    `packages_to_install=[]`, but `archive_agent_code` is not in that list --
+    it runs on stock python:3.11 and resolves its own dependencies fresh on
+    every run. A floor there is the same defect as a floor in a Dockerfile.
+    """
+    source = Path("wrangler/pipeline/components.py").read_text()
+    floors = re.findall(r"packages_to_install=\[([^\]]*)\]", source)
+    bad = [spec for group in floors for spec in group.split(",") if ">=" in spec]
+    assert not bad, f"unpinned KFP runtime installs: {bad}"
 
 
 def _dockerfile_pins() -> dict[str, str]:
     """Package -> version from the Dockerfile's pip install block."""
-    pins = {}
-    for match in re.finditer(r'"([a-z0-9\-]+)(?:\[[^\]]*\])?==([^"]+)"', DOCKERFILE.read_text()):
-        pins[match.group(1)] = match.group(2)
-    return pins
+    return _pins(DOCKERFILE)
 
 
 def test_every_dependency_is_pinned_not_floored():
     """A floor lets a rebuild resolve fresh. That is the whole defect."""
-    floors = re.findall(r'"([a-z0-9\-]+)(?:\[[^\]]*\])?>=([^"]+)"', DOCKERFILE.read_text())
+    floors = re.findall(r'"?([a-z0-9\-]+)(?:\[[^\]]*\])?>=([^"\s\\]+)"?', _instructions(DOCKERFILE))
     assert not floors, (
         f"{[f[0] for f in floors]} use >= in Dockerfile.pipeline. A lockfile bump "
         f"moves the image tag, forces a rebuild, and pip resolves these fresh — "
@@ -101,4 +174,57 @@ def test_the_agent_container_and_the_pipeline_container_agree_on_adk():
     assert agent_pin.group(1) == _dockerfile_pins()["google-adk"], (
         f"agent container pins google-adk=={agent_pin.group(1)} but the pipeline "
         f"image pins {_dockerfile_pins()['google-adk']}"
+    )
+
+
+def _source_requirements() -> list[str]:
+    from wrangler.core.deploy import _SOURCE_REQUIREMENTS
+
+    return list(_SOURCE_REQUIREMENTS)
+
+
+def test_no_agent_requirement_floors_above_the_validated_version():
+    """A floor higher than what we run is a version nothing has ever tested.
+
+    These are floors on purpose -- GEAP resolves them itself, so the deployed
+    agent may be newer than local. But the floor itself must be a version that
+    exists in this environment, or it asserts confidence in something the suite
+    never exercised.
+
+    Campaign 07 died on exactly this. `litellm>=1.96.2` was read off uv.lock
+    without noticing the entry sits behind a python>=3.14 marker; GEAP runs
+    3.11 and validates against 1.85.7. litellm 1.96.2 needs jinja2>=3.1.6,
+    google-adk[eval] resolves jinja2 3.1.5, and the GEAP build died with
+    ResolutionImpossible -- surfaced to the caller only as "Build failed ... or
+    other dependencies", three attempts, whole campaign lost.
+    """
+    from packaging.version import Version
+
+    bad = []
+    for spec in _source_requirements():
+        m = re.match(r"([a-z0-9\-]+)(?:\[[^\]]*\])?>=([0-9][^,\s]*)", spec)
+        if not m:
+            continue
+        name, floor = m.group(1), m.group(2)
+        try:
+            installed = metadata.version(name)
+        except metadata.PackageNotFoundError:
+            continue
+        if Version(floor) > Version(installed):
+            bad.append(f"{name}>={floor} but this environment validates {installed}")
+    assert not bad, "floors above the validated version: " + "; ".join(bad)
+
+
+def test_litellm_stays_capped_below_the_jinja2_conflict():
+    """Guards the specific fix, not just the general rule above.
+
+    The general test passes at any floor <= installed, including an uncapped
+    `litellm>=1.85.7` -- which GEAP would happily resolve to 1.96.2 and break
+    again. The cap is the thing that actually holds.
+    """
+    spec = next((s for s in _source_requirements() if s.startswith("litellm")), None)
+    assert spec is not None, "litellm vanished from _SOURCE_REQUIREMENTS"
+    assert "<1.86" in spec, (
+        f"litellm must stay capped below 1.86 in _SOURCE_REQUIREMENTS; got {spec!r}. "
+        "Above that it needs jinja2>=3.1.6 and google-adk[eval] resolves 3.1.5."
     )
