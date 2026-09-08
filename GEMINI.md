@@ -1,51 +1,142 @@
-# GEMINI.md
+# GEPA Prompt Wrangler — Agent Context & Guidelines
 
-Context file for Gemini CLI. **The guidance itself lives in
-[CLAUDE.md](CLAUDE.md)** — this file imports it rather than restating it.
+Operating rules for an agent working in this repo. Architecture and domain
+detail live in [CLAUDE.md](CLAUDE.md), imported below — **this file is the rule
+set, not a second copy of the architecture.**
 
 @CLAUDE.md
 
 ---
 
-## Why this file is a pointer and not a copy
+## 🚨 Critical Standards Reference
 
-Gemini CLI reads `GEMINI.md` the way Claude Code reads `CLAUDE.md`, so the
-obvious move is to keep a copy here. Don't. Every serious defect this repo has
-recorded in the last month came from two copies of the same thing drifting
-apart:
+**Always read [CODE_STANDARDS.md](CODE_STANDARDS.md) before writing code or
+changing the environment.** It is authoritative for tooling, commits,
+dependencies and secrets. CLAUDE.md covers *what the system is*;
+CODE_STANDARDS.md covers *how we write and ship it*; this file covers *what will
+bite you*.
 
-- **`wrangler/core/models.py` and `examples/multi_model_agents/config.py`** both
-  define `resolve_model()`. A fix applied to one worked locally and shipped
-  broken to every deployed agent. `tests/test_shared_source_drift.py` now
-  compares them by *behaviour*, because comparing by source needed an allowlist
-  that would eventually let a real difference through.
-- **A second CLI.** Seven online-eval commands lived behind their own dispatcher
-  and never appeared in `wrangler --help`, so `trace-health` — the diagnostic
-  for a real span-drop failure — was unfindable. It is now a shim over the one
-  implementation.
-- **A guide that drifted from the code.** `docs/online_eval_guide.md` accumulated
-  14 references to a module path deleted in a package reorganisation. Every
-  documented command failed with `No module named`.
+Session notes and known traps: [docs/notes/README.md](docs/notes/README.md).
 
-A 500-line duplicate of CLAUDE.md would be the largest instance of that pattern
-in the repo, and the least likely to be noticed: nothing fails when a docs copy
-goes stale, it just quietly teaches the wrong thing. `tests/test_agent_context.py`
-fails if this file grows its own guidance instead of importing.
+## 🧪 A Green Test Suite Is Not Evidence
 
-If `@CLAUDE.md` import is unsupported by your tooling, read
-[CLAUDE.md](CLAUDE.md) directly — it is the single source of truth, and
-[CODE_STANDARDS.md](CODE_STANDARDS.md) is authoritative for tooling and
-conventions.
+**This is the most expensive mistake available in this repo. Read it twice.**
 
-## The one thing worth repeating here
+The suite is deliberately hermetic — no network, no GCP — so it **mocks the
+Vertex SDK**. On 2026-09-08 it stayed green (1100+ passing) through *three*
+separate failures that broke live behaviour completely:
 
-Because it is the most expensive mistake available in this repo, and a reader
-who skims may not reach it:
+- a monkey-patch applied to the wrong package's module, silently disabling
+  `EVAL_MAX_RETRIES`
+- `SessionInput` built from the wrong package, making the eval service reject
+  **every** case (0/3 scored)
+- a dependency set that could not resolve at all, killing a campaign arm
 
-**A green test suite is not evidence that a change works.** The suite is
-deliberately hermetic — no network, no GCP — so it mocks the Vertex SDK. On
-2026-09-08 it stayed green through two separate breakages that made live
-inference fail outright, and through a dependency set that could not resolve at
-all. Before trusting a change to deployment, eval, or dependencies, run
-`uv run wrangler preflight` and deploy one probe engine. See CLAUDE.md's
-"Pipeline Pitfalls" and [docs/notes/silent-failures.md](docs/notes/silent-failures.md).
+**Never report a deployment, eval, or dependency change as working on the
+strength of the suite alone.** Required evidence, in order of cost:
+
+```bash
+uv run wrangler preflight        # ~1s — resolves both dependency sets
+uv run python scripts/deploy_probe_arms.py --arm mcp-claude --campaign <id>
+uv run python -m wrangler.tools.boot_probe --arm mcp-claude=<engine-id> --n 12 --spacing 3
+```
+
+**Always reap the probe engine afterwards.** See 🗑️ below.
+
+## 🛠️ Environment & Tooling Rules
+
+- **Package management: `uv` only.** Never invoke bare `pip`, `python`, or
+  `pytest`. Never activate a virtualenv — `uv run` handles it. Add dependencies
+  with `uv add`, never by hand-editing `pyproject.toml`.
+- **Lint and format: `ruff` only.** Never black, flake8, isort, pyupgrade or
+  pydocstyle. Never disable a rule repo-wide to silence one call site.
+- **Type checking: `ty` only.** Never mypy or pyright. Use `str | None`,
+  `list[str]` — never `Optional`, `List`, `Dict`.
+- **Git and PRs.** Branch, then open a PR. **NEVER commit directly to `main`,
+  and NEVER merge until the user has explicitly approved it.** Never add
+  `Co-Authored-By` trailers or "Generated with" lines to commits or PR bodies.
+- **Before every commit:** `uv run pytest tests/ -q`, `uv run ruff format`,
+  `uv run ruff check`, `uv run ty check wrangler/`.
+
+## 📌 Dependency Pin Rules
+
+- **A `>=` floor in any Dockerfile is PROHIBITED** and is a test failure
+  (`tests/test_pipeline_image_pins.py`). A lockfile bump moves the image tag,
+  the rebuild resolves floors fresh, and the container silently diverges from
+  what CI tested. This is exactly how the optimize container ended up on an
+  unverified ADK while running five monkey-patches against it.
+- **Never read a version out of `uv.lock` without checking its marker.**
+  `uv.lock` holds *two* entries for some packages either side of
+  `python>=3.14`. Reading the wrong side set `litellm>=1.96.2` and killed a
+  campaign arm. Use `importlib.metadata.version()` — the installed truth.
+- **`litellm` stays capped `<1.86`.** Above it needs `jinja2>=3.1.6` while
+  `google-adk[eval]` resolves 3.1.5 on the GEAP builder → `ResolutionImpossible`,
+  surfaced only as `Build failed ... or other dependencies`.
+- **Never bump `fastmcp` past 3.4.7.** ADK pins `mcp>=1.24,<2` on the extra that
+  provides `McpToolset`; fastmcp 4.x moves to the mcp 2.x protocol and the
+  servers become unreachable *while still reporting healthy*.
+
+## 🤖 Vertex SDK Rules
+
+- **Use `wrangler.core.clients.agent_client()`.** Constructing
+  `vertexai.Client` is PROHIBITED — deprecated at aiplatform 2.1.0, and an
+  AST guard in `tests/test_clients.py` fails on either spelling.
+- **Agent Engine CRUD is `client.runtimes`, never `client.agent_engines`.**
+  `get`/`delete` are keyword-only (`name=...`).
+- **NEVER mix `vertexai` and `agentplatform` objects across a call boundary.**
+  It type-checks fine and fails at runtime, and the mocked suite cannot see it.
+  If the client is agentplatform's, then `types`, `_evals_common` and
+  `_gcs_utils` must be too.
+- `agentplatform` ships **vendored inside** `google-cloud-aiplatform`. Never
+  test for it with `importlib.metadata.version()` — that raises while the
+  import succeeds.
+
+## 🔬 ADK Monkey-Patch Rules
+
+`optimize/optimizer.py:_patch_adk()` applies five patches to ADK internals.
+
+- **Never add or remove a patch without re-running the per-patch probe** in
+  [docs/notes/adk-patch-status.md](docs/notes/adk-patch-status.md).
+- **Re-probe when the Vertex SDK moves, not only ADK.** Patch 6 reads
+  `METRIC_LATEST_SPEC_NAME` out of the SDK, so an aiplatform major can
+  invalidate a patch while ADK sits still.
+- **A redundant patch is not harmless.** Patch 5 was deleted after it silently
+  overwrote newer upstream behaviour and corrupted the scores GEPA optimizes
+  against.
+
+## 🗑️ Engine Lifecycle Rules
+
+- **Reap the engines you deploy.** This project reached 80 unnoticed, 61 holding
+  warm instances. Deploy scratch engines with
+  `labels={"lifecycle": "ephemeral", "campaign": "<id>"}` and delete them as the
+  last step of the task, not as a later chore.
+- **Never sweep by age or name.** Only 48 of those 80 were ours, and three
+  *unlabelled* ones were the busiest in the project. `wrangler engines prune` is
+  dry-run by default and deletes only what every signal agrees on.
+- **Never pin an engine id in source.** Ids arrive at the call site; a missing
+  one must fail clearly, never fall back to a checked-in default.
+
+## 📊 Campaign & Measurement Rules
+
+- **Every sweep carries a control arm** whose prompt does not change, run under
+  identical conditions. Whatever it produces **is the noise floor**, and nothing
+  may be reported as an improvement unless it exceeds it. A byte-identical
+  prompt once produced +0.039 and +0.035, which would have read as a clean win.
+- **Never reuse a floor measured on an earlier run.** Dropout varies with load
+  and with how many arms run at once.
+- **Report coverage beside every score.** A delta across a coverage gap measures
+  dropout, not the prompt.
+- **Never launch a full campaign unvalidated.** `scripts/validate_then_run.py`
+  submits one arm and releases the rest only on SUCCEEDED.
+
+## 📝 Project Notes & Knowledge
+
+- Durable findings that outlive a session go in `docs/notes/<topic>.md`, one
+  topic per file — not in commit messages, where nobody will find them.
+- Add a one-line row to the index in
+  [docs/notes/README.md](docs/notes/README.md); keep that index under 200 lines.
+- Pre-registered experiments go in `docs/doe/`, with the hypothesis, statistic
+  and decision rule written down **before** the data exists.
+- **Never let a doc drift from the code.** A guide here accumulated 14
+  references to a deleted module path, so every documented command failed. If
+  you move a module, grep the docs.

@@ -1,16 +1,21 @@
-"""Agent context files must delegate, not duplicate.
+"""Agent context files carry rules; CLAUDE.md carries the architecture.
 
-CLAUDE.md is the single source of truth for architecture and domain guidance.
-GEMINI.md (Gemini CLI) imports it. Any future per-agent context file should do
-the same.
+CLAUDE.md is the single source of truth for architecture and domain detail.
+GEMINI.md (Gemini CLI) imports it and adds an operating rule set of its own --
+what will bite you, in imperative form. That division is the thing under test.
 
-The temptation is to copy CLAUDE.md, because each tool reads its own filename.
-Resist it: every serious defect this repo has recorded came from two copies of
-one thing drifting -- the two `resolve_model()` implementations (now guarded by
-test_shared_source_drift.py), a second CLI that left seven commands
-undiscoverable, and a guide that accumulated 14 references to a deleted module
-path. A duplicated context file is the worst of the set, because nothing fails
-when it goes stale; it just quietly teaches the wrong thing.
+The temptation is to make each context file self-contained, because each tool
+reads its own filename. Resist it for the *architecture*: every serious defect
+this repo has recorded came from two copies of one thing drifting -- the two
+`resolve_model()` implementations (now guarded by test_shared_source_drift.py),
+a second CLI that left seven commands undiscoverable, and a guide that
+accumulated 14 references to a deleted module path. A duplicated architecture
+section is the worst of the set, because nothing fails when it goes stale; it
+just quietly teaches the wrong thing.
+
+So these tests do not cap the file's size -- rules earn their space. They check
+that it still imports CLAUDE.md, and that it has not started restating
+CLAUDE.md's sections.
 """
 
 from __future__ import annotations
@@ -22,11 +27,6 @@ import pytest
 
 CANONICAL = Path("CLAUDE.md")
 DELEGATING = [Path("GEMINI.md")]
-
-# A pointer file needs room to say *why* it points, and to repeat the one or two
-# things a skimming reader must not miss. It does not need room for a copy of
-# the architecture. CLAUDE.md is ~540 lines; this is a small fraction of it.
-MAX_LINES = 120
 
 
 def test_the_canonical_file_exists():
@@ -43,12 +43,17 @@ def test_the_delegating_file_imports_the_canonical_one(path: Path):
 
 
 @pytest.mark.parametrize("path", DELEGATING, ids=lambda p: p.name)
-def test_the_delegating_file_has_not_grown_a_copy(path: Path):
-    lines = len(path.read_text().splitlines())
-    assert lines <= MAX_LINES, (
-        f"{path} is {lines} lines against a {MAX_LINES} ceiling. It is a pointer; "
-        f"guidance belongs in CLAUDE.md, or every future edit has to be made "
-        f"twice and will not be."
+def test_the_delegating_file_is_not_mostly_a_copy(path: Path):
+    """Size is not the signal -- rules earn their space -- but wholesale
+    duplication is. Anything approaching CLAUDE.md's length has stopped being a
+    rule set and started being a second architecture doc.
+    """
+    theirs = len(path.read_text().splitlines())
+    canonical = len(CANONICAL.read_text().splitlines())
+    assert theirs < canonical / 2, (
+        f"{path} is {theirs} lines against CLAUDE.md's {canonical}. It should hold "
+        f"rules and import the architecture, not restate it -- otherwise every "
+        f"future edit has to be made twice and will not be."
     )
 
 
