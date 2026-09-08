@@ -84,6 +84,7 @@ def deploy_single_agent(
     secret_id: str,
     cache_bust: str,
     health_gate_json: str,
+    engine_labels_json: str,
     metrics: Output[Metrics],
     summary: Output[Markdown],
     agent_prompt: Output[Markdown],
@@ -161,6 +162,12 @@ def deploy_single_agent(
             if k.startswith(("SEARCH_MCP", "BOOKING_MCP", "EXPENSE_MCP"))
         }
 
+        # Merged over the standard ownership label. A campaign that declares
+        # `lifecycle: ephemeral` becomes reapable by `wrangler engines prune`,
+        # which otherwise keeps it forever on its own eval traffic.
+        engine_labels = {"solution": "promp-wrangler"}
+        engine_labels.update(json.loads(engine_labels_json) if engine_labels_json else {})
+
         t0 = time.time()
         engine_id = deploy_agent_from_source(
             agent_module=f"/app/{agent_module}",
@@ -168,6 +175,7 @@ def deploy_single_agent(
             instruction=pair["system_prompt"],
             display_name=f"gepa-{pair_id}",
             env_vars=mcp_env,
+            labels=engine_labels,
         )
         # Health-gate the fresh engine. A deploy is a lottery -- ten
         # byte-identical engines measured 0%-100% reach -- and a bad one

@@ -65,6 +65,18 @@ class Manifest:
     # or disables that. See docs/notes/engine-lifecycle.md.
     health_gate: dict[str, Any] = field(default_factory=dict)
 
+    # Extra GCP labels stamped onto every engine this manifest deploys, merged
+    # over the standard {"solution": "promp-wrangler"}.
+    #
+    # This is how a campaign's engines stay reapable. `wrangler engines prune`
+    # lets an engine labelled `lifecycle: ephemeral` waive the traffic veto,
+    # because the only traffic a campaign engine ever sees is the traffic the
+    # campaign sent it. Without the label a finished campaign's engines read as
+    # "ours, but busy" and are kept forever -- which is how this project
+    # reached 80 engines. Only the standalone probe script used to apply them,
+    # so nothing the pipeline deployed was reapable.
+    labels: dict[str, str] = field(default_factory=dict)
+
     @property
     def pair_ids(self) -> list[str]:
         """Every declared pair's id, disabled ones included.
@@ -176,4 +188,5 @@ class PairFactory:
             eval_config=raw.get("eval_config", {}),
             pipeline=raw.get("pipeline", {}),
             health_gate=raw.get("health_gate", {}),
+            labels=raw.get("labels", {}),
         )

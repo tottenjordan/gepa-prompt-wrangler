@@ -420,6 +420,10 @@ def deploy_pipeline(
             # bare defaults while the manifest's settings were silently
             # dropped. `required` is the one that must not be droppable.
             "health_gate_json": json.dumps(getattr(manifest, "health_gate", None) or {}),
+            # Engine labels, forwarded so a campaign's engines can be found and
+            # reaped afterwards. Nothing the pipeline deployed carried them
+            # before, so `wrangler engines prune` refused to touch any of it.
+            "engine_labels_json": json.dumps(getattr(manifest, "labels", None) or {}),
         },
         labels={"solution": "promp-wrangler"},
     )
