@@ -711,3 +711,108 @@ now walks all of them and requires each to be a write, guarded by `exists()`, or
 inside `redeploy`. When a defect is positional rather than logical — "this code
 path assumed a file exists" — enumerate the positions before fixing the one you
 can see.
+
+## 12. A local MCP server stops answering, and GEPA scores a toolless agent
+
+**Found 2026-09-08, live, in campaign 07's validation arm. Observability fixed
+in PR #51; the underlying cause is still open — see "What is fixed, and what is
+not" below.**
+
+**Five times in 50 GEPA generations (~10%)**, the optimize stage logged
+(first seen at 3-in-35, and the rate has held steady rather than climbing,
+which is what kept the arm running under the decision rule):
+
+```
+Agent sonnet_agent will run without the tools from toolset McpToolset,
+which failed to load: Failed to get tools from MCP server:
+```
+
+The agent then evaluates **with no tools at all**. It scores near zero on tool
+use, and that score is fed into the objective GEPA is optimising — so the search
+is pulled by evaluations that measure nothing about the prompt.
+`eval_before` scored `tool_use_quality_v1` at **0.969** on the same agent, which
+is the evidence that the agent is fine and the toolset is not.
+
+### The message ends at the colon because the exception has no text
+
+`mcp_toolset.py:419` does `raise ConnectionError(f"{error_message}: {e}") from e`.
+Here `e` is an `asyncio.CancelledError`, whose `str()` is empty. The empty
+suffix is not truncation in the log viewer — there is genuinely nothing there,
+and that is what makes this look unfalsifiable at first glance.
+
+### What it actually is: a 120-second timeout on localhost
+
+The full chain, from the container's own traceback:
+
+```
+anyio WouldBlock -> receive_event.wait() -> asyncio.wait_for(...)
+  -> TimeoutError -> CancelledError -> ConnectionError
+```
+
+`mcp_toolset.py:403` takes its timeout from `connection_params.timeout`, and
+`examples/multi_model_agents/registry.py:16` sets `MCP_TIMEOUT_SECONDS = 120.0`.
+
+So `list_tools` waited **two minutes** and got nothing — against a *localhost*
+server that answers in ~0.1s when healthy (`re-warmed 3/3 in 0.1s`, every
+generation). **Raising the timeout is therefore not the fix.** A local server
+that is silent for 120s is wedged, not slow.
+
+### Three hypotheses that were checked and rejected
+
+- **A session-refresh race** (the shape of #1b). Refuted: all three failures
+  precede their nearest `Closing toolset` by 4-9 seconds, and no `re-warm` or
+  `pre-warm` appears in the 90s *before* any of them. The teardown is a
+  consequence of the case ending, not the cause.
+- **The `tool_list_cache_ttl_seconds` gap.** Already applied in both registries
+  (`deploy.py:598`, `registry.py:61`).
+- **Container ADK drift**, the thing the inspecting-pipeline-runs skill tells
+  you to check. Also refuted, and worth recording as a positive: the container's
+  traceback cites `mcp_toolset.py` lines 501 and 419, and the local ADK 2.8.0
+  has byte-identical content at both lines. The pinning work of 2026-09-08 is
+  holding in the live container.
+
+The remaining explanation is resource contention: `components.py:530-537` starts
+the three servers as `subprocess.Popen` children of the optimize container,
+which is simultaneously running GEPA's concurrent evaluation load.
+
+### The reason it cannot be diagnosed further
+
+```python
+proc = subprocess.Popen(
+    [sys.executable, str(server_py)],
+    stdout=subprocess.DEVNULL,
+    stderr=subprocess.DEVNULL,      # <-- everything the server said is gone
+)
+```
+
+Whether the server crashed, restarted, blocked on GC, or was CPU-starved is
+unknowable, because its own output is discarded. Nothing else records it: the
+liveness check (`p.poll()`) runs **once**, five seconds after start, and never
+again.
+
+### What is fixed, and what is not
+
+Steps 1 and 2 below shipped in **PR #51**. Step 3 cannot be done until a run
+produces the evidence they capture.
+
+1. ~~Send the servers' stdout/stderr somewhere other than `DEVNULL`.~~ **Done.**
+   Each server writes to its own log, uploaded to
+   `stages/optimize/mcp_logs/<pair>-<server>.log` so it survives the container.
+2. ~~Poll each server and report which are dead.~~ **Done.**
+   `_report_mcp_server_health()` runs before teardown -- before `terminate()`,
+   since afterwards every exit code is ours -- and dumps the tail of any that
+   exited.
+3. **Still open.** Decide whether the cause is a crash (restart it) or CPU
+   starvation (give the servers their own resources). This needs the logs from
+   step 1, so it waits for the first run that carries them.
+
+The delay was deliberate: the fix lives in `components.py`, KFP caches a
+component on its **function body hash** (CLAUDE.md, "Pipeline Caching"), and
+campaign 07's batch 1 re-submits the validation arm expecting a cache hit on
+`optimize-single-agent` (`validate_then_run.py:123`). Merging #51 voids that hit
+and re-runs a ~7 hour optimize already paid for -- accepted deliberately rather
+than by accident.
+
+Until then, treat a campaign arm's tool-use scores as carrying roughly a
+**10% contamination rate**, and grep both wordings -- `will run without the
+tools` and `Failed to get tools from toolset` -- when reading any optimize run.

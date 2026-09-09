@@ -1,10 +1,46 @@
 # Agent Engine returns HTTP 200 with an empty event stream and no inference
 
-**Status:** ready to file · **Filed:** _(not yet)_ · **Case:** _(none)_
+**Status:** ready to file, **evidence re-checked 2026-09-08** · **Filed:** _(not yet)_ · **Case:** _(none)_
 **Reported by:** GEPA Prompt Wrangler team
 **Date of measurement:** 2026-08-23, extended 2026-08-24 and 2026-09-01
 **Supporting analysis:** [../analysis/2026-08-23-geap-empty-stream-doe.md](../analysis/2026-08-23-geap-empty-stream-doe.md)
 **Worker-level follow-up:** [../doe/01-engine-lottery.md](../doe/01-engine-lottery.md)
+
+---
+
+## 0. Re-check before filing — 2026-09-08
+
+Two things a reader should know before this is sent, both found by re-checking
+rather than by re-measuring.
+
+**Every engine id cited below has been deleted.** All 14 were reaped in the
+2026-08-24 and 2026-09-08 teardowns (see
+[../notes/engine-lifecycle.md](../notes/engine-lifecycle.md)). The measurement
+stands — it rests on 960 logged requests with a per-request join, not on the
+engines still existing — but **support will not be able to look any of them
+up**. Say so up front rather than letting them discover it.
+
+**Recent deploys have not reproduced it, and that is not evidence of a fix.**
+Three engines deployed on 2026-09-08, on a materially newer stack (ADK 2.8.0,
+google-cloud-aiplatform 2.1.0, the `agentplatform` client), showed:
+
+| engine | single-attempt reach |
+| --- | --- |
+| probe 3037666403789307904 | 12/12 |
+| probe 1366857330313920512 | 12/12 |
+| campaign 07 arm 8490988990860623872 | health gate `rate=1.0`, 0 rerolls |
+
+That is 24/24 plus a clean gate, with no empty stream observed. **It does not
+show the defect is gone.** This report's own finding is that the rate is
+*per-engine* and ranges 4%–68%, so three healthy draws is an expected outcome
+even if nothing changed — and since 2026-08-24 the deploy path has run a health
+gate that rerolls engines below 80% reach, which selects healthy engines by
+construction. Distinguishing "fixed" from "we drew well" needs a deliberate
+ungated sample, which has not been run.
+
+**What to claim when filing:** the 2026-08-23 measurement as recorded, noting
+the engines are deleted and that we have not re-measured on an ungated deploy
+since. Do not assert the defect is current, and do not withdraw it.
 
 ---
 
