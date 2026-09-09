@@ -111,6 +111,11 @@ class TestCallersThreadItThrough:
 
         src = Path("wrangler/pipeline/components.py").read_text()
         i = src.index("def optimize_single_agent")
-        body = src[i : i + 8000]
+        # Bounded by the next component, not by a byte count. This was
+        # `src[i : i + 8000]`, and adding MCP server log capture pushed the
+        # optimize() call to offset 8545 -- so the test failed on a change that
+        # left the behaviour it guards entirely intact.
+        j = src.index("def redeploy_single_agent", i)
+        body = src[i:j]
         assert "optimize(" in body
         assert "model=" in body

@@ -519,7 +519,17 @@ def optimize_single_agent(
     from pathlib import Path
 
     mcp_servers_dir = Path("/app/examples/multi_model_agents/mcp_servers")
-    mcp_procs = []
+    # name -> (Popen, log path). A list of bare processes could not say *which*
+    # server died, which is the only question worth asking when a toolset fails.
+    mcp_procs = {}
+    # Written inside the component's output dir so it is uploaded to GCS with
+    # the rest of the stage. A log on the container's local disk dies with the
+    # container, which is the same as not keeping it.
+    mcp_server_log_dir = Path("/tmp/mcp_server_logs")
+    mcp_server_log_dir.mkdir(parents=True, exist_ok=True)
+    # Our end of each pipe, closed in the finally below rather than leaked for
+    # the life of the stage.
+    mcp_log_handles = []
     if mcp_servers_dir.exists():
         servers = [
             ("search", 8001, "SEARCH_MCP_URL"),
@@ -529,21 +539,51 @@ def optimize_single_agent(
         for name, port, env_key in servers:
             server_py = mcp_servers_dir / name / "server.py"
             if server_py.exists():
+                # NOT DEVNULL. Campaign 07 lost its toolset in ~10% of GEPA
+                # generations and the cause could not be established, because
+                # whatever these servers said as they went unresponsive was
+                # thrown away. See docs/notes/silent-failures.md #12.
+                log_path = mcp_server_log_dir / f"{name}.log"
+                log_fh = log_path.open("w", buffering=1)
                 proc = subprocess.Popen(
                     [sys.executable, str(server_py)],
                     cwd=str(mcp_servers_dir / name),
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL,
+                    stdout=log_fh,
+                    stderr=subprocess.STDOUT,
                 )
-                mcp_procs.append(proc)
+                mcp_log_handles.append(log_fh)
+                mcp_procs[name] = (proc, log_path)
                 os.environ[env_key] = f"http://localhost:{port}/mcp"
-                logging.info(f"Started local MCP server: {name} on port {port}")
+                logging.info(f"Started local MCP server: {name} on port {port} -> {log_path}")
         time.sleep(5)
         # Verify servers are alive
-        alive = sum(1 for p in mcp_procs if p.poll() is None)
+        alive = sum(1 for proc, _ in mcp_procs.values() if proc.poll() is None)
         logging.info(f"Started {alive}/{len(mcp_procs)} local MCP server(s)")
     else:
         logging.warning("MCP servers dir not found — using remote URLs from secrets")
+
+    def _report_mcp_server_health(reason: str) -> None:
+        """Say which servers are alive, and show the tail of any that are not.
+
+        Called when a toolset fails to load. A dead server means a crash and a
+        live one means the process was starved or blocked -- the two need
+        different fixes, and the single startup poll could not tell them apart.
+        """
+        if not mcp_procs:
+            return
+        logging.warning(f"MCP server health check ({reason}):")
+        for name, (proc, log_path) in mcp_procs.items():
+            code = proc.poll()
+            if code is None:
+                logging.warning(f"  {name}: alive (pid {proc.pid})")
+                continue
+            logging.error(f"  {name}: DEAD, exit code {code}")
+            try:
+                tail = log_path.read_text().splitlines()[-25:]
+                for line in tail:
+                    logging.error(f"      {name}| {line}")
+            except OSError:
+                logging.exception(f"      {name}| could not read {log_path}")
 
     from wrangler.core.config import MODEL_COSTS
     from wrangler.optimize.optimizer import optimize
@@ -612,32 +652,68 @@ def optimize_single_agent(
             )
 
     t0 = time.time()
-    optimized_prompt = optimize(
-        str(agent_path),
-        eval_data_path=f"/app/{eval_data_path}",
-        sampler_config_path=str(sampler_cfg) if sampler_cfg.exists() else None,
-        agent_name=pair_id,
-        judge_model=judge_model,
-        max_metric_calls=max_metric_calls if max_metric_calls > 0 else None,
-        initial_instruction=original_prompt,
-        # The manifest's model, not the one the _opt module happens to import.
-        # stage_optimize has passed this since 7219295; this path did not, so
-        # two c07 arms pointing at sonnet_agent -- claude-sonnet-5 and
-        # claude-sonnet-4-6 -- both optimized whatever config.py pins, and the
-        # frontier the campaign measures would have differed only by label.
-        model=model,
-    )
-    elapsed = time.time() - t0
+    # try/finally, because the run that *crashes* is the one whose server logs
+    # you most want. Uploading them only on the success path would have kept
+    # exactly the wrong half.
+    try:
+        optimized_prompt = optimize(
+            str(agent_path),
+            eval_data_path=f"/app/{eval_data_path}",
+            sampler_config_path=str(sampler_cfg) if sampler_cfg.exists() else None,
+            agent_name=pair_id,
+            judge_model=judge_model,
+            max_metric_calls=max_metric_calls if max_metric_calls > 0 else None,
+            initial_instruction=original_prompt,
+            # The manifest's model, not the one the _opt module happens to import.
+            # stage_optimize has passed this since 7219295; this path did not, so
+            # two c07 arms pointing at sonnet_agent -- claude-sonnet-5 and
+            # claude-sonnet-4-6 -- both optimized whatever config.py pins, and the
+            # frontier the campaign measures would have differed only by label.
+            model=model,
+        )
+    finally:
+        # Ask the servers who is still alive *before* tearing them down -- after
+        # terminate() every exit code is ours and tells you nothing.
+        # Unconditional rather than gated on a failure count: optimize() keeps
+        # its toolset-failure tally as a local, so there is nothing here to gate
+        # on, and three poll() calls are cheap enough not to plumb one out.
+        _report_mcp_server_health("end of optimize, before teardown")
 
-    # Clean up local MCP servers
-    for proc in mcp_procs:
-        try:
-            proc.terminate()
-            proc.wait(timeout=5)
-        except Exception:
-            proc.kill()
-    if mcp_procs:
-        logging.info(f"Stopped {len(mcp_procs)} local MCP server(s)")
+        # Iterates .items() -- mcp_procs is keyed by server name so a failure
+        # report can say *which* one died.
+        for name, (proc, _log_path) in mcp_procs.items():
+            try:
+                proc.terminate()
+                proc.wait(timeout=5)
+            except Exception:
+                logging.warning(f"MCP server {name} did not terminate; killing")
+                proc.kill()
+        if mcp_procs:
+            logging.info(f"Stopped {len(mcp_procs)} local MCP server(s)")
+
+        # Close our end of the pipes now the writers are gone, so nothing is
+        # left buffered and the handles do not leak for the life of the stage.
+        for fh in mcp_log_handles:
+            try:
+                fh.flush()
+                fh.close()
+            except OSError as exc:
+                # Never let closing a log handle be the thing that fails a
+                # 7-hour optimize stage.
+                logging.warning(f"could not close an MCP log handle: {exc}")
+
+        # Keep the servers' own output with the run. Without this it dies with
+        # the container, which is what made silent-failures #12 undiagnosable.
+        for name, (_proc, log_path) in mcp_procs.items():
+            try:
+                if log_path.exists() and log_path.stat().st_size:
+                    gcs.bucket(bucket_name).blob(
+                        f"pipeline-runs/{run_id}/stages/optimize/mcp_logs/{pair_id}-{name}.log"
+                    ).upload_from_filename(str(log_path))
+            except Exception as exc:  # never let log shipping fail the stage
+                logging.warning(f"could not upload {name} MCP log: {exc}")
+
+    elapsed = time.time() - t0
 
     # Clean up MCP sessions
     import asyncio
