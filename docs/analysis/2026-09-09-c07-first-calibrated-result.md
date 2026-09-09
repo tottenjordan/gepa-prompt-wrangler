@@ -8,15 +8,17 @@ Campaign 07 was stopped after batch 1.
 
 ![Per-metric deltas against their own noise floors](2026-09-09-c07-first-calibrated-result.png)
 
-<sub>Figure built with matplotlib, not PaperBanana, against the repo convention.
-`paperbanana.generate_plot` failed three times on 2026-09-09 with
-`RetryError[... ClientError]`. That is **a credential problem, not an outage**:
-PaperBanana has no Vertex/ADC path (`show-config` offers only `*_api_key`) and calls the
-Generative Language API with `GOOGLE_API_KEY`, which returns `401 UNAUTHENTICATED —
-API keys are not supported by this API`. `.env` sets `GOOGLE_API_KEY` and
-`GEMINI_API_KEY` to the same value, and it is not an AI Studio key. Redraw with
-`uv run python scripts/plot_c07_calibrated_result.py`; switch back to PaperBanana once a
-valid AI Studio key is available.</sub>
+<sub>**Read the error bars as the null band, not as uncertainty.** Each is that metric's
+own floor centred on **zero** — the interval a delta has to escape to be a result. A bar
+that ends outside its whiskers is the finding; a bar that ends inside them is noise. The
+grey band is the single scalar floor (±0.0417) shown for comparison, and the blue line is
+the average delta, which sits inside it.
+
+Drawn by PaperBanana (`paperbanana plot`, `gemini-3.5-flash` VLM + `gemini-3.1-flash-image`,
+2 refinement iterations). Its emitted matplotlib is committed verbatim at
+`scripts/plot_c07_calibrated_result.py` so the published figure can be reproduced without
+a second non-deterministic generation; the input is
+`2026-09-09-c07-first-calibrated-result.data.json`.</sub>
 
 ## Headline
 
