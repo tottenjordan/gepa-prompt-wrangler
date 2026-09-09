@@ -8,6 +8,12 @@ Campaign 07 was stopped after batch 1.
 
 ![Per-metric deltas against their own noise floors](2026-09-09-c07-first-calibrated-result.png)
 
+<sub>Figure built with matplotlib, not PaperBanana, against the repo convention:
+`paperbanana.generate_plot` failed three times on 2026-09-09 with
+`RetryError[... ClientError]`, including on a minimal request with refinement and
+captioning disabled, so the failure is the service rather than the request. Redraw with
+`uv run python scripts/plot_c07_calibrated_result.py`; replace when PaperBanana is back.</sub>
+
 ## Headline
 
 **One metric improved, four regressed, and all five moved past their own noise floor.**
