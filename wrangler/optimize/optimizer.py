@@ -237,6 +237,33 @@ agent = types.SimpleNamespace(root_agent=root_agent)
     return wrapper_dir
 
 
+def _invalidate_tool_list_cache(toolset) -> bool:
+    """Drop a toolset's cached `tools/list`, so the next `get_tools()` really reconnects.
+
+    `McpToolset.close()` tears down the transport but leaves `_tool_list_cache` — which
+    lives on the toolset *instance* — populated. A pre-warm straight after a close is
+    therefore answered from cache in ~0.1s without re-establishing anything, the session
+    stays dead, and the next real call blocks until ADK's 120s `asyncio.wait_for` fires
+    with a bare `TimeoutError()`. ADK then hands the agent zero tools and GEPA scores it.
+
+    Measured on campaign 07's `c07-pro` arm: 16 toolless generations in 111 (~14%), and
+    subtracting the 120s timeout puts all 17 logged hangs 6-27s after a re-warm. See
+    docs/notes/silent-failures.md #12.
+
+    Returns True if a cache was found and emptied. Best-effort by design: the caller is
+    already suppressing exceptions around the close, and a failure to invalidate must not
+    be the thing that kills a generation.
+    """
+    try:
+        cache = getattr(toolset, "_tool_list_cache", None)
+        if cache is None:
+            return False
+        cache.clear()
+    except Exception:  # see docstring: invalidation must never fail the refresh
+        return False
+    return True
+
+
 async def _prewarm_mcp_toolsets(agent, tag: str = "  ", max_retries: int = 3) -> int:
     """Pre-warm MCP tool sessions so GEPA doesn't timeout on first connection.
 
@@ -534,18 +561,36 @@ def optimize(
                         f"{tag}  Generation {gen}: closing {mcp_count} stale MCP session(s)...",
                         flush=True,
                     )
+                    stranded = 0
                     for tool in root_agent.tools:
                         if isinstance(tool, BaseToolset):
                             # Closing a stale session is best-effort: the point is
                             # to re-warm below, and a dead session raises on close.
                             with contextlib.suppress(Exception):
                                 await tool.close()
+                            # ...but close() leaves ADK's tool-list cache populated, so
+                            # without this the re-warm is a cache read and the session we
+                            # just closed is never reopened. That stranded session is what
+                            # cost campaign 07 ~14% of its generations: the next real call
+                            # hangs for ADK's full 120s timeout, then the agent is scored
+                            # with no tools at all. silent-failures.md #12.
+                            if not _invalidate_tool_list_cache(tool):
+                                stranded += 1
                     warmed = await _prewarm_mcp_toolsets(root_agent, tag, max_retries=2)
                     refresh_elapsed = time.time() - gen_t0
                     print(
                         f"{tag}  Generation {gen}: re-warmed {warmed}/{mcp_count} in {refresh_elapsed:.1f}s",
                         flush=True,
                     )
+                    if stranded:
+                        # A re-warm that could not have reconnected. Loud, because the
+                        # symptom otherwise appears 120s later as an empty error message.
+                        print(
+                            f"{tag}  Generation {gen}: WARNING {stranded}/{mcp_count} toolset(s) "
+                            f"kept a tool-list cache across close() — their sessions may be "
+                            f"stranded and the agent may be scored without tools",
+                            flush=True,
+                        )
                 else:
                     print(f"{tag}  Generation {gen}: evaluating candidate...", flush=True)
 
