@@ -817,12 +817,87 @@ Until then, treat a campaign arm's tool-use scores as carrying roughly a
 **10% contamination rate**, and grep both wordings -- `will run without the
 tools` and `Failed to get tools from toolset` -- when reading any optimize run.
 
+## 13. Merging to main rewrote a running campaign's pipeline specs
+
+**2026-09-09. Cost: two campaign-07 arms and about two hours. Caught before
+batch 2 sent three more.**
+
+Campaign 07's driver was watching batch 1. Three PRs merged to `main` at 01:44,
+one of them adding 138 lines to `wrangler/pipeline/components.py`. At 02:35 the
+driver submitted the next two arms, and both came back with **pipeline specs in
+which `exec-generate-analysis` contained the source of `redeploy_single_agent`**:
+
+```
+AttributeError: module 'ephemeral_component' has no attribute 'generate_analysis'
+```
+
+`c07-ctrl-sonnet5` failed at analysis after every measurement stage had
+succeeded. `c07-pro` was cancelled nine hours short of the same certain failure.
+
+### The mechanism
+
+`dag.py:_make_heavy_components` rebuilds five components with
+`dsl.component(...)(func.python_func)`, and KFP calls `inspect.getsource()` on
+each one. `inspect.getsource`:
+
+- reads the file **from disk**, but
+- locates the function by `__code__.co_firstlineno`, captured **at import time**
+
+The driver imported `components.py` at 01:04. The merge shifted every function
+after `optimize_single_agent` down by 138 lines. At 02:35 `inspect` read the new
+file at the old offsets and returned whatever now lived there.
+
+**Nothing was wrong with the code.** Both the pre-merge and post-merge trees
+compile correct specs; a *fresh* process was verified to produce 9 executors
+with 0 mismatches. Only a process that imported the file before the edit and
+compiled after it produces this.
+
+### Why the usual precautions missed it
+
+The change was developed in a git worktree precisely so the main tree would stay
+stable for the driver. That protects the **code tarball**, which `submit()`
+builds from the working directory. It does not protect the **pipeline spec**,
+which is compiled in-process from already-imported modules against the file on
+disk. Two different reads of the same tree, and only one of them was considered.
+
+Before merging, the checks made were: does this void a KFP cache hit (yes,
+accepted), and does it move the image tag (no). Neither asks what else a live
+driver re-reads from disk.
+
+### Rules
+
+- **After any merge that touches `wrangler/pipeline/`, restart the campaign
+  driver** before it submits again. A running driver's spec compilation is only
+  correct for the tree it imported.
+- **Docs-only merges are safe.** So are merges to files no component's
+  `python_func` lives in. The hazard is specifically `components.py` and
+  `dag.py`.
+- **Verify the spec, not just the compile.** The check that found this reads
+  the submitted job's own spec and asserts each executor defines the function it
+  claims:
+
+  ```python
+  execs = dict(job.gca_resource.pipeline_spec)["deploymentSpec"]["executors"]
+  # for each: re.findall(r"^def (\w+)\(", command_text, re.M) must contain
+  # the name implied by the executor key
+  ```
+
+  Compiling locally is not the same test -- a fresh process always compiles
+  cleanly, which is exactly why this was invisible until the spec was read back
+  off the submitted job.
+
+### What survived
+
+Everything measured. Stage artifacts are written per-stage to GCS, so the
+control arm's `deploy` and `eval_before` were already durable and its
+`eval-single-agent-3` had succeeded before analysis died. Only reports and
+wall-clock were lost -- the same property that made the 2026-09-02 floor
+recoverable from a run whose analysis stage failed.
+
 ## 14. A resubmission overwrites its predecessor's results, in place
 
 **Found:** 2026-09-09, while assembling campaign 07's first calibrated result.
 **Status:** open. Nothing detects it; the loss is silent and total.
-**Numbering:** #13 is the spec-corruption entry added in PR #54; if that lands
-after this one, renumber rather than reusing.
 
 `run_id` is a hash of manifest name + agent module + eval data + pair ids. That
 determinism is deliberate and correct: it is what lets KFP hit its cache across

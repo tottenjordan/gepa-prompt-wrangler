@@ -226,6 +226,16 @@ Required in `.env`:
 - `GOOGLE_CLOUD_PROJECT`, `GOOGLE_CLOUD_LOCATION=global`
 - `GOOGLE_GENAI_USE_VERTEXAI=1`
 
+**`GOOGLE_GENAI_USE_ENTERPRISE` is not required, and it is a trap for API-key clients.**
+Nothing in `wrangler/` reads it, but `.env` sets it to `1` and `google-genai` treats it as a
+second, independent way of saying *use Vertex*. So a child process that inherits this
+environment routes an API key to `aiplatform.googleapis.com` and gets
+`401 — API keys are not supported by this API`, **even with `GOOGLE_GENAI_USE_VERTEXAI`
+unset**. Anything authenticating with a key rather than ADC — PaperBanana, an MCP server
+launched from this directory — must set it to `0`. See
+[docs/notes/repo-traps.md](docs/notes/repo-traps.md); `reporting/charts.py` is already safe
+because it builds its subprocess env from scratch rather than copying ours.
+
 For multi-model agents: `SEARCH_MCP_SERVER`, `BOOKING_MCP_SERVER`, `EXPENSE_MCP_SERVER` (+ corresponding `_URL` variants for direct Cloud Run access).
 
 ## Important Conventions
@@ -537,3 +547,19 @@ gcloud logging read 'resource.type="aiplatform.googleapis.com/ReasoningEngine" A
 ```
 
 Known failure patterns are cataloged in `~/.claude/skills/inspect-vai-pipes/references/known-failures.md`.
+
+### Restart the campaign driver after merging to `wrangler/pipeline/`
+
+`submit()` builds the code tarball from the working directory, so a worktree
+keeps that safe. It does **not** keep the *pipeline spec* safe: the spec is
+compiled in-process from already-imported modules, and KFP's `inspect.getsource()`
+locates each component by its **import-time line number** while reading the file
+**from disk**.
+
+Merging 138 lines into `components.py` under a live driver on 2026-09-09 made it
+serialise `redeploy_single_agent`'s body under the name `generate_analysis`,
+killing one arm and dooming another nine hours ahead of the failure. Both trees
+compiled correctly in isolation; only the long-lived process was wrong. See
+[docs/notes/silent-failures.md](docs/notes/silent-failures.md) #13.
+
+Docs-only merges are safe. So is anything outside `components.py` and `dag.py`.

@@ -38,7 +38,24 @@ from wrangler.core.models import get_spec  # noqa: E402
 # Seconds between the two arms of a batch. The shared Gemini judge means their
 # optimize phases would otherwise collide; offsetting the starts keeps them out
 # of step. Eval-only campaigns do not need it, so they pass 0.
-OPTIMIZE_STAGGER = 90 * 60
+#
+# 40, not 90. Two reasons, and the second is the binding one.
+#
+# It never did what 90 implies: campaign 07's optimize ran 577 minutes, so a
+# 90-minute offset left two arms overlapping for ~8 of 9.6 hours. It
+# de-conflicted the first 16% and then they contended anyway -- 76 x HTTP 429
+# arrived *with* the stagger in place. See docs/notes/optimize-stagger.md.
+#
+# And a 90-minute sleep outlives an ADC access token. On 2026-09-09 the driver
+# slept through the expiry and its next submit died on
+# "Reauthentication is needed", killing the run between two arms of one batch.
+# 40 minutes keeps both submissions inside one token lifetime.
+#
+# This is a mitigation, not a fix. A driver that sleeps for hours will
+# eventually straddle a reauth however short each individual sleep is; the real
+# answer is refreshing credentials before each submit, or not holding state
+# across sleeps at all.
+OPTIMIZE_STAGGER = 40 * 60
 
 CAMPAIGNS: dict[str, list[tuple[str, ...]]] = {
     # Campaign 06 -- eval-only control arms. Paired by publisher at each
