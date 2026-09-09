@@ -6,58 +6,61 @@
 **Generated:** 2026-09-09 · **Corrected:** 2026-09-09, see *Correction* below.
 **Status:** campaign stopped after batch 1; 1 of 4 optimizing arms complete.
 
-![Per-metric deltas against their floor and against run-to-run spread](2026-09-09-c07-first-calibrated-result.png)
+![Deltas against both the noise floor and the run-to-run spread](2026-09-09-c07-first-calibrated-result.png)
 
 ## Correction
 
-An earlier version of this document reported **one metric improved and four regressed**,
-from an average delta of -0.0109. Those numbers came from a run of this manifest whose
-artifacts **no longer exist**: a second run of the same manifest overwrote them in place
-at 17:11 and 17:52 UTC the same day (silent-failures #14, which fired *again* while this
-document was being written).
+An earlier version reported **one metric improved and four regressed**, average -0.0109.
+Those numbers came from a run whose artifacts **no longer exist**: the next run of the same
+manifest overwrote them in place at 17:11 and 17:52 UTC the same day — silent-failures #14,
+firing again while the document describing it was being written.
 
-Nothing was wrong with the original reading of the run it described. But that run is
-unreproducible, and the artifacts a reader would check now say something materially
-different. This version reports the **surviving** run as primary and keeps the lost run as
-a second sample — which turns out to be the most useful thing in the whole result.
+The original reading was not wrong about the run it described. But that run is
+unreproducible, and the artifacts a reader checks now say something different. This version
+reports the **surviving** run as primary and keeps the lost run as a second sample, which
+turns out to be the most valuable thing here.
 
-Both runs share `eval_before` (2026-09-08 14:56, a KFP cache hit that was never rewritten),
-so they are directly comparable: same baseline, same seed, same model, same criteria, same
-budget. **Only `optimize` and `eval_after` differ, and they differ because GEPA's search is
-stochastic.** Both runs' artifacts are now archived under
+Both runs share `eval_before` (2026-09-08 14:56, a KFP cache hit never rewritten), so they
+are exactly comparable: same manifest, seed, model, criteria and budget, differing only in
+GEPA's stochastic search. Both are archived under
 `pipeline-runs/archive/run-8a5905dee0-2026-09-09/`.
 
 ## Headline
 
-**One result survives: `safety_v1`, +0.157.** Everything else is either inside its noise
-floor or inside the gap between two runs of the identical manifest.
+**Two results survive, and they point the same way.** `safety_v1` improved **+0.157** and
+`instruction_following_v1` regressed **-0.062**. Both clear their noise floor *and* the gap
+between the two runs; the other three do not.
 
-The control-arm floor is **not sufficient** to judge a prompt-optimization result. It is
-measured with the prompt held fixed, so it captures *evaluation* noise only. GEPA's search
-is itself stochastic, and on three of five metrics the run-to-run spread is **larger than
-the effect** — up to **12.3x the floor** on `hallucination_v1`.
+The pattern is not subtle once the holdout is marked: **GEPA improved a criterion it was
+scored on and degraded the one metric absent from its criteria.** The sampler config gates
+on safety, final-response-quality, tool-use and hallucination. `instruction_following_v1`
+is not among them, and it is the metric that reproducibly got worse.
 
-## Per-metric: the surviving run, against two different rulers
+That independently reproduces
+[2026-08-22](2026-08-22-first-optimization-sweep.md), which found the same thing and
+attributed it to instruction-following being a holdout GEPA never optimizes. Two campaigns,
+different models, same result.
 
-| metric | before | after | delta | floor | Δ/floor | run-to-run spread | spread/floor | verdict |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| `safety_v1` | 0.8063 | 0.9631 | **+0.1568** | 0.0417 | 3.8x | 0.0032 | 0.1x | **survives** |
-| `tool_use_quality_v1` | 0.9693 | 0.9898 | **+0.0205** | 0.0164 | 1.2x | 0.0750 | 4.6x | not reproducible |
-| `hallucination_v1` | 0.9414 | 0.9586 | **+0.0172** | 0.0077 | 2.2x | 0.0950 | 12.3x | not reproducible |
-| `final_response_quality_v1` | 0.8902 | 0.8843 | **-0.0059** | 0.0108 | 0.5x | 0.0250 | 2.3x | within floor |
-| `instruction_following_v1` | 0.8416 | 0.7801 | **-0.0615** | 0.0151 | 4.1x | 0.0167 | 1.1x | not reproducible |
+## Per-metric: judged against two rulers
 
-*Floor* is the concurrent control arm's own movement (larger of paired/unpaired — see
-Appendix). *Run-to-run spread* is |run A − run B| on `eval_after`. A delta only counts as a
-result if it clears **both**.
+A delta counts only if it exceeds **both** its noise floor (evaluation noise, from the
+concurrent control) and the run-to-run spread (optimizer noise, from the two runs).
 
-Average delta: **+0.0254** (surviving run) against **-0.0109** (lost run). The
-average is not a quantity worth reporting — the two runs disagree on its *sign*.
+| metric | in GEPA criteria? | before | after | delta | floor | run-to-run spread | verdict |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| `safety_v1` | criterion | 0.8063 | 0.9631 | **+0.1568** | 0.0417 | 0.0032 | **survives — improved** |
+| `tool_use_quality_v1` | criterion | 0.9693 | 0.9898 | **+0.0205** | 0.0164 | 0.0750 | swamped by run-to-run |
+| `hallucination_v1` | criterion | 0.9414 | 0.9586 | **+0.0172** | 0.0077 | 0.0950 | swamped by run-to-run |
+| `final_response_quality_v1` | criterion | 0.8902 | 0.8843 | **-0.0059** | 0.0108 | 0.0250 | within floor |
+| `instruction_following_v1` | **holdout** | 0.8416 | 0.7801 | **-0.0615** | 0.0151 | 0.0167 | **survives — regressed** |
 
-## The two runs, side by side
+Average delta: **+0.0254** here against **-0.0109** in the lost run. The two runs
+disagree on its *sign*, so the average is not worth reporting.
 
-Identical manifest, identical 78-character seed prompt, identical budget
-(`max_metric_calls: 600`), identical `num_runs: 3`, same cached `eval_before`.
+## Why the control arm is not enough
+
+Identical manifest, identical 78-character seed, identical budget (`max_metric_calls: 600`),
+identical `num_runs: 3`, shared cached `eval_before`:
 
 | metric | run A delta (lost) | run B delta (surviving) | spread | spread / floor |
 | --- | --- | --- | --- | --- |
@@ -67,47 +70,75 @@ Identical manifest, identical 78-character seed prompt, identical budget
 | `instruction_following_v1` | -0.0448 | -0.0615 | 0.0167 | 1.1x |
 | `safety_v1` | +0.1536 | +0.1568 | 0.0032 | 0.1x |
 
-The optimized prompts differ as much as the scores: **6,067 characters (run A) against
-3,873 (run B)**, from the same 78-character seed.
+On `hallucination_v1` the two runs differ by **12.3x the control-arm floor** — one says
+-0.078, the other +0.017. The optimized prompts differ as much: **6,067 characters against
+3,873**, from the same 78-character seed.
 
-`safety_v1` is the exception that makes the rest legible — the two runs agree to within
-0.0032, a tenth of its floor, on a +0.157 move. That is what a real effect looks like here.
-`hallucination_v1` moved -0.078 in one run and +0.017 in the other; reporting either as a
-finding would have been an artifact of which run happened to survive.
+The control arm holds the prompt fixed, so it measures *evaluation* noise. It cannot see
+optimizer variance, and here optimizer variance is the larger term on three of five metrics.
+`num_runs: 3` does not help either — it averages the evaluation of one optimized prompt, not
+the choice of prompt. **An optimizing arm needs a repeat.**
 
-**This is n=2.** Two runs bound the variation better than one does, but they do not measure
-it. The honest statement is that run-to-run variation on this configuration is *at least*
-this large, not that it is this large.
-
-## What this means for the method
-
-- **Every optimizing arm needs repeats, not just a control.** CLAUDE.md's rule — that a
-  sweep carries a control arm whose prompt does not change — is necessary and, on this
-  evidence, insufficient. A control bounds evaluation noise; it says nothing about the
-  optimizer's own variance, which is the larger term here.
-- **`num_runs: 3` does not address this.** It averages the *evaluation* of one optimized
-  prompt. It does not average over *which* prompt the search lands on.
-- **Reporting an average across metrics is actively misleading.** The two runs disagree on
-  its sign while agreeing closely on the one metric that actually moved.
+**This is n=2.** Two runs bound the variation; they do not measure it. The honest claim is
+that run-to-run variation is *at least* this large.
 
 ## Caveats
 
-- **Coverage.** eval_before 64/64; eval_after 63/64 (run B) and 62/64 (run A). The control
-  was clean at 64/64 on both sides, so the floor omits a source of error the arms have.
-- **~14% of GEPA's own generations scored a toolless agent.** The concurrent `c07-pro` arm
-  logs `will run without the tools` 16 times across 111 generations, and its internal
-  counter reports **zero** because it matches a different string (silent-failures #12).
-  `tool_use_quality_v1` should be read with that in mind on any arm.
-- **One control arm.** Campaign 06 ran four and found per-metric floors varying 3.4x
-  between them.
-- **`c07-pro` was still running** when this was written and would add a second model on the
-  same seed and criteria.
+- **Coverage.** eval_before 64/64; eval_after 63/64 (run B), 62/64 (run A). The control was
+  clean 64/64 both sides, so the floor omits a source of error the arms have.
+- **~14% of GEPA's generations scored a toolless agent.** The concurrent `c07-pro` arm logs
+  `will run without the tools` 16 times over 111 generations while its internal counter
+  reports **zero**, because the counter matches a different string (silent-failures #12).
+  Read `tool_use_quality_v1` accordingly — though here it is swamped by run-to-run spread
+  anyway.
+- **One control arm.** Campaign 06 ran four and saw per-metric floors vary 3.4x between them.
+- **`c07-pro` was still running** when this was written; a second model on the same seed and
+  criteria would test whether the holdout regression generalises.
 
 ## Appendix — `uv run wrangler floor run-70166a6bc8 --markdown`
 
-Verbatim, so the floor traces to a command rather than to a paste. The control arm's
-artifacts (written 14:03 and 14:28 UTC) were not affected by the overwrite.
+The control arm's artifacts (written 14:03 and 14:28 UTC) were not affected by the overwrite.
 
 ```
-(see wrangler floor run-70166a6bc8 --markdown)
+Reading 1 run(s) from gs://gepa-prompt-wrangler-staging-bucket-v1/pipeline-runs/
+Found 1 arm(s): c07-ctrl-sonnet5
+
+### Per-arm floors
+
+| arm | coverage before/after | n paired | scalar floor |
+| --- | --- | --- | --- |
+| c07-ctrl-sonnet5 | 100% / 100% | 64 | 0.0346 |
+
+### Per-metric, unpaired and paired
+
+Both, always. They disagree substantially, and reporting only the
+smaller flatters the pipeline while only the larger hides a real lever.
+
+| arm | metric | unpaired Δ | paired Δ |
+| --- | --- | --- | --- |
+| c07-ctrl-sonnet5 | safety_v1 | -0.0346 | -0.0417 |
+| c07-ctrl-sonnet5 | instruction_following_v1 | +0.0151 | +0.0085 |
+| c07-ctrl-sonnet5 | tool_use_quality_v1 | -0.0099 | -0.0164 |
+| c07-ctrl-sonnet5 | hallucination_v1 | -0.0077 | -0.0013 |
+| c07-ctrl-sonnet5 | final_response_quality_v1 | -0.0020 | -0.0108 |
+
+### Pooled floor, worst movement per metric
+
+| metric | floor |
+| --- | --- |
+| safety_v1 | 0.0346 |
+| instruction_following_v1 | 0.0151 |
+| tool_use_quality_v1 | 0.0099 |
+| hallucination_v1 | 0.0077 |
+| final_response_quality_v1 | 0.0020 |
+
+**Headline floor: 0.0346** (worst pooled metric).
+
+### Drift sign test
+
+1/1 arms drifted negative overall; consistent = **True**.
+
+The five metrics are not independent — all score the same responses via the same autorater — so the **arms** are the unit. With four arms, unanimity is 12.5% two-sided: suggestive, not conclusive.
+
+**On √n:** with only two `num_runs` levels this is a two-point comparison, not a fitted curve. Two points cannot distinguish √n from any other decreasing relationship; report the ratio, do not draw a line through it.
 ```

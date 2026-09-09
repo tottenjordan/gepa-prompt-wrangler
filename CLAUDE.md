@@ -320,9 +320,13 @@ For multi-model agents: `SEARCH_MCP_SERVER`, `BOOKING_MCP_SERVER`, `EXPENSE_MCP_
   bounds *evaluation* noise only. GEPA's search is stochastic, and on 2026-09-09 two runs
   of one manifest — same seed, model, criteria, budget, and a shared cached `eval_before` —
   produced `eval_after` scores differing by up to **12.3x the control-arm floor**, with
-  `hallucination_v1` moving -0.078 in one and +0.017 in the other. Only `safety_v1`
-  reproduced (+0.154 vs +0.157). So a delta must clear **both** the floor and the
-  run-to-run spread, which means an optimizing arm needs a **repeat**, not just a control.
+  `hallucination_v1` moving -0.078 in one and +0.017 in the other. Two of five metrics
+  reproduced: `safety_v1` (+0.154 vs +0.157) and `instruction_following_v1` (-0.045 vs
+  -0.062). So a delta must clear **both** the floor and the run-to-run spread, which means
+  an optimizing arm needs a **repeat**, not just a control. Note which one regressed:
+  `instruction_following_v1` is the metric *absent* from the sampler config's criteria, so
+  GEPA improved what it was scored on and degraded the holdout — reproducing the
+  2026-08-22 sweep's finding on a different model.
   `num_runs` does not help: it averages the evaluation of one optimized prompt, not the
   choice of prompt. Detail in
   [docs/analysis/2026-09-09-c07-first-calibrated-result.md](docs/analysis/2026-09-09-c07-first-calibrated-result.md).
