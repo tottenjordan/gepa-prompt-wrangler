@@ -893,3 +893,41 @@ control arm's `deploy` and `eval_before` were already durable and its
 `eval-single-agent-3` had succeeded before analysis died. Only reports and
 wall-clock were lost -- the same property that made the 2026-09-02 floor
 recoverable from a run whose analysis stage failed.
+
+## 14. A resubmission overwrites its predecessor's results, in place
+
+**Found:** 2026-09-09, while assembling campaign 07's first calibrated result.
+**Status:** open. Nothing detects it; the loss is silent and total.
+
+`run_id` is a hash of manifest name + agent module + eval data + pair ids. That
+determinism is deliberate and correct: it is what lets KFP hit its cache across
+resubmissions of the same manifest (CLAUDE.md, "Pipeline Caching").
+
+The GCS artifact prefix is keyed on the **same** value —
+`pipeline-runs/run-<run_id>/stages/<stage>/<pair>.json`. So two submissions of one
+manifest do not produce two result sets. The second writes over the first.
+
+Campaign 07 was submitted four times under `run-8a5905dee0` while recovering from
+the spec corruption in #13 above. Only the last one's artifacts exist. The
+**validation arm** — the arm the whole campaign was gated on — measured +0.156
+safety at 64/64 coverage from a 1,647-character prompt; that result is gone. What
+`docs/analysis/2026-09-09-c07-first-calibrated-result.md` reports is the 04:57
+run, which reached a 6,067-character prompt and 62/64 coverage. Same run id, same
+path, different experiment.
+
+**Why it is silent.** Every layer behaves correctly. The pipeline succeeds. The
+writes succeed. `gsutil ls` shows a complete, consistent, plausible result set with
+recent timestamps. There is no partial state to notice and no error to read. The
+only signal that anything was lost is remembering that an earlier run reported
+different numbers — and if nobody wrote them down, nothing did.
+
+**Why the obvious fix is wrong.** Making `run_id` unique per submission would fix
+the artifacts and destroy the cache: campaign 07's recovery depended on
+re-submitting and *hitting* the cached optimize stage, a ~7 hour saving. The two
+consumers want opposite things from the key. They should not share one — the cache
+key stays deterministic, and the artifact prefix gains a submission-scoped
+component (job id, or the timestamp already in the job name).
+
+**Until then:** before resubmitting a manifest whose earlier run produced results
+you care about, copy the prefix aside. `gsutil -m cp -r
+gs://$GCP_STAGING_BUCKET/pipeline-runs/run-<id> gs://$GCP_STAGING_BUCKET/pipeline-runs/archive/run-<id>-<date>`.
