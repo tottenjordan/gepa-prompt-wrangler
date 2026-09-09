@@ -220,6 +220,51 @@ environment still broke it. The fix is to build the subprocess env from scratch 
 `HOME`, `GOOGLE_API_KEY`, `IMAGE_MODEL`, `VLM_MODEL`), which is exactly what the working MCP
 server passes in its `~/.claude.json` env block. Result: 71s and a real render.
 
+### The "something else" is `GOOGLE_GENAI_USE_ENTERPRISE`
+
+**Named 2026-09-09.** `.env:17` sets `GOOGLE_GENAI_USE_ENTERPRISE=1`. `google-genai` reads
+it as a second, independent way of saying *use Vertex* — so unsetting
+`GOOGLE_GENAI_USE_VERTEXAI` changes nothing while this one survives. Measured on the same
+key and model, constructing the client exactly as PaperBanana does (`genai.Client(api_key=…)`,
+no explicit `vertexai=`):
+
+| `GOOGLE_GENAI_USE_ENTERPRISE` | resolved | endpoint |
+| --- | --- | --- |
+| `1` | `vertexai=True` | `aiplatform.googleapis.com` → 401, API keys not supported |
+| `0` / `false` / `""` | `vertexai=False` | `generativelanguage.googleapis.com` → OK |
+| unset | `vertexai=None` | falls through to the other signals |
+
+`0` is enough; the variable does not have to be absent.
+
+It appears **nowhere in the repo's code, CLAUDE.md or `.env.example`** — only in a
+developer's `.env`, from which `load_dotenv()` puts it in every child process. Nothing here
+reads it. Its entire observable effect is to break API-key clients.
+
+Two consequences worth carrying:
+
+- **`charts.py` is already immune** — it builds the subprocess env from scratch, so it never
+  inherits this. The trap is live for anything that *does* inherit: an MCP server launched
+  from this directory, a `uv run` one-off, a shell script.
+- **ADC is not an escape hatch.** PaperBanana 0.3.0 cannot use Vertex at all:
+  `providers/registry.py:_validate_api_key` raises on an empty `GOOGLE_API_KEY` before any
+  client is built, but `google-genai` only reaches ADC when `api_key is None`. The gate
+  requires the variable set; the transport requires it unset. There is no value satisfying
+  both, and `vertexai` appears nowhere in the package. An AI Studio key is the only option.
+
+### Corrections to the model notes above
+
+**Checked 2026-09-09.** The defaults are still `gemini-3-pro-image-preview` (its
+`core/config.py:69`, aliased `IMAGE_MODEL`) and `gemini-2.5-flash`. Two refinements:
+
+- **`IMAGE_MODEL` does not affect plots.** A `paperbanana plot` run reports
+  `image_provider: none`, `image_model: dummy`, `num_image_calls: 0` — the VLM writes
+  matplotlib and critiques the render. `IMAGE_MODEL` matters only for `generate_diagram`.
+  So on the chart path, `VLM_MODEL` is the only lever that does anything.
+- **The reported cost is not real.** `lookup_vlm_price` / `lookup_image_price` prefix-match
+  against a table holding neither `gemini-3.5-flash` nor any non-`-preview` image model, so
+  both log `Unknown … pricing` and the run prints `$0.0000`. A real 6-call plot run reports
+  zero.
+
 Three smaller things found alongside it, all in `wrangler/reporting/charts.py`:
 
 - **PaperBanana's own model defaults are the expensive ones** — `gemini-3-pro-image-preview`

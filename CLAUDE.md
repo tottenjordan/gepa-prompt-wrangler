@@ -226,6 +226,16 @@ Required in `.env`:
 - `GOOGLE_CLOUD_PROJECT`, `GOOGLE_CLOUD_LOCATION=global`
 - `GOOGLE_GENAI_USE_VERTEXAI=1`
 
+**`GOOGLE_GENAI_USE_ENTERPRISE` is not required, and it is a trap for API-key clients.**
+Nothing in `wrangler/` reads it, but `.env` sets it to `1` and `google-genai` treats it as a
+second, independent way of saying *use Vertex*. So a child process that inherits this
+environment routes an API key to `aiplatform.googleapis.com` and gets
+`401 — API keys are not supported by this API`, **even with `GOOGLE_GENAI_USE_VERTEXAI`
+unset**. Anything authenticating with a key rather than ADC — PaperBanana, an MCP server
+launched from this directory — must set it to `0`. See
+[docs/notes/repo-traps.md](docs/notes/repo-traps.md); `reporting/charts.py` is already safe
+because it builds its subprocess env from scratch rather than copying ours.
+
 For multi-model agents: `SEARCH_MCP_SERVER`, `BOOKING_MCP_SERVER`, `EXPENSE_MCP_SERVER` (+ corresponding `_URL` variants for direct Cloud Run access).
 
 ## Important Conventions
