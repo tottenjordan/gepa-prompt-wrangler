@@ -33,7 +33,7 @@ labels:
 
 pipeline:
   secret_id: wrangler-agent-env
-  cache_bust: "c07-v1"
+  cache_bust: "c07-v2"
   # 600, not 800. Per-arm arithmetic: deploy 0.3h + eval 1.5h + optimize ~7h +
   # redeploy 0.3h + eval 1.5h = ~10.6h, which fits a night. 800 would not.
   max_metric_calls: 600
