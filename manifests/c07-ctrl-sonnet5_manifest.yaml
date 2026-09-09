@@ -35,7 +35,7 @@ labels:
 
 pipeline:
   secret_id: wrangler-agent-env
-  cache_bust: "c07-v1"
+  cache_bust: "c07-v2"
   # No optimize stage: this arm exists to measure what an UNCHANGED prompt
   # scores twice, under the same load as the arms it calibrates.
   skip_optimize: true
