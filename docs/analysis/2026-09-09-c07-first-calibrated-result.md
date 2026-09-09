@@ -8,11 +8,15 @@ Campaign 07 was stopped after batch 1.
 
 ![Per-metric deltas against their own noise floors](2026-09-09-c07-first-calibrated-result.png)
 
-<sub>Figure built with matplotlib, not PaperBanana, against the repo convention:
+<sub>Figure built with matplotlib, not PaperBanana, against the repo convention.
 `paperbanana.generate_plot` failed three times on 2026-09-09 with
-`RetryError[... ClientError]`, including on a minimal request with refinement and
-captioning disabled, so the failure is the service rather than the request. Redraw with
-`uv run python scripts/plot_c07_calibrated_result.py`; replace when PaperBanana is back.</sub>
+`RetryError[... ClientError]`. That is **a credential problem, not an outage**:
+PaperBanana has no Vertex/ADC path (`show-config` offers only `*_api_key`) and calls the
+Generative Language API with `GOOGLE_API_KEY`, which returns `401 UNAUTHENTICATED —
+API keys are not supported by this API`. `.env` sets `GOOGLE_API_KEY` and
+`GEMINI_API_KEY` to the same value, and it is not an AI Studio key. Redraw with
+`uv run python scripts/plot_c07_calibrated_result.py`; switch back to PaperBanana once a
+valid AI Studio key is available.</sub>
 
 ## Headline
 

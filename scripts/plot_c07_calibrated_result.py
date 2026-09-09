@@ -6,9 +6,11 @@ docs/analysis/2026-09-09-c07-first-calibrated-result.md, and the GCS artifacts t
 came from were later overwritten (see that file's "run_id does not uniquely identify
 a run"). Re-reading them from the bucket would silently redraw a different run.
 
-Uses matplotlib against the repo's PaperBanana convention -- paperbanana.generate_plot
-failed three times on 2026-09-09 with RetryError[...ClientError], including on a
-minimal request, so the failure was the service. Prefer PaperBanana when it is back.
+Uses matplotlib against the repo's PaperBanana convention. paperbanana.generate_plot
+failed three times on 2026-09-09 with RetryError[...ClientError] -- a credential
+problem, not an outage. PaperBanana has no Vertex/ADC path and calls the Generative
+Language API with GOOGLE_API_KEY; that key returns 401 UNAUTHENTICATED ("API keys are
+not supported by this API"). Prefer PaperBanana once a valid AI Studio key is set.
 
     uv run python scripts/plot_c07_calibrated_result.py
 """
