@@ -66,7 +66,12 @@ from .analysis import (
 #
 #    which is precisely the ClientError the planner retried three times. Popping
 #    just that one was still not enough, so we pass only what the working MCP
-#    server passes. CLAUDE.md carries the mirror-image rule for the pipeline (pop
+#    server passes. The "not enough" was identified 2026-09-09:
+#    `GOOGLE_GENAI_USE_ENTERPRISE=1` in .env, which google-genai reads as a
+#    second, independent way of saying "use Vertex". Building the env from
+#    scratch already excludes it -- do not switch back to os.environ.copy() and
+#    a pop-list, because that list would now need two entries and the next
+#    signal google-genai adds would be a third. CLAUDE.md carries the mirror-image rule for the pipeline (pop
 #    GOOGLE_API_KEY so it cannot override Vertex ADC): the two credential styles
 #    are mutually exclusive, and this process needs the other one.
 _PB_TIMEOUT = 300
