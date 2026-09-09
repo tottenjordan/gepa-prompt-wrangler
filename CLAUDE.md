@@ -316,8 +316,21 @@ For multi-model agents: `SEARCH_MCP_SERVER`, `BOOKING_MCP_SERVER`, `EXPENSE_MCP_
   gate on the first attempt, which is a ~9% event at the measured 55% healthy rate.
   These floors likely sit at the optimistic end.
 
-  Do not substitute a repeat of the same arm, and do not reuse a floor measured on an
-  earlier run — the dropout that generates the noise varies with load and with how many
+  **A control arm is necessary and not sufficient.** It holds the prompt fixed, so it
+  bounds *evaluation* noise only. GEPA's search is stochastic, and on 2026-09-09 two runs
+  of one manifest — same seed, model, criteria, budget, and a shared cached `eval_before` —
+  produced `eval_after` scores differing by up to **12.3x the control-arm floor**, with
+  `hallucination_v1` moving -0.078 in one and +0.017 in the other. Only `safety_v1`
+  reproduced (+0.154 vs +0.157). So a delta must clear **both** the floor and the
+  run-to-run spread, which means an optimizing arm needs a **repeat**, not just a control.
+  `num_runs` does not help: it averages the evaluation of one optimized prompt, not the
+  choice of prompt. Detail in
+  [docs/analysis/2026-09-09-c07-first-calibrated-result.md](docs/analysis/2026-09-09-c07-first-calibrated-result.md).
+  That comparison exists only by accident — see silent-failures #14, which destroyed one of
+  the two runs and would have hidden the disagreement entirely.
+
+  Do not substitute a repeat of the same arm *for the control*, and do not reuse a floor
+  measured on an earlier run — the dropout that generates the noise varies with load and with how many
   arms run at once. See
   [docs/analysis/2026-08-22-first-optimization-sweep.md](docs/analysis/2026-08-22-first-optimization-sweep.md).
 
