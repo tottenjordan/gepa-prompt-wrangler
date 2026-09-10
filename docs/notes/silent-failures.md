@@ -978,6 +978,31 @@ consumers want opposite things from the key. They should not share one — the c
 key stays deterministic, and the artifact prefix gains a submission-scoped
 component (job id, or the timestamp already in the job name).
 
+### It fired again the same day, during the write-up
+
+**2026-09-09.** While `docs/analysis/2026-09-09-c07-first-calibrated-result.md` was being
+written from `run-8a5905dee0`, the *next* `c07-sonnet5` run finished and overwrote the
+artifacts the document was quoting — `optimize` at 17:11 UTC, `eval_after` at 17:52. The
+analysis had to be corrected within the hour.
+
+That second occurrence is worth more than the first, because it produced the comparison the
+project did not otherwise have. `eval_before` was a cache hit and was **not** rewritten, so
+the two runs share a baseline exactly: same manifest, same seed, same model, same criteria,
+same budget, differing only in GEPA's stochastic search. Their `eval_after` scores differ by
+up to **12.3x the control-arm noise floor**:
+
+| metric | run A delta | run B delta | spread / floor |
+| --- | --- | --- | --- |
+| `hallucination_v1` | -0.0778 | +0.0172 | 12.3x |
+| `tool_use_quality_v1` | -0.0545 | +0.0205 | 4.6x |
+| `final_response_quality_v1` | -0.0309 | -0.0059 | 2.3x |
+| `instruction_following_v1` | -0.0448 | -0.0615 | 1.1x |
+| `safety_v1` | +0.1536 | +0.1568 | 0.1x |
+
+So this is not only a data-loss bug. **Overwriting destroys the repeats that would tell us
+whether a result is real**, and the project has been one-run-per-arm partly because the
+storage layout makes a second run look like a correction rather than a sample.
+
 **Until then:** before resubmitting a manifest whose earlier run produced results
 you care about, copy the prefix aside. `gsutil -m cp -r
 gs://$GCP_STAGING_BUCKET/pipeline-runs/run-<id> gs://$GCP_STAGING_BUCKET/pipeline-runs/archive/run-<id>-<date>`.
