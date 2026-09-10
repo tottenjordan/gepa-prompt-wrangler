@@ -1,7 +1,9 @@
 # Resubmission: what it costs us, and what it could buy
 
-**Opened:** 2026-09-10. **Status:** investigation, not a decision. Nothing here has been
-implemented.
+**Opened:** 2026-09-10. **Status:** decided and implemented the same day — see
+[silent-failures.md](silent-failures.md) #14. The chosen fix is the one this note's
+question 1 pointed at: snapshot at submit time, keep the cache key alone. Kept as the
+record of how the decision was reached, including the case for waiting.
 
 **Scope.** What happens when the same manifest is submitted more than once — today it
 silently destroys the previous run's results — and whether fixing that is worth the work.
