@@ -802,8 +802,10 @@ produces the evidence they capture.
    `_report_mcp_server_health()` runs before teardown -- before `terminate()`,
    since afterwards every exit code is ours -- and dumps the tail of any that
    exited.
-3. ~~Decide whether the cause is a crash or CPU starvation.~~ **Neither. Solved
-   2026-09-09** from `c07-pro`'s logs — the first run to carry them.
+3. ~~Decide whether the cause is a crash or CPU starvation.~~ **Neither** — ruled out
+   2026-09-09 from `c07-pro`'s logs, the first run to carry them. A replacement cause
+   was proposed and shipped in PR #59, and **campaign 08 disproved it on 2026-09-10**.
+   See *The cache was not the cause* below. **Still open.**
 
 ### The cause: two mitigations that cancel each other
 
@@ -845,9 +847,40 @@ exists to survive the idle drop. Together they produce a refresh that closes ses
 cannot reopen them. CLAUDE.md's note that this is "not simply the documented cache-TTL fix
 being absent" was right, and understated: the cache TTL is *load-bearing in the failure*.
 
-**Fixed** in `optimizer.py:_invalidate_tool_list_cache`, called on each toolset straight
-after `close()`, with a loud warning if a toolset kept its cache anyway — because the
-symptom otherwise surfaces 120 s later as an empty error message.
+Shipped in PR #59 as `optimizer.py:_invalidate_tool_list_cache`, called on each toolset
+straight after `close()`, with a loud warning if a toolset kept its cache anyway.
+
+### The cache was not the cause — disproved 2026-09-10
+
+Campaign 08's validation arm ran with that fix in place. The fix works in the narrow sense
+that it does what it claims: the "kept a tool-list cache across close()" warning **never
+fires**, so invalidation succeeds on every toolset, every generation.
+
+And nothing changed.
+
+| run | fix present | `will run without the tools` | generations | rate |
+| --- | --- | --- | --- | --- |
+| `c07-pro` | no | 16 | 111 | 14% |
+| `c08-old-r1` | **yes** | 3 | 20 | **15%** |
+
+The tell is the line this note already flagged: `re-warmed 3/3 in 0.1s`, on **every one of
+20 generations**. If clearing the cache had forced a real reconnect the pre-warm would take
+seconds. It still takes a tenth of one, with the cache provably empty — so `get_tools()`
+was never reaching a dead session, and there was nothing for the cache to hide.
+
+The section above is therefore wrong about the mechanism. What survives it: the servers are
+healthy (3,626 x 200 OK, zero errors), the empty message is an argument-less `TimeoutError`,
+and all 17 of c07's hangs began 6-27 s after a re-warm. That last fact still points at the
+refresh — just not at the cache.
+
+**Next thing to try:** stop closing the sessions at all. The per-generation `close()` was
+written for a Cloud Run idle drop that CLAUDE.md already records as unreproducible, the
+optimize stage talks to *localhost* servers, and ADK 2.8.0 now carries its own
+`_begin_session_use`/`_end_session_use` guard against the idle sweep. The refresh may be
+solving a problem that no longer exists while causing one that does.
+
+**Leave PR #59 in place regardless.** Invalidating a cache after an explicit close is
+correct on its own terms, and the warning it added is how the next attempt gets measured.
 
 Two things this leaves behind:
 
