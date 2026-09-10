@@ -802,9 +802,59 @@ produces the evidence they capture.
    `_report_mcp_server_health()` runs before teardown -- before `terminate()`,
    since afterwards every exit code is ours -- and dumps the tail of any that
    exited.
-3. **Still open.** Decide whether the cause is a crash (restart it) or CPU
-   starvation (give the servers their own resources). This needs the logs from
-   step 1, so it waits for the first run that carries them.
+3. ~~Decide whether the cause is a crash or CPU starvation.~~ **Neither. Solved
+   2026-09-09** from `c07-pro`'s logs — the first run to carry them.
+
+### The cause: two mitigations that cancel each other
+
+The servers were never the problem. Across 864 KiB of log from the three of them:
+**3,626 x `200 OK`, 1,204 x `202 Accepted`, and zero HTTP errors.** No crash, no
+restart, one unrelated `ClientDisconnect`. The 379-388 `Session ... idle timeout`
+lines are the mcp library's 30-minute reaper and are far too slow to matter.
+
+The failure is entirely client-side, and the traceback names it:
+
+```
+File "google/adk/tools/mcp_tool/mcp_toolset.py", line 412, in _execute_with_session
+    return await asyncio.wait_for(coroutine_func(session), timeout=timeout_in_seconds)
+raise exceptions.TimeoutError() from exc
+TimeoutError
+```
+
+`TimeoutError()` is constructed with no arguments, which is why the operator sees
+`Failed to get tools from MCP server: ` with **nothing after the colon** — the empty
+cause that made this look mysterious for two days is just an argument-less exception.
+
+`timeout_in_seconds` is `MCP_TIMEOUT_SECONDS = 120.0`. Subtract it from each of the 17
+logged failures and every one of the hanging calls started **6-27 s after a session
+re-warm** — 17 of 17, no exceptions. So it *is* the refresh, and the mechanism is:
+
+1. `_refreshed_sample` calls `await tool.close()` on each toolset between generations.
+2. `close()` tears down the transport but **leaves `_tool_list_cache` populated** — the
+   cache lives on the toolset instance, and ADK does not clear it.
+3. The pre-warm immediately after is answered from that cache and returns without
+   reconnecting. This is why the log says `re-warmed 3/3 in 0.1s`: **0.1 s is not three
+   HTTP sessions, it is three dictionary reads.** The "re-warmed" line was reporting
+   success for work it had not done.
+4. The session stays closed. The next real call blocks 120 s, times out, and ADK hands
+   the agent zero tools. GEPA scores that candidate.
+
+Both mitigations are individually correct and documented. `tool_list_cache_ttl_seconds`
+exists so a transient failure does not cost an invocation its whole toolset; the close
+exists to survive the idle drop. Together they produce a refresh that closes sessions and
+cannot reopen them. CLAUDE.md's note that this is "not simply the documented cache-TTL fix
+being absent" was right, and understated: the cache TTL is *load-bearing in the failure*.
+
+**Fixed** in `optimizer.py:_invalidate_tool_list_cache`, called on each toolset straight
+after `close()`, with a loud warning if a toolset kept its cache anyway — because the
+symptom otherwise surfaces 120 s later as an empty error message.
+
+Two things this leaves behind:
+
+- **A `re-warmed N/N in 0.1s` line is a red flag, not a success.** Real reconnects take
+  seconds. If you see sub-second re-warms, the sessions are stranded.
+- **The 120 s timeout is worth revisiting separately.** A stranded session costs a full
+  two minutes of wall clock before anyone finds out, on a stage that runs ~9 hours.
 
 The delay was deliberate: the fix lives in `components.py`, KFP caches a
 component on its **function body hash** (CLAUDE.md, "Pipeline Caching"), and
@@ -927,6 +977,31 @@ re-submitting and *hitting* the cached optimize stage, a ~7 hour saving. The two
 consumers want opposite things from the key. They should not share one — the cache
 key stays deterministic, and the artifact prefix gains a submission-scoped
 component (job id, or the timestamp already in the job name).
+
+### It fired again the same day, during the write-up
+
+**2026-09-09.** While `docs/analysis/2026-09-09-c07-first-calibrated-result.md` was being
+written from `run-8a5905dee0`, the *next* `c07-sonnet5` run finished and overwrote the
+artifacts the document was quoting — `optimize` at 17:11 UTC, `eval_after` at 17:52. The
+analysis had to be corrected within the hour.
+
+That second occurrence is worth more than the first, because it produced the comparison the
+project did not otherwise have. `eval_before` was a cache hit and was **not** rewritten, so
+the two runs share a baseline exactly: same manifest, same seed, same model, same criteria,
+same budget, differing only in GEPA's stochastic search. Their `eval_after` scores differ by
+up to **12.3x the control-arm noise floor**:
+
+| metric | run A delta | run B delta | spread / floor |
+| --- | --- | --- | --- |
+| `hallucination_v1` | -0.0778 | +0.0172 | 12.3x |
+| `tool_use_quality_v1` | -0.0545 | +0.0205 | 4.6x |
+| `final_response_quality_v1` | -0.0309 | -0.0059 | 2.3x |
+| `instruction_following_v1` | -0.0448 | -0.0615 | 1.1x |
+| `safety_v1` | +0.1536 | +0.1568 | 0.1x |
+
+So this is not only a data-loss bug. **Overwriting destroys the repeats that would tell us
+whether a result is real**, and the project has been one-run-per-arm partly because the
+storage layout makes a second run look like a correction rather than a sample.
 
 **Until then:** before resubmitting a manifest whose earlier run produced results
 you care about, copy the prefix aside. `gsutil -m cp -r

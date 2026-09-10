@@ -1,204 +1,128 @@
 """Redraw the campaign 07 calibrated-result figure.
 
-Authored by PaperBanana (`paperbanana plot`, gemini-3.5-flash VLM +
-gemini-3.1-flash-image, 2 refinement iterations, 2026-09-09) and committed verbatim
-apart from the output path, so the published figure is reproducible without a second
-non-deterministic generation. Regenerate from scratch with the command recorded in
-docs/analysis/2026-09-09-c07-first-calibrated-result.md and the data file beside it.
+Authored by PaperBanana (`paperbanana plot`, gemini-3.5-flash VLM, 2 refinement
+iterations, 2026-09-09) and committed verbatim apart from the output path, so the
+published figure is reproducible without a second non-deterministic generation.
 
-Numbers are inlined because that is what PaperBanana emitted, and because the GCS
-artifacts they came from were overwritten by a later run sharing the same run_id
-prefix (silent-failures #14) -- re-reading the bucket would draw a different run.
+Encoding: both intervals are centred on **zero** and a bar must escape both to count.
+The thin whisker is the concurrent control arm's floor (evaluation noise); the orange
+band is |run A - run B| on eval_after (optimizer noise, from two runs of the identical
+manifest). Only safety_v1 and instruction_following_v1 clear both.
 
-Note the error-bar encoding: each is that metric's floor centred on **zero**, i.e. the
-interval a delta must escape to be a result, not uncertainty on the estimate.
+Numbers are inlined because the GCS artifacts behind them were overwritten in place by
+a later run sharing the same run_id prefix (silent-failures #14). Both runs are archived
+under pipeline-runs/archive/run-8a5905dee0-2026-09-09/.
 
     uv run python scripts/plot_c07_calibrated_result.py
 """
 
+import matplotlib.patches as mpatches
 import matplotlib.pyplot as plt
+import numpy as np
+from matplotlib.lines import Line2D
 
 # Define output path
 OUTPUT_PATH = "docs/analysis/2026-09-09-c07-first-calibrated-result.png"
 
-# Set up publication-quality style
+# Set global font styles to ensure a clean, modern sans-serif look
 plt.rcParams["font.family"] = "sans-serif"
-plt.rcParams["font.sans-serif"] = ["Helvetica", "Arial", "DejaVu Sans"]
+plt.rcParams["font.sans-serif"] = ["Helvetica", "Arial", "DejaVu Sans", "sans-serif"]
 plt.rcParams["text.usetex"] = False
 
-# Create figure with optimal dimensions for horizontal layout
+# Data
+metrics = [
+    "instruction_following_v1*",
+    "final_response_quality_v1",
+    "hallucination_v1",
+    "tool_use_quality_v1",
+    "safety_v1",
+]
+
+deltas = [-0.0615, -0.0059, 0.0172, 0.0205, 0.1568]
+noise_floors = [0.0151, 0.0108, 0.0077, 0.0164, 0.0417]
+run_to_runs = [0.0167, 0.0250, 0.0950, 0.0750, 0.0032]
+y_pos = np.arange(len(metrics))
+
+# Initialize figure
 fig, ax = plt.subplots(figsize=(10, 6), facecolor="#ffffff")
 ax.set_facecolor("#ffffff")
 
-# Set limits to comfortably accommodate all elements without clipping
-ax.set_xlim(-0.12, 0.18)
-ax.set_ylim(-0.6, 4.8)
+# Grid and reference lines
+ax.axvline(0.0, color="#757575", linestyle="--", linewidth=1.5, zorder=1)
 
-# Fine dotted vertical grid lines rendered behind the data (zorder=0)
-ax.set_xticks([-0.10, -0.05, 0, 0.05, 0.10, 0.15])
-ax.grid(True, axis="x", color="#e0e0e0", linestyle=":", linewidth=0.75, zorder=0)
+# X-axis configuration
+xticks = np.arange(-0.12, 0.181, 0.02)
+ax.set_xticks(xticks)
+ax.set_xticklabels([f"{x:.2f}" for x in xticks], fontsize=9, color="#212121")
+ax.grid(axis="x", color="#e0e0e0", linewidth=0.8, linestyle="--", zorder=0)
 
-# Shaded Scalar Floor Band (zorder=1)
-ax.axvspan(-0.0417, 0.0417, color="#eceff1", alpha=0.6, zorder=1)
+# Plot data elements
+for i, y in enumerate(y_pos):
+    delta = deltas[i]
+    noise = noise_floors[i]
+    r2r = run_to_runs[i]
 
-# Zero Line (zorder=2)
-ax.axvline(0, color="#424242", linestyle="--", linewidth=1.25, zorder=2)
+    # Determine bar color based on positive/negative delta
+    bar_color = "#2e7d32" if delta >= 0 else "#d32f2f"
 
-# Average Delta Line (zorder=3)
-ax.axvline(-0.0109, color="#0d47a1", linestyle="-", linewidth=2.0, zorder=3)
-
-# Data Coordinates
-metrics = [
-    "hallucination_v1",
-    "tool_use_quality_v1",
-    "instruction_following_v1",
-    "final_response_quality_v1",
-    "safety_v1",
-]
-y_coords = [0.0, 1.0, 2.0, 3.0, 4.0]
-deltas = [-0.0778, -0.0545, -0.0448, -0.0309, 0.1536]
-noise_floors = [0.0077, 0.0164, 0.0151, 0.0108, 0.0417]
-
-# Draw Bars (zorder=4)
-# safety_v1 (positive delta, solid forest green)
-ax.barh(
-    4.0, 0.1536, height=0.5, left=0, color="#1b5e20", edgecolor="#1a1a1a", linewidth=0.75, zorder=4
-)
-
-# Other metrics (negative deltas, crimson red with diagonal hatching)
-for y, d in zip(y_coords[:-1], deltas[:-1], strict=True):
+    # 1. Run-to-Run Spread Band (zorder=2)
+    # Rendered as a solid horizontal bar of height 0.3 centered at x=0
     ax.barh(
         y,
-        d,
-        height=0.5,
-        left=0,
-        color="#b71c1c",
-        hatch="//",
-        edgecolor="#1a1a1a",
-        linewidth=0.75,
-        zorder=4,
+        width=2 * r2r,
+        left=-r2r,
+        height=0.3,
+        color="#ff9800",
+        alpha=0.4,
+        edgecolor="#e65100",
+        linewidth=0.5,
+        zorder=2,
     )
 
-# Draw Symmetric Noise Floor Error Bars (zorder=5)
-ax.errorbar(
-    x=[0] * 5,
-    y=y_coords,
-    xerr=noise_floors,
-    fmt="none",
-    ecolor="#000000",
-    elinewidth=1.5,
-    capsize=6,
-    capthick=1.5,
-    zorder=5,
-)
+    # 2. Main Bar (zorder=3)
+    # Height of 0.5 leaves a clean 0.5 gap between adjacent bars
+    ax.barh(
+        y,
+        width=delta,
+        left=0,
+        height=0.5,
+        color=bar_color,
+        edgecolor="#1a1a1a",
+        linewidth=1.0,
+        zorder=3,
+    )
 
-# Text Annotations for Delta Over Floor (zorder=6)
-# safety_v1
-ax.text(
-    0.158,
-    4.0,
-    "3.7x floor",
-    color="#1b5e20",
-    fontsize=10,
-    fontweight="bold",
-    va="center",
-    ha="left",
-    zorder=6,
-)
-# final_response_quality_v1
-ax.text(
-    -0.035,
-    3.0,
-    "2.9x floor",
-    color="#b71c1c",
-    fontsize=10,
-    fontweight="bold",
-    va="center",
-    ha="right",
-    zorder=6,
-)
-# instruction_following_v1
-ax.text(
-    -0.049,
-    2.0,
-    "3.0x floor",
-    color="#b71c1c",
-    fontsize=10,
-    fontweight="bold",
-    va="center",
-    ha="right",
-    zorder=6,
-)
-# tool_use_quality_v1
-ax.text(
-    -0.059,
-    1.0,
-    "3.3x floor",
-    color="#b71c1c",
-    fontsize=10,
-    fontweight="bold",
-    va="center",
-    ha="right",
-    zorder=6,
-)
-# hallucination_v1
-ax.text(
-    -0.082,
-    0.0,
-    "10.1x floor",
-    color="#b71c1c",
-    fontsize=10,
-    fontweight="bold",
-    va="center",
-    ha="right",
-    zorder=6,
-)
+    # 3. Noise Floor Whisker (zorder=4)
+    # Horizontal line centered at x=0
+    ax.plot([-noise, noise], [y, y], color="#1a1a1a", linewidth=1.5, zorder=4)
+    # Flat vertical caps (height of 0.2 units: from y-0.1 to y+0.1)
+    ax.plot([-noise, -noise], [y - 0.1, y + 0.1], color="#1a1a1a", linewidth=1.5, zorder=4)
+    ax.plot([noise, noise], [y - 0.1, y + 0.1], color="#1a1a1a", linewidth=1.5, zorder=4)
 
-# Reference Line Labels (zorder=6)
-ax.text(
-    0.005,
-    4.6,
-    "scalar floor",
-    color="#546e7a",
-    fontsize=9,
-    style="italic",
-    va="center",
-    ha="left",
-    zorder=6,
-)
-ax.text(
-    -0.013,
-    4.6,
-    "average",
-    color="#0d47a1",
-    fontsize=9,
-    fontweight="bold",
-    va="center",
-    ha="right",
-    zorder=6,
-)
-
-# Spines (Open modern layout)
+# Spines & Borders (Open layout)
 ax.spines["top"].set_visible(False)
 ax.spines["right"].set_visible(False)
-ax.spines["left"].set_visible(False)
+ax.spines["left"].set_color("#212121")
+ax.spines["left"].set_linewidth(1.0)
 ax.spines["bottom"].set_color("#212121")
 ax.spines["bottom"].set_linewidth(1.0)
 
-# X-Axis Styling
-ax.set_xlabel(
-    "score delta (after minus before)", fontsize=12, fontweight="bold", color="#212121", labelpad=10
-)
-ax.tick_params(axis="x", colors="#212121", labelsize=10, direction="in")
+# Ticks styling
+ax.tick_params(axis="x", direction="in", colors="#212121", length=4)
+ax.tick_params(axis="y", left=False)  # Hide y-axis tick marks, keep labels
 
-# Y-Axis Styling
-ax.set_yticks(y_coords)
-ax.set_yticklabels(metrics, fontsize=11, color="#212121")
-ax.tick_params(axis="y", left=False)  # Hide y-ticks but keep labels
+# Y-axis limits and labels
+ax.set_yticks(y_pos)
+ax.set_yticklabels(metrics, fontsize=10, color="#212121")
+ax.set_ylim(-0.5, 4.8)
+ax.set_xlim(-0.12, 0.18)
 
-# Title (Top-left aligned, flush with the left edge of the Y-axis labels)
-ax.set_title(
-    "Every metric clears its own noise floor; the average clears none.",
+# Labels & Title
+ax.set_xlabel("score delta (after minus before)", fontsize=11, color="#424242", labelpad=8)
+
+# Left-aligned title for an editorial, modern aesthetic
+plt.title(
+    "Two results survive both rulers; the regression is the holdout metric.",
     fontsize=14,
     fontweight="bold",
     color="#212121",
@@ -206,5 +130,37 @@ ax.set_title(
     loc="left",
 )
 
-# Save the publication-quality figure
+# Legend
+# Custom handles to accurately represent the visual elements
+noise_handle = Line2D(
+    [], [], color="#1a1a1a", linewidth=1.5, marker="|", markersize=10, markeredgewidth=1.5
+)
+r2r_handle = mpatches.Patch(facecolor="#ff9800", alpha=0.4, edgecolor="#e65100", linewidth=0.5)
+
+ax.legend(
+    [noise_handle, r2r_handle],
+    ["Noise Floor", "Run-to-Run Spread"],
+    loc="upper right",
+    frameon=True,
+    facecolor="#ffffff",
+    edgecolor="#d0d0d0",
+    prop={"size": 9.5},
+)
+
+# Adjust layout to ensure footnote space
+plt.subplots_adjust(bottom=0.15)
+
+# Align footnote dynamically with the left spine of the plot
+bbox = ax.get_position()
+fig.text(
+    bbox.x0,
+    0.03,
+    "*not in GEPA criteria (holdout)",
+    fontsize=9,
+    color="#616161",
+    style="italic",
+    ha="left",
+)
+
+# Save the high-resolution figure
 plt.savefig(OUTPUT_PATH, dpi=300, bbox_inches="tight")

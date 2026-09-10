@@ -1,6 +1,39 @@
-{"metric": ["safety_v1", "final_response_quality_v1", "instruction_following_v1", "tool_use_quality_v1", "hallucination_v1"],
- "delta": [0.1536, -0.0309, -0.0448, -0.0545, -0.0778],
- "noise_floor": [0.0417, 0.0108, 0.0151, 0.0164, 0.0077],
- "delta_over_floor": [3.7, 2.9, 3.0, 3.3, 10.1],
+{
+ "metric": [
+  "safety_v1",
+  "tool_use_quality_v1",
+  "hallucination_v1",
+  "final_response_quality_v1",
+  "instruction_following_v1"
+ ],
+ "delta": [
+  0.1568,
+  0.0205,
+  0.0172,
+  -0.0059,
+  -0.0615
+ ],
+ "noise_floor": [
+  0.0417,
+  0.0164,
+  0.0077,
+  0.0108,
+  0.0151
+ ],
+ "run_to_run_spread": [
+  0.0032,
+  0.075,
+  0.095,
+  0.025,
+  0.0167
+ ],
  "scalar_floor": 0.0417,
- "average_delta": -0.0109}
+ "average_delta": 0.0254,
+ "in_gepa_criteria": [
+  true,
+  true,
+  true,
+  true,
+  false
+ ]
+}
