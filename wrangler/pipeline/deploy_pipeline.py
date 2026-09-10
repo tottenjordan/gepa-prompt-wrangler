@@ -18,6 +18,7 @@ load_dotenv(override=True)
 
 from ..core.config import disable_pyopenssl  # noqa: E402
 from ..core.models import DEFAULT_JUDGE_MODEL  # noqa: E402
+from .artifact_snapshot import snapshot_prior_run  # noqa: E402
 
 disable_pyopenssl()
 
@@ -343,12 +344,22 @@ def deploy_pipeline(
     image_uri = build_pipeline_image(project_id, location)
 
     # Step 2: Package code and upload to GCS (including manifest)
-    logger.info("Packaging code and uploading to GCS...")
-    package_and_upload_code(bucket_name, run_id, project_id)
-
+    #
+    # Preserve any prior run's artifacts FIRST. run_id is deterministic so KFP can cache,
+    # and the artifact prefix is keyed on the same value -- so a resubmission silently
+    # writes over its predecessor's results. Campaign 07 lost its validation arm that way
+    # (silent-failures #14). This runs client-side, ahead of every write, and touches no
+    # component on purpose: threading a per-submission id into the components would give
+    # each one a fresh input value and cost the cache that the resubmission is usually
+    # being made to hit.
     from google.cloud import storage as _storage
 
     _gcs = _storage.Client(project=project_id)
+    snapshot_prior_run(_gcs.bucket(bucket_name), run_id)
+
+    logger.info("Packaging code and uploading to GCS...")
+    package_and_upload_code(bucket_name, run_id, project_id)
+
     _gcs.bucket(bucket_name).blob(f"pipeline-runs/{run_id}/manifest.json").upload_from_string(
         manifest_json, content_type="application/json"
     )
