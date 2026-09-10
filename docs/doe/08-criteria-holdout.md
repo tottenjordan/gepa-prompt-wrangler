@@ -78,6 +78,37 @@ useful finding.
 0.017, the pre-registered threshold was too low and the answer is *unresolved*. Say that
 rather than re-deriving the bar from the data it is judging.
 
+## Known contamination, measured live on the validation arm
+
+**`tool_use_quality_v1` is contaminated in both conditions and is not interpretable in this
+campaign.** Recorded here before any results exist, so it cannot be discovered afterwards
+and argued about.
+
+The validation arm (`c08-old-r1`) logs `will run without the tools` **3 times in 20 scored
+generations — 15%**, against campaign 07's 16 in 111 (14%). A tool-using agent evaluated
+with an empty toolset scores near zero on tool use, and those candidates feed the objective
+GEPA is searching against.
+
+**PR #59 did not fix this.** That fix cleared ADK's tool-list cache after `close()` so the
+per-generation pre-warm would genuinely reconnect. It is running and doing what it claims —
+the "stranded cache" warning never fires, so invalidation succeeds on every toolset — but
+`re-warmed 3/3 in 0.1s` still appears on every generation, which is a cache-speed
+reconnect, and the failure rate is unchanged. So the tool-list cache was not the cause, the
+mechanism in silent-failures #12 is wrong, and #12 is still open.
+
+Why this does not invalidate the campaign:
+
+- **It is symmetric.** Both conditions run the same agent against the same MCP servers with
+  the same budget, so the contamination applies equally and cannot manufacture a difference
+  between them.
+- **The primary outcome does not depend on it.** The question is
+  Δ`instruction_following_v1`, and the secondary is Δ`safety_v1`.
+- Campaign 07 reached the same conclusion for the same reason, and its two surviving
+  results were safety and instruction-following — not tool use.
+
+**Do not report a tool-use result from this campaign in either direction**, including "no
+change". At 15% contamination the metric measures MCP availability, not the prompt.
+
 ## Cost
 
 ~44 h wall clock, ~$4. Optimize is ~87% of it; the binding constraint is judge RPM and
