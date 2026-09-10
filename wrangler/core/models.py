@@ -410,6 +410,20 @@ def get_batch_config(model: str) -> tuple[int, float, int]:
 
 GLOBAL_LOCATION = "global"
 
+# The one regional literal in the package. Named FALLBACK_REGION, not DEFAULT_REGION:
+# in this module a `DEFAULT_*` string means a model role, and `test_models.py` requires
+# every one of them to be a registered model with a retirement date. This names a
+# location, and it is a *fallback* for when `GCP_REGION` is unset rather than a chosen
+# default -- so the more accurate name is also the one that keeps that guard strict. Everything else must reach a region
+# through `GCP_REGION` or `model_location()`, because a stray region string is not a
+# style problem here -- Gemini 3.x and Claude are *not servable from a region*, and
+# sending one there fails with `Publisher Model .../locations/us-central1/... is not
+# servable in region us-central1`. `tests/test_region_literals.py` enforces it.
+#
+# `GLOBAL_LOCATION` above is deliberately *not* covered by that guard: "global" is the
+# correct endpoint for those families, not a hardcoded region.
+FALLBACK_REGION = "us-central1"
+
 
 def is_regional_model(model_str: str) -> bool:
     """True if `model_str` is served from a regional Vertex AI endpoint."""
@@ -439,7 +453,7 @@ def model_location(model_str: str) -> str:
     object*, and this function is the single source of that decision.
     """
     if is_regional_model(model_str):
-        return os.environ.get("GCP_REGION", "us-central1")
+        return os.environ.get("GCP_REGION", FALLBACK_REGION)
     return GLOBAL_LOCATION
 
 

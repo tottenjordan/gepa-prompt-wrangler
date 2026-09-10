@@ -10,6 +10,7 @@ from .core.models import (
     DEFAULT_AGENT_MODEL,
     DEFAULT_AGENT_MODEL_ALT,
     DEFAULT_MANIFEST_JUDGE_MODEL,
+    FALLBACK_REGION,
 )
 
 
@@ -847,7 +848,7 @@ def pipeline_status(job_id: str):
     from google.cloud import aiplatform
 
     project_id = os.environ.get("GCP_PROJECT_ID", "")
-    location = os.environ.get("GCP_REGION", "us-central1")
+    location = os.environ.get("GCP_REGION", FALLBACK_REGION)
 
     aiplatform.init(project=project_id, location=location)
     job = aiplatform.PipelineJob.get(resource_name=job_id)

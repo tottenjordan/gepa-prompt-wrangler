@@ -7,6 +7,7 @@ from dotenv import load_dotenv
 from .models import (
     BLENDED_INPUT_WEIGHT,
     BLENDED_OUTPUT_WEIGHT,
+    FALLBACK_REGION,
     MODELS,
     blended_cost,
     get_batch_config,
@@ -42,7 +43,7 @@ for _key_var in ("GOOGLE_API_KEY", "GEMINI_API_KEY"):
 
 # --- GCP Settings ---
 GCP_PROJECT_ID = os.environ.get("GCP_PROJECT_ID", "")
-GCP_REGION = os.environ.get("GCP_REGION", "us-central1")
+GCP_REGION = os.environ.get("GCP_REGION", FALLBACK_REGION)
 GCP_STAGING_BUCKET = os.environ.get("GCP_STAGING_BUCKET", f"{GCP_PROJECT_ID}-wrangler-staging")
 
 # --- Outputs ---
