@@ -17,7 +17,7 @@ load_dotenv(override=True)
 # that read GCP config at import time.
 
 from ..core.config import disable_pyopenssl  # noqa: E402
-from ..core.models import DEFAULT_JUDGE_MODEL  # noqa: E402
+from ..core.models import DEFAULT_JUDGE_MODEL, FALLBACK_REGION  # noqa: E402
 from .artifact_snapshot import snapshot_prior_run  # noqa: E402
 
 disable_pyopenssl()
@@ -90,7 +90,7 @@ def _image_exists(image_uri: str) -> bool:
 
 def build_pipeline_image(
     project_id: str,
-    location: str = "us-central1",
+    location: str = FALLBACK_REGION,
     force: bool = False,
 ) -> str:
     """Build and push the pipeline base image via Cloud Build.
@@ -280,7 +280,7 @@ def deploy_pipeline(
         pipeline_config = raw.get("pipeline", {})
 
     project_id = os.getenv("GCP_PROJECT_ID", "")
-    location = pipeline_config.get("region", os.getenv("GCP_REGION", "us-central1"))
+    location = pipeline_config.get("region", os.getenv("GCP_REGION", FALLBACK_REGION))
     bucket_name = pipeline_config.get(
         "bucket", os.getenv("GCP_STAGING_BUCKET", f"{project_id}-wrangler-staging")
     )

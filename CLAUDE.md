@@ -132,6 +132,18 @@ env var and can serve it back regionally regardless of the deployment config. In
 `GOOGLE_CLOUD_LOCATION=global` stays in `.env` as the fallback for code paths that bypass
 `resolve_model()`. Setting it to `${GCP_REGION}` breaks every Claude and Gemini 3.x agent.
 
+**No regional literal anywhere in `wrangler/` except one.** `core/models.py:FALLBACK_REGION`
+is the sole place a string like `us-central1` may appear; everything else reaches a region
+through `GCP_REGION`, `FALLBACK_REGION`, or `model_location()`.
+`tests/test_region_literals.py` enforces it by AST, so prose may name a region but code may
+not — the same rule as the model-id guard.
+
+`"global"` is **deliberately not covered**. It is the correct endpoint for Gemini 3.x and
+Claude, not a hardcoded region, and a guard that flagged it would point at the ten call
+sites that are right. Note the constant is `FALLBACK_REGION` rather than `DEFAULT_REGION`:
+in that module a `DEFAULT_*` string means a *model role* and must be a registered model with
+a retirement date, which `test_models.py` enforces.
+
 Both `wrangler/core/models.py` and `examples/multi_model_agents/config.py` implement this —
 keep them in sync (see "Two config.py Files" below).
 
