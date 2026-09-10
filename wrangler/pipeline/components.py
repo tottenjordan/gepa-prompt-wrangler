@@ -1011,6 +1011,7 @@ def generate_analysis(
 
     from wrangler.core.converter import load_eval_file
     from wrangler.reporting.reporter import generate_report
+    from wrangler.reporting.stage_economics import build_stage_usage
 
     def _summed_usage(*stages):
         """Total tokens across an arm's stages. {} when nothing recorded any.
@@ -1094,6 +1095,11 @@ def generate_analysis(
             # Inlined rather than imported: KFP serializes this body alone, so
             # a module-level helper in components.py is absent at runtime.
             "token_usage": _summed_usage(eval_before, optimize_data, eval_after),
+            # ...and the same numbers *unsummed*, which is the only way to say
+            # which stage spent them. On c07-pro optimize was 87% of the wall
+            # clock but 36% of the dollars; the sum cannot express that, and the
+            # clock is the constraint that actually bounds a campaign.
+            "stage_usage": build_stage_usage(eval_before, optimize_data, eval_after),
         }
 
         for stage_data in [eval_before, optimize_data, eval_after]:

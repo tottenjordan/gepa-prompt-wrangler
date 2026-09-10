@@ -196,6 +196,37 @@ path. Documented in README's Options block as of 2026-08-20.
 scaffolding, but a generated evalset will run and score against `"TODO"` goldens if
 nobody fills them in. Nothing validates that they were.
 
+## The money and the clock are in different stages
+
+**Measured 2026-09-10** on campaign 07's `c07-pro` run, from the per-stage artifacts:
+
+| stage | spend | % of $ | wall clock | % of clock |
+| --- | --- | --- | --- | --- |
+| eval_before | $0.4213 | 47% | 41m 38s | 7% |
+| optimize | $0.3284 | 36% | **8h 32m** | **87%** |
+| eval_after | $0.1531 | 17% | 34m 12s | 6% |
+
+**Optimize is 87% of the wall clock and 36% of the dollars.** Reasoning about "what a
+campaign costs" in dollars therefore points at the wrong stage. At **$0.90 a run** the
+money is close to irrelevant; what bounds a campaign is wall clock and judge RPM, and the
+lever on wall clock is `optimize`, not eval.
+
+Two things fall out of the same numbers:
+
+- **Output is 87% of tokens** (9,750 in vs 66,449 out), and a larger share of cost. Response
+  verbosity is the cost lever; prompt length essentially is not. Optimising a prompt to be
+  shorter saves almost nothing.
+- **`eval_before` cost 2.8x `eval_after`** ($0.4213 vs $0.1531) on identical inputs, because
+  the optimized prompt produced far shorter responses — 22,754 output tokens against 7,855.
+  So GEPA measurably changed verbosity here, which is invisible in the scores and shows up
+  only in the token bill.
+
+All figures carry `is_estimate: true`; they are estimates, not metered billing.
+
+Rendered per run by `_stage_economics_section` in `reporting/reporter.py`. Before that the
+three stages were summed before the reporter saw them, so none of this was recoverable
+from a finished run.
+
 ## PaperBanana fails if you hand it this repo's environment
 
 **Verified 2026-08-21.** Every chart in every report had been matplotlib, not PaperBanana,

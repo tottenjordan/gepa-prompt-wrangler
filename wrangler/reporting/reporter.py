@@ -17,6 +17,7 @@ from .analysis import (
     normalize_agent_keys,
 )
 from .analyzer import classify_deltas, measure_noise_floor_per_metric
+from .stage_economics import STAGE_ORDER, stage_totals
 
 REPORTS_DIR = Path("outputs/reports")
 CHARTS_DIR = REPORTS_DIR / "charts"
@@ -611,6 +612,171 @@ def _cost_benefit_section(results: dict, ordered: list[str]) -> list[str]:
         "look cheap on one and dear on the other, which is the point of showing both. "
         "`n/a` means no token usage was recorded, not that the run was free.*\n"
     )
+    lines.extend(_cost_per_surviving_point(results, ordered))
+    return lines
+
+
+def _cost_per_surviving_point(results: dict, ordered: list[str]) -> list[str]:
+    """Price only the movement that cleared the noise.
+
+    The `$/quality pt` column above prices the raw delta, which costs noise at the
+    same rate as signal. Campaign 07 measured one metric moving 12.3x its own floor
+    between two runs of the *same manifest*, so an uncalibrated delta is not a thing
+    worth costing.
+
+    Same floor machinery as `_per_metric_verdict_lines`, deliberately: one source of
+    truth for what "survives" means, including the subtle rule that a floor measured
+    at exactly 0.0 is uncalibrated rather than infinitely sensitive.
+
+    Most runs here have one arm and their control lives in a *different* run, so the
+    honest output is usually `uncalibrated`. That is the point -- a plausible number
+    with no floor behind it is the failure this table exists to prevent.
+    """
+    arms = [_ArmView(n, results[n]) for n in ordered]
+    floors = measure_noise_floor_per_metric(arms)
+    if floors:
+        floors = {m: f for m, f in floors.items() if f > 0.0} or None
+    real = [a for a in arms if not a.is_control]
+    if not real:
+        return []
+
+    lines = ["", "### Cost per *surviving* quality point", ""]
+    if floors is None:
+        lines.append(
+            "**Uncalibrated.** This run has no control arm, so nothing here measures the "
+            "noise and no delta can be shown to have survived it. Pricing the raw delta "
+            "would cost noise at the same rate as signal."
+        )
+        lines.append("")
+        lines.append("Measure a floor from a control run, then re-read the deltas against it:")
+        lines.append("")
+        lines.append("```")
+        lines.append("wrangler floor <control-run-id> --markdown")
+        lines.append("```")
+        lines.append("")
+        return lines
+
+    lines.append("| arm | metric | delta | floor | verdict | spend | $/surviving pt |")
+    lines.append("| --- | --- | --- | --- | --- | --- | --- |")
+    for arm in real:
+        data = results[arm.name]
+        usage = data.get("token_usage") or {}
+        spent = measured_cost(
+            data.get("model", "unknown"),
+            usage.get("input_tokens", 0),
+            usage.get("output_tokens", 0),
+            custom_costs=data.get("costs_per_million"),
+        )
+        spend_txt = f"${spent['total_usd']:.4f}" if spent["priced"] else "unpriced"
+        verdicts = classify_deltas(arm, floors)
+        survivors = [m for m, v in verdicts.items() if v == "improved"]
+        for metric, verdict in verdicts.items():
+            delta = arm.deltas[metric]
+            if verdict != "improved" or not spent["priced"] or not survivors:
+                # A regression has negative value, not negative cost. Dividing by it
+                # yields a negative dollar figure that reads as a rebate.
+                per_pt = "—"
+            else:
+                per_pt = f"${spent['total_usd'] / len(survivors) / delta:.2f}"
+            lines.append(
+                f"| {arm.name} | {metric} | {delta:+.4f} | {floors[metric]:.4f} | "
+                f"{verdict} | {spend_txt} | {per_pt} |"
+            )
+    lines.append("")
+    lines.append(
+        "*Spend is attributed evenly across the metrics that survived, which is a "
+        "convention rather than a measurement -- the run bought all of them at once. "
+        "Metrics that did not clear their floor are priced `—`, never as negative cost.*"
+    )
+    lines.append("")
+    return lines
+
+
+def _fmt_hms(seconds: float) -> str:
+    s = int(seconds)
+    if s < 3600:
+        return f"{s // 60}m {s % 60:02d}s"
+    return f"{s // 3600}h {(s % 3600) // 60:02d}m"
+
+
+def _stage_economics_section(results: dict, ordered: list[str]) -> list[str]:
+    """Which stage spent the money, and which spent the clock.
+
+    `_cost_benefit_section` answers "what did this arm cost". This answers "where did
+    it go", and the two do not point the same way. Measured on c07-pro: optimize was
+    **87% of the wall clock but 36% of the dollars**, so eval is where the money is
+    and optimize is where the time is.
+
+    That decides how a campaign is planned. At roughly $0.90 a run the dollars are
+    close to irrelevant; what bounds a campaign is hours and judge RPM. A report that
+    only totals dollars invites optimising the cheap axis.
+    """
+    arms = [n for n in ordered if results[n].get("stage_usage")]
+    if not arms:
+        return []
+
+    lines = ["", "### Where it went — by stage", ""]
+    any_estimate = False
+    rows: list[str] = []
+    for name in arms:
+        usage = results[name]["stage_usage"]
+        model = results[name].get("model", "unknown")
+        totals = stage_totals(usage)
+        for stage in STAGE_ORDER:
+            data = usage.get(stage)
+            if not data:
+                # Absent, not zero. An eval-only run never optimized; "$0.00" would
+                # be a claim about spend rather than about the run.
+                rows.append(f"| {name} | {stage} | — | — | — | — | not run |")
+                continue
+            any_estimate = any_estimate or data.get("is_estimate")
+            priced = measured_cost(model, data["input_tokens"], data["output_tokens"])
+            usd = data["input_usd"] + data["output_usd"]
+            if not priced["priced"] and usd == 0.0:
+                usd_txt, usd_share = "unpriced", "—"
+            else:
+                usd_txt = f"${usd:.4f}"
+                usd_share = f"{100 * usd / totals['usd']:.0f}%" if totals["usd"] else "—"
+            clock_share = (
+                f"{100 * data['elapsed'] / totals['elapsed']:.0f}%" if totals["elapsed"] else "—"
+            )
+            rows.append(
+                f"| {name} | {stage} | {usd_txt} | {usd_share} | "
+                f"{_fmt_hms(data['elapsed'])} | {clock_share} | "
+                f"{data['input_tokens']:,} in / {data['output_tokens']:,} out |"
+            )
+
+    lines.append("| arm | stage | spend | % of $ | wall clock | % of clock | tokens |")
+    lines.append("| --- | --- | --- | --- | --- | --- | --- |")
+    lines.extend(rows)
+    lines.append("")
+
+    # Output share. The lever this exposes is verbosity, not prompt length: c07-pro
+    # sent 3,900 tokens in and got 35,840 back -- 90% of volume, 98% of cost.
+    lines.append("### Token asymmetry")
+    lines.append("")
+    lines.append("| arm | input tokens | output tokens | output share |")
+    lines.append("| --- | --- | --- | --- |")
+    for name in arms:
+        totals = stage_totals(results[name]["stage_usage"])
+        tot = totals["input_tokens"] + totals["output_tokens"]
+        share = f"{100 * totals['output_tokens'] / tot:.0f}%" if tot else "—"
+        lines.append(
+            f"| {name} | {totals['input_tokens']:,} | {totals['output_tokens']:,} | {share} |"
+        )
+    lines.append("")
+    lines.append(
+        "Output dominates both volume and cost, so **response verbosity is the cost "
+        "lever and prompt length essentially is not** — worth knowing before optimising "
+        "a prompt for brevity."
+    )
+    lines.append("")
+    if any_estimate:
+        lines.append(
+            "> **These are estimates.** Every `token_usage` this pipeline records carries "
+            "`is_estimate: true`; the figures are not metered billing."
+        )
+        lines.append("")
     return lines
 
 
@@ -785,6 +951,7 @@ def generate_report(
     lines.append("---\n")
     lines.append("## What it cost\n")
     lines.extend(_cost_benefit_section(normalized, ordered))
+    lines.extend(_stage_economics_section(normalized, ordered))
 
     lines.append("---\n")
     lines.append("## Charts\n")

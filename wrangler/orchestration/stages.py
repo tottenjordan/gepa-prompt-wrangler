@@ -14,6 +14,7 @@ from ..core.models import DEFAULT_JUDGE_MODEL, DEFAULT_MANIFEST_JUDGE_MODEL
 from ..eval.evaluator import run_batch_eval_averaged
 from ..optimize.optimizer import optimize
 from ..reporting.reporter import generate_report as _generate_report
+from ..reporting.stage_economics import build_stage_usage
 
 if TYPE_CHECKING:
     from ..core.factory import AgentPromptPair, Manifest
@@ -989,6 +990,14 @@ def stage_report(exp: Experiment, use_paperbanana: bool = True) -> None:
             # to read. It lived only in the per-stage artifacts, so both new
             # cost columns rendered "n/a" on every real report.
             "token_usage": _sum_token_usage(
+                eval_before.get(pair_id, {}),
+                optimize_data.get(pair_id, {}),
+                eval_after.get(pair_id, {}),
+            ),
+            # The same figures kept per stage. See stage_economics for why the
+            # sum is not enough: dollars and wall clock point at different
+            # stages, and only the split shows it.
+            "stage_usage": build_stage_usage(
                 eval_before.get(pair_id, {}),
                 optimize_data.get(pair_id, {}),
                 eval_after.get(pair_id, {}),
