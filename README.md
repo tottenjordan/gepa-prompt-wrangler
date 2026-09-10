@@ -31,6 +31,53 @@ wrangler pipeline run manifest.yaml
 
 This compiles and submits the experiment as a managed Vertex AI Pipeline. Each model/agent pair gets its own pipeline step for granular visibility, fault isolation, and per-step metrics in the Vertex AI console. See [Vertex AI Pipeline](#vertex-ai-pipeline) below.
 
+![GEPA managed pipeline run in the Vertex AI console](docs/imgs/gepa_pipeline_v1.png)
+
+The runtime graph is the workflow above, executed. Reading top to bottom:
+
+1. **Archive agent Code** — verifies the code tarball the components will unpack.
+2. **Evaluate Agent (Before)** — batch eval against the freshly deployed engine. This is the
+   baseline every later number is measured from.
+3. **Optimize Agent** — GEPA runs *inside* the pipeline container, not against the deployed
+   engine, proposing and scoring candidate prompts against the eval set.
+4. **Re-deploy Optimized Agent** → **Evaluate Agent (After)** — the winning prompt is pushed
+   to the engine and scored again, under the same conditions.
+5. **Generate Analysis** — writes the comparative report.
+
+Every step emits `metrics` and a `summary` markdown artifact, so each one is inspectable on
+its own rather than only through the final report. The right-hand pane here is
+`Generate Analysis`'s summary: per-metric before/after/delta, cost, and total wall clock.
+
+The pair-per-step layout is what makes a partial failure survivable — one arm can die
+without taking the others with it, and its artifacts remain readable.
+
+#### Zooming in: what the optimize step produces
+
+![Optimize step summary artifact, original vs optimized prompt](docs/imgs/gepa_pipeline_summary_v1.png)
+
+Selecting the `summary` artifact under **Optimize Agent** (highlighted) shows what that step
+actually did — here, 574 minutes of search that grew the prompt from **78 to 2,489
+characters** for $0.23.
+
+The two prompts show the shape of the change. The original is a single generic sentence:
+
+> You are a helpful assistant. Use the available tools to answer user questions.
+
+The optimized version keeps that intent but adds structure the seed never had — **General
+Guidelines** (prioritize tool use, conciseness, clarity) followed by **Specific Task
+Guidelines** naming individual tools, e.g. *Flight Booking (`book_flight` tool)*.
+
+That progression is GEPA working as designed. It starts from the seed, proposes mutated
+candidates, scores each against the eval set with a judge, and reflects on the failures to
+write the next candidate. So the optimized prompt is less a better-written instruction than
+a **record of which failure modes the eval set exposed** — it names `book_flight`
+specifically because tool-selection mistakes on those cases cost score.
+
+Worth reading with the caveat this repo has since measured: **longer is not automatically
+better.** In the run pictured, safety rose +0.08 while instruction-following fell −0.10, and
+that trade has now reproduced across two model families. See
+[docs/analysis/2026-09-10-campaign-07-wrapup.md](docs/analysis/2026-09-10-campaign-07-wrapup.md).
+
 ### Run step by step
 
 ```bash
