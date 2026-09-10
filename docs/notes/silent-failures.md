@@ -914,12 +914,49 @@ Three reasons it should not have survived ADK 2.8.0:
 
 The single pre-warm before the run stays; it is what makes the first generation cheap.
 
-**Not confirmed on a campaign yet.** The mechanism is argued from ADK's source and from the
-correlation, not from a run carrying the change. Campaign 08 is mid-flight on the old code,
-so the next optimize run after this merges is the measurement. Expect
-`will run without the tools` at **0**, against 14-15% before. If it is unchanged again the
-refresh was not the cause either, and the next suspect is whatever makes ADK's
-`_execute_with_session` wait the full 120s.
+### Reproduced locally 2026-09-10 — the mechanism, confirmed
+
+Against a real local MCP server and a real `McpToolset`, in seconds rather than a campaign.
+`scripts/repro_mcp_refresh_hang.py` runs it. **Two conditions are both required**, which is
+why the first two attempts at this missed it:
+
+| `tool_list_cache_ttl_seconds` | `close()` concurrent? | hung calls |
+| --- | --- | --- |
+| 300 | no | 0/18 |
+| 300 | **yes** | 0/18 |
+| `None` | no | 0/18 |
+| **`None`** | **yes** | **9/18** |
+
+1. `get_tools()` must actually reach the session. A cache hit never does, so **the
+   tool-list cache was protecting us** — the opposite of PR #59's premise.
+2. `close()` must run *concurrently* with it. Sequential close-then-get_tools, which is what
+   `_refreshed_sample` looks like in isolation, never hangs: 0/48 across both cache
+   settings.
+
+**Why the real run was concurrent even though the code reads sequentially.** Three facts
+compose:
+
+- **Candidates share one toolset.** `agent.clone()` is a shallow copy, as CLAUDE.md already
+  records for the cache; it is equally true of the session.
+- **GEPA drives from a worker thread.** `gepa_root_agent_prompt_optimizer.py:140` dispatches
+  each evaluation with `asyncio.run_coroutine_threadsafe(..., self._main_loop)`, so the
+  refresh and other candidates' tool calls are coroutines on one shared loop, scheduled from
+  outside it.
+- **So a `close()` from one candidate's refresh can overlap another candidate's
+  `get_tools()`** on the same object. That is the 9/18 condition exactly.
+
+**And that explains the rate.** The cache TTL is 300s; generations averaged ~286s apart. The
+cache covers most refresh windows and occasionally expires right at one — which is a ~14%
+leak, not a constant failure. It also explains why PR #59 changed nothing: it cleared the
+cache and immediately re-warmed it, leaving the same coverage.
+
+**The fix follows by construction.** No `close()` means nothing to race, whatever the
+concurrency and whatever the cache does. That is what shipped.
+
+**Still to confirm on a campaign.** The reproduction establishes the mechanism and that
+removing `close()` removes the precondition; it does not prove the production rate goes to
+zero. The next optimize run is the measurement — expect `will run without the tools` at
+**0**, against 14-15% before.
 
 Two things this leaves behind:
 
