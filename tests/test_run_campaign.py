@@ -427,3 +427,52 @@ class TestBatchesMayCarryAControlArm:
             for f in glob.glob("manifests/c07-*_manifest.yaml")
         }
         assert levels == {3}, f"c07 arms disagree on num_runs: {levels}"
+
+
+class TestEveryCampaignIsLaunchable:
+    """A campaign the driver knows about but cannot start is a launch-day surprise.
+
+    `validate_then_run.py --campaign` derives its choices from `VALIDATION_ARM`, so a
+    campaign added to `CAMPAIGNS` without an entry there is rejected by argparse at the
+    moment someone tries to run it. Campaign 08 was in exactly that state until the arm
+    was registered -- found by running `--help`, not by any test.
+    """
+
+    @staticmethod
+    def _tables():
+        from scripts.run_campaign import CAMPAIGNS
+        from scripts.validate_then_run import VALIDATION_ARM
+
+        return CAMPAIGNS, VALIDATION_ARM
+
+    def test_every_campaign_has_a_validation_arm(self):
+        campaigns, arms = self._tables()
+        missing = sorted(set(campaigns) - set(arms))
+        assert not missing, (
+            f"campaigns {missing} are in CAMPAIGNS but have no VALIDATION_ARM, so "
+            "`validate_then_run.py --campaign` will refuse to start them"
+        )
+
+    def test_every_validation_arm_manifest_exists(self):
+        from pathlib import Path
+
+        _, arms = self._tables()
+        missing = {c: p for c, p in arms.items() if not Path(p).is_file()}
+        assert not missing, f"validation arms point at manifests that do not exist: {missing}"
+
+    def test_every_validation_arm_is_part_of_its_own_campaign(self):
+        """Otherwise the validation run is ~11h of work thrown away.
+
+        The arm is re-submitted by the driver later and hits the KFP cache, which is what
+        makes validating with a real arm affordable. An arm outside the campaign is
+        validated and then never reused.
+        """
+        campaigns, arms = self._tables()
+        for campaign, arm in arms.items():
+            if campaign not in campaigns:
+                continue
+            in_campaign = {m for batch in campaigns[campaign] for m in batch}
+            assert arm in in_campaign, (
+                f"campaign {campaign}'s validation arm {arm} is not one of its batches, so "
+                "its result is discarded rather than reused"
+            )
