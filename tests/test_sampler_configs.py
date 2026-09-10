@@ -12,11 +12,29 @@ from pathlib import Path
 
 import pytest
 
-CONFIGS = sorted(
-    (Path(__file__).resolve().parents[1] / "examples" / "multi_model_agents" / "agents").glob(
-        "*_opt/sampler_config.json"
-    )
-)
+_AGENTS = Path(__file__).resolve().parents[1] / "examples" / "multi_model_agents" / "agents"
+
+# Deliberately-divergent criteria, with the reason and an expiry.
+#
+# Campaign 08 tests whether PR #69's instruction-adherence weighting (1 of 2 rubrics -> 3
+# of 4) removes the regression campaign 07 reproduced on two model families. That needs
+# both weightings running concurrently, and the criteria are chosen by agent-module name --
+# so the baseline condition has to be a second directory carrying the *old* criteria.
+#
+# Named rather than pattern-matched, and exempted from two guards rather than the guards
+# being relaxed, following ROLES_EXEMPT_FROM_REGISTRATION and PYTHON_MISMATCH_ACCEPTED.
+# `test_the_baseline_is_exactly_the_pre_pr69_shape` pins what it is allowed to be, so the
+# control condition cannot quietly become a second copy of the treatment.
+#
+# Delete this, the directory, and campaign 08's manifests together when 08 reports.
+BASELINE_CONFIGS = {"sonnet_baseline_opt"}
+
+# Every config, baseline included. The exemption is applied by the two tests it
+# concerns, not here -- a baseline arm still has to name registered metrics, keep the
+# train/validation split, and avoid vacuous rubrics. Dropping it from CONFIGS wholesale
+# would exempt it from all nine guards to get relief from two.
+CONFIGS = sorted(_AGENTS.glob("*_opt/sampler_config.json"))
+TREATMENT_CONFIGS = [p for p in CONFIGS if p.parent.name not in BASELINE_CONFIGS]
 
 
 def _criteria(path):
@@ -34,9 +52,12 @@ def test_every_agent_optimizes_against_identical_criteria():
     response-quality 0.50 while the rest carried 0.95 / 0.95 / 0.85. The sweep
     published that day equalised seed and budget across arms and still compared
     a model searching against a 0.50 bar with one searching against 0.85.
+
+    Campaign 08's baseline arm is excluded by name -- see BASELINE_CONFIGS. It exists
+    precisely to carry different criteria, and it is pinned by its own test.
     """
     digests = {}
-    for path in CONFIGS:
+    for path in TREATMENT_CONFIGS:
         digest = hashlib.sha256(json.dumps(_criteria(path), sort_keys=True).encode()).hexdigest()[
             :12
         ]
@@ -147,7 +168,7 @@ def test_every_criterion_is_actually_registered_with_adk():
         )
 
 
-@pytest.mark.parametrize("path", CONFIGS, ids=lambda p: p.parent.name)
+@pytest.mark.parametrize("path", TREATMENT_CONFIGS, ids=lambda p: p.parent.name)
 def test_instruction_adherence_outweighs_the_rest_of_its_metric(path):
     """The point of the change: adherence must not be averaged away.
 
@@ -160,4 +181,46 @@ def test_instruction_adherence_outweighs_the_rest_of_its_metric(path):
     assert len(adherence) > len(rubrics) - len(adherence), (
         f"{path.parent.name}: instruction adherence is {len(adherence)}/{len(rubrics)} "
         "rubrics and no longer carries the majority of this metric."
+    )
+
+
+@pytest.mark.parametrize("name", sorted(BASELINE_CONFIGS))
+def test_the_baseline_is_exactly_the_pre_pr69_shape(name):
+    """Pin what the exempted config is allowed to be.
+
+    An exemption with nothing behind it is a hole. Campaign 08 compares adherence at 1 of
+    2 rubrics against 3 of 4; if the baseline drifted to 3 of 4 the campaign would compare
+    a condition with itself and report "no effect", which is indistinguishable from a real
+    null result and far more misleading.
+    """
+    path = _AGENTS / name / "sampler_config.json"
+    rubrics = _criteria(path)["rubric_based_final_response_quality_v1"]["rubrics"]
+    ids = [r["rubric_id"] for r in rubrics]
+    assert ids == ["instruction_adherence", "completeness"], (
+        f"{name} is no longer the pre-#69 baseline: {ids}"
+    )
+
+
+@pytest.mark.parametrize("name", sorted(BASELINE_CONFIGS))
+def test_the_baseline_differs_from_its_treatment_only_in_those_rubrics(name):
+    """One variable, or the campaign measures two things at once.
+
+    Thresholds, judge model, the other three metrics and the train/validation split must
+    all be byte-identical to the arm it is compared against.
+    """
+    treatment = _AGENTS / name.replace("_baseline", "") / "sampler_config.json"
+    assert treatment.exists(), f"no treatment config to compare {name} against"
+
+    added = {"user_stated_requirements", "brevity_does_not_override_instructions"}
+
+    def _normalised(path):
+        cfg = json.loads(path.read_text())
+        cfg.pop("app_name")
+        frq = cfg["eval_config"]["criteria"]["rubric_based_final_response_quality_v1"]
+        frq["rubrics"] = [r for r in frq["rubrics"] if r["rubric_id"] not in added]
+        return cfg
+
+    assert _normalised(treatment) == _normalised(_AGENTS / name / "sampler_config.json"), (
+        f"{name} differs from its treatment beyond the PR #69 rubrics -- campaign 08 would "
+        "have two variables"
     )

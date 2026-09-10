@@ -104,6 +104,43 @@ CAMPAIGNS: dict[str, list[tuple[str, ...]]] = {
             "manifests/c07-ctrl-lite_manifest.yaml",
         ),
     ],
+    # Campaign 08 -- did PR #69's criteria change remove the instruction-following
+    # regression campaign 07 reproduced on two model families?
+    #
+    # One model (claude-sonnet-5), two criteria conditions, two repeats each. The
+    # conditions differ only in sampler_config.json, which is selected by agent-module
+    # name -- hence the sonnet_baseline_agent twin.
+    #
+    # Condition is crossed with batch, not confounded by it: each batch runs one arm of
+    # each condition, so an unlucky batch cannot land entirely on one condition. Same
+    # reasoning as campaign 07's cost tiers.
+    #
+    # Two repeats because campaign 07 measured run-to-run spread at up to 12.3x the
+    # control floor -- two runs of one manifest disagreed on the *sign* of three metrics.
+    # A single arm per condition could not attribute anything.
+    #
+    # A control per batch, never reused across batches: CLAUDE.md forbids carrying a
+    # floor over, since the dropout that generates it varies with load.
+    # ONE optimizing arm per batch, not two. Both conditions run claude-sonnet-5 --
+    # that is the point, the model is held constant so criteria is the only variable --
+    # so pairing them in a batch would put two Anthropic optimize phases on one quota
+    # pool. `validate()` rejects exactly that, and it caught this design before it ran.
+    #
+    # Campaign 07 could pair its arms because it varied the model; campaign 08 cannot,
+    # and the honest cost is four sequential optimize phases (~44h) instead of two.
+    #
+    # Each batch still carries its own control. A control has no optimize stage, so it
+    # shares the publisher for free and adds no wall clock -- and CLAUDE.md forbids
+    # reusing a floor measured under different load, so each batch measures its own.
+    #
+    # Conditions alternate across batches so a drift in the substrate over two days
+    # cannot land entirely on one condition.
+    "08": [
+        ("manifests/c08-new-r1_manifest.yaml", "manifests/c08-ctrl-a_manifest.yaml"),
+        ("manifests/c08-old-r1_manifest.yaml", "manifests/c08-ctrl-b_manifest.yaml"),
+        ("manifests/c08-new-r2_manifest.yaml", "manifests/c08-ctrl-c_manifest.yaml"),
+        ("manifests/c08-old-r2_manifest.yaml", "manifests/c08-ctrl-d_manifest.yaml"),
+    ],
 }
 
 
