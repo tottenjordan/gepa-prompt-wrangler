@@ -87,3 +87,77 @@ def test_train_validation_split_is_preserved(path):
     d = json.loads(path.read_text())
     assert len(d["train_eval_case_ids"]) == 49
     assert len(d["validation_eval_case_ids"]) == 15
+
+
+# --- Instruction-following pressure (campaign 08 experiment) -------------------
+#
+# Campaign 07 reproduced a regression across two model families: GEPA improved
+# `safety_v1`, a criterion it is scored on, and degraded `instruction_following_v1`,
+# the one metric absent from these criteria. Both survived their noise floor *and*
+# the run-to-run spread; nothing else did.
+#
+# The obvious response -- add `instruction_following_v1` to the criteria -- is not
+# available. It is not in ADK's metric evaluator registry, and a sampler config naming
+# it raises NotFoundError before a single candidate is scored. Verified against the
+# installed ADK by the test below rather than taken from CLAUDE.md, which was already
+# stale about a neighbouring entry.
+#
+# So the pressure goes through the registered rubric metric instead, and the
+# experiment is a weighting change: instruction adherence went from 1 of 2 rubrics to
+# 3 of 4. The threshold is deliberately left at 0.85 -- one variable at a time, or the
+# result cannot be attributed.
+
+INSTRUCTION_METRIC = "rubric_based_final_response_quality_v1"
+
+
+def test_instruction_following_v1_is_not_a_criterion():
+    """Naming it would break every optimize run before it scored anything.
+
+    This is a guard against a plausible and tempting edit, not a hypothetical: it is
+    the literal form of the campaign 08 change, and it fails at runtime rather than at
+    review.
+    """
+    for path in CONFIGS:
+        assert "instruction_following_v1" not in _criteria(path), (
+            f"{path.parent.name} names instruction_following_v1, which is not in ADK's "
+            "metric evaluator registry -- GEPA raises NotFoundError. Put the pressure in "
+            f"{INSTRUCTION_METRIC}'s INSTRUCTION_ADHERENCE rubrics instead."
+        )
+
+
+def test_every_criterion_is_actually_registered_with_adk():
+    """The registry is the authority, not the documentation.
+
+    CLAUDE.md's registered/unregistered lists were correct about
+    `instruction_following_v1` and wrong about `final_response_match_v2` at ADK 2.8.0,
+    so this asks ADK directly.
+    """
+    from google.adk.evaluation.metric_evaluator_registry import (
+        DEFAULT_METRIC_EVALUATOR_REGISTRY,
+    )
+
+    known = set(getattr(DEFAULT_METRIC_EVALUATOR_REGISTRY, "_registry", {}) or {})
+    if not known:  # pragma: no cover - registry internals moved
+        pytest.skip("could not read ADK's metric registry")
+    for path in CONFIGS:
+        unknown = set(_criteria(path)) - known
+        assert not unknown, (
+            f"{path.parent.name} names metric(s) ADK does not register: {sorted(unknown)}. "
+            "GEPA raises NotFoundError on these."
+        )
+
+
+@pytest.mark.parametrize("path", CONFIGS, ids=lambda p: p.parent.name)
+def test_instruction_adherence_outweighs_the_rest_of_its_metric(path):
+    """The point of the change: adherence must not be averaged away.
+
+    With one adherence rubric against one completeness rubric, a candidate could trade
+    adherence for completeness and hold the metric at its threshold -- which is a fair
+    description of what campaign 07 measured.
+    """
+    rubrics = _criteria(path)[INSTRUCTION_METRIC]["rubrics"]
+    adherence = [r for r in rubrics if r["type"] == "INSTRUCTION_ADHERENCE"]
+    assert len(adherence) > len(rubrics) - len(adherence), (
+        f"{path.parent.name}: instruction adherence is {len(adherence)}/{len(rubrics)} "
+        "rubrics and no longer carries the majority of this metric."
+    )
