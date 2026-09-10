@@ -38,6 +38,7 @@ RUN pip install --no-cache-dir \
     "pandas==3.0.5" \
     "paperbanana==0.3.0" \
     "rouge-score==0.1.2" \
+    "markdown-it-py==4.2.0" \
     "google-cloud-storage==3.13.1" \
     "google-cloud-secret-manager==2.30.0" \
     "anthropic[vertex]==1.4.0" \
