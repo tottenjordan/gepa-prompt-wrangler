@@ -1,0 +1,45 @@
+name: "c08-old-r1"
+description: >
+  Campaign 08 — did the criteria fix work? Repeat 1 of 2, baseline arm.
+  BASELINE — instruction adherence at 1 of 2 rubrics, the pre-#69 weighting.
+  Reads agents/sonnet_baseline_opt/sampler_config.json. The agent itself is the
+  same object as the treatment's; only the criteria differ.
+  Everything except the criteria is held identical across all six arms:
+  claude-sonnet-5, the 78-char generic seed, budget 600, num_runs 3.
+  See docs/doe/08-criteria-holdout.md
+
+agent_module: "examples/multi_model_agents/agents/sonnet_baseline_agent"
+eval_data: "examples/multi_model_agents/eval_data/eval_cases.yaml"
+
+pairs:
+  - id: "c08-old-r1"
+    model: "claude-sonnet-5"
+    description: "campaign 08 baseline — repeat 1"
+    agent_module: "examples/multi_model_agents/agents/sonnet_baseline_agent"
+    # Byte-identical across all six arms. Campaign 07 showed GEPA only produces a
+    # real prompt change when started from maximum headroom; a seed that differed
+    # between conditions would confound the criteria comparison with seed value.
+    system_prompt: "You are a helpful assistant. Use the available tools to answer user questions."
+
+eval_config:
+  response_match_threshold: 0.5
+  safety_threshold: 0.8
+
+labels:
+  lifecycle: "ephemeral"
+  campaign: "08"
+
+pipeline:
+  secret_id: wrangler-agent-env
+  cache_bust: "c08-v1"
+  # Held at campaign 07's value. Budget is campaign 10's variable, not this
+  # campaign's -- changing it here would confound criteria with budget.
+  max_metric_calls: 600
+  num_runs: 3
+
+health_gate:
+  enabled: true
+  # An arm that runs on a rejected engine measures dropout, not the criteria.
+  # Redeploy is gated too as of PR #70, so the after-side engine is checked as
+  # well -- campaign 07's after-side was ungated and its clean coverage was luck.
+  required: true

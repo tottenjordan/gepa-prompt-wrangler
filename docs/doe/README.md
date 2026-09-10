@@ -16,11 +16,12 @@ outcome would mean *before* looking is what stops that.
 | [01](01-engine-lottery.md) | Is the engine failure rate a deployment lottery? | **Complete 2026-08-24 — yes, and it is a per-worker property** | 1,400 attempts, ~6 h |
 | [02](02-judge-variance.md) | How much of the noise floor is the judge? | **Not started** | One capture, then scoring only |
 | [03](03-noise-floor.md) | What is the noise floor, really? | **Not started** | Moderate |
-| [04](04-gepa-budget-and-criteria.md) | What does a GEPA budget buy? | Superseded by [08](08-gepa-budget-curve.md) | ~90 h wall-clock |
+| [04](04-gepa-budget-and-criteria.md) | What does a GEPA budget buy? | Superseded by [10](10-gepa-budget-curve.md) | ~90 h wall-clock |
 | [06](06-pipeline-noise-floor.md) | What is the noise floor, on the pipeline? | **Complete 2026-09-08 — 0.058 at n=1, 0.011–0.014 at n=3; averaging beats √n** | ~6 h, 4 arms (n=5 trimmed) |
 | [07](07-cost-quality-frontier.md) | What does a model tier cost per unit of quality? | **Unblocked 2026-09-08 — 06's floor measured, drift null** | ~10.6 h/arm, 4 arms, 2 at a time |
-| [08](08-gepa-budget-curve.md) | What does a GEPA budget buy? (scoped to fit) | Conditional on 06 | 1 optimize arm per batch |
+| [08](08-criteria-holdout.md) | Did the criteria fix remove the instruction-following regression? | **Pre-registered 2026-09-10, not yet run** | ~44 h, 4 optimize arms + 4 controls |
 | [09](09-lottery-recheck.md) | Has the deploy lottery got worse? | **Complete 2026-09-01 — no, 5/10 vs 6/10, p=1.000** | 10 engines, ~4 h |
+| [10](10-gepa-budget-curve.md) | What does a GEPA budget buy? (scoped to fit) | **Deferred — needs repeats per budget** | 1 optimize arm per batch |
 
 **09 ran before 06 and cleared it.** The lottery had not shifted (5/10 vs 6/10,
 p=1.000), so `max_rerolls` went to 4 and 06 proceeded. Original note below.

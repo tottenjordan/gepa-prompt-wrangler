@@ -1,7 +1,14 @@
-# Campaign 08 — What does a GEPA budget buy?
+# Campaign 10 — What does a GEPA budget buy?
 
-**Status:** Conditional — runs only if Campaign 06 shows the floor sits below the
-effects Campaign 07 finds.
+> **Renumbered from 08 on 2026-09-10, and its design needs revising before it runs.**
+> Campaign 07 measured run-to-run spread at up to **12.3x the control floor**, with two runs
+> of one manifest disagreeing on the *sign* of three metrics. That is this document's own
+> "non-monotonic" outcome, arriving before the campaign does: one arm per budget cannot
+> separate budget from search variance. The question is still worth answering — it needs
+> repeats per budget level, which triples the cost, so it waits behind campaign 08.
+> Slot 08 now holds [08-criteria-holdout.md](08-criteria-holdout.md).
+
+**Status:** Deferred, and needs a design revision — see the note above.
 
 ## Question
 
