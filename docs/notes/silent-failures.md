@@ -802,9 +802,59 @@ produces the evidence they capture.
    `_report_mcp_server_health()` runs before teardown -- before `terminate()`,
    since afterwards every exit code is ours -- and dumps the tail of any that
    exited.
-3. **Still open.** Decide whether the cause is a crash (restart it) or CPU
-   starvation (give the servers their own resources). This needs the logs from
-   step 1, so it waits for the first run that carries them.
+3. ~~Decide whether the cause is a crash or CPU starvation.~~ **Neither. Solved
+   2026-09-09** from `c07-pro`'s logs — the first run to carry them.
+
+### The cause: two mitigations that cancel each other
+
+The servers were never the problem. Across 864 KiB of log from the three of them:
+**3,626 x `200 OK`, 1,204 x `202 Accepted`, and zero HTTP errors.** No crash, no
+restart, one unrelated `ClientDisconnect`. The 379-388 `Session ... idle timeout`
+lines are the mcp library's 30-minute reaper and are far too slow to matter.
+
+The failure is entirely client-side, and the traceback names it:
+
+```
+File "google/adk/tools/mcp_tool/mcp_toolset.py", line 412, in _execute_with_session
+    return await asyncio.wait_for(coroutine_func(session), timeout=timeout_in_seconds)
+raise exceptions.TimeoutError() from exc
+TimeoutError
+```
+
+`TimeoutError()` is constructed with no arguments, which is why the operator sees
+`Failed to get tools from MCP server: ` with **nothing after the colon** — the empty
+cause that made this look mysterious for two days is just an argument-less exception.
+
+`timeout_in_seconds` is `MCP_TIMEOUT_SECONDS = 120.0`. Subtract it from each of the 17
+logged failures and every one of the hanging calls started **6-27 s after a session
+re-warm** — 17 of 17, no exceptions. So it *is* the refresh, and the mechanism is:
+
+1. `_refreshed_sample` calls `await tool.close()` on each toolset between generations.
+2. `close()` tears down the transport but **leaves `_tool_list_cache` populated** — the
+   cache lives on the toolset instance, and ADK does not clear it.
+3. The pre-warm immediately after is answered from that cache and returns without
+   reconnecting. This is why the log says `re-warmed 3/3 in 0.1s`: **0.1 s is not three
+   HTTP sessions, it is three dictionary reads.** The "re-warmed" line was reporting
+   success for work it had not done.
+4. The session stays closed. The next real call blocks 120 s, times out, and ADK hands
+   the agent zero tools. GEPA scores that candidate.
+
+Both mitigations are individually correct and documented. `tool_list_cache_ttl_seconds`
+exists so a transient failure does not cost an invocation its whole toolset; the close
+exists to survive the idle drop. Together they produce a refresh that closes sessions and
+cannot reopen them. CLAUDE.md's note that this is "not simply the documented cache-TTL fix
+being absent" was right, and understated: the cache TTL is *load-bearing in the failure*.
+
+**Fixed** in `optimizer.py:_invalidate_tool_list_cache`, called on each toolset straight
+after `close()`, with a loud warning if a toolset kept its cache anyway — because the
+symptom otherwise surfaces 120 s later as an empty error message.
+
+Two things this leaves behind:
+
+- **A `re-warmed N/N in 0.1s` line is a red flag, not a success.** Real reconnects take
+  seconds. If you see sub-second re-warms, the sessions are stranded.
+- **The 120 s timeout is worth revisiting separately.** A stranded session costs a full
+  two minutes of wall clock before anyone finds out, on a stage that runs ~9 hours.
 
 The delay was deliberate: the fix lives in `components.py`, KFP caches a
 component on its **function body hash** (CLAUDE.md, "Pipeline Caching"), and
