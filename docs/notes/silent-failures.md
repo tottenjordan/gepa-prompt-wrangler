@@ -873,14 +873,53 @@ healthy (3,626 x 200 OK, zero errors), the empty message is an argument-less `Ti
 and all 17 of c07's hangs began 6-27 s after a re-warm. That last fact still points at the
 refresh — just not at the cache.
 
-**Next thing to try:** stop closing the sessions at all. The per-generation `close()` was
-written for a Cloud Run idle drop that CLAUDE.md already records as unreproducible, the
-optimize stage talks to *localhost* servers, and ADK 2.8.0 now carries its own
-`_begin_session_use`/`_end_session_use` guard against the idle sweep. The refresh may be
-solving a problem that no longer exists while causing one that does.
+### Why that fix was a no-op — and a retraction
 
-**Leave PR #59 in place regardless.** Invalidating a cache after an explicit close is
-correct on its own terms, and the warning it added is how the next attempt gets measured.
+`McpToolset.close()` clears the tool-list cache **itself**, as the first statement in the
+method. PR #59's helper duplicated it. Verified against the real class rather than reasoned
+about:
+
+```python
+toolset._tool_list_cache["key"] = object()
+asyncio.run(toolset.close())
+len(toolset._tool_list_cache)   # 0 — ADK already did this
+```
+
+It shipped because its test asserted the claim against a **fake** toolset written to behave
+the way the theory needed. The test passed, and it tested the model rather than ADK.
+
+**Retraction:** the disproof above leaned partly on `re-warmed 3/3 in 0.1s` being too fast
+to be a real reconnect. That was wrong — three *localhost* round trips genuinely take about
+that, and three *remote* ones measured 0.76s. The timing never said anything either way.
+What actually disproved the cache theory is the rate not moving: 3 in 20 against 16 in 111.
+
+### Fixed 2026-09-10 — the refresh itself goes
+
+The per-generation close-and-re-warm is removed. It is the only thing correlated with the
+failures: all 17 of campaign 07's hangs began 6-27s after a re-warm, on servers that logged
+zero errors throughout.
+
+Three reasons it should not have survived ADK 2.8.0:
+
+- **The condition it was written for does not apply here.** It targets a Cloud Run ~2 minute
+  idle drop that CLAUDE.md already records as unreproducible, and the optimize stage does
+  not talk to Cloud Run at all — it starts local FastMCP servers on localhost and points the
+  MCP URLs at them.
+- **ADK pools sessions properly now.** The idle TTL is **900s** against our ~286s between
+  generations, so nothing expires in the gap, and the sweep skips any session with a call in
+  flight. Our `close()` had no such guard.
+- **Our close detaches its teardowns**, awaiting only those on the current loop. A teardown
+  from one generation could still be running while the next generation's pre-warm rebuilt
+  the same pool key.
+
+The single pre-warm before the run stays; it is what makes the first generation cheap.
+
+**Not confirmed on a campaign yet.** The mechanism is argued from ADK's source and from the
+correlation, not from a run carrying the change. Campaign 08 is mid-flight on the old code,
+so the next optimize run after this merges is the measurement. Expect
+`will run without the tools` at **0**, against 14-15% before. If it is unchanged again the
+refresh was not the cause either, and the next suspect is whatever makes ADK's
+`_execute_with_session` wait the full 120s.
 
 Two things this leaves behind:
 
