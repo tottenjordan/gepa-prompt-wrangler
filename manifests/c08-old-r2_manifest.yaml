@@ -31,7 +31,7 @@ labels:
 
 pipeline:
   secret_id: wrangler-agent-env
-  cache_bust: "c08-v1"
+  cache_bust: "c08-v2"
   # Held at campaign 07's value. Budget is campaign 10's variable, not this
   # campaign's -- changing it here would confound criteria with budget.
   max_metric_calls: 600

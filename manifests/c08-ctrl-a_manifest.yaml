@@ -31,7 +31,7 @@ labels:
 
 pipeline:
   secret_id: wrangler-agent-env
-  cache_bust: "c08-v1"
+  cache_bust: "c08-v2"
   # No optimize stage: eval the same prompt twice under the same load as the
   # optimizing arms in this batch, so whatever it moves by is that batch's floor.
   skip_optimize: true
