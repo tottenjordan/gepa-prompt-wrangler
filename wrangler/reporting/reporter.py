@@ -750,21 +750,53 @@ def generate_report(
     print("Generating charts...")
     generate_all_charts(normalized, case_metadata, CHARTS_DIR, use_paperbanana=use_paperbanana)
 
+    # Ordered by descending decision-value, not by how the pipeline computed it.
+    #
+    # It used to run: summary, methodology, seven charts, scores, ..., conclusions.
+    # So the verdicts -- the only part most readers need -- sat below roughly 200 lines
+    # of setup, and the charts landed before the numbers they illustrate. Anyone
+    # skimming for "did it work" met the experimental design first.
+    #
+    # Now each layer answers one question and every layer below it is evidence for the
+    # one above. Stop reading at any point and you have a true, if coarser, picture.
     lines = []
     lines.append(f"# GEPA Prompt Wrangler — {experiment_name}\n")
 
     lines.extend(_executive_summary(normalized, ordered))
-    lines.extend(_methodology_section(normalized, ordered, experiment_name))
-    lines.extend(_charts_section())
-    lines.extend(_scores_section(normalized, ordered))
-    lines.extend(_threshold_section(normalized, ordered))
-    lines.extend(_significance_section(normalized, ordered))
-    lines.extend(_per_case_winners_losers(normalized, ordered, case_metadata))
-    lines.extend(_per_model_section(normalized, ordered))
-    lines.extend(_cost_benefit_section(normalized, ordered))
     lines.extend(_conclusions_section(normalized, ordered))
 
-    lines.append("## Optimized Prompts\n")
+    lines.append("---\n")
+    lines.append("## The numbers\n")
+    lines.append("*Every score behind the findings above.*\n")
+    lines.extend(_scores_section(normalized, ordered))
+
+    lines.append("---\n")
+    lines.append("## Is it real?\n")
+    lines.append("*Thresholds, coverage and whether any delta clears the noise.*\n")
+    lines.extend(_threshold_section(normalized, ordered))
+    lines.extend(_significance_section(normalized, ordered))
+
+    lines.append("---\n")
+    lines.append("## Where it came from\n")
+    lines.append("*Which cases and which models moved, and by how much.*\n")
+    lines.extend(_per_case_winners_losers(normalized, ordered, case_metadata))
+    lines.extend(_per_model_section(normalized, ordered))
+
+    lines.append("---\n")
+    lines.append("## What it cost\n")
+    lines.extend(_cost_benefit_section(normalized, ordered))
+
+    lines.append("---\n")
+    lines.append("## Charts\n")
+    lines.extend(_charts_section())
+
+    lines.append("---\n")
+    lines.append("## Methodology\n")
+    lines.append("*How the run was configured. Read this to attack the result.*\n")
+    lines.extend(_methodology_section(normalized, ordered, experiment_name))
+
+    lines.append("---\n")
+    lines.append("## Appendix — optimized prompts\n")
     for name in ordered:
         data = normalized[name]
         lines.append(f"### {name.title()}\n")
@@ -778,3 +810,17 @@ def generate_report(
     with open(report_path, "w") as f:
         f.write("\n".join(lines))
     print(f"Report saved to: {report_path}")
+
+    # A self-contained sibling, because the markdown's relative chart paths resolve
+    # nowhere except a full local copy of this directory -- and every real reader of
+    # this report meets it in GCS. Never fatal: the markdown and summary.json are the
+    # artifacts, this is a convenience rendering of them.
+    try:
+        from .html_report import write_self_contained_html
+
+        html_path = write_self_contained_html(
+            report_path, title=f"GEPA Prompt Wrangler — {experiment_name}"
+        )
+        print(f"Self-contained HTML saved to: {html_path}")
+    except Exception as exc:  # pragma: no cover - exercised via the failure test
+        print(f"HTML rendering skipped ({type(exc).__name__}: {exc}); markdown is unaffected")

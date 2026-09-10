@@ -269,6 +269,60 @@ def engines_prune(days: int, yes: bool, snapshot: bool):
         raise SystemExit(1)
 
 
+@main.command("report-html")
+@click.argument("run_id")
+@click.option("--bucket", default=None, help="GCS bucket (default: GCP_STAGING_BUCKET).")
+@click.option(
+    "--download", "dest", default=None, help="Save the HTML here instead of printing links."
+)
+@click.option("--open/--no-open", "open_it", default=False, help="Open the downloaded report.")
+def report_html_cmd(run_id: str, bucket: str | None, dest: str | None, open_it: bool):
+    """Locate (or fetch) a run's rendered report.
+
+    `experiment_report.md` references its charts relatively, so it only renders from a
+    full local copy of the reports directory -- which is nobody's actual workflow. The
+    pipeline also publishes `experiment_report.html`, a single file with every chart
+    inlined as a data URI and no external references at all. This points you at it.
+
+        wrangler report-html run-5aa73d6191 --download /tmp/report.html --open
+    """
+    import webbrowser
+
+    from google.cloud import storage
+
+    from .core.config import GCP_STAGING_BUCKET
+
+    target = bucket or GCP_STAGING_BUCKET
+    run_id = run_id if run_id.startswith("run-") else f"run-{run_id}"
+    blob_path = f"pipeline-runs/{run_id}/reports/experiment_report.html"
+
+    blob = storage.Client().bucket(target).blob(blob_path)
+    if not blob.exists():
+        raise click.ClickException(
+            f"no rendered report at gs://{target}/{blob_path}\n"
+            f"  Runs from before the HTML renderer shipped published only the markdown.\n"
+            f"  Render one from those artifacts with:\n"
+            f"    gsutil -m cp -r gs://{target}/pipeline-runs/{run_id}/reports /tmp/{run_id}\n"
+            f'    uv run python -c "from wrangler.reporting.html_report import '
+            f"write_self_contained_html as w; w('/tmp/{run_id}/experiment_report.md')\""
+        )
+
+    if dest:
+        out = Path(dest)
+        blob.download_to_filename(str(out))
+        click.echo(f"Saved {out}  ({out.stat().st_size / 1024:.0f} KiB, self-contained)")
+        if open_it:
+            webbrowser.open(out.resolve().as_uri())
+        return
+
+    click.echo("Self-contained report (charts inlined, opens anywhere):")
+    click.echo(f"  gs://{target}/{blob_path}")
+    click.echo(f"  https://storage.cloud.google.com/{target}/{blob_path}")
+    click.echo("")
+    click.echo("Download and open it in one step:")
+    click.echo(f"  wrangler report-html {run_id} --download /tmp/{run_id}.html --open")
+
+
 @main.command("floor")
 @click.argument("run_ids", nargs=-1, required=True)
 @click.option("--bucket", default=None, help="GCS bucket (default: GCP_STAGING_BUCKET).")

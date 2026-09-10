@@ -1172,11 +1172,24 @@ def generate_analysis(
         reporter.CHARTS_DIR = charts_dir
         experiment_name = manifest.get("name", run_id)
         generate_report(results, experiment_name, use_paperbanana=True)
+        # Content types matter here, and were previously left to GCS to guess.
+        # experiment_report.html is the only artifact a browser can render in place, and
+        # it only does so if it arrives as text/html -- otherwise the console offers a
+        # download of something it calls application/octet-stream.
+        _CONTENT_TYPES = {
+            ".html": "text/html; charset=utf-8",
+            ".md": "text/markdown; charset=utf-8",
+            ".json": "application/json",
+            ".png": "image/png",
+            ".svg": "image/svg+xml",
+        }
         for local_file in reports_dir.rglob("*"):
             if local_file.is_file():
                 rel = local_file.relative_to(reports_dir)
-                gcs_bucket.blob(f"pipeline-runs/{run_id}/reports/{rel}").upload_from_filename(
-                    str(local_file)
+                blob = gcs_bucket.blob(f"pipeline-runs/{run_id}/reports/{rel}")
+                blob.upload_from_filename(
+                    str(local_file),
+                    content_type=_CONTENT_TYPES.get(local_file.suffix.lower()),
                 )
     except Exception:
         # Deliberately not re-raised. The summary and every eval artifact are
