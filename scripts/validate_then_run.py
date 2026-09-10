@@ -40,6 +40,18 @@ from wrangler.tools.preflight import render, run_preflight  # noqa: E402
 VALIDATION_ARM = {
     "06": "manifests/c06-ctrl-claude-n1_manifest.yaml",
     "07": "manifests/c07-sonnet5_manifest.yaml",
+    # A *baseline* arm, deliberately, not a control and not a treatment arm.
+    #
+    # The validation arm exists to run the paths nothing has run before, and for
+    # campaign 08 those are the sonnet_baseline_agent/_opt directories -- which have
+    # never been deployed or optimized -- and the redeploy health gate added in PR #70,
+    # which no campaign has ever executed. A control arm would exercise neither: it
+    # skips optimize and never redeploys.
+    #
+    # It is also a real campaign arm (batch 2), so the ~11h is not spent twice: the
+    # driver's later submission of the same manifest hits the KFP cache, which is the
+    # same mechanism campaign 07 relied on.
+    "08": "manifests/c08-old-r1_manifest.yaml",
 }
 
 
