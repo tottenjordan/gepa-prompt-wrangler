@@ -218,7 +218,21 @@ Registered in ADK metric evaluator registry (usable by GEPA optimizer):
 - `hallucinations_v1` (plural), `safety_v1`, `rubric_based_final_response_quality_v1`, `rubric_based_tool_use_quality_v1`
 
 NOT registered (will cause NotFoundError if used in sampler_config.json):
-- `instruction_following_v1`, `hallucination_v1` (singular), `final_response_match_v2`
+- `instruction_following_v1`, `hallucination_v1` (singular)
+
+**Re-checked against ADK 2.8.0 on 2026-09-10**, by reading the registry rather than this
+list. `final_response_match_v2` **is** registered and was wrongly listed here as absent;
+the other two are confirmed missing. `tests/test_sampler_configs.py` now asks ADK directly,
+so the next drift is a red build instead of a stale line.
+
+**`instruction_following_v1` cannot be a GEPA criterion, which matters more than it
+sounds.** Campaign 07 reproduced, across two model families, that GEPA improves `safety_v1`
+(a criterion) and degrades `instruction_following_v1` (the holdout) — the only two results
+that survived both the noise floor and the run-to-run spread. The obvious fix is unavailable:
+naming the metric raises NotFoundError before a candidate is scored. The pressure has to go
+through `rubric_based_final_response_quality_v1`'s `INSTRUCTION_ADHERENCE` rubrics, which is
+what the sampler configs now do — adherence is 3 of 4 rubrics rather than 1 of 2, with the
+threshold left at 0.85 so the change is one variable.
 
 Batch eval metrics (server-side, usable in eval_before/eval_after):
 - `final_response_quality`, `hallucination`, `safety`, `tool_use_quality`, `instruction_following`

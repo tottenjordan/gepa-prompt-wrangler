@@ -16,6 +16,20 @@
             "type": "INSTRUCTION_ADHERENCE"
           },
           {
+            "rubric_id": "user_stated_requirements",
+            "rubric_content": {
+              "text_property": "The response satisfies every explicit requirement in the USER's request -- requested output format, requested fields, requested comparisons, and any stated quantity or limit. A requirement the user stated but the response omits fails this rubric, even if the response is otherwise accurate."
+            },
+            "type": "INSTRUCTION_ADHERENCE"
+          },
+          {
+            "rubric_id": "brevity_does_not_override_instructions",
+            "rubric_content": {
+              "text_property": "Where the system prompt's style guidance (brevity, directness, omitting pleasantries) would conflict with an explicit user instruction, the user's instruction wins. Dropping requested content in order to be terse fails this rubric."
+            },
+            "type": "INSTRUCTION_ADHERENCE"
+          },
+          {
             "rubric_id": "completeness",
             "rubric_content": {
               "text_property": "The response resolves every part of the user's request. For a multi-part request, each part is addressed and its outcome stated. Concrete values obtained from tools -- prices, identifiers, policy limits, confirmations -- are reported rather than summarised away."
