@@ -939,15 +939,48 @@ def stage_redeploy(exp: Experiment, pair_id: str | None = None) -> None:
         version_tag = exp.version.replace("_", "-") if exp.version else ""
         display = f"{pair.id}_{version_tag}" if version_tag else pair.id
         agent_ref = pair.agent_module or manifest.agent_module
-        deployer.update_agent_from_source(
-            engine_id=engine_id,
-            agent_module=str(mdir / agent_ref),
-            model=pair.model,
-            instruction=optimized_prompt,
-            display_name=display,
-        )
+
+        def _update(
+            _eid=engine_id, _ref=agent_ref, _pair=pair, _prompt=optimized_prompt, _display=display
+        ):
+            deployer.update_agent_from_source(
+                engine_id=_eid,
+                agent_module=str(mdir / _ref),
+                model=_pair.model,
+                instruction=_prompt,
+                display_name=_display,
+            )
+            # The same engine, updated in place -- not a replacement.
+            return _eid
+
+        _update()
         elapsed = time.time() - t0
         print(f" {_fmt_duration(elapsed)}")
+
+        # Redeploying redraws the health lottery. Campaign 01 measured an
+        # in-place update moving an engine 0%->50% and 6%->56%, so the engine
+        # eval_before was gated onto is *not* the same draw eval_after gets.
+        # Ungated, a bad after-side draw shows up as a regression: the delta
+        # measures dropout rather than the prompt, and always in that
+        # direction. c07-pro came back 64/64 on both sides, which was luck --
+        # the stage recorded no health at all, so nothing had checked.
+        gate_cfg = health_gate_config(exp.config)
+        health: dict = {"engine_id": engine_id, "passed": True, "skipped": True}
+        if gate_cfg["enabled"]:
+            health = gate_engine_health(
+                engine_id,
+                redeploy_fn=_update,
+                attempts=gate_cfg["attempts"],
+                threshold=gate_cfg["threshold"],
+                max_rerolls=gate_cfg["max_rerolls"],
+                # Never a discard_fn here. `_update` returns the *same* id, so
+                # after one reroll that id is in the gate's `gate_created` set
+                # and a discard_fn would delete the engine the campaign is
+                # running on. Deploy can discard because each reroll there is a
+                # genuinely new engine; redeploy cannot.
+                discard_fn=None,
+            )
+            engine_id = health["engine_id"]
 
         exp.merge_pair(
             "redeploy",
@@ -956,8 +989,11 @@ def stage_redeploy(exp: Experiment, pair_id: str | None = None) -> None:
                 "engine_id": engine_id,
                 "updated_at": datetime.now(tz=UTC).isoformat(timespec="seconds"),
                 "elapsed": elapsed,
+                "health": health,
             },
         )
+
+        enforce_health_gate(health, gate_cfg["required"], pair.id)
 
 
 def stage_report(exp: Experiment, use_paperbanana: bool = True) -> None:

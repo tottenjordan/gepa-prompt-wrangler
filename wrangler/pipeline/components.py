@@ -826,6 +826,7 @@ def redeploy_single_agent(
     secret_id: str,
     optimize_output: str,
     cache_bust: str,
+    health_gate_json: str,
     metrics: Output[Metrics],
     summary: Output[Markdown],
     agent_prompt: Output[Markdown],
@@ -912,27 +913,72 @@ def redeploy_single_agent(
         if k.startswith(("SEARCH_MCP", "BOOKING_MCP", "EXPENSE_MCP"))
     }
 
+    def _update():
+        update_agent_from_source(
+            engine_id=engine_id,
+            agent_module=f"/app/{agent_module}",
+            model=model,
+            instruction=optimized_prompt,
+            display_name=f"gepa-{pair_id}",
+            env_vars=mcp_env,
+        )
+        # Updated in place: the same engine comes back, not a replacement.
+        return engine_id
+
     t0 = time.time()
-    update_agent_from_source(
-        engine_id=engine_id,
-        agent_module=f"/app/{agent_module}",
-        model=model,
-        instruction=optimized_prompt,
-        display_name=f"gepa-{pair_id}",
-        env_vars=mcp_env,
-    )
+    _update()
     elapsed = time.time() - t0
+
+    # Redeploying redraws the health lottery -- campaign 01 measured in-place
+    # updates moving an engine 0%->50% and 6%->56%. So eval_after does not
+    # inherit the draw eval_before was gated onto, and an ungated bad draw
+    # reads as a regression because the delta measures dropout. c07-pro's
+    # clean 64/64 after-side was luck: this stage recorded no health at all.
+    #
+    # Imported inside the component body: KFP serializes each @dsl.component in
+    # isolation, so a module-level import is absent at runtime.
+    from wrangler.orchestration.stages import (
+        enforce_health_gate,
+        gate_engine_health,
+        health_gate_config,
+    )
+
+    gate_cfg = health_gate_config(
+        {"health_gate": json.loads(health_gate_json) if health_gate_json else {}}
+    )
+    health = {"engine_id": engine_id, "passed": True, "skipped": True}
+    if gate_cfg["enabled"]:
+        health = gate_engine_health(
+            engine_id,
+            redeploy_fn=_update,
+            attempts=gate_cfg["attempts"],
+            threshold=gate_cfg["threshold"],
+            max_rerolls=gate_cfg["max_rerolls"],
+            # No discard_fn, deliberately. `_update` returns the same engine id,
+            # so after one reroll that id sits in the gate's `gate_created` set
+            # and a discard_fn would delete the engine this campaign is running
+            # on. Deploy can discard because each of its rerolls is a new engine.
+            discard_fn=None,
+        )
+        engine_id = health["engine_id"]
 
     result = {
         "pair_id": pair_id,
         "engine_id": engine_id,
         "updated_at": datetime.now(tz=UTC).isoformat(timespec="seconds"),
         "elapsed": elapsed,
+        "health": health,
     }
     stage_blob = f"pipeline-runs/{run_id}/stages/redeploy/{pair_id}.json"
     gcs.bucket(bucket_name).blob(stage_blob).upload_from_string(
         json.dumps(result, indent=2, default=str), content_type="application/json"
     )
+
+    # Enforced *after* the write, unlike deploy, which enforces first. A hard
+    # gate failure should still leave its verdict on GCS -- otherwise the one
+    # run whose engine was too sick to use is also the one run with no record
+    # of why it stopped.
+    enforce_health_gate(health, gate_cfg["required"], pair_id)
 
     metrics.log_metric("elapsed_seconds", round(elapsed, 1))
     with open(summary.path, "w") as f:
