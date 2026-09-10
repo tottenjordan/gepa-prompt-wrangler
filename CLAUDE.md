@@ -293,6 +293,20 @@ For multi-model agents: `SEARCH_MCP_SERVER`, `BOOKING_MCP_SERVER`, `EXPENSE_MCP_
   control of four tiers at 93–100%, so evals against it measure dropout rather than the
   prompt ([docs/analysis/2026-09-01-opus-serving-failure.md](docs/analysis/2026-09-01-opus-serving-failure.md)).
 
+- **Redeploy is health-gated too, on the same `health_gate:` config.** Updating an engine
+  in place **redraws its reach rate** (campaign 01 measured 0%→50% and 6%→56%), so the
+  engine `eval_before` was gated onto is not the draw `eval_after` gets. Ungated, a bad
+  after-side draw reads as a *regression* — the delta measures dropout, and always in that
+  direction, which biased every published result the same way. `stage_redeploy` and
+  `redeploy_single_agent` now probe and re-update while below the bar, and write the verdict
+  to the redeploy stage under `health`. c07-pro's clean 64/64 after-side was luck: that
+  stage recorded no health at all.
+
+  **The gate passes `discard_fn=None` here, and must.** An in-place update returns the
+  *same* engine id, so after one reroll that id is in `gate_engine_health`'s `gate_created`
+  set and a `discard_fn` would delete the engine the campaign is running on. Deploy can
+  discard because each of its rerolls is a genuinely new engine.
+
 - **A fresh deploy is health-gated, and it is on by default.** Roughly four in ten
   deployments come up unable to serve, failing by returning 200 with no inference — so an
   ungated deploy hands the eval an engine that silently drops a third of its cases, and the

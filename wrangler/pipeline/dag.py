@@ -154,6 +154,10 @@ def build_pipeline(image_uri: str):
                     secret_id=secret_id,
                     optimize_output=optimize_task.outputs["Output"],
                     cache_bust=cache_bust,
+                    # Redeploy redraws the health lottery, so it is gated on the
+                    # same config as deploy. Without this the after-side engine
+                    # is ungated and its dropout reads as a regression.
+                    health_gate_json=health_gate_json,
                 )
                 redeploy_task.set_caching_options(enable_caching=True)
                 redeploy_task.set_display_name("Re-deploy Optimized Agent")
