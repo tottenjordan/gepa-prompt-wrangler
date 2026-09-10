@@ -29,6 +29,45 @@ An engine is deletable only when **all** of these agree. Any single one protects
 | **Reference** | its id appears in `.env`, a manifest, or an experiment config |
 | **Warmth** | `min_instances > 0` **and** referenced — someone is holding it hot on purpose |
 
+### Missing veto: an in-flight pipeline job (open, 2026-09-10)
+
+**The traffic veto is a lagging proxy for "in use", and there is an ~8-hour window in every
+campaign where a live arm's engine looks deletable.**
+
+Observed on `c07-pro` while it was running. At 22:00 the prune plan listed its engine under
+DELETE; `redeploy` and `eval_after` were still PENDING against it. Running prune then would
+have destroyed a 9-hour arm an hour before it finished.
+
+The cause is structural, not a bug in the traffic count. `optimize_single_agent` takes **no
+`engine_id`** — only deploy, eval and redeploy do. GEPA runs inside the pipeline container
+against local FastMCP servers and calls the judge directly, so the deployed engine sees
+nothing for the whole optimize stage:
+
+| time | stage | engine traffic |
+| --- | --- | --- |
+| 13:17 | deploy | health probe |
+| 13:30-14:15 | eval_before | ~192 requests |
+| 14:15-22:47 | **optimize, 8h 32m** | **none** |
+| 23:00-23:33 | eval_after | ~250 requests |
+
+Optimize is ~87% of a run's wall clock, so an arm spends most of its life looking idle.
+
+Once `eval_after` ran, the same command moved it to KEEP — *traffic in window (444
+requests)*. So the protection arrives only after the engine is no longer needed.
+
+**The fix, when it is worth doing:** add a fifth veto that lists running `PipelineJob`s,
+reads `engine_id` from each one's `stages/deploy/<pair>.json`, and protects those ids. Cheap
+to implement and it closes the window entirely.
+
+**Deferred deliberately.** Nothing is running today, and the cost of the gap is bounded by
+remembering not to prune mid-campaign. Ranked below silent-failures #14, above the cosmetic
+items — it can destroy a day of compute, and the exposure is most of every campaign.
+
+**Until then:** do not run `wrangler engines prune` while any pipeline job is active. Check
+with `PipelineJob.list(filter='state="PIPELINE_STATE_RUNNING"')` first. Note that "no job
+running" is the real precondition — not "the engine shows traffic", which is what the tool
+checks.
+
 ### Why the ownership veto is the important one
 
 **Only 48 of the 80 were labelled ours.** Three of the *unlabelled* engines were the busiest
