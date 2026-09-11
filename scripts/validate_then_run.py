@@ -40,18 +40,25 @@ from wrangler.tools.preflight import render, run_preflight  # noqa: E402
 VALIDATION_ARM = {
     "06": "manifests/c06-ctrl-claude-n1_manifest.yaml",
     "07": "manifests/c07-sonnet5_manifest.yaml",
-    # A *baseline* arm, deliberately, not a control and not a treatment arm.
+    # Batch 1's treatment arm, and it has to be one now that campaign 08 is a screen.
     #
-    # The validation arm exists to run the paths nothing has run before, and for
-    # campaign 08 those are the sonnet_baseline_agent/_opt directories -- which have
-    # never been deployed or optimized -- and the redeploy health gate added in PR #70,
-    # which no campaign has ever executed. A control arm would exercise neither: it
-    # skips optimize and never redeploys.
+    # It was c08-old-r1, chosen because the baseline condition's sonnet_baseline_agent/_opt
+    # directories had never been deployed or optimized. The rescope drops the `old` arms,
+    # so that manifest is no longer part of its own campaign -- meaning ~11h of validation
+    # would be thrown away instead of hitting the KFP cache when the driver resubmits it.
+    # `test_every_validation_arm_is_part_of_its_own_campaign` fails on exactly that, and
+    # did.
     #
-    # It is also a real campaign arm (batch 2), so the ~11h is not spent twice: the
-    # driver's later submission of the same manifest hits the KFP cache, which is the
-    # same mechanism campaign 07 relied on.
-    "08": "manifests/c08-old-r1_manifest.yaml",
+    # The never-run paths it still covers are the ones that matter: the redeploy health
+    # gate from PR #70, which no campaign has executed, and the optimize stage with the
+    # per-generation MCP refresh removed (PR #75). A control arm would exercise neither --
+    # it skips optimize and never redeploys.
+    #
+    # That second one is a gate, not a bonus. Watch this arm's log for
+    # `will run without the tools`: 0 confirms the silent-failure #12 fix, and anything
+    # near campaign 07's 14% or campaign 08's earlier 15% means the refresh was not the
+    # cause either, and scripts/repro_mcp_refresh_hang.py is where to resume.
+    "08": "manifests/c08-new-r1_manifest.yaml",
 }
 
 
