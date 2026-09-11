@@ -714,9 +714,11 @@ can see.
 
 ## 12. A local MCP server stops answering, and GEPA scores a toolless agent
 
-**Found 2026-09-08, live, in campaign 07's validation arm. Observability fixed
-in PR #51; the underlying cause is still open — see "What is fixed, and what is
-not" below.**
+**Found 2026-09-08, live, in campaign 07's validation arm. Observability fixed in PR #51.
+Cause identified and fixed 2026-09-10 after two wrong answers — the per-generation session
+refresh, removed in PR #75 and reproduced locally in PR #77. Read the sections in order:
+the middle ones record mechanisms that turned out to be wrong, and they are kept because
+the way they were wrong is the useful part. Not yet confirmed at campaign scale.**
 
 **Five times in 50 GEPA generations (~10%)**, the optimize stage logged
 (first seen at 3-in-35, and the rate has held steady rather than climbing,
@@ -805,7 +807,8 @@ produces the evidence they capture.
 3. ~~Decide whether the cause is a crash or CPU starvation.~~ **Neither** — ruled out
    2026-09-09 from `c07-pro`'s logs, the first run to carry them. A replacement cause
    was proposed and shipped in PR #59, and **campaign 08 disproved it on 2026-09-10**.
-   See *The cache was not the cause* below. **Still open.**
+   See *The cache was not the cause* and *Reproduced locally* below. **Closed 2026-09-10**,
+   pending confirmation on the next optimize run.
 
 ### The cause: two mitigations that cancel each other
 
@@ -1056,7 +1059,8 @@ recoverable from a run whose analysis stage failed.
 ## 14. A resubmission overwrites its predecessor's results, in place
 
 **Found:** 2026-09-09, while assembling campaign 07's first calibrated result.
-**Status:** open. Nothing detects it; the loss is silent and total.
+**Status:** **fixed 2026-09-10** in PR #66 — see *Snapshot before write* below. It was open
+for a day and fired twice in it. Nothing detected it; the loss was silent and total.
 
 `run_id` is a hash of manifest name + agent module + eval data + pair ids. That
 determinism is deliberate and correct: it is what lets KFP hit its cache across
