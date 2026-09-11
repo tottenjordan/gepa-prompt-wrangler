@@ -184,7 +184,7 @@ class TestValidateThenRun:
             vtr, "wait_for_jobs", lambda ids: dict.fromkeys(ids, "PIPELINE_STATE_SUCCEEDED")
         )
         monkeypatch.setattr(
-            vtr, "run_campaign", lambda c, confirm, log_dir: released.append(c) or 0
+            vtr, "run_campaign", lambda c, confirm, log_dir, **kw: released.append(c) or 0
         )
         assert vtr.main("06", tmp_path) == 0
         assert released == ["06"]
@@ -198,7 +198,7 @@ class TestValidateThenRun:
             vtr, "wait_for_jobs", lambda ids: dict.fromkeys(ids, "PIPELINE_STATE_FAILED")
         )
         monkeypatch.setattr(
-            vtr, "run_campaign", lambda c, confirm, log_dir: released.append(c) or 0
+            vtr, "run_campaign", lambda c, confirm, log_dir, **kw: released.append(c) or 0
         )
         assert vtr.main("06", tmp_path) == 1
         assert released == []
@@ -211,7 +211,7 @@ class TestValidateThenRun:
         monkeypatch.setattr(vtr, "submit", lambda m, d: "job-1")
         monkeypatch.setattr(vtr, "wait_for_jobs", lambda ids: {})
         monkeypatch.setattr(
-            vtr, "run_campaign", lambda c, confirm, log_dir: released.append(c) or 0
+            vtr, "run_campaign", lambda c, confirm, log_dir, **kw: released.append(c) or 0
         )
         assert vtr.main("06", tmp_path) == 1
         assert released == []
@@ -226,7 +226,7 @@ class TestValidateThenRun:
 
         monkeypatch.setattr(vtr, "submit", _boom)
         monkeypatch.setattr(
-            vtr, "run_campaign", lambda c, confirm, log_dir: released.append(c) or 0
+            vtr, "run_campaign", lambda c, confirm, log_dir, **kw: released.append(c) or 0
         )
         assert vtr.main("06", tmp_path) == 1
         assert released == []
@@ -260,7 +260,7 @@ class TestAdoptARunningArm:
             lambda ids: watched.extend(ids) or dict.fromkeys(ids, "PIPELINE_STATE_SUCCEEDED"),
         )
         monkeypatch.setattr(
-            vtr, "run_campaign", lambda c, confirm, log_dir: released.append(c) or 0
+            vtr, "run_campaign", lambda c, confirm, log_dir, **kw: released.append(c) or 0
         )
 
         assert vtr.main("06", tmp_path, watch_job="job-abc") == 0
@@ -276,7 +276,7 @@ class TestAdoptARunningArm:
             vtr, "wait_for_jobs", lambda ids: dict.fromkeys(ids, "PIPELINE_STATE_FAILED")
         )
         monkeypatch.setattr(
-            vtr, "run_campaign", lambda c, confirm, log_dir: released.append(c) or 0
+            vtr, "run_campaign", lambda c, confirm, log_dir, **kw: released.append(c) or 0
         )
         assert vtr.main("06", tmp_path, watch_job="job-abc") == 1
         assert released == []
@@ -476,3 +476,191 @@ class TestEveryCampaignIsLaunchable:
                 f"campaign {campaign}'s validation arm {arm} is not one of its batches, so "
                 "its result is discarded rather than reused"
             )
+
+
+class TestTheDriverOutlivesItsCredentials:
+    """A 22-44 h driver sleeps through token lifetimes; on 2026-09-09 it died mid-batch.
+
+    `ensure_credentials()` cannot renew a reauth session -- nothing programmatic can --
+    but it moves the failure to *before* the submission, where nothing has been sent
+    and the message can name the fix.
+    """
+
+    def test_submit_checks_credentials_before_deploying(self, tmp_path, monkeypatch):
+        """The ordering is the whole point: a check after the API call buys nothing."""
+        import scripts.run_campaign as rc
+
+        order = []
+        monkeypatch.setattr(rc, "ensure_credentials", lambda: order.append("creds") or "ok")
+
+        def _deploy(manifest_path):
+            order.append("deploy")
+            return {"job_id": "j1", "dashboard_uri": "https://example/j1"}
+
+        monkeypatch.setattr(
+            "wrangler.pipeline.deploy_pipeline.deploy_pipeline", _deploy, raising=True
+        )
+        rc.submit("manifests/pipeline_smoke_manifest.yaml", tmp_path)
+        assert order == ["creds", "deploy"]
+
+    def test_an_unrefreshable_token_raises_before_anything_is_submitted(self):
+        from scripts.run_campaign import CredentialsExpiredError, ensure_credentials
+
+        class _Dead:
+            valid = False
+            expired = True
+            expiry = None
+
+            def refresh(self, _request):
+                raise RuntimeError("Reauthentication is needed")
+
+        with pytest.raises(CredentialsExpiredError, match="Nothing was submitted"):
+            ensure_credentials(credentials_fn=lambda: (_Dead(), "proj"))
+
+    def test_a_valid_token_is_not_refreshed(self):
+        """The check runs before every submit, so it has to be free when nothing is wrong."""
+        from scripts.run_campaign import ensure_credentials
+
+        class _Live:
+            valid = True
+            expired = False
+            expiry = None
+
+            def refresh(self, _request):
+                raise AssertionError("refreshed a credential that was already valid")
+
+        assert ensure_credentials(credentials_fn=lambda: (_Live(), "proj"))
+
+
+class TestADeadDriverIsRestartable:
+    """The driver's position lives in memory; the jobs live on Vertex. Rebuild it.
+
+    Exercised against a fake job lister -- resume must be testable without Vertex,
+    or it is only ever tested by the campaign it is supposed to save.
+    """
+
+    SUCCEEDED = "PipelineState.PIPELINE_STATE_SUCCEEDED"
+    RUNNING = "PipelineState.PIPELINE_STATE_RUNNING"
+    FAILED = "PipelineState.PIPELINE_STATE_FAILED"
+
+    def _record(self, log_dir, batch, prefix):
+        for n, manifest in enumerate(batch):
+            (log_dir / f"{Path(manifest).stem}.job").write_text(f"{prefix}-{n}\n")
+
+    def test_nothing_recorded_means_start_from_the_beginning(self, tmp_path):
+        from scripts.run_campaign import resume_state
+
+        assert resume_state(CAMPAIGNS["06"], tmp_path, state_fn=lambda _j: self.SUCCEEDED) == (
+            0,
+            [],
+        )
+
+    def test_a_finished_batch_is_skipped(self, tmp_path):
+        from scripts.run_campaign import resume_state
+
+        self._record(tmp_path, CAMPAIGNS["06"][0], "b1")
+        skip, adopted = resume_state(CAMPAIGNS["06"], tmp_path, state_fn=lambda _j: self.SUCCEEDED)
+        assert (skip, adopted) == (1, [])
+
+    def test_a_running_batch_is_adopted_not_resubmitted(self, tmp_path):
+        """Resubmitting would double the load on the judge the whole design is built around."""
+        from scripts.run_campaign import resume_state
+
+        self._record(tmp_path, CAMPAIGNS["06"][0], "b1")
+        self._record(tmp_path, CAMPAIGNS["06"][1], "b2")
+        states = {"b1-0": self.SUCCEEDED, "b1-1": self.SUCCEEDED}
+        skip, adopted = resume_state(
+            CAMPAIGNS["06"], tmp_path, state_fn=lambda j: states.get(j, self.RUNNING)
+        )
+        assert skip == 1
+        assert adopted == ["b2-0", "b2-1"]
+
+    def test_a_half_submitted_batch_is_re_run_not_adopted(self, tmp_path):
+        """One .job file missing means the driver died between two submissions."""
+        from scripts.run_campaign import resume_state
+
+        self._record(tmp_path, CAMPAIGNS["06"][0], "b1")
+        (tmp_path / f"{Path(CAMPAIGNS['06'][1][0]).stem}.job").write_text("b2-0\n")
+        states = {"b1-0": self.SUCCEEDED, "b1-1": self.SUCCEEDED}
+        assert resume_state(
+            CAMPAIGNS["06"], tmp_path, state_fn=lambda j: states.get(j, self.RUNNING)
+        ) == (1, [])
+
+    def test_a_failed_batch_stops_the_scan_rather_than_being_skipped_past(self, tmp_path):
+        """Resuming past a failure drops it silently while the campaign looks complete."""
+        from scripts.run_campaign import resume_state
+
+        self._record(tmp_path, CAMPAIGNS["06"][0], "b1")
+        self._record(tmp_path, CAMPAIGNS["06"][1], "b2")
+        assert resume_state(CAMPAIGNS["06"], tmp_path, state_fn=lambda _j: self.FAILED) == (0, [])
+
+    def test_a_partly_failed_batch_is_not_adopted_by_its_survivors(self, tmp_path):
+        from scripts.run_campaign import resume_state
+
+        self._record(tmp_path, CAMPAIGNS["06"][0], "b1")
+        states = {"b1-0": self.FAILED}
+        assert resume_state(
+            CAMPAIGNS["06"], tmp_path, state_fn=lambda j: states.get(j, self.RUNNING)
+        ) == (0, [])
+
+    def test_resume_skips_the_finished_batch_end_to_end(self, tmp_path, monkeypatch):
+        import scripts.run_campaign as rc
+
+        self._record(tmp_path, CAMPAIGNS["06"][0], "b1")
+        submitted = []
+        monkeypatch.setattr(rc, "submit", lambda m, _d: submitted.append(m) or "new")
+        monkeypatch.setattr(
+            rc, "wait_for_jobs", lambda ids, **kw: dict.fromkeys(ids, self.SUCCEEDED)
+        )
+        rc.run_campaign(
+            "06",
+            confirm=True,
+            log_dir=tmp_path,
+            sleep_fn=lambda _s: None,
+            resume=True,
+            state_fn=lambda _j: self.SUCCEEDED,
+        )
+        assert submitted == list(CAMPAIGNS["06"][1]), "batch 1 was re-submitted despite succeeding"
+
+    def test_without_resume_everything_runs(self, tmp_path, monkeypatch):
+        """Resume is opt-in: log_dir is not campaign-scoped, so a stale .job must not decide."""
+        import scripts.run_campaign as rc
+
+        self._record(tmp_path, CAMPAIGNS["06"][0], "b1")
+        submitted = []
+        monkeypatch.setattr(rc, "submit", lambda m, _d: submitted.append(m) or "new")
+        monkeypatch.setattr(
+            rc, "wait_for_jobs", lambda ids, **kw: dict.fromkeys(ids, self.SUCCEEDED)
+        )
+        rc.run_campaign("06", confirm=True, log_dir=tmp_path, sleep_fn=lambda _s: None)
+        assert len(submitted) == 4
+
+
+class TestTheDriverLogSurvivesTheDriver:
+    def test_output_is_written_to_the_log_dir_as_well_as_the_terminal(self, tmp_path, capsys):
+        from scripts.run_campaign import tee_stdout
+
+        path = tmp_path / "campaign-06.log"
+        with tee_stdout(path):
+            print("batch 1 complete")
+        assert "batch 1 complete" in path.read_text()
+        assert "batch 1 complete" in capsys.readouterr().out
+
+    def test_a_resumed_driver_appends_rather_than_truncating(self, tmp_path):
+        from scripts.run_campaign import tee_stdout
+
+        path = tmp_path / "campaign-06.log"
+        for line in ("first driver", "second driver"):
+            with tee_stdout(path):
+                print(line)
+        assert path.read_text().count("driver") == 2
+
+    def test_stdout_is_restored_afterwards(self, tmp_path):
+        import sys
+
+        from scripts.run_campaign import tee_stdout
+
+        before = sys.stdout
+        with tee_stdout(tmp_path / "x.log"):
+            pass
+        assert sys.stdout is before

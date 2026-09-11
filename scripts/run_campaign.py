@@ -16,11 +16,24 @@ Usage:
     uv run python scripts/run_campaign.py --campaign 06        # dry run
     uv run python scripts/run_campaign.py --campaign 06 --yes
     uv run python scripts/run_campaign.py --campaign 07 --yes
+    uv run python scripts/run_campaign.py --campaign 08 --yes --resume
+
+**A driver that dies is no longer a lost campaign.** It runs for 22-44 hours and
+used to hold its position only in memory, so losing the process lost the run even
+though every job was on Vertex and unaffected. `--resume` rebuilds the position
+from the `.job` files in `--log-dir` and the states Vertex still answers for:
+finished batches are skipped, a batch still running is adopted rather than
+resubmitted. The driver's own transcript is appended to `<log-dir>/campaign-NN.log`
+so it survives too -- the 2026-09-10 log went to /tmp and died with the process.
+
+No redirection needed, and do not resume into a *different* campaign's log dir:
+`.job` files are keyed by manifest stem, not by run.
 """
 
 from __future__ import annotations
 
 import argparse
+import contextlib
 import sys
 import time
 from pathlib import Path
@@ -52,9 +65,10 @@ from wrangler.core.models import get_spec  # noqa: E402
 # 40 minutes keeps both submissions inside one token lifetime.
 #
 # This is a mitigation, not a fix. A driver that sleeps for hours will
-# eventually straddle a reauth however short each individual sleep is; the real
-# answer is refreshing credentials before each submit, or not holding state
-# across sleeps at all.
+# eventually straddle a reauth however short each individual sleep is. Both
+# halves of the real answer are now here: `ensure_credentials()` runs before
+# every submit, and `--resume` means a driver that dies is restartable rather
+# than a lost campaign.
 OPTIMIZE_STAGGER = 40 * 60
 
 CAMPAIGNS: dict[str, list[tuple[str, ...]]] = {
@@ -197,6 +211,48 @@ _DONE = ("SUCCEEDED", "FAILED", "CANCELLED")
 POLL_SECONDS = 120
 
 
+class CredentialsExpiredError(RuntimeError):
+    """ADC cannot be renewed without a human. Raised *before* a submission."""
+
+
+def ensure_credentials(credentials_fn=None) -> str:
+    """Refresh ADC and return a one-line note on how long it is good for.
+
+    Called at the top of every ``submit()``. What this does and does not buy is
+    worth being precise about, because the obvious reading is wrong.
+
+    It does **not** hand refreshed credentials to the SDK. ``google.auth.default()``
+    mints a new credentials object per caller and ``deploy_pipeline`` builds its
+    own, so nothing downstream sees the object refreshed here.
+
+    What it buys is that the failure lands *before* the submission instead of
+    inside it. The 2026-09-09 death came after a 90-minute sleep, mid-``submit``,
+    with one arm of the batch already away — leaving a half-submitted batch and a
+    traceback that named an HTTP call rather than the expired session. A check
+    here turns that into a named error at a point where nothing has been sent.
+
+    For a service account this is also a genuine renewal and costs one token
+    fetch. For user ADC hitting a reauth challenge nothing programmatic can help;
+    the message says so, and says what does.
+    """
+    import google.auth
+    from google.auth.transport.requests import Request
+
+    creds, _ = (credentials_fn or google.auth.default)()
+    if not creds.valid or getattr(creds, "expired", False):
+        try:
+            creds.refresh(Request())
+        except Exception as exc:  # RefreshError, ReauthFailError, transport errors
+            raise CredentialsExpiredError(
+                f"ADC could not be refreshed before submitting ({type(exc).__name__}: {exc}). "
+                "Nothing was submitted. Run `gcloud auth application-default login`, then "
+                "re-run with --resume; a long campaign is better driven under a service "
+                "account, which has no reauth challenge to straddle."
+            ) from exc
+    expiry = getattr(creds, "expiry", None)
+    return f"credentials good until {expiry:%H:%M:%S} UTC" if expiry else "credentials refreshed"
+
+
 def submit(manifest_path: str, log_dir: Path) -> str:
     """Submit one arm and return its Vertex job id.
 
@@ -207,6 +263,7 @@ def submit(manifest_path: str, log_dir: Path) -> str:
     """
     from wrangler.pipeline.deploy_pipeline import deploy_pipeline
 
+    print(f"    {ensure_credentials()}", flush=True)
     log_dir.mkdir(parents=True, exist_ok=True)
     result = deploy_pipeline(manifest_path=manifest_path)
     job_id = result["job_id"]
@@ -214,6 +271,65 @@ def submit(manifest_path: str, log_dir: Path) -> str:
     print(f"      {result['dashboard_uri']}", flush=True)
     (log_dir / f"{Path(manifest_path).stem}.job").write_text(job_id + "\n")
     return job_id
+
+
+def job_ids_for(batch: tuple[str, ...], log_dir: Path) -> list[str] | None:
+    """The job ids a previous driver recorded for this batch, or None if incomplete.
+
+    ``submit()`` writes one ``<manifest-stem>.job`` per arm as it goes, so a batch
+    with a file missing was interrupted part-way through submission and has to be
+    re-run rather than adopted.
+    """
+    ids = []
+    for manifest in batch:
+        path = log_dir / f"{Path(manifest).stem}.job"
+        if not path.is_file():
+            return None
+        job_id = path.read_text().strip()
+        if not job_id:
+            return None
+        ids.append(job_id)
+    return ids
+
+
+def resume_state(
+    batches: list[tuple[str, ...]], log_dir: Path, state_fn=None
+) -> tuple[int, list[str]]:
+    """Work out where a dead driver got to. Returns (batches to skip, jobs to adopt).
+
+    The driver holds its position in memory across a 22-44 hour run, so losing the
+    process loses the campaign even though every job is on Vertex and unaffected.
+    This reconstructs the position from the two things that *did* survive: the
+    ``.job`` files on disk and the job states Vertex will still answer for.
+
+    Only **leading** batches are skipped. A gap -- batch 1 succeeded, 2 failed,
+    3 succeeded -- stops the scan at 2, because resuming past a failed batch would
+    quietly drop it while the campaign carried on looking complete. Re-running the
+    failed batch is the safe default and KFP caches whatever still applies.
+
+    A batch whose jobs are still running is **adopted**, not resubmitted: that is
+    the case this exists for, and resubmitting would double the load on the judge
+    the whole design is built around.
+
+    ``log_dir`` is not campaign-scoped, so a ``.job`` file from an earlier run of
+    the same manifest reads as this run's. The caller prints each adopted id and
+    its file's age for exactly that reason -- this decides, it does not confirm.
+    """
+    state_of = state_fn or _job_state
+    skip = 0
+    for batch in batches:
+        ids = job_ids_for(batch, log_dir)
+        if ids is None:
+            break
+        states = {job_id: state_of(job_id) for job_id in ids}
+        if all("SUCCEEDED" in st for st in states.values()):
+            skip += 1
+            continue
+        live = [j for j, st in states.items() if not any(t in st for t in _DONE)]
+        # Adopt only if nothing in the batch has already failed -- a mixed batch
+        # needs re-running as a whole, and waiting on its survivors would hide that.
+        return (skip, live) if live and len(live) == len(ids) else (skip, [])
+    return skip, []
 
 
 def wait_for_jobs(job_ids: list[str], sleep_fn=time.sleep, state_fn=None) -> dict[str, str]:
@@ -289,7 +405,14 @@ def _job_state(job_id: str) -> str:
         return "UNKNOWN"
 
 
-def run_campaign(campaign: str, confirm: bool, log_dir: Path, sleep_fn=time.sleep) -> int:
+def run_campaign(
+    campaign: str,
+    confirm: bool,
+    log_dir: Path,
+    sleep_fn=time.sleep,
+    resume: bool = False,
+    state_fn=None,
+) -> int:
     batches = CAMPAIGNS[campaign]
     problems = validate(batches)
 
@@ -314,7 +437,27 @@ def run_campaign(campaign: str, confirm: bool, log_dir: Path, sleep_fn=time.slee
         print("\nDRY RUN — re-run with --yes to submit.")
         return 0
 
+    skip, adopted = resume_state(batches, log_dir, state_fn) if resume else (0, [])
+    if skip or adopted:
+        print(f"\nRESUMING: {skip} batch(es) already succeeded", flush=True)
+        for job_id in adopted:
+            print(f"  adopting running job {job_id}", flush=True)
+        for manifest in batches[skip] if adopted else ():
+            path = log_dir / f"{Path(manifest).stem}.job"
+            age_h = (time.time() - path.stat().st_mtime) / 3600
+            print(f"    {path.name} submitted {age_h:.1f} h ago", flush=True)
+    if adopted:
+        print(f"    waiting for {len(adopted)} adopted job(s)", flush=True)
+        final = wait_for_jobs(adopted, sleep_fn=sleep_fn, state_fn=state_fn)
+        failed = [j for j, st in final.items() if "SUCCEEDED" not in st]
+        if failed:
+            print(f"    adopted batch had {len(failed)} non-successful job(s): {failed}")
+        skip += 1
+
     for i, batch in enumerate(batches, 1):
+        if i <= skip:
+            print(f"\n--- batch {i} of {len(batches)}: already done, skipping ---", flush=True)
+            continue
         print(f"\n--- batch {i} of {len(batches)} ---", flush=True)
         # Optimizing arms are staggered from each other because they share the
         # gemini-3.5-flash judge. A control has no optimize stage, so it goes
@@ -336,7 +479,7 @@ def run_campaign(campaign: str, confirm: bool, log_dir: Path, sleep_fn=time.slee
             jobs.append(submit(manifest, log_dir))
 
         print(f"    waiting for {len(jobs)} job(s) to finish before the next batch", flush=True)
-        final = wait_for_jobs(jobs, sleep_fn=sleep_fn)
+        final = wait_for_jobs(jobs, sleep_fn=sleep_fn, state_fn=state_fn)
         failed = [j for j, st in final.items() if "SUCCEEDED" not in st]
         if failed:
             # Report and continue: a later batch may still be worth having, and
@@ -347,10 +490,52 @@ def run_campaign(campaign: str, confirm: bool, log_dir: Path, sleep_fn=time.slee
     return 0
 
 
+@contextlib.contextmanager
+def tee_stdout(path: Path):
+    """Duplicate everything printed into ``path`` as well as the terminal.
+
+    The driver is normally launched with its output redirected somewhere ad hoc.
+    During the 2026-09-10 run that somewhere was ``/tmp``, the process died, and
+    the log went with it -- so the only record of a 22-hour campaign's first half
+    was gone, and its absence was noticed by looking rather than by being told.
+
+    Writing into ``--log-dir`` costs nothing, sits beside the ``.job`` files that
+    ``--resume`` reads, and is not swept. Appends, so a resumed driver extends the
+    record instead of truncating the part that explains why it had to resume.
+    """
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a", encoding="utf-8") as handle:
+
+        class _Tee:
+            def write(self, text: str) -> int:
+                handle.write(text)
+                handle.flush()
+                return original.write(text)
+
+            def flush(self) -> None:
+                handle.flush()
+                original.flush()
+
+        original = sys.stdout
+        sys.stdout = _Tee()
+        try:
+            yield
+        finally:
+            sys.stdout = original
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Run a DOE campaign as paired pipelines")
     parser.add_argument("--campaign", required=True, choices=sorted(CAMPAIGNS))
     parser.add_argument("--yes", action="store_true", help="Actually submit. Dry run without it.")
     parser.add_argument("--log-dir", default="outputs/campaigns")
+    parser.add_argument(
+        "--resume",
+        action="store_true",
+        help="Skip batches Vertex says already succeeded, and adopt one still running.",
+    )
     args = parser.parse_args()
-    sys.exit(run_campaign(args.campaign, args.yes, Path(args.log_dir)))
+    log_dir = Path(args.log_dir)
+    with tee_stdout(log_dir / f"campaign-{args.campaign}.log"):
+        print(f"\n=== driver started {time.strftime('%Y-%m-%d %H:%M:%S')} ===", flush=True)
+        sys.exit(run_campaign(args.campaign, args.yes, log_dir, resume=args.resume))
