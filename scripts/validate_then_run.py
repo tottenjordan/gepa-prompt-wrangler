@@ -79,8 +79,18 @@ def _preflight_ok(skip: bool) -> bool:
     return True
 
 
-def main(campaign: str, log_dir: Path, watch_job: str = "", skip_preflight: bool = False) -> int:
+def main(
+    campaign: str,
+    log_dir: Path,
+    watch_job: str = "",
+    skip_preflight: bool = False,
+    resume: bool = False,
+) -> int:
     """Validate, then release. ``watch_job`` adopts a validation arm already running.
+
+    ``resume`` is passed through to the campaign it releases, for the case this
+    wrapper cannot cover: a driver that died *after* validation, part-way through
+    the batches. ``watch_job`` adopts one arm; ``--resume`` adopts a position.
 
     The campaign list is read into memory at import, so editing it cannot change
     a chain that is already running. Trimming a batch mid-flight therefore means
@@ -103,7 +113,7 @@ def main(campaign: str, log_dir: Path, watch_job: str = "", skip_preflight: bool
         print("=" * 70)
         print(f"STEP 2 — releasing campaign {campaign}: {len(CAMPAIGNS[campaign])} batches")
         print("=" * 70)
-        return run_campaign(campaign, confirm=True, log_dir=log_dir)
+        return run_campaign(campaign, confirm=True, log_dir=log_dir, resume=resume)
 
     arm = VALIDATION_ARM[campaign]
     print("=" * 70)
@@ -135,13 +145,18 @@ def main(campaign: str, log_dir: Path, watch_job: str = "", skip_preflight: bool
     print("The validated arm re-submits with the same inputs, so KFP should cache")
     print("it and move on quickly rather than repeating the work.\n")
 
-    return run_campaign(campaign, confirm=True, log_dir=log_dir)
+    return run_campaign(campaign, confirm=True, log_dir=log_dir, resume=resume)
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Validate one arm, then run the campaign")
     parser.add_argument("--campaign", default="06", choices=sorted(VALIDATION_ARM))
     parser.add_argument("--log-dir", default="outputs/campaigns")
+    parser.add_argument(
+        "--resume",
+        action="store_true",
+        help="Skip batches Vertex says already succeeded, and adopt one still running.",
+    )
     parser.add_argument(
         "--skip-preflight",
         action="store_true",
@@ -162,6 +177,7 @@ if __name__ == "__main__":
         Path(args.log_dir),
         watch_job=args.watch_job,
         skip_preflight=args.skip_preflight,
+        resume=args.resume,
     )
     print(f"\nTotal wall clock: {(time.time() - started) / 3600:.1f} h")
     sys.exit(code)
