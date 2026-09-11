@@ -1,6 +1,6 @@
 # Agent Engine returns HTTP 200 with an empty event stream and no inference
 
-**Status:** ready to file, **evidence re-checked 2026-09-08** · **Filed:** _(not yet)_ · **Case:** _(none)_
+**Status:** ready to file, **evidence re-checked 2026-09-11** · **Filed:** _(not yet)_ · **Case:** _(none)_
 **Reported by:** GEPA Prompt Wrangler team
 **Date of measurement:** 2026-08-23, extended 2026-08-24 and 2026-09-01
 **Supporting analysis:** [../analysis/2026-08-23-geap-empty-stream-doe.md](../analysis/2026-08-23-geap-empty-stream-doe.md)
@@ -43,6 +43,18 @@ the engines are deleted and that we have not re-measured on an ungated deploy
 since. Do not assert the defect is current, and do not withdraw it.
 
 ---
+
+### Re-checked again 2026-09-11 — nothing has changed the argument
+
+One more gated deploy since: campaign 08's validation arm drew `rate=1.0` over **60**
+attempts with zero rerolls. That is a larger clean sample than any above and it still does
+**not** distinguish a fix from a good draw, for the reason already given — the gate selects
+healthy engines by construction, so it cannot observe the failure it exists to avoid.
+
+The one thing that would settle it is unchanged and still not run: a deliberate **ungated**
+sample across a dozen fresh engines. That costs about four hours and a dozen engines, and it
+is worth doing only if support asks for current evidence. Do not run it speculatively — the
+2026-08-23 measurement is the stronger artifact, because it has a per-request join.
 
 ## 1. Summary
 

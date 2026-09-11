@@ -39,6 +39,7 @@ One topic per file. Keep this index under 200 lines — put detail in the topic 
 
 | Escalation | Status |
 |------------|--------|
+| [../escalations/2026-09-11-judge-quota.md](../escalations/2026-09-11-judge-quota.md) | **Ready to file, not a defect report.** `gemini-3.5-flash` is capped at **5 RPM** and that single number sets campaign length: optimize is 87% of every run, a *single* arm draws 70 x HTTP 429, and the agent model sits idle at 2000 RPM. Asks for 60, derived from measured demand (~2,400 judge calls in 512 min). Records why `gemini-2.5-flash` at 100 RPM was rejected as the workaround — it retires 2026-10-16 and it scores the rubrics under test, so swapping it risks a false null. |
 | [../escalations/2026-08-23-geap-empty-stream.md](../escalations/2026-08-23-geap-empty-stream.md) | **Ready to file, not yet filed. Evidence re-checked 2026-09-08:** all 14 cited engine ids have been reaped, and three recent deploys showed 24/24 reach — which is *not* evidence of a fix, because the rate is per-engine (4%–68%) and the deploy health gate now selects healthy engines by construction. Agent Engine returns 200 with an empty stream and runs no inference, 31.7% of requests. The ask is narrow: do not use 200 for a request the service did not serve — 1.2% of requests already return `400 Service Unavailable`, so the path exists. |
 
 ## DOE Campaigns
