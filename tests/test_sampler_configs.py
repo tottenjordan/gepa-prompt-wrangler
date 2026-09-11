@@ -16,17 +16,26 @@ _AGENTS = Path(__file__).resolve().parents[1] / "examples" / "multi_model_agents
 
 # Deliberately-divergent criteria, with the reason and an expiry.
 #
-# Campaign 08 tests whether PR #69's instruction-adherence weighting (1 of 2 rubrics -> 3
-# of 4) removes the regression campaign 07 reproduced on two model families. That needs
-# both weightings running concurrently, and the criteria are chosen by agent-module name --
-# so the baseline condition has to be a second directory carrying the *old* criteria.
+# **STAGED, NOT LIVE as of 2026-09-11.** Nothing currently runs this directory. Campaign 08
+# was rescoped to a screen -- two repeats of the new criteria, ~22h -- and the concurrent
+# `old` arms it exists for were dropped, because both conditions are claude-sonnet-5 so they
+# cannot share a batch and four sequential optimize phases cost ~44h.
+#
+# It stays because the follow-up it enables is the *point* of screening: if campaign 08
+# screens the criteria change in, the `old` arms run as a controlled comparison and this is
+# what they run against. Rebuilding a byte-matched pre-PR#69 config later, from a repo that
+# has moved on, is how a "baseline" quietly becomes a re-derivation of the treatment.
+#
+# An exemption for something nothing runs is also how dead weight accumulates, so it carries
+# a date and two conditions for deletion: campaign 08 reports UNRESOLVED or negative, or the
+# follow-up runs. Delete this, examples/multi_model_agents/agents/sonnet_baseline_agent.py,
+# the _opt directory, and the c08-old-* / c08-ctrl-c / c08-ctrl-d manifests together.
+#
+# The two tests pinning its shape stay live either way -- unused is not unguarded, and they
+# are what stops it drifting into a copy of the treatment while it sits idle.
 #
 # Named rather than pattern-matched, and exempted from two guards rather than the guards
 # being relaxed, following ROLES_EXEMPT_FROM_REGISTRATION and PYTHON_MISMATCH_ACCEPTED.
-# `test_the_baseline_is_exactly_the_pre_pr69_shape` pins what it is allowed to be, so the
-# control condition cannot quietly become a second copy of the treatment.
-#
-# Delete this, the directory, and campaign 08's manifests together when 08 reports.
 BASELINE_CONFIGS = {"sonnet_baseline_opt"}
 
 # Every config, baseline included. The exemption is applied by the two tests it

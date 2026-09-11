@@ -118,42 +118,44 @@ CAMPAIGNS: dict[str, list[tuple[str, ...]]] = {
             "manifests/c07-ctrl-lite_manifest.yaml",
         ),
     ],
-    # Campaign 08 -- did PR #69's criteria change remove the instruction-following
-    # regression campaign 07 reproduced on two model families?
+    # Campaign 08 -- SCREENING. Does PR #69's criteria change (instruction adherence
+    # 1 of 2 rubrics -> 3 of 4) move the instruction-following regression campaign 07
+    # reproduced on two model families?
     #
-    # One model (claude-sonnet-5), two criteria conditions, two repeats each. The
-    # conditions differ only in sampler_config.json, which is selected by agent-module
-    # name -- hence the sonnet_baseline_agent twin.
+    # Two repeats of the NEW criteria, a control each, ~22h. Read
+    # docs/doe/08-criteria-holdout.md before changing this; the readings are
+    # pre-registered there and a screen has a narrower claim than it looks like.
     #
-    # Condition is crossed with batch, not confounded by it: each batch runs one arm of
-    # each condition, so an unlucky batch cannot land entirely on one condition. Same
-    # reasoning as campaign 07's cost tiers.
+    # This was a crossed two-condition design -- new and old criteria, two repeats
+    # each -- and the concurrent `old` arms were dropped. Why, and what it costs:
     #
-    # Two repeats because campaign 07 measured run-to-run spread at up to 12.3x the
-    # control floor -- two runs of one manifest disagreed on the *sign* of three metrics.
-    # A single arm per condition could not attribute anything.
+    # ONE optimizing arm per batch is forced, not chosen. Both conditions run
+    # claude-sonnet-5, which is the point: the model is held constant so criteria is
+    # the only variable. That puts both optimize phases on the Anthropic quota pool,
+    # and `validate()` rejects pairing them -- it caught the crossed design before it
+    # ran. Campaign 07 could pair its arms only because it varied the model.
     #
-    # A control per batch, never reused across batches: CLAUDE.md forbids carrying a
-    # floor over, since the dropout that generates it varies with load.
-    # ONE optimizing arm per batch, not two. Both conditions run claude-sonnet-5 --
-    # that is the point, the model is held constant so criteria is the only variable --
-    # so pairing them in a batch would put two Anthropic optimize phases on one quota
-    # pool. `validate()` rejects exactly that, and it caught this design before it ran.
+    # So the four arms were four *sequential* optimize phases: ~44h, two nights, with
+    # `main` frozen throughout because submit() packages the working tree per batch.
+    # Halving the arms halves that; nothing else on the list buys a comparable amount.
+    # It is not concurrency -- optimize is judge-bound and one arm already saturates
+    # gemini-3.5-flash at rpm=5 (70 x 429 from a single arm), so there is no schedule
+    # that runs four optimize phases in 22h.
     #
-    # Campaign 07 could pair its arms because it varied the model; campaign 08 cannot,
-    # and the honest cost is four sequential optimize phases (~44h) instead of two.
+    # What the screen gives up. The `old` comparison is now against campaign 07's
+    # recorded -0.045/-0.062, measured before PR #59, #70 and #75 -- so a difference
+    # cannot be attributed cleanly to the criteria rather than to the substrate. A
+    # large effect screens in and justifies running the staged `old` arms as a proper
+    # controlled follow-up; anything near campaign 07's numbers is UNRESOLVED, not a
+    # negative result. The manifests, agent modules and sampler config for the `old`
+    # condition are all kept for exactly that.
     #
-    # Each batch still carries its own control. A control has no optimize stage, so it
-    # shares the publisher for free and adds no wall clock -- and CLAUDE.md forbids
-    # reusing a floor measured under different load, so each batch measures its own.
-    #
-    # Conditions alternate across batches so a drift in the substrate over two days
-    # cannot land entirely on one condition.
+    # Each batch keeps its own control. A control has no optimize stage, so it shares
+    # the publisher for free and adds no wall clock, and CLAUDE.md forbids reusing a
+    # floor measured under different load. `-c` and `-d` are staged with the `old` arms.
     "08": [
         ("manifests/c08-new-r1_manifest.yaml", "manifests/c08-ctrl-a_manifest.yaml"),
-        ("manifests/c08-old-r1_manifest.yaml", "manifests/c08-ctrl-b_manifest.yaml"),
-        ("manifests/c08-new-r2_manifest.yaml", "manifests/c08-ctrl-c_manifest.yaml"),
-        ("manifests/c08-old-r2_manifest.yaml", "manifests/c08-ctrl-d_manifest.yaml"),
+        ("manifests/c08-new-r2_manifest.yaml", "manifests/c08-ctrl-b_manifest.yaml"),
     ],
 }
 
