@@ -431,7 +431,9 @@ def capture_cmd(engine_id: str, eval_data: str, label: str, model: str, retry_fa
     default=1,
     type=int,
     help="Score the same capture N times and report the spread. N>1 measures judge "
-    "non-determinism directly, since the responses are identical.",
+    "non-determinism directly, since the responses are identical. Reports a per-case "
+    "disagreement rate -- the share of cases not scored identically on every pass -- and "
+    "saves the per-case rows for each pass.",
 )
 @click.option("--label", default="", help="Label for output.")
 def score_cmd(capture_path: str, repeat: int, label: str):
@@ -441,19 +443,47 @@ def score_cmd(capture_path: str, repeat: int, label: str):
     different judge model shifts the result, what a metric prompt change does —
     is only a valid comparison if the responses underneath are identical.
     """
-    from .eval.evaluator import save_eval_results, score_captured, score_captured_repeated
+    from .eval.evaluator import (
+        per_case_disagreement,
+        save_eval_results,
+        score_captured,
+        score_captured_repeated,
+    )
 
     name = label or Path(capture_path).stem
 
     if repeat > 1:
         summary = score_captured_repeated(capture_path, repeat=repeat, agent_name=name)
+        results = summary.get("results", [])
         click.echo(f"\n{summary['n']} scoring passes over identical responses:")
-        click.echo(f"  {'metric':40s} {'mean':>7s} {'sd':>7s} {'min':>7s} {'max':>7s}")
+        click.echo(
+            f"  {'metric':40s} {'mean':>7s} {'sd':>7s} {'min':>7s} {'max':>7s} {'disagree':>9s}"
+        )
+        rates = per_case_disagreement([r.per_case for r in results if r.per_case])
         for metric in sorted(summary["mean"]):
+            rate = rates.get(metric)
+            shown = f"{rate:8.1%}" if rate is not None else "       -"
             click.echo(
                 f"  {metric:40s} {summary['mean'][metric]:7.3f} {summary['std'][metric]:7.3f} "
-                f"{summary['min'][metric]:7.3f} {summary['max'][metric]:7.3f}"
+                f"{summary['min'][metric]:7.3f} {summary['max'][metric]:7.3f} {shown:>9s}"
             )
+        click.echo(
+            "\n  disagree = share of cases NOT scored identically on every pass "
+            "(cases with <2 observations excluded)"
+        )
+        # Persist every pass. The summary alone cannot answer DOE 02's per-case
+        # question, and re-running five scoring passes to recover rows that were
+        # already computed is the expensive way to learn that.
+        for i, result in enumerate(results):
+            saved = save_eval_results(
+                agent_name=f"{name}-pass{i + 1}",
+                scores=result.scores,
+                phase="scored",
+                per_case=result.per_case,
+                coverage=result.coverage,
+                scoring=result.scoring,
+            )
+            click.echo(f"  Saved pass {i + 1}: {saved} ({len(result.per_case)} per-case rows)")
         return
 
     result = score_captured(capture_path, agent_name=name)

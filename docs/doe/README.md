@@ -14,7 +14,7 @@ outcome would mean *before* looking is what stops that.
 | # | Campaign | Status | Cost |
 |---|----------|--------|------|
 | [01](01-engine-lottery.md) | Is the engine failure rate a deployment lottery? | **Complete 2026-08-24 — yes, and it is a per-worker property** | 1,400 attempts, ~6 h |
-| [02](02-judge-variance.md) | How much of the noise floor is the judge? | **Not started** | One capture, then scoring only |
+| [02](02-judge-variance.md) | How much of the noise floor is the judge? | **Arms 1-2 complete 2026-09-16 — the holdout's floor IS the judge (64/64 cases disagree); safety's is not (0/64)** | ~55 min, no agent redeploy |
 | [03](03-noise-floor.md) | What is the noise floor, really? | **Not started** | Moderate |
 | [04](04-gepa-budget-and-criteria.md) | What does a GEPA budget buy? | Superseded by [10](10-gepa-budget-curve.md) | ~90 h wall-clock |
 | [06](06-pipeline-noise-floor.md) | What is the noise floor, on the pipeline? | **Complete 2026-09-08 — 0.058 at n=1, 0.011–0.014 at n=3; averaging beats √n** | ~6 h, 4 arms (n=5 trimmed) |

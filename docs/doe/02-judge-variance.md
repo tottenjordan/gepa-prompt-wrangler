@@ -1,6 +1,7 @@
 # Campaign 02 — How much of the noise floor is the judge?
 
-**Status:** Not started · **Depends on:** `wrangler capture` / `wrangler score`
+**Status:** Arms 1–2 **complete 2026-09-16** · arm 3 inconclusive · arm 4 not run
+**Depends on:** `wrangler capture` / `wrangler score` — **both shipped**; this line read "Not started / Depends on" long after they existed.
 
 ## Question
 
@@ -63,4 +64,22 @@ of why it is worth building capture/score before running it.
 
 ## Result
 
-_Not yet run._
+**The holdout's floor is the judge; safety's is not.** Scoring byte-identical responses five
+times, the judge disagreed with itself on **64/64 cases** for `instruction_following_v1`
+(sd 0.024) and **0/64** for `safety_v1` (sd 0.000).
+
+Campaign 08's IF control floor was **0.022** — so within the available precision essentially
+all of the holdout's floor is judge non-determinism, and the cheap lever (more scoring passes,
+no agent calls) applies. The replicated safety effect sits on the most stable metric measured.
+
+Against this campaign's own decision table: **judge SD ≥ agent SD** for the holdout →
+*"recommend scoring repeats over `num_runs`"*. For safety the opposite holds and `num_runs`
+is the only lever.
+
+One methodological correction to the pre-registration: **the variance subtraction does not
+work at n=5** — applied literally it returns judge = 386% of total for IF, which is
+impossible. An sd from n=5 has a 95% interval of [0.007, 0.033] when the truth is 0.020. The
+**per-case disagreement rates are the robust statistic** (proportions over 64 cases, not sds
+over 5 passes), which is why requiring them was right.
+
+Full write-up: [../analysis/2026-09-16-doe-02-result.md](../analysis/2026-09-16-doe-02-result.md)
