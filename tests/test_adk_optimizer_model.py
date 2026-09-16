@@ -115,23 +115,60 @@ def test_we_are_not_silently_back_on_adks_default():
         assert DEFAULT_OPTIMIZER_MODEL in MODELS
 
 
-def test_optimizer_and_judge_sharing_a_model_is_deliberate():
-    """Writer and scorer are currently the same id. Pin it so a change is a choice.
+def test_the_writer_is_not_the_scorer():
+    """A writer sharing the scorer's model can target the measured score too precisely.
 
-    Campaigns 07 and 08 ran writer (`gemini-2.5-flash`) != scorer
-    (`gemini-3.5-flash`) and measured GEPA improving its criterion while degrading
-    its holdout, on five arms out of five. A writer that shares the scorer's
-    preferences could plausibly amplify that, because it can target the measured
-    score more precisely. That is a hypothesis and not a measurement — but it is
-    the kind of thing that should never change by accident.
+    Campaigns 07 and 08 ran writer != scorer and measured GEPA improving its criterion
+    while degrading its holdout, on five arms out of five. A writer that shares the
+    scorer's preferences could plausibly amplify that. It is a hypothesis rather than a
+    measurement -- DOE 11 records the power arithmetic for testing it -- but the cheap
+    move is to not create the overlap, which is what `claude-opus-4-8` does.
 
-    If you are here because this failed: you either split them, which is likely
-    an improvement and needs the substrate note in the campaign docs, or you
-    changed the judge and should decide which of the two you meant to move.
+    PR #83 briefly shipped writer == scorer as a side effect of clearing a retirement
+    deadline. This is the guard that would have caught it.
     """
-    assert DEFAULT_OPTIMIZER_MODEL == DEFAULT_JUDGE_MODEL, (
-        f"The prompt writer ({DEFAULT_OPTIMIZER_MODEL!r}) and the scorer "
-        f"({DEFAULT_JUDGE_MODEL!r}) are no longer the same model. That may well be "
-        f"right — see DEFAULT_OPTIMIZER_MODEL in core/models.py — but it changes "
-        f"the experimental substrate, so update this test and say so in the DOE."
+    assert DEFAULT_OPTIMIZER_MODEL != DEFAULT_JUDGE_MODEL, (
+        f"the prompt writer and the scorer are both {DEFAULT_JUDGE_MODEL!r}. See "
+        f"DEFAULT_OPTIMIZER_MODEL in core/models.py; if this is deliberate, say why there."
+    )
+
+
+def test_the_writer_is_not_an_enabled_agent_model():
+    """Writer == agent is a confound for cross-model campaigns, and a subtler one.
+
+    A model writing prompts for its own architecture may produce prompts that suit it
+    better than they suit another agent model. In a cost/quality frontier campaign like
+    07 that asymmetry lands on some arms and not others.
+
+    `claude-opus-4-8` is safe because every opus pair is disabled -- the serving lottery,
+    docs/analysis/2026-09-01-opus-serving-failure.md. This test is what stops that
+    becoming untrue by accident when someone re-enables an opus arm.
+
+    Reads `enabled_pairs`, never `pairs`: a *disabled* opus pair must not trip it.
+    """
+    from wrangler.core.factory import PairFactory
+
+    manifests = Path(__file__).resolve().parents[1] / "manifests"
+    collisions: list[str] = []
+    unreadable: list[str] = []
+    for path in sorted(manifests.glob("*.yaml")):
+        try:
+            manifest = PairFactory.load(str(path))
+        except Exception as exc:  # a broken manifest is another test's problem
+            unreadable.append(f"{path.name} ({type(exc).__name__}: {exc})")
+            continue
+        collisions.extend(
+            f"{path.name}:{pair.id}"
+            for pair in manifest.enabled_pairs
+            if pair.model == DEFAULT_OPTIMIZER_MODEL
+        )
+
+    assert not collisions, (
+        f"{DEFAULT_OPTIMIZER_MODEL!r} writes GEPA's prompts and is also an enabled agent "
+        f"in {collisions}. Either pick a different optimizer model or disable those pairs "
+        f"— see DEFAULT_OPTIMIZER_MODEL in core/models.py."
+    )
+    assert len(unreadable) < 3, (
+        f"{len(unreadable)} manifests failed to parse, so this guard checked almost "
+        f"nothing: {unreadable[:3]}"
     )

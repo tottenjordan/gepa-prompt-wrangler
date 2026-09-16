@@ -268,40 +268,56 @@ DEFAULT_AGENT_MODEL_ALT = "claude-sonnet-4-6"
 # The model GEPA uses to *write* candidate prompts -- distinct from the judge,
 # which scores them. Until 2026-09-16 this was never set, so ADK's own default
 # applied: gemini-2.5-flash, retiring 2026-10-16. Declaring the role is the
-# point of the change, not the id: an ADK default is invisible to the registry's
-# retirement guard, so a vendor shutdown would have surfaced as GEPA 404ing
-# nine hours into an optimize stage instead of as a red build.
+# point, not the id: an ADK default is invisible to the registry's retirement
+# guard, so a vendor shutdown would have surfaced as GEPA 404ing nine hours into
+# an optimize stage instead of as a red build.
 #
-# gemini-3.5-flash, for the same reason DEFAULT_AGENT_MODEL is: it has a dated
-# retirement (2027-05-19) rather than the short-term availability track. Newer
-# and cheaper ids were considered and rejected -- gemini-3.6-flash can retire on
-# 45 days' notice with no date announced in advance, which is the very failure
-# this role is being declared to prevent. A lite tier was rejected on capability:
-# this model reads the eval failures and writes the next prompt, so it is doing
-# the reasoning GEPA's search quality depends on.
+# claude-opus-4-8, chosen so the writer collides with nothing:
 #
-# TWO CONSEQUENCES, both deliberate and neither free:
+# - NOT THE JUDGE. A writer sharing the scorer's model can target the measured
+#   score more precisely, and campaigns 07/08 already measured GEPA improving its
+#   criterion while degrading its holdout on five arms of five. Those ran writer
+#   != scorer; keeping that property costs nothing and removes a live suspect.
+# - NOT AN AGENT UNDER TEST. claude-sonnet-5 was the cheaper Anthropic pick and
+#   is the agent campaign 08 evaluated -- that trades writer == scorer for
+#   writer == agent, which is asymmetric across arms in a cross-model campaign
+#   like 07's cost/quality frontier. Every opus pair in manifests/ is
+#   `enabled: false` (the serving lottery, docs/analysis/2026-09-01), so the opus
+#   tier cannot silently become an agent again;
+#   `test_the_writer_is_not_an_enabled_agent_model` makes that a red build.
+# - OFF THE BOTTLENECK. rpm=800 on the Anthropic pool, against gemini-3.5-flash's
+#   rpm=5 which the judge already saturates at 4.7/min. Optimize is 87% of a run
+#   and judge-bound; the writer no longer contends with it at all.
+# - DATED RETIREMENT, 2027-05-28. A model with no announced date (gemini-3.6-flash,
+#   45 days' notice) would reintroduce exactly the failure this role was declared
+#   to prevent.
 #
-# 1. It is now the SAME id as DEFAULT_JUDGE_MODEL, so the model writing the
-#    prompts is the model scoring them. Campaigns 07 and 08 ran writer
-#    (gemini-2.5-flash) != scorer (gemini-3.5-flash). Those campaigns measured
-#    GEPA improving its criterion and degrading its holdout, five arms for five;
-#    a writer that shares the scorer's preferences could plausibly amplify that,
-#    since it can target the measured score more precisely. This is a hypothesis,
-#    not a measurement. `test_optimizer_and_judge_sharing_a_model_is_deliberate`
-#    pins it so the day someone wants writer != scorer, they change it on purpose.
-# 2. RPM drops 100 -> 5, onto the Gemini pool the judge already saturates. The
-#    optimizer made 69 calls against 331 judge calls in campaign 07 (~0.12/min
-#    against the judge's 4.7/min), so the added contention is small -- but it is
-#    on the bottleneck, and campaign length is judge-RPM-bound.
+# THE ONE REAL OBSTACLE, and it is in the request config rather than the model.
+# ADK's default `model_configuration` asks for `thinking_budget=10240`, a positive
+# value that maps to Anthropic's `{"type": "enabled"}`. Probed against Vertex on
+# 2026-09-16: adaptive (-1) returns normally, enabled (10240) returns
+# `400 '"thinking.type.enabled" is not supported for this model'`. It would also
+# exceed ADK's `Claude.max_tokens` default of 8192 on its own terms. So the config
+# is built per model in `wrangler/optimize/optimizer_config.py`. No ADK patch is
+# involved -- `model_configuration` is an ordinary field on the GEPA config.
 #
-# Anthropic was the tempting answer -- claude-sonnet-5 is rpm=2000 on a separate
-# publisher quota pool, so it would add no contention at all. It was rejected on
-# two mechanics: ADK passes `model_configuration` to this model and its default
-# carries a Gemini-only `thinking_config`, and a bare Claude id does not carry
-# the `projects/.../locations/global/publishers/anthropic/...` resource path the
-# location rule requires. Both are solvable; neither is solvable in this change.
-DEFAULT_OPTIMIZER_MODEL = "gemini-3.5-flash"
+# An earlier revision of this comment claimed Claude was blocked because ADK
+# passes a "Gemini-only" thinking_config and because a bare Claude id lacks the
+# `projects/.../locations/global/...` resource path. Both were wrong. ADK maps
+# thinking_config for Anthropic, and `Claude._anthropic_client` falls back to
+# GOOGLE_CLOUD_PROJECT/GOOGLE_CLOUD_LOCATION, which every pipeline component
+# hardcodes to "global". A full resource path is in fact worse: LLMRegistry
+# resolves the class from this string and raises ValueError on a `projects/...`
+# form.
+#
+# COSTS, stated rather than buried. Opus is $5/$25 per 1M against flash pennies;
+# at ~69 reflection calls per campaign that is roughly $5, so a ~$4 campaign
+# becomes ~$9. Trivial in absolute terms, a real multiple in relative ones.
+# And this is a THIRD writer: 07/08 used gemini-2.5-flash, #83 used
+# gemini-3.5-flash. Writer != scorer is restored, but writer *capability* still
+# differs from those campaigns, so a comparison across this boundary needs the
+# same caveat campaign 08's `old` condition got.
+DEFAULT_OPTIMIZER_MODEL = "claude-opus-4-8"
 
 # PaperBanana's text/VLM stage — it plans the figure, then critiques the render.
 # Currently the same id as the judge, but a separate role on purpose: moving the

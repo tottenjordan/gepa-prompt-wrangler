@@ -141,6 +141,12 @@ def deploy_single_agent(
         os.environ["GOOGLE_GENAI_USE_VERTEXAI"] = "1"
         os.environ.pop("GOOGLE_API_KEY", None)
         os.environ.pop("GEMINI_API_KEY", None)
+        # Re-pin the location too. It is set above, but load_dotenv(override=True)
+        # runs after that, so a GOOGLE_CLOUD_LOCATION in the secret payload wins.
+        # Claude and Gemini 3.x are not servable from a region, and GEPA's prompt
+        # writer is now claude-opus-4-8, which reads this env var directly through
+        # Claude._anthropic_client -- a regional value fails the whole optimize stage.
+        os.environ["GOOGLE_CLOUD_LOCATION"] = "global"
 
     instruction = pair.get("system_prompt", "")
     logging.info(
@@ -513,6 +519,12 @@ def optimize_single_agent(
         os.environ["GOOGLE_GENAI_USE_VERTEXAI"] = "1"
         os.environ.pop("GOOGLE_API_KEY", None)
         os.environ.pop("GEMINI_API_KEY", None)
+        # Re-pin the location too. It is set above, but load_dotenv(override=True)
+        # runs after that, so a GOOGLE_CLOUD_LOCATION in the secret payload wins.
+        # Claude and Gemini 3.x are not servable from a region, and GEPA's prompt
+        # writer is now claude-opus-4-8, which reads this env var directly through
+        # Claude._anthropic_client -- a regional value fails the whole optimize stage.
+        os.environ["GOOGLE_CLOUD_LOCATION"] = "global"
 
     # -- Start local MCP servers for reliable tool connections --
     import subprocess
@@ -882,6 +894,12 @@ def redeploy_single_agent(
         os.environ["GOOGLE_GENAI_USE_VERTEXAI"] = "1"
         os.environ.pop("GOOGLE_API_KEY", None)
         os.environ.pop("GEMINI_API_KEY", None)
+        # Re-pin the location too. It is set above, but load_dotenv(override=True)
+        # runs after that, so a GOOGLE_CLOUD_LOCATION in the secret payload wins.
+        # Claude and Gemini 3.x are not servable from a region, and GEPA's prompt
+        # writer is now claude-opus-4-8, which reads this env var directly through
+        # Claude._anthropic_client -- a regional value fails the whole optimize stage.
+        os.environ["GOOGLE_CLOUD_LOCATION"] = "global"
 
     # Read deploy + optimize results from GCS
     deploy_data = json.loads(

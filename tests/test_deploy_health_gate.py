@@ -542,19 +542,30 @@ class TestAllThreeDeployPathsAreGated:
     def test_the_kfp_component_gates(self):
         """KFP serializes each component in isolation, so the import must be
         inside the function body or it is simply absent at runtime."""
+        # Extracted by AST, not by a fixed-size slice. `src[i : i + 6000]` is what
+        # this used to do, and on 2026-09-16 six added lines pushed the call it
+        # asserts on past the 6000-character boundary -- the slice then cut a call
+        # in half and the test failed with a SyntaxError about the *test's* own
+        # substring rather than anything wrong with the component. The same trap is
+        # recorded at tests/test_optimize_model_override.py:115, where the number
+        # was bumped instead. Several sibling tests still slice this way.
+        import ast
         from pathlib import Path
 
         src = Path("wrangler/pipeline/components.py").read_text()
-        i = src.index("def deploy_single_agent")
-        body = src[i : i + 6000]
+        module = ast.parse(src)
+        func = next(
+            node
+            for node in module.body
+            if isinstance(node, ast.FunctionDef) and node.name == "deploy_single_agent"
+        )
+        body = ast.get_source_segment(src, func) or ""
         assert "gate_engine_health" in body
         # Parsed rather than string-matched: the import is legitimately
         # multi-line now that the component also pulls in enforce_health_gate
         # and health_gate_config, and an exact-text assertion just breaks on
         # formatting without checking anything more.
-        import ast
-
-        tree = ast.parse(body[: body.rindex("\n")] + "\n    pass\n")
+        tree = ast.parse(body)
         imported = {
             alias.name
             for node in ast.walk(tree)
