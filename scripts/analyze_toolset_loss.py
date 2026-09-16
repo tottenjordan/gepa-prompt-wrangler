@@ -32,11 +32,18 @@ FAILURE_PATTERNS = ("will run without the tools", "Failed to get tools from tool
 CLOSE_PATTERN = "Closing toolset"
 
 
-def read_timestamps(job_id: str, pattern: str, limit: int = 20000) -> list[dt.datetime]:
+def read_timestamps(
+    job_id: str, pattern: str, limit: int = 20000, freshness: str = "90d"
+) -> list[dt.datetime]:
     """Timestamps of log lines matching `pattern`, oldest first.
 
     Filtered server-side: one optimize component emits ~50k lines and paging them
     through Python is minutes of wall clock for no extra information.
+
+    **`--freshness` is not optional.** `gcloud logging read` defaults it to **1 day**
+    and says nothing when it truncates, so without this every run older than
+    yesterday reports zero losses and looks clean. That misfired here on 2026-09-16,
+    reading a 4-day-old arm as having no failures.
     """
     out = subprocess.run(
         [
@@ -49,6 +56,7 @@ def read_timestamps(job_id: str, pattern: str, limit: int = 20000) -> list[dt.da
             ),
             "--project=" + _project(),
             f"--limit={limit}",
+            f"--freshness={freshness}",
             "--format=value(timestamp)",
         ],
         capture_output=True,
@@ -115,6 +123,11 @@ def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--job-id", required=True, help="ml_job custom job id, not the pipeline name")
     ap.add_argument(
+        "--freshness",
+        default="90d",
+        help="How far back to search. gcloud defaults to 1d and truncates silently.",
+    )
+    ap.add_argument(
         "--timeout",
         type=float,
         default=120.0,
@@ -125,14 +138,24 @@ def main() -> int:
 
     failures: list[dt.datetime] = []
     for pattern in FAILURE_PATTERNS:
-        hits = read_timestamps(args.job_id, pattern, limit=500)
+        hits = read_timestamps(args.job_id, pattern, limit=500, freshness=args.freshness)
         print(f"{pattern!r}: {len(hits)}")
         failures.extend(hits)
     if not failures:
-        print("\nNo toolset losses in this run.")
+        # Distinguish "clean" from "looked in the wrong place": a real optimize
+        # container always closes toolsets, so zero of those means the job id or the
+        # freshness window is wrong, not that the run was healthy.
+        closes = read_timestamps(args.job_id, CLOSE_PATTERN, freshness=args.freshness)
+        if not closes:
+            print(
+                f"\nNo {CLOSE_PATTERN!r} events either -- job {args.job_id} is not an "
+                "optimize container, or --freshness is too short. NOT a clean run."
+            )
+            return 2
+        print(f"\nNo toolset losses in this run ({len(closes)} closes seen).")
         return 0
 
-    closes = read_timestamps(args.job_id, CLOSE_PATTERN)
+    closes = read_timestamps(args.job_id, CLOSE_PATTERN, freshness=args.freshness)
     groups = burst(sorted(failures))
     print(f"\n{len(failures)} losses in {len(groups)} bursts; {len(closes)} toolset closes")
 

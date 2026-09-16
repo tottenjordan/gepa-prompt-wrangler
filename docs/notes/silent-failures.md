@@ -717,7 +717,7 @@ can see.
 **Found 2026-09-08, live, in campaign 07's validation arm. STILL OPEN. Observability
 fixed in PR #51 — the only shipped fix that did what it claimed. Three mechanisms have been
 proposed and two shipped; the rate has not moved: 14% (c07) -> 15% (c08, with PR #59) ->
-12% (c08, with PR #75).**
+12% and 24% (c08's two arms, with PR #75).**
 
 **Localised 2026-09-12 by measurement rather than by reading:** a burst of ~32 toolset
 closes lands 90-150s before every loss at ~10x baseline, p<0.0001, with every other band
@@ -997,8 +997,8 @@ campaign 07's batch 1 re-submits the validation arm expecting a cache hit on
 and re-runs a ~7 hour optimize already paid for -- accepted deliberately rather
 than by accident.
 
-Until then, treat a campaign arm's tool-use scores as carrying a **12-15% contamination
-rate** (measured across three arms: 14%, 15%, 12%), and grep both wordings -- `will run without the
+Until then, treat a campaign arm's tool-use scores as carrying a **12-24% contamination
+rate** (measured across four arms: 14%, 15%, 12%, 24%), and grep both wordings -- `will run without the
 tools` and `Failed to get tools from toolset` -- when reading any optimize run.
 
 ## 13. Merging to main rewrote a running campaign's pipeline specs

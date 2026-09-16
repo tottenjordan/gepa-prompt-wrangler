@@ -12,7 +12,8 @@
 | --- | --- | --- |
 | 07 | 16 / 111 | 14% |
 | 08 earlier arm, with PR #59 | 3 / 20 | 15% |
-| **08 this arm, with PR #75** | **16 / 131** | **12%** |
+| **08 `c08-new-r1`, with PR #75** | **16 / 131** | **12%** |
+| **08 `c08-new-r2`, with PR #75** | **29 / 119** | **24%** |
 
 **Three fixes have shipped for #12 and the rate has not moved.** PR #51 fixed the
 observability, and it is the only one that did what it claimed.
@@ -54,6 +55,27 @@ ADK's MCP call timeout is **120 s**. So the hung `list_tools()` started ~120 s b
 error was logged — precisely inside the close burst — and then nothing happened at all
 until the deadline fired. The empty bands either side are not noise; they are the shape of
 the mechanism.
+
+## Replicated on the second arm
+
+`c08-new-r2` ran the identical configuration nine hours later and reproduces the signature
+exactly — **independently, on data that did not exist when the mechanism was proposed**:
+
+```
+seconds before failure   r1 enrichment   r2 enrichment
+    0 -  90 s                 0.0-0.2x        0.0-0.4x
+   90 - 120 s                    10.7x           11.0x
+  120 - 150 s                     9.8x           11.5x
+  150 - 240 s                     0.0x            0.0x
+```
+
+Both arms logged **exactly 1,812** toolset closes, which is the expected consequence of an
+identical `max_metric_calls: 600` budget and a useful consistency check on the counting.
+
+The loss *rate* is not stable — 12% and 24% on identical configurations — so treat the
+contamination as **12–24%** and do not read a change in rate as evidence about a fix
+unless it clears that spread. This is why the acceptance test below has to be a rate on a
+real stage rather than a reproduction.
 
 ## The mechanism
 
@@ -117,7 +139,7 @@ The target is step 2: **a shared toolset that any runner may close.** Three opti
 
 Whatever ships, **the acceptance test is the rate on a real optimize stage, not a
 reproduction** — that is the lesson of PR #59 and PR #75, both of which passed their own
-tests and changed nothing. Expect `will run without the tools` at 0 against the 12–15%
+tests and changed nothing. Expect `will run without the tools` at 0 against the 12–24%
 baseline, and count it with `analyze_toolset_loss.py` rather than by eye.
 
 ## Also: the run's own failure counter reports zero
@@ -136,3 +158,24 @@ not be argued about afterwards: `tool_use_quality_v1` is **not interpretable** i
 campaign in either direction, including "no change". The primary outcome
 (Δ`instruction_following_v1`) and the secondary (Δ`safety_v1`) do not depend on it, and the
 contamination is symmetric across arms.
+
+## A defect in the analysis script, found by it reporting a clean run
+
+On 2026-09-16 the script reported **zero losses** for `c08-new-r2`. The arm actually had
+29.
+
+`gcloud logging read` defaults `--freshness` to **one day** and truncates silently, so any
+run older than yesterday reads as clean. The script passed no window at all, which was
+invisible while it was only ever run against same-day jobs.
+
+Fixed two ways, because the flag alone would fail the same way again the next time someone
+narrows it:
+
+- `--freshness` defaults to `90d` and is an argument.
+- **Zero failures is no longer reported as success on its own.** A real optimize container
+  always closes toolsets, so zero `Closing toolset` events means the job id or the window
+  is wrong. The script now says so and exits **2** rather than printing "no toolset losses".
+
+The general shape is worth naming: *an absence of evidence read out of a truncated query
+looks exactly like evidence of absence.* Both times this has bitten in this repo, the
+query was right and the window was wrong.
