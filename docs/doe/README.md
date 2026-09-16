@@ -19,9 +19,10 @@ outcome would mean *before* looking is what stops that.
 | [04](04-gepa-budget-and-criteria.md) | What does a GEPA budget buy? | Superseded by [10](10-gepa-budget-curve.md) | ~90 h wall-clock |
 | [06](06-pipeline-noise-floor.md) | What is the noise floor, on the pipeline? | **Complete 2026-09-08 — 0.058 at n=1, 0.011–0.014 at n=3; averaging beats √n** | ~6 h, 4 arms (n=5 trimmed) |
 | [07](07-cost-quality-frontier.md) | What does a model tier cost per unit of quality? | **Unblocked 2026-09-08 — 06's floor measured, drift null** | ~10.6 h/arm, 4 arms, 2 at a time |
-| [08](08-criteria-holdout.md) | Did the criteria fix remove the instruction-following regression? | **Pre-registered 2026-09-10, not yet run** | ~44 h, 4 optimize arms + 4 controls |
+| [08](08-criteria-holdout.md) | Did the criteria fix remove the instruction-following regression? | **Complete 2026-09-13 — UNRESOLVED by all three pre-registered routes; the regression replicated, 5 arms of 5** | ~23 h, 2 optimize arms + 2 controls (rescoped) |
 | [09](09-lottery-recheck.md) | Has the deploy lottery got worse? | **Complete 2026-09-01 — no, 5/10 vs 6/10, p=1.000** | 10 engines, ~4 h |
 | [10](10-gepa-budget-curve.md) | What does a GEPA budget buy? (scoped to fit) | **Deferred — needs repeats per budget** | 1 optimize arm per batch |
+| [11](11-writer-scorer-identity.md) | Does the prompt writer sharing the scorer's model amplify the holdout regression? | **Pre-registered 2026-09-16, GATED on the judge-quota escalation** | ~88 h now, ~25–40 h after |
 
 **09 ran before 06 and cleared it.** The lottery had not shifted (5/10 vs 6/10,
 p=1.000), so `max_rerolls` went to 4 and 06 proceeded. Original note below.
