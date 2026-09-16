@@ -87,16 +87,29 @@ Rules the test suite enforces:
   the completeness check still sees it, and a test fails if it ever gains a `ModelSpec`
   without the exemption being removed.
 
-**GEPA runs two models, and both are now declared roles.** The **judge**
-(`DEFAULT_JUDGE_MODEL`) scores candidates; the **optimizer model**
-(`DEFAULT_OPTIMIZER_MODEL`) reads the failures and writes the next candidate prompt.
-Until 2026-09-16 the second was never set, so ADK's own default applied
+**GEPA runs two models, and both are declared roles.** The **judge**
+(`DEFAULT_JUDGE_MODEL`, `gemini-3.5-flash`) scores candidates; the **optimizer model**
+(`DEFAULT_OPTIMIZER_MODEL`, `claude-opus-4-8`) reads the failures and writes the next
+candidate prompt. Until 2026-09-16 the second was never set, so ADK's own default applied
 (`gemini-2.5-flash`) — invisible to the retirement guard above, because that guard only
-inspects roles this repo declares. It came within 30 days of shutdown while writing every
-candidate prompt. Both are `gemini-3.5-flash` today, so **the model writing the prompts is
-the model scoring them**; campaigns 07 and 08 ran them as different models, so a campaign
-comparing across that boundary is not comparing like with like. See the comment on
-`DEFAULT_OPTIMIZER_MODEL` for why, and `tests/test_adk_optimizer_model.py` for the pins.
+inspects roles this repo declares, and it came within 30 days of shutdown while writing
+every candidate prompt.
+
+The writer is deliberately **neither the judge nor any enabled agent model**. Sharing the
+judge lets it target the measured score; sharing an agent biases cross-model campaigns
+towards the arms that match it. Two tests in `tests/test_adk_optimizer_model.py` enforce
+both, and they are not hypothetical — the interim `gemini-3.5-flash` choice collided with
+*both*, being the judge and an enabled agent in five manifests.
+
+**ADK's default reflection config does not work on Claude, and the fix is config, not a
+patch.** `thinking_budget=10240` maps to Anthropic `{"type": "enabled"}`, which Opus 4.7+
+rejects with a 400 (probed on Vertex 2026-09-16); adaptive (`-1`) works.
+`wrangler/optimize/optimizer_config.py` builds the right config per model and explains why
+it reads `supports_sampling_params` as a generation marker.
+
+**Campaigns 07 and 08 used a third writer** (`gemini-2.5-flash`). Writer ≠ scorer is
+restored, but writer *capability* still differs from those runs, so any comparison across
+that boundary carries the same caveat campaign 08's `old` condition did.
 
 Retirement dates are the *earliest announced* shutdown. Anthropic's are "not sooner than"
 and apply to Anthropic-operated platforms — Google Cloud sets its own schedule for partner

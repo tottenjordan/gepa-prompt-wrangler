@@ -8,6 +8,17 @@ that fit, can only detect an amplification worth 60–80% of the entire effect. 
 **Follows:** [08-criteria-holdout.md](08-criteria-holdout.md) and
 [../analysis/2026-09-16-campaign-08-result.md](../analysis/2026-09-16-campaign-08-result.md)
 
+> **Update 2026-09-16, before this ran:** the writer was moved off the judge's model to
+> `claude-opus-4-8`, so **the overlap this campaign measures is no longer shipped** and the
+> campaign is now hypothetical as well as gated. Kept, because the power arithmetic below
+> applies to any two-condition holdout design, not just this one.
+>
+> **If a slot opens after the quota lands, run the writer A/B first, not this.** Scored on
+> the *criterion* rather than the holdout it is far better powered — `safety_v1` has a large
+> effect (+0.149) and small variance (sd 0.0121), so n=2 detects **23%** of the effect where
+> this design's n=2 detects only 79%. No DOE file for it yet: nothing is scheduled, and a
+> pre-registration for an unscheduled campaign is dead weight.
+
 ## Question
 
 GEPA runs two models. The **judge** scores candidates; the **optimizer model** reads the

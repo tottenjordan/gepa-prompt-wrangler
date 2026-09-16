@@ -11,6 +11,7 @@ import time
 from pathlib import Path
 
 from ..core.models import DEFAULT_JUDGE_MODEL, DEFAULT_OPTIMIZER_MODEL
+from .optimizer_config import build_optimizer_config
 
 log = logging.getLogger(__name__)
 
@@ -489,10 +490,18 @@ def optimize(
     # ADK's was gemini-2.5-flash, which retires 2026-10-16 and is invisible to the
     # registry's retirement guard because the repo never named the role. See
     # DEFAULT_OPTIMIZER_MODEL in core/models.py for why this id and what it costs.
-    optimizer_kwargs = {"run_dir": run_dir, "optimizer_model": DEFAULT_OPTIMIZER_MODEL}
+    optimizer_config = GEPARootAgentPromptOptimizerConfig(
+        run_dir=run_dir,
+        optimizer_model=DEFAULT_OPTIMIZER_MODEL,
+        # ADK's default model_configuration is Gemini-shaped and 400s on Claude
+        # Opus 4.7+; see optimizer_config.py for the probe that established it.
+        model_configuration=build_optimizer_config(DEFAULT_OPTIMIZER_MODEL),
+    )
+    # Assigned rather than passed so ADK keeps ownership of the default when the
+    # manifest omits it. Keyword args, not a **dict: a heterogeneous kwargs dict
+    # collapses to one union type and the config's own field types stop being checked.
     if max_metric_calls is not None:
-        optimizer_kwargs["max_metric_calls"] = max_metric_calls
-    optimizer_config = GEPARootAgentPromptOptimizerConfig(**optimizer_kwargs)
+        optimizer_config.max_metric_calls = max_metric_calls
     eval_sets_manager = LocalEvalSetsManager(agents_dir=agents_dir)
     sampler = LocalEvalSampler(sampler_cfg, eval_sets_manager)
     optimizer = GEPARootAgentPromptOptimizer(optimizer_config)
