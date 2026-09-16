@@ -139,4 +139,16 @@ binding constraint is judge RPM, not budget.
 
 ## Result
 
-_Not yet run._
+**UNRESOLVED**, by all three pre-registered routes independently. Ran 2026-09-11 →
+2026-09-13; all four arms SUCCEEDED at 64/64 coverage with the health gate passing at
+rate 1.0 throughout.
+
+- mean Δ IF = **−0.052**, inside the unresolved band of (−0.062, 0)
+- control gate tripped: `c08-ctrl-b` drifted **+0.022** on IF against the 0.017 bar
+- within-condition spread **0.032**, also above 0.017
+
+What it *did* establish: the criterion/holdout pattern replicated a third and fourth time
+and PR #69 did not remove it — safety **+0.154 / +0.131** against a 0.006 floor,
+instruction following **−0.068 / −0.036** against a 0.022 floor.
+
+Full write-up: [../analysis/2026-09-16-campaign-08-result.md](../analysis/2026-09-16-campaign-08-result.md)
