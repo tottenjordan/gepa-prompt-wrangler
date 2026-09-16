@@ -190,21 +190,44 @@ assuming it.
 
 ### Is prompt length a bigger lever than the writer id?
 
-**Plausibly yes, and it is better evidenced than the writer question.** The case:
+**RETRACTED 2026-09-16, same day.** An earlier revision of this section said *"Plausibly
+yes, and it is better evidenced than the writer question."* The "plausibly" survives. The
+**"better evidenced" was false, and it was false against data already in our own bucket.**
 
-- GEPA's own literature names verbosity-overfitting as the characteristic failure, with
-  length constraints as the standard regularizer.
-- Campaign 07 measured prompts growing 78 → 3,873 characters.
-- Five arms across two campaigns show the criterion improving while the holdout degrades —
-  the signature overfitting predicts.
-- Measured here: candidate writers differ **7×** in output length (483 to 3,375 characters)
-  on an identical request, so the lever has real range.
+Every optimize stage records `original_chars` and `optimized_chars`. Pairing those with the
+holdout delta, across all seven arms that have both:
 
-What is missing is any measurement tying length to the holdout delta *in this pipeline*.
-That is a real experiment, not a patch, and it should be designed before anything is
-changed. **If it holds, it reframes both DOE 11 and the writer A/B**: the writer id would
-matter mainly through the length it produces, and the cheaper intervention would be
-constraining length directly rather than shopping for models.
+| cohort | n | `r(optimized_chars, Δ instruction_following_v1)` |
+| --- | --- | --- |
+| all arms | 7 | +0.373 |
+| optimized only (drop the arm that returned its seed unchanged) | 6 | **+0.699** |
+| **clean substrate only (c07 + c08)** | **4** | **−0.112** |
+| `claude-sonnet-5` only, model held constant | 3 | +0.470 |
+
+**The sign flips with the subset, and the only comparable cohort is indistinguishable from
+no relationship.** A *positive* `r` means longer prompts had a *smaller* holdout
+regression — the opposite of the hypothesis. Nothing here supports the mechanism in either
+direction.
+
+The hypothesis remains reasonable: verbosity-overfitting is GEPA's documented failure mode,
+campaign 07 did grow its prompt 78 → 3,873 characters, five arms do show criterion-up /
+holdout-down, and the writers measured above differ 4× in output length so the lever has
+real range. What was never true is that any of that is *evidence about length as the
+channel*. It was an appeal to published literature plus one internal correlation, neither
+checked against the artifacts.
+
+**Arm-level data cannot settle it** — one nine-hour stage yields one `(length, delta)` pair,
+which is why n=4. GEPA's own `run_dir` yields one per *candidate*: 14 on the surviving local
+run, spanning 78 to 12,741 characters. That directory was being deleted with the container
+on every pipeline run; it is now uploaded to
+`pipeline-runs/{run_id}/stages/optimize/gepa_run/{pair_id}/`, and
+[`scripts/analyze_candidate_lengths.py`](../../scripts/analyze_candidate_lengths.py) reads
+it.
+
+One limit that does not go away: those per-candidate scores are GEPA's **criteria**, not the
+holdout. `instruction_following_v1` is not a criterion and is never scored during the
+search, so candidate data can test the first half of the overfitting story and not the
+second.
 
 ## Recommendations
 
@@ -213,7 +236,9 @@ constraining length directly rather than shopping for models.
 2. **Register the missing models.** `gemini-3.7-flash` and `gemini-3.8-flash` are callable
    and absent from `wrangler/core/models.py`. The registry lagging the platform is part of
    why the retirement scare happened at all. Separate PR.
-3. **Investigate length regularization before running any writer A/B.** It is better
-   evidenced, and it may make the A/B ask the wrong question.
+3. **Do not build length regularization.** The premise is unsupported (above). GEPA's
+   `run_dir` is now preserved, so the question becomes answerable at no marginal cost from
+   the next campaign onward — revisit when a campaign has produced candidate data, not
+   before.
 4. **Test whether `seed` would fix the run-to-run spread** before building any design around
    repeats. Cheap, and it bears on every campaign costing.

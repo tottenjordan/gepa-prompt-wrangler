@@ -336,7 +336,12 @@ class TestSkipOptimize:
                 "<module>",
             )
             window = "\n".join(lines[max(0, n - 10) : n + 10])
-            writes = "upload_from_string" in window
+            # Both upload verbs count. This said `upload_from_string` only until
+            # 2026-09-16, which made the MCP-log upload -- an upload_from_filename --
+            # pass by coincidence: an unrelated `.exists()` in its window classified
+            # it as "guarded". The next upload_from_filename with no nearby .exists()
+            # was flagged as an unguarded read, which it was not.
+            writes = "upload_from_string" in window or "upload_from_filename" in window
             guarded = ".exists()" in window or "required=False" in window
             assert writes or guarded or owner in allowed_unguarded, (
                 f"{owner} (line {n + 1}) reads the optimize stage unguarded; "
