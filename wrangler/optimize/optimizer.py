@@ -10,7 +10,7 @@ import sys
 import time
 from pathlib import Path
 
-from ..core.models import DEFAULT_JUDGE_MODEL
+from ..core.models import DEFAULT_JUDGE_MODEL, DEFAULT_OPTIMIZER_MODEL
 
 log = logging.getLogger(__name__)
 
@@ -485,11 +485,14 @@ def optimize(
 
     run_dir = os.path.join("outputs", "gepa_runs", app_name)
     os.makedirs(run_dir, exist_ok=True)
-    optimizer_config = (
-        GEPARootAgentPromptOptimizerConfig(run_dir=run_dir, max_metric_calls=max_metric_calls)
-        if max_metric_calls is not None
-        else GEPARootAgentPromptOptimizerConfig(run_dir=run_dir)
-    )
+    # optimizer_model is passed explicitly rather than left to ADK's default.
+    # ADK's was gemini-2.5-flash, which retires 2026-10-16 and is invisible to the
+    # registry's retirement guard because the repo never named the role. See
+    # DEFAULT_OPTIMIZER_MODEL in core/models.py for why this id and what it costs.
+    optimizer_kwargs = {"run_dir": run_dir, "optimizer_model": DEFAULT_OPTIMIZER_MODEL}
+    if max_metric_calls is not None:
+        optimizer_kwargs["max_metric_calls"] = max_metric_calls
+    optimizer_config = GEPARootAgentPromptOptimizerConfig(**optimizer_kwargs)
     eval_sets_manager = LocalEvalSetsManager(agents_dir=agents_dir)
     sampler = LocalEvalSampler(sampler_cfg, eval_sets_manager)
     optimizer = GEPARootAgentPromptOptimizer(optimizer_config)
@@ -502,7 +505,11 @@ def optimize(
         f"{tag}  Train: {train_count} cases, Val: {val_count} cases, Max metric calls: {max_calls}",
         flush=True,
     )
-    print(f"{tag}  Optimizer model: {optimizer_config.optimizer_model}", flush=True)
+    print(
+        f"{tag}  Optimizer model: {optimizer_config.optimizer_model} (writes prompts) | "
+        f"judge: {judge_model} (scores them)",
+        flush=True,
+    )
     print(f"{tag}  Run dir: {run_dir}", flush=True)
 
     t0 = time.time()

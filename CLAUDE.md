@@ -87,6 +87,17 @@ Rules the test suite enforces:
   the completeness check still sees it, and a test fails if it ever gains a `ModelSpec`
   without the exemption being removed.
 
+**GEPA runs two models, and both are now declared roles.** The **judge**
+(`DEFAULT_JUDGE_MODEL`) scores candidates; the **optimizer model**
+(`DEFAULT_OPTIMIZER_MODEL`) reads the failures and writes the next candidate prompt.
+Until 2026-09-16 the second was never set, so ADK's own default applied
+(`gemini-2.5-flash`) — invisible to the retirement guard above, because that guard only
+inspects roles this repo declares. It came within 30 days of shutdown while writing every
+candidate prompt. Both are `gemini-3.5-flash` today, so **the model writing the prompts is
+the model scoring them**; campaigns 07 and 08 ran them as different models, so a campaign
+comparing across that boundary is not comparing like with like. See the comment on
+`DEFAULT_OPTIMIZER_MODEL` for why, and `tests/test_adk_optimizer_model.py` for the pins.
+
 Retirement dates are the *earliest announced* shutdown. Anthropic's are "not sooner than"
 and apply to Anthropic-operated platforms — Google Cloud sets its own schedule for partner
 models, so treat them as an early-warning floor.
