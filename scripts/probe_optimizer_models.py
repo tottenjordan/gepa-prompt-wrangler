@@ -171,7 +171,14 @@ def _build_llm(model: str):
 
     cls = LLMRegistry.resolve(model)
     if cls.__name__ == "LiteLlm":
-        return cls(
+        # ty reports `pydantic-discarded-extra-argument` here and is wrong. It sees
+        # `LiteLlm.__init__` forward **kwargs to a Pydantic `super().__init__`, which does
+        # discard them -- but __init__ separately keeps them in `self._additional_args`
+        # and passes them to the litellm completion call. Verified behaviourally: the same
+        # model through `LLMRegistry.new_llm()` (no extra args) fails with
+        # `Publisher model ... 400`, and succeeds with them. Suppressed rather than worked
+        # around, because dropping the arguments genuinely breaks the call.
+        return cls(  # ty: ignore[pydantic-discarded-extra-argument]
             model=model,
             vertex_project=os.environ["GCP_PROJECT_ID"],
             vertex_location="global",
