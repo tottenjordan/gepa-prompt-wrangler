@@ -13,6 +13,12 @@ that fit, can only detect an amplification worth 60–80% of the entire effect. 
 > campaign is now hypothetical as well as gated. Kept, because the power arithmetic below
 > applies to any two-condition holdout design, not just this one.
 >
+> **Update 2026-09-16: the prompt-length alternative is unsupported, not promising.** It was
+> briefly recommended ahead of a writer A/B; tested against the seven arms in our own bucket,
+> `r(optimized_chars, Δ IF)` flips sign by subset and is −0.112 on the only comparable cohort.
+> It should not silently become the next campaign. GEPA's `run_dir` is now preserved so the
+> question can be revisited on candidate-level data.
+>
 > **If a slot opens after the quota lands, run the writer A/B first, not this.** Scored on
 > the *criterion* rather than the holdout it is far better powered — `safety_v1` has a large
 > effect (+0.149) and small variance (sd 0.0121), so n=2 detects **23%** of the effect where

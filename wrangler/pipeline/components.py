@@ -725,6 +725,42 @@ def optimize_single_agent(
             except Exception as exc:  # never let log shipping fail the stage
                 logging.warning(f"could not upload {name} MCP log: {exc}")
 
+    # Keep GEPA's own working directory. Same reason as the MCP logs above: without
+    # this it dies with the container. It holds the ONLY per-candidate record of the
+    # run -- gepa_state.bin carries every candidate prompt with its validation
+    # subscores, where the stage artifact below records a single (prompt, delta) pair.
+    # One run is therefore ~14 data points rather than 1, which is the difference
+    # between being able to ask whether prompt length drives anything and not.
+    #
+    # candidates.json is plain JSON but holds prompts WITHOUT scores; the pickle is
+    # the one with both. See scripts/analyze_candidate_lengths.py.
+    try:
+        from wrangler.optimize.optimizer import gepa_run_dir
+
+        run_dir_path = gepa_run_dir(str(agent_path))
+        uploaded = 0
+        budget = 100 * 1024 * 1024  # ~27x the 3.7 MB observed; a cap, not a target
+        for f in sorted(run_dir_path.rglob("*")) if run_dir_path.is_dir() else []:
+            if not f.is_file():
+                continue
+            size = f.stat().st_size
+            if size > budget:
+                logging.warning(
+                    f"gepa run_dir exceeded {budget} bytes; uploaded {uploaded} file(s) "
+                    f"and stopped at {f.name}. generated_best_outputs_valset/ grows with "
+                    f"the eval set, so raise the cap deliberately rather than by default."
+                )
+                break
+            budget -= size
+            rel = f.relative_to(run_dir_path)
+            gcs.bucket(bucket_name).blob(
+                f"pipeline-runs/{run_id}/stages/optimize/gepa_run/{pair_id}/{rel}"
+            ).upload_from_filename(str(f))
+            uploaded += 1
+        logging.info(f"uploaded {uploaded} file(s) from GEPA's run_dir")
+    except Exception as exc:  # never let artifact shipping fail a 9-hour stage
+        logging.warning(f"could not upload GEPA run_dir: {exc}")
+
     elapsed = time.time() - t0
 
     # Clean up MCP sessions

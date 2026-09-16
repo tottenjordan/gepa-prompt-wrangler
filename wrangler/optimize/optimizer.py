@@ -311,6 +311,23 @@ def _apply_model_override(root_agent, model: str, tag: str = "") -> None:
     print(f"{tag}  Model override: {model} (from manifest)", flush=True)
 
 
+def gepa_run_dir(agent_module_path: str) -> Path:
+    """Where GEPA writes its candidates, per-candidate scores and search tree.
+
+    One definition, because two callers need it: `optimize()` passes it to GEPA, and the
+    KFP optimize component uploads what GEPA leaves there. Recomputing the expression in
+    the component would let the two drift, and the failure would be silent -- the upload
+    would find an empty directory and log nothing interesting.
+
+    What lands here is the only per-candidate record of a run. `gepa_state.bin` holds every
+    candidate prompt alongside its validation subscores -- 14 candidates spanning 78 to
+    12,741 characters on the one surviving local run -- against the single (prompt, delta)
+    pair the stage artifact records. `candidates.json` has the prompts as plain JSON but
+    **no scores**, so anything correlating length against score needs the pickle.
+    """
+    return Path("outputs") / "gepa_runs" / Path(agent_module_path).name
+
+
 def optimize(
     agent_module_path: str,
     evalset_path: str | None = None,
@@ -484,7 +501,7 @@ def optimize(
             flush=True,
         )
 
-    run_dir = os.path.join("outputs", "gepa_runs", app_name)
+    run_dir = str(gepa_run_dir(agent_module_path))
     os.makedirs(run_dir, exist_ok=True)
     # optimizer_model is passed explicitly rather than left to ADK's default.
     # ADK's was gemini-2.5-flash, which retires 2026-10-16 and is invisible to the
