@@ -120,7 +120,7 @@ They *are* reachable, and the id form is load-bearing — it took three attempts
 working one.
 
 Five probed: `qwen3-next-80b-a3b-thinking` (483 ±120 chars, ok),
-`kimi-k2-thinking` (855 **±764**, ok but wildly unstable), `deepseek-v3.2` (429 on the
+`kimi-k2-thinking` (855 **±764**, and it returned an **empty proposal** on a later call), `deepseek-v3.2` (429 on the
 reflection samples), `glm-5.2` (429), `grok-4.6` (404).
 
 **Ruled out on three grounds unrelated to model quality:**
@@ -148,11 +148,23 @@ That needs a real optimize-stage comparison: ~44 h at n=2, gated on the judge qu
 on the criterion it is well powered (n=2 detects 23% of the effect) — see
 [DOE 11](../doe/11-writer-scorer-identity.md).
 
-**The silent failure the probes were built around did not fire.** Every candidate that
-answered at all returned text after thought-stripping. `generate_reflection_response`
-returns `""` rather than raising when a model emits only thought parts, which would hand
-GEPA an empty proposal and burn a nine-hour stage — the thinking models were the suspects
-and all of them passed. Worth re-checking whenever the writer changes.
+**CORRECTION (same day): the silent failure the probes were built around DID fire.** An
+earlier revision of this document said it did not. On a follow-up call,
+`vertex_ai/moonshotai/kimi-k2-thinking-maas` returned **an empty string** through
+`generate_reflection_response` — the exact failure the probe was designed to catch, where a
+model emits only thought parts and GEPA receives an empty prompt proposal with no error.
+
+It is **intermittent**, which is why the first pass missed it: the same model returned
+855 characters on average across three samples, but with a standard deviation of **±764**.
+That spread was the tell, and it should have been read as one at the time — a ±764 spread
+on an 855 mean means some samples are near zero.
+
+Two things follow. **No first-party candidate tripped it** — every Claude and Gemini model
+returned text on every call. And **intermittency is the point**: a writer that returns an
+empty proposal one call in several would corrupt an optimize stage silently and
+irregularly, which is far harder to diagnose than one that fails outright. It strengthens
+the case for ruling the Model Garden models out, and it means the probe should be re-run
+with more samples for any candidate that shows high length variance.
 
 ---
 
