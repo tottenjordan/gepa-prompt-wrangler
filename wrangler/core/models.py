@@ -265,6 +265,44 @@ DEFAULT_JUDGE_ENSEMBLE = ["gemini-3.1-pro-preview", "gemini-3.5-flash"]
 DEFAULT_AGENT_MODEL = "gemini-3.5-flash"
 DEFAULT_AGENT_MODEL_ALT = "claude-sonnet-4-6"
 
+# The model GEPA uses to *write* candidate prompts -- distinct from the judge,
+# which scores them. Until 2026-09-16 this was never set, so ADK's own default
+# applied: gemini-2.5-flash, retiring 2026-10-16. Declaring the role is the
+# point of the change, not the id: an ADK default is invisible to the registry's
+# retirement guard, so a vendor shutdown would have surfaced as GEPA 404ing
+# nine hours into an optimize stage instead of as a red build.
+#
+# gemini-3.5-flash, for the same reason DEFAULT_AGENT_MODEL is: it has a dated
+# retirement (2027-05-19) rather than the short-term availability track. Newer
+# and cheaper ids were considered and rejected -- gemini-3.6-flash can retire on
+# 45 days' notice with no date announced in advance, which is the very failure
+# this role is being declared to prevent. A lite tier was rejected on capability:
+# this model reads the eval failures and writes the next prompt, so it is doing
+# the reasoning GEPA's search quality depends on.
+#
+# TWO CONSEQUENCES, both deliberate and neither free:
+#
+# 1. It is now the SAME id as DEFAULT_JUDGE_MODEL, so the model writing the
+#    prompts is the model scoring them. Campaigns 07 and 08 ran writer
+#    (gemini-2.5-flash) != scorer (gemini-3.5-flash). Those campaigns measured
+#    GEPA improving its criterion and degrading its holdout, five arms for five;
+#    a writer that shares the scorer's preferences could plausibly amplify that,
+#    since it can target the measured score more precisely. This is a hypothesis,
+#    not a measurement. `test_optimizer_and_judge_sharing_a_model_is_deliberate`
+#    pins it so the day someone wants writer != scorer, they change it on purpose.
+# 2. RPM drops 100 -> 5, onto the Gemini pool the judge already saturates. The
+#    optimizer made 69 calls against 331 judge calls in campaign 07 (~0.12/min
+#    against the judge's 4.7/min), so the added contention is small -- but it is
+#    on the bottleneck, and campaign length is judge-RPM-bound.
+#
+# Anthropic was the tempting answer -- claude-sonnet-5 is rpm=2000 on a separate
+# publisher quota pool, so it would add no contention at all. It was rejected on
+# two mechanics: ADK passes `model_configuration` to this model and its default
+# carries a Gemini-only `thinking_config`, and a bare Claude id does not carry
+# the `projects/.../locations/global/publishers/anthropic/...` resource path the
+# location rule requires. Both are solvable; neither is solvable in this change.
+DEFAULT_OPTIMIZER_MODEL = "gemini-3.5-flash"
+
 # PaperBanana's text/VLM stage — it plans the figure, then critiques the render.
 # Currently the same id as the judge, but a separate role on purpose: moving the
 # judge should not silently re-point figure generation. PaperBanana's own default
