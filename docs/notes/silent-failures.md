@@ -575,6 +575,28 @@ That is server-side, and `GEAP_MIN_INSTANCES` was measured not to move it.
 
 ## 9. Cases that inferred fine still vanish during scoring
 
+**Update 2026-09-16 (DOE 02): the CASCADE is gone; the case loss is not.** This entry
+describes one malformed metric response costing that case *every* metric via
+`extra='forbid'`. Measured across five scoring passes of one capture — 320 case-scorings per
+metric, identical responses — **zero cases lost one metric and another.** The losses are now
+fully independent per metric, so the recovery path retired the cascade.
+
+Loss itself continues, at a per-metric rate worth knowing:
+
+| metric | lost / 320 | |
+| --- | --- | --- |
+| `tool_use_quality_v1` | 9 | 2.8% — worst |
+| `safety_v1` | 7 | 2.2% |
+| `instruction_following_v1` | 6 | 1.9% |
+| `final_response_quality_v1` | 4 | 1.25% |
+| `hallucination_v1` | **0** | **0%** |
+
+Mostly different cases each pass, so this reads as autorater flakiness rather than specific
+cases being unparseable — and `hallucination_v1` losing nothing across 320 scorings says the
+ceiling is reachable. A JSON-hardened tool-use prompt
+(`_TOOL_USE_JUDGE_PROMPT_HARDENED`) scored 64/64 where the original scored 63/64; see
+[../analysis/2026-09-16-doe-02-result.md](../analysis/2026-09-16-doe-02-result.md) arm 4.
+
 **Symptom:** the run reports fewer cases than it submitted, and says nothing.
 Measured 2026-08-23 on two control runs: **50 rows submitted → 41 scored**, and
 **44 → 39**. Roughly 11–18% of successfully-inferred cases lost *after* inference.

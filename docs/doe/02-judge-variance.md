@@ -1,6 +1,6 @@
 # Campaign 02 — How much of the noise floor is the judge?
 
-**Status:** Arms 1–2 **complete 2026-09-16** · arm 3 inconclusive · arm 4 not run
+**Status:** **Complete 2026-09-16** — all four arms
 **Depends on:** `wrangler capture` / `wrangler score` — **both shipped**; this line read "Not started / Depends on" long after they existed.
 
 ## Question
@@ -81,5 +81,20 @@ work at n=5** — applied literally it returns judge = 386% of total for IF, whi
 impossible. An sd from n=5 has a 95% interval of [0.007, 0.033] when the truth is 0.020. The
 **per-case disagreement rates are the robust statistic** (proportions over 64 cases, not sds
 over 5 passes), which is why requiring them was right.
+
+**Arm 3:** the judge CAN be pinned — a full resource name works where a bare id 400s, and it
+is honoured (score 0.9762 → 1.0, coverage 63 → 64). `types.LLMMetric` only; the four
+predefined metrics remain server-resolved.
+
+**Arm 4:** the hardened tool-use prompt gives **better coverage (64/64 vs 63/64), an aggregate
+shift indistinguishable from same-prompt noise (0.0111 against a same-prompt median of
+0.0112), and per-case movement above the same-prompt range (14.3% vs 6.6–10.0%)**. Ship it;
+do not compare per-case tool-use numbers across the boundary. The standing objection —
+*"changing that prompt changes every score it produces"* — is answered: at the aggregate it
+changes nothing detectable.
+
+**The cascade premise is dead.** silent-failures #9's `extra='forbid'` cascade is no longer
+occurring: of 26 case-losses across five passes, **zero** cases lost one metric and another.
+Losses are independent per metric, so hardening tool use recovers tool use alone.
 
 Full write-up: [../analysis/2026-09-16-doe-02-result.md](../analysis/2026-09-16-doe-02-result.md)
