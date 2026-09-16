@@ -993,6 +993,48 @@ def _score_dataset(
     )
 
 
+def per_case_disagreement(runs: list[list[dict]]) -> dict[str, float]:
+    """Per metric, the fraction of cases the judge did not score identically every time.
+
+    **Definition, stated because an implicit one gets misread:** a case *disagrees* on a
+    metric when the scores it received across passes are not all equal. The rate is
+    (disagreeing cases) / (cases with at least two observations of that metric).
+
+    This is the quantity DOE 02 needs and neither the mean nor the sd supplies. A mean over
+    five scorings hides the spread outright. An sd hides its *shape*: two metrics can share
+    an sd while one wobbles slightly on every case and the other is exact on all but one.
+    Those imply opposite fixes -- more scoring passes helps the first and not the second.
+
+    Cases are matched by ``CASE_INDEX_KEY``, never by list position. Passes drop different
+    cases, so position k is a different case in each; ``average_per_case`` was fixed for
+    exactly that, and the ~0.034 noise floor computed through the old behaviour had to be
+    re-measured.
+
+    A case only one pass scored is **excluded**, not counted as agreement. With one
+    observation there is nothing to disagree with, and counting it as agreement would drag
+    the rate toward zero on precisely the runs where the judge is least stable.
+    """
+    by_case: dict[int, dict[str, list[float]]] = {}
+    for rows in runs:
+        for row in rows:
+            idx = row.get(CASE_INDEX_KEY)
+            if idx is None:
+                continue
+            bucket = by_case.setdefault(int(idx), {})
+            for metric, value in row.items():
+                if metric == CASE_INDEX_KEY or not isinstance(value, (int, float)):
+                    continue
+                bucket.setdefault(metric, []).append(float(value))
+
+    seen: dict[str, list[bool]] = {}
+    for metrics in by_case.values():
+        for metric, values in metrics.items():
+            if len(values) < 2:
+                continue  # nothing to disagree with
+            seen.setdefault(metric, []).append(len(set(values)) > 1)
+    return {m: sum(flags) / len(flags) for m, flags in sorted(seen.items()) if flags}
+
+
 def average_per_case(runs: list[list[dict]]) -> list[dict[str, float]]:
     """Average per-case rows across runs, matching cases by index.
 

@@ -87,6 +87,26 @@ Rules the test suite enforces:
   the completeness check still sees it, and a test fails if it ever gains a `ModelSpec`
   without the exemption being removed.
 
+**THREE models score or write, and only two are ours.** Asked in September 2026 whether to
+move "the scorer" to a Gemini pro model, the honest answer turned out to be that the question
+names two different things:
+
+| role | model | ours? |
+| --- | --- | --- |
+| GEPA's prompt **writer** | `DEFAULT_OPTIMIZER_MODEL` = `claude-opus-4-8` | yes |
+| GEPA's optimize-time **judge** | `DEFAULT_JUDGE_MODEL` = `gemini-3.5-flash` | yes, by A/B 2026-08-20 |
+| **Batch-eval autorater** — every `eval_before`/`eval_after` number, every campaign result, every noise floor | **the Vertex service default** | **no, and not recorded** |
+
+`evaluator.py` says so in a comment: *"Leaving it unset uses the service default autorater."*
+`client.evals.create_evaluation_run()` takes no judge parameter, `vertexai.types` has no
+`AutoraterConfig`, and the four predefined metrics are `LazyLoadedPrebuiltMetric`, resolved
+server-side. **So "change the judge" is not currently a lever for the metrics that carry our
+results**, and a silent service-side model change would look like a result.
+
+DOE 02 measured what that autorater's non-determinism costs: on byte-identical responses it
+disagrees with itself on **64/64 cases** for `instruction_following_v1` and **0/64** for
+`safety_v1`. See [docs/analysis/2026-09-16-doe-02-result.md](docs/analysis/2026-09-16-doe-02-result.md).
+
 **GEPA runs two models, and both are declared roles.** The **judge**
 (`DEFAULT_JUDGE_MODEL`, `gemini-3.5-flash`) scores candidates; the **optimizer model**
 (`DEFAULT_OPTIMIZER_MODEL`, `claude-opus-4-8`) reads the failures and writes the next
