@@ -149,6 +149,17 @@ violated — when both were scheduled and gated behind the arm it was looking at
 
 "Not yet submitted" and "missing" are different claims. Check which one applies.
 
+## References
+
+Lookup material, kept out of the body so this file stays readable:
+
+- [references/vertex-state-codes.md](references/vertex-state-codes.md) — pipeline and task
+  state codes, our DAG's shape, and the SDK edges (`PipelineJob` has no `start_time`;
+  `display_name` != `resource_name`; container start times vary by minutes).
+- [references/log-queries.md](references/log-queries.md) — copy-paste Cloud Logging queries,
+  the greps that matter here, and the two flags whose absence has produced wrong answers
+  (`--freshness`, `resource.labels.job_id`).
+
 ## Common mistakes
 
 - Reporting task states as the whole status.
