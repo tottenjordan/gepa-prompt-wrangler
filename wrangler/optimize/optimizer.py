@@ -62,6 +62,123 @@ class _ToolsetFailureCounter(logging.Handler):
             self.count += 1
 
 
+def _enrich_with_rationales(extracted: dict | None, eval_results: list) -> dict | None:
+    """Put the judge's per-rubric reasoning back into GEPA's reflective dataset.
+
+    ADK's `_extract_eval_data` emits `{metric_name, score, eval_status}` per metric and drops
+    `EvalMetricResult.details.rubric_scores[].rationale` -- a populated explanation of *why*
+    each rubric passed or failed. The reflection model that writes every candidate prompt
+    therefore sees numbers and no diagnosis.
+
+    That is the input GEPA's method is built on: the metric's textual feedback is read
+    straight into the reflection prompt, and a metric returning only pass/fail starves the
+    step. It is also a plausible mechanism for two things measured in this repo and never
+    explained -- the criterion improving while the holdout degrades across five arms, and
+    prompts growing 78 -> 3,873 characters, which is what a search looks like when it cannot
+    see what is wrong and can only add more instructions.
+
+    Enrichment, not replacement: the original dict is mutated in place and returned, so if
+    ADK changes shape the worst case is that nothing is added.
+
+    **Every failure mode here is swallowed.** A nine-hour optimize stage must not die because
+    an enrichment met a shape it did not expect, and a reflector with no rationale is exactly
+    what we have today -- so the downside of silence is the status quo, not a regression.
+    """
+    if not isinstance(extracted, dict):
+        return extracted
+
+    for case in eval_results or []:
+        try:
+            entry = extracted.get(getattr(case, "eval_id", None))
+            if not isinstance(entry, dict):
+                continue
+            invocations = entry.get("invocations")
+            per_invocation = getattr(case, "eval_metric_result_per_invocation", []) or []
+            if not isinstance(invocations, list):
+                continue
+            for inv_dict, inv_obj in zip(invocations, per_invocation, strict=False):
+                metric_dicts = inv_dict.get("eval_metric_results")
+                metric_objs = getattr(inv_obj, "eval_metric_results", []) or []
+                if not isinstance(metric_dicts, list):
+                    continue
+                for md, mo in zip(metric_dicts, metric_objs, strict=False):
+                    details = getattr(mo, "details", None)
+                    rubrics = getattr(details, "rubric_scores", None) or getattr(
+                        mo, "rubric_scores", None
+                    )
+                    rationales = [
+                        {
+                            "rubric_id": getattr(r, "rubric_id", None),
+                            "score": getattr(r, "score", None),
+                            "rationale": getattr(r, "rationale", None),
+                        }
+                        for r in (rubrics or [])
+                        if getattr(r, "rationale", None)
+                    ]
+                    # An entry whose rationale is None is noise in a reflection prompt.
+                    if rationales and isinstance(md, dict):
+                        md["rubric_scores"] = rationales
+        except Exception as exc:  # never let enrichment fail a nine-hour stage
+            log.warning("could not attach rubric rationales: %s", exc)
+    return extracted
+
+
+# Idempotence marker for _patch_gepa_optimize. A mutable container rather than a
+# rebound module global: the flag is set from inside a function, and `global` for
+# that is both lint-discouraged and easy to get wrong under re-import.
+_GEPA_PATCH_STATE: dict[str, bool] = {"optimize": False}
+
+
+def _gepa_extra_kwargs() -> dict:
+    """Arguments we want on `gepa.optimize()` that ADK's config has nowhere to put.
+
+    `gepa.optimize()` takes 46 arguments and ADK forwards 8. Most of the other 38 are
+    observability or tuning surface we do not need. This one is different:
+
+    **`use_merge`** is `False` in the installed gepa, while the published guidance says it
+    defaults to `True` and recommends keeping it on. Merge proposes a candidate combining two
+    Pareto-frontier parents that win on *different* examples -- one re-evaluation per
+    attempt, capped at 5 by `max_merge_invocations`. GEPA+Merge is reported to produce
+    prompts **up to 9.2x shorter while scoring higher**, and prompt length is the mechanism
+    this repo hypothesised, could not support from its own arm-level data, and otherwise had
+    no way to act on.
+
+    Injected rather than configured because `GEPARootAgentPromptOptimizerConfig` has no field
+    for it. Filtered against the live signature below, so an argument gepa drops in a future
+    version degrades to "not passed" instead of a `TypeError` nine hours into a stage.
+    """
+    return {"use_merge": True}
+
+
+def _patch_gepa_optimize():
+    """Inject `_gepa_extra_kwargs()` into ADK's `gepa.optimize()` call.
+
+    Caller-supplied values win, so this raises the floor without overriding anything ADK
+    decides to start forwarding. Unknown arguments are dropped against the live signature:
+    the failure mode this avoids is a `TypeError` at the single call that costs nine hours.
+    """
+    import inspect
+
+    import gepa
+
+    if _GEPA_PATCH_STATE["optimize"]:
+        return
+
+    _orig_optimize = gepa.optimize
+    accepted = set(inspect.signature(_orig_optimize).parameters)
+
+    def _patched_optimize(*args, **kwargs):
+        for key, value in _gepa_extra_kwargs().items():
+            if key in accepted and key not in kwargs:
+                kwargs[key] = value
+        return _orig_optimize(*args, **kwargs)
+
+    # ty: monkey-patching a precisely-typed module function is the point here; the
+    # wrapper deliberately has a looser signature so it can forward anything.
+    gepa.optimize = _patched_optimize  # ty: ignore[invalid-assignment]
+    _GEPA_PATCH_STATE["optimize"] = True
+
+
 def _patch_adk():
     """Apply ADK patches for GEPA compatibility.
 
@@ -83,6 +200,8 @@ def _patch_adk():
 
     Re-run the probe in docs/notes/adk-patch-status.md on every ADK bump.
     """
+    _patch_gepa_optimize()
+
     from google.adk.evaluation import eval_case as _ec
     from google.adk.evaluation import eval_set as _es
 
@@ -161,7 +280,8 @@ def _patch_adk():
                     len(eval_results),
                 )
 
-        return _orig_extract(self, eval_set_id, eval_results)
+        # Patch 4b -- put the judge's reasoning back. See _enrich_with_rationales.
+        return _enrich_with_rationales(_orig_extract(self, eval_set_id, eval_results), eval_results)
 
     sampler_mod.LocalEvalSampler._extract_eval_data = _patched_extract
 

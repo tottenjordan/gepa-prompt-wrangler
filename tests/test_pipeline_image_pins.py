@@ -161,6 +161,64 @@ def test_the_pin_comparisons_know_when_they_are_not_evidence():
     )
 
 
+def test_every_deployed_interpreter_is_in_the_ci_matrix():
+    """CI must run every Python we actually serve on -- not a range we merely allow.
+
+    Until 2026-09-17 the matrix was 3.11, 3.12, 3.13 while production ran **3.11 and
+    3.14**: 3.11 for GEAP and the pipeline image, 3.14 for all three Cloud Run MCP images.
+    Two of the three entries tested versions nothing runs, and the one production
+    interpreter that is not TARGET_PYTHON was tested nowhere.
+
+    That gap is not theoretical. `uv.lock` carries two litellm entries split at exactly
+    the 3.14 boundary -- 1.85.7 below, 1.96.2 at or above -- and
+    `google-cloud-aiplatform[evaluation]` flips its litellm range at the same point. A
+    resolution that works on 3.11 can therefore differ on 3.14, which is the interpreter
+    the MCP servers serve from.
+
+    Derived from the Dockerfiles rather than hardcoded, so a future base bump fails here
+    instead of quietly leaving the new interpreter untested.
+    """
+    bases = {DOCKERFILE, *OTHER_DOCKERFILES}
+    deployed = set()
+    for path in bases:
+        m = re.match(r"python:(\d+\.\d+)", _base_image(path))
+        assert m, f"{path} base is not a python: tag -- {_base_image(path)}"
+        deployed.add(m.group(1))
+
+    matrix = set(re.findall(r'"(3\.\d+)"', Path(".github/workflows/ci.yml").read_text()))
+    missing = deployed - matrix
+    assert not missing, (
+        f"these interpreters are deployed to but not in the CI matrix: {sorted(missing)}. "
+        f"Deployed: {sorted(deployed)} | matrix: {sorted(matrix)}. Add them, or stop "
+        f"shipping an image built on an untested Python."
+    )
+
+
+def test_the_matrix_does_not_carry_versions_nothing_runs():
+    """The other half: a matrix entry nobody deploys to is coverage pointing at nothing.
+
+    Not a style rule. The pin-vs-installed comparisons SKIP off TARGET_PYTHON, so an
+    extra entry runs a quietly reduced suite while reading as a green tick -- which is
+    worse than no entry, because it looks like coverage.
+
+    If a version is added back deliberately (say the tool gets distributed and
+    `requires-python` becomes a real promise), widen this with the reason.
+    """
+    deployed = set()
+    for path in {DOCKERFILE, *OTHER_DOCKERFILES}:
+        m = re.match(r"python:(\d+\.\d+)", _base_image(path))
+        if m:
+            deployed.add(m.group(1))
+
+    matrix = set(re.findall(r'"(3\.\d+)"', Path(".github/workflows/ci.yml").read_text()))
+    extra = matrix - deployed
+    assert not extra, (
+        f"CI runs {sorted(extra)}, which nothing is deployed on. Deployed: "
+        f"{sorted(deployed)}. Those jobs skip the pin comparisons, so they are a green "
+        f"tick over a reduced suite."
+    )
+
+
 def test_the_pipeline_image_is_never_exempted():
     """Dockerfile.pipeline runs the five ADK monkey-patches.
 
