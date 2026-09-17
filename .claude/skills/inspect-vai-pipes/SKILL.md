@@ -1,5 +1,5 @@
 ---
-name: inspecting-pipeline-runs
+name: inspect-vai-pipes
 description: Use when asked to report on, diagnose, or interpret a Vertex pipeline run or DOE campaign arm in this repo — a run that is in flight, stuck, failed with an unhelpful error, or finished and needs its results read.
 ---
 

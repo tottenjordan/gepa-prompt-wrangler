@@ -24,7 +24,7 @@ published a +0.039 "improvement" from an arm whose prompt was byte-identical on 
 - A pre-registration (`docs/doe/*.md` or `<experiment>/doe_plan.md`) needs its Result section filled
 
 **Not for** an in-flight or failed run — that is diagnosis, and it belongs to the
-`inspecting-pipeline-runs` skill. Use that first, then come back here when the run finishes.
+`inspect-vai-pipes` skill. Use that first, then come back here when the run finishes.
 
 ## Where the output goes
 
@@ -41,7 +41,7 @@ it carries a lesson someone must not rediscover.
 
 | Step | Action |
 | --- | --- |
-| 1 | Find the run and confirm it actually finished — `inspecting-pipeline-runs` skill |
+| 1 | Find the run and confirm it actually finished — `inspect-vai-pipes` skill |
 | 2 | Pull stage artifacts from `gs://{bucket}/pipeline-runs/{run_id}/` or the experiment's `stages/` |
 | 3 | Compute per-metric deltas and classify — `scripts/summarize_arm_metrics.py` |
 | 4 | Read the pre-registration **before** interpreting, and the prior reports it compares to |
