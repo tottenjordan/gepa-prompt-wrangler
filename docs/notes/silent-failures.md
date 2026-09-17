@@ -736,10 +736,82 @@ can see.
 
 ## 12. A local MCP server stops answering, and GEPA scores a toolless agent
 
-**Found 2026-09-08, live, in campaign 07's validation arm. STILL OPEN. Observability
-fixed in PR #51 — the only shipped fix that did what it claimed. Three mechanisms have been
-proposed and two shipped; the rate has not moved: 14% (c07) -> 15% (c08, with PR #59) ->
-12% and 24% (c08's two arms, with PR #75).**
+**Found 2026-09-08, live, in campaign 07's validation arm. FIX SHIPPED 2026-09-17 (patch 8),
+AWAITING ITS ACCEPTANCE TEST — which is the rate on a real optimize stage, not a green suite.
+Observability fixed in PR #51 — the only earlier fix that did what it claimed. Three
+mechanisms were proposed and two shipped; the rate did not move: 14% (c07) -> 15% (c08, with
+PR #59) -> 12% and 24% (c08's two arms, with PR #75).**
+
+**The fix (2026-09-17): defer `close()` for the duration of the optimize run.**
+`wrangler/optimize/optimizer.py:_deferred_toolset_closes()` swaps `McpToolset.close` for a
+recorder while the run is in flight and closes each toolset exactly once on exit. This
+removes the *precondition* rather than narrowing the race — with no teardown mid-run there
+is nothing to strand, whatever the concurrency and whatever the cache does. Scoped to the
+run and reversed on exit including on the error path, so outside the window `close()` is
+still a real close and the container does not leak sessions.
+
+Verified locally on the real production path, not just against fakes: a real `LlmAgent`,
+`agent.clone()` confirmed to still share one `McpToolset`, and **20 genuine `Runner.close()`
+calls producing 0 session teardowns inside the window and 1 at flush**
+(`tests/test_toolset_close_deferral.py::TestTheRealProductionPath`).
+
+**And reproduced end-to-end against a live MCP server, which is the evidence the earlier
+fixes never had.** `scripts/repro_mcp_refresh_hang.py` was rewritten to the real topology
+the 2026-09-12 analysis asked for — one shared `McpToolset`, 32 short-lived `Runner.close()`
+calls per burst, 6 readers in flight — and run at the **production** 300s cache TTL:
+
+| | hung readers |
+| --- | --- |
+| patch 8 **off** | **15/18** |
+| patch 8 **on** | **0/18** |
+
+Stable across three runs. The old version of that script reported **0/18 in this same
+condition** and was read as exonerating close-racing; the difference is entirely topology.
+
+Two things were needed to reproduce, and the second is the one that hid it: `get_tools()`
+must reach the session (a cache hit never does), so the script now **clears the cache
+immediately before the burst to model the TTL lapse** rather than lowering the TTL to a
+value we do not run. Generations averaged ~286s against a 300s TTL, so the cache covers most
+refresh windows and lapses at a few — which is why the production leak was ~14% rather than
+constant. The script **runs both conditions and refuses to report a pass if the unpatched
+one does not hang**, because a harness that has stopped reproducing cannot demonstrate a fix.
+
+**This is not yet evidence the production rate is zero, and the history here says to
+distrust a green suite.** PR #59 and PR #75 both passed their own tests and changed nothing.
+The acceptance test is `will run without the tools` at **0** on a real optimize stage,
+counted with `scripts/analyze_toolset_loss.py` against the 12–24% baseline. The run log now
+prints a deferred-close count; **a stage reporting 0 deferrals did not exercise the patch at
+all**, and a clean result from such a stage means nothing.
+
+**Bust the KFP cache before that run.** `optimizer.py` is in the code tarball, not a
+component body, so an unchanged `run_id` cache-hits and returns a *pre-fix* optimize stage —
+the acceptance run would measure the old code, or skip the stage and look clean. Bump
+`cache_bust`. Same trap as the `evaluator.py` re-baseline; the deferred-close count is the
+tell.
+
+Note the loss *rate* was 12% and 24% on two identical configurations, so a single post-fix
+stage showing a low-but-nonzero rate does not distinguish "fixed" from "lucky draw". Zero is
+the bar, and one stage at zero is one observation.
+
+**`Closing toolset` in the log no longer means a toolset was closed — verified 2026-09-17.**
+ADK's `_cleanup_toolsets` logs `Closing toolset: %s`, awaits the close, then logs
+`Successfully closed toolset: %s`. Our deferred close returns cleanly, so **both lines are
+still emitted, at full volume**: measured 5 runner closes → 5 `Closing toolset` and 5
+`Successfully closed toolset`, with zero session teardowns. A post-fix stage will therefore
+*still* show ~1,812 `Closing toolset` events and the band analysis will *still* find the
+burst, because the burst is now harmless.
+
+This matters twice over. Do **not** read a surviving close count as the fix having failed to
+apply — and note it is load-bearing in the other direction too, since
+`analyze_toolset_loss.py` treats *zero* closes as evidence of a broken query rather than a
+clean run, and that guard keeps working. **The count of deferrals printed by the run, and
+the failure count, are the signals. The close count is not.**
+
+One stale claim corrected while here: the 2026-09-12 analysis recorded the run's own
+`_ToolsetFailureCounter` reporting zero against 16 losses and called that defect "still
+live". It is not live in the current tree — the counter matches both ADK phrasings, and
+re-tested on 2026-09-17 it catches ADK 2.9.1's exact warning. That run was a container
+predating the 2026-09-08 counter fix.
 
 **Localised 2026-09-12 by measurement rather than by reading:** a burst of ~32 toolset
 closes lands 90-150s before every loss at ~10x baseline, p<0.0001, with every other band

@@ -109,6 +109,18 @@ about the reproduction, not about production.
 **The rewrite needs the real topology:** one shared `McpToolset`, N short-lived runners
 each calling `close()` on it, and a `get_tools()` in flight across the burst.
 
+**Rewritten 2026-09-17, and it reproduces.** At the production 300s TTL, with 32
+`Runner.close()` per burst against one shared toolset and 6 readers in flight:
+**15/18 readers hang with patch 8 off, 0/18 with it on**, stable over three runs. The same
+script reported 0/18 in the same condition before the rewrite, so the earlier negative was
+topology, exactly as suspected here.
+
+The missing ingredient was the cache. `get_tools()` has to reach the session and a cache hit
+never does, so the script now clears the cache immediately before the burst to model the
+**TTL lapse** — rather than setting the TTL to `None`, a value we do not run, which is what
+made the old version's "production setting" result misleading. It also runs the unpatched
+condition every time and refuses to report a pass if that one comes back clean.
+
 ## A near-miss worth recording
 
 The first pass of this analysis used a **60-second** window, because the timeout was
@@ -127,13 +139,18 @@ wrong.
 
 ## Fix direction
 
-Not yet implemented — this document is the diagnosis.
+**Implemented 2026-09-17 — the recommended option, patch 8.**
+`wrangler/optimize/optimizer.py:_deferred_toolset_closes()` defers `McpToolset.close()` for
+the duration of the optimize run and closes each toolset once on exit. Verified on the real
+path — a real `LlmAgent`, `agent.clone()` re-confirmed to share one `McpToolset`, and 20
+genuine `Runner.close()` calls yielding 0 teardowns inside the window and 1 at flush.
+**Still awaiting its acceptance test**, below, which no local check can substitute for.
 
-The target is step 2: **a shared toolset that any runner may close.** Three options:
+The target was step 2: **a shared toolset that any runner may close.** Three options:
 
 | option | cost |
 | --- | --- |
-| Make `close()` a no-op on the shared toolsets during optimize, closing once at the end | Narrow, matches the existing `_patch_adk` style. **Recommended** |
+| Make `close()` a no-op on the shared toolsets during optimize, closing once at the end | Narrow, matches the existing `_patch_adk` style. **Recommended — SHIPPED 2026-09-17** |
 | Give each candidate its own toolset | Deep-copies `agent.clone()`; N× sessions against three local servers |
 | Stop GEPA closing runners between candidates | Upstream behaviour, not ours to change |
 
@@ -148,8 +165,12 @@ ADK's `_ToolsetFailureCounter` matches `"Failed to get tools from toolset"`. Thi
 emitted that string **0** times and `"will run without the tools"` **16** times, so the
 pipeline's self-reported degradation was **0 while 16 losses sat in the log**.
 
-This was first recorded on 2026-09-08 and is still live. Grep both strings; the analysis
-script does.
+**Corrected 2026-09-17: this is not live in the current tree.** The counter has matched both
+phrasings since the 2026-09-08 fix, and re-tested against the installed ADK 2.9.1 it catches
+that release's exact warning (`Agent %s will run without the tools from toolset %s%s`).
+`tests/test_optimizer.py::TestToolsetFailureCounterTracksADKWording` reads ADK's own source,
+so a re-wording is a red build. The container behind *this* run predated the fix. Grep both
+strings anyway when reading an older run; the analysis script does.
 
 ## Impact on campaign 08
 
