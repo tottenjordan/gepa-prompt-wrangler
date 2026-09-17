@@ -196,7 +196,7 @@ def _patch_gepa_optimize():
     _GEPA_PATCH_STATE["optimize"] = True
 
 
-def _patch_adk():
+def _patch_adk(forward_rationale: bool = True):
     """Apply ADK patches for GEPA compatibility.
 
     Verified against google-adk 2.8.0 on 2026-09-08 (and 2.7.1 on 2026-08-20).
@@ -301,8 +301,14 @@ def _patch_adk():
                     len(eval_results),
                 )
 
+        extracted = _orig_extract(self, eval_set_id, eval_results)
+        if not forward_rationale:
+            # OFF means UPSTREAM ADK BEHAVIOUR, not a softer version of our patch. If this
+            # still routed through _enrich_with_rationales and merely skipped the attach,
+            # campaign 09's contrast would measure our wrapper rather than the rationale.
+            return extracted
         # Patch 4b -- put the judge's reasoning back. See _enrich_with_rationales.
-        return _enrich_with_rationales(_orig_extract(self, eval_set_id, eval_results), eval_results)
+        return _enrich_with_rationales(extracted, eval_results)
 
     sampler_mod.LocalEvalSampler._extract_eval_data = _patched_extract
 
@@ -589,6 +595,7 @@ def optimize(
     max_metric_calls: int | None = None,
     initial_instruction: str | None = None,
     model: str = "",
+    forward_rationale: bool = True,
 ) -> str:
     """Run GEPA optimization. Returns the optimized instruction string.
 
@@ -605,7 +612,7 @@ def optimize(
     """
     tag = f"  [{agent_name}] " if agent_name else "  "
     print(f"{tag}[1/3] Applying ADK patches...", flush=True)
-    _patch_adk()
+    _patch_adk(forward_rationale=forward_rationale)
 
     import vertexai
 

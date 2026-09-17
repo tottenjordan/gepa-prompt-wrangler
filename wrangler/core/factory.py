@@ -37,6 +37,13 @@ class AgentPromptPair:
     # configuration honest and makes re-enabling a one-line diff.
     enabled: bool = True
     disabled_reason: str = ""
+    # Campaign factors, per pair so one pipeline job can vary them BETWEEN arms.
+    # dag.py forwards the whole pair dict as `pair_json`, so neither needs a DAG
+    # signature change. Both default to today's behaviour: every existing manifest
+    # omits them, and a pair silently arriving with forward_rationale=False would
+    # disable ADK patch 4b for a campaign that never asked to.
+    forward_rationale: bool = True
+    skip_optimize: bool = False
 
     def summary(self) -> str:
         """One-line summary for display."""
@@ -176,6 +183,8 @@ class PairFactory:
                     costs=costs,
                     enabled=entry.get("enabled", True),
                     disabled_reason=entry.get("disabled_reason", ""),
+                    forward_rationale=entry.get("forward_rationale", True),
+                    skip_optimize=entry.get("skip_optimize", False),
                 )
             )
 

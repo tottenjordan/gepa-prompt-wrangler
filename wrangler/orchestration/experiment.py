@@ -71,7 +71,15 @@ class Experiment:
             "agent_module": manifest.agent_module,
             "eval_data": manifest.eval_data,
             "defaults": {
-                "num_runs": 3,
+                # From the manifest, not a hardcode. This was pinned at 3 regardless of
+                # what the manifest said, so an experiment created from a `num_runs: 2`
+                # manifest reported 3 here -- and this file, not the manifest, is what the
+                # local path and run_experiment.py read. Same trap as max_metric_calls
+                # below, which is why that comment exists.
+                "num_runs": (manifest.pipeline or {}).get("num_runs", 3),
+                # DOE 03 made this a first-class knob (coverage, not variance). Absent
+                # here it silently stays 1 and safety_v1 loses ~6 of 64 cases a side.
+                "score_repeats": (manifest.pipeline or {}).get("score_repeats", 1),
                 "judge_model": manifest.eval_config.get(
                     "judge_model", DEFAULT_MANIFEST_JUDGE_MODEL
                 ),
@@ -85,6 +93,12 @@ class Experiment:
                 # that already set it there.
                 "max_metric_calls": (manifest.pipeline or {}).get("max_metric_calls"),
             },
+            # Where this experiment came from. Recorded because the pipeline submit path
+            # (`deploy_pipeline`) takes a MANIFEST path and re-parses it with
+            # PairFactory.load, which cannot read this file -- so without the provenance
+            # there is no way to get from an experiment directory back to a submittable
+            # manifest, and `scripts/run_experiment.py --pipeline` would have to ask.
+            "source_manifest": str(manifest_path),
             "pairs": [],
             "eval_config": manifest.eval_config,
             # Read at the top level by stages.health_gate_config(). Carried
@@ -116,6 +130,13 @@ class Experiment:
                     "system_prompt": pair.system_prompt,
                     "enabled": pair.enabled,
                     "disabled_reason": pair.disabled_reason,
+                    # Campaign factors. Carried for the same reason `enabled` is: the
+                    # experiment config is what the local path and run_experiment.py
+                    # actually read, so a field that cannot reach here is a field that
+                    # silently does nothing -- a control arm would quietly become an
+                    # optimizing arm and spend ten hours proving nothing.
+                    "forward_rationale": pair.forward_rationale,
+                    "skip_optimize": pair.skip_optimize,
                 }
             )
 
@@ -180,6 +201,8 @@ class Experiment:
                 # enabled=True regardless of what the manifest said.
                 enabled=entry.get("enabled", True),
                 disabled_reason=entry.get("disabled_reason", ""),
+                forward_rationale=entry.get("forward_rationale", True),
+                skip_optimize=entry.get("skip_optimize", False),
             )
             for entry in cfg.get("pairs", [])
         ]
