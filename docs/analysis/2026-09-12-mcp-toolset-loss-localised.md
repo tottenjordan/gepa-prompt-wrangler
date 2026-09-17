@@ -127,13 +127,18 @@ wrong.
 
 ## Fix direction
 
-Not yet implemented — this document is the diagnosis.
+**Implemented 2026-09-17 — the recommended option, patch 8.**
+`wrangler/optimize/optimizer.py:_deferred_toolset_closes()` defers `McpToolset.close()` for
+the duration of the optimize run and closes each toolset once on exit. Verified on the real
+path — a real `LlmAgent`, `agent.clone()` re-confirmed to share one `McpToolset`, and 20
+genuine `Runner.close()` calls yielding 0 teardowns inside the window and 1 at flush.
+**Still awaiting its acceptance test**, below, which no local check can substitute for.
 
-The target is step 2: **a shared toolset that any runner may close.** Three options:
+The target was step 2: **a shared toolset that any runner may close.** Three options:
 
 | option | cost |
 | --- | --- |
-| Make `close()` a no-op on the shared toolsets during optimize, closing once at the end | Narrow, matches the existing `_patch_adk` style. **Recommended** |
+| Make `close()` a no-op on the shared toolsets during optimize, closing once at the end | Narrow, matches the existing `_patch_adk` style. **Recommended — SHIPPED 2026-09-17** |
 | Give each candidate its own toolset | Deep-copies `agent.clone()`; N× sessions against three local servers |
 | Stop GEPA closing runners between candidates | Upstream behaviour, not ours to change |
 
@@ -148,8 +153,12 @@ ADK's `_ToolsetFailureCounter` matches `"Failed to get tools from toolset"`. Thi
 emitted that string **0** times and `"will run without the tools"` **16** times, so the
 pipeline's self-reported degradation was **0 while 16 losses sat in the log**.
 
-This was first recorded on 2026-09-08 and is still live. Grep both strings; the analysis
-script does.
+**Corrected 2026-09-17: this is not live in the current tree.** The counter has matched both
+phrasings since the 2026-09-08 fix, and re-tested against the installed ADK 2.9.1 it catches
+that release's exact warning (`Agent %s will run without the tools from toolset %s%s`).
+`tests/test_optimizer.py::TestToolsetFailureCounterTracksADKWording` reads ADK's own source,
+so a re-wording is a red build. The container behind *this* run predated the fix. Grep both
+strings anyway when reading an older run; the analysis script does.
 
 ## Impact on campaign 08
 

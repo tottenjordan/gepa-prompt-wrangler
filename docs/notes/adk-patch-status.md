@@ -76,6 +76,14 @@ Related: [toolchain-baseline.md](toolchain-baseline.md),
 
 ---
 
+**Patch 8 is not applied by `_patch_adk()` and must not be.** It is a run-scoped async
+context manager (`_deferred_toolset_closes()`) wrapped around the optimize call, because
+outside that window `McpToolset.close()` has to stay a real close — a process-wide patch
+would leak every MCP session in the pipeline container. Probe it by checking that
+`McpToolset` still defines `close` and that `Runner._cleanup_toolsets` still calls
+`toolset.close()`; both are asserted in `tests/test_toolset_close_deferral.py`. Verified at
+ADK 2.9.1 on 2026-09-17, including against a real `Runner` over a real shared toolset.
+
 ## Per-patch findings
 
 | # | Target | Upstream issue | Issue state | Still needed at 2.7.1? |
@@ -86,6 +94,7 @@ Related: [toolchain-baseline.md](toolchain-baseline.md),
 | 4 | `LocalEvalSampler._extract_eval_data` — score-None coercion + logging | — (local instrumentation) | — | Yes, but it is diagnostics, not a bug workaround |
 | 5 | `rubric_based_evaluator._normalize_text` + `convert_auto_rater_response_to_score` | [#6072](https://github.com/google/adk-python/issues/6072) | **Closed** 2026-07-31 | **No — was actively harmful; DELETED 2026-08-20** |
 | 6 | `SafetyEvaluatorV1.evaluate_invocations` — pin the metric to `safety_v1` | not filed | — | **Yes** (added 2026-08-20) |
+| 8 | `McpToolset.close` — deferred for the optimize run, flushed once at the end | not filed | — | **Yes** (added 2026-09-17, fixes silent-failures #12) |
 
 ### Patch 1 / 2 — still required despite the issue being closed
 

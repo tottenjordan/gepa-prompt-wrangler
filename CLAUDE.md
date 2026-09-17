@@ -233,7 +233,7 @@ fastmcp when ADK ships mcp 2.x support, not before.
 
 ### ADK Patches
 
-`optimize/optimizer.py:_patch_adk()` applies 5 monkey-patches to ADK internals required for GEPA to work. Patches 1–3 compensate for ADK bugs (github.com/google/adk-python issues #5906, #6071); patch 4 is local instrumentation; patch 6 pins the safety metric version. All the bug workarounds are still required at ADK 2.8.0 even though their issues are closed — the fixes are not in the release. Re-probed 2026-09-08 on the 2.7.1 → 2.8.0 bump: all five unchanged.
+`optimize/optimizer.py:_patch_adk()` applies 5 monkey-patches to ADK internals required for GEPA to work, and `_deferred_toolset_closes()` adds a sixth as a run-scoped window (patch 8, below). Patches 1–3 compensate for ADK bugs (github.com/google/adk-python issues #5906, #6071); patch 4 is local instrumentation; patch 6 pins the safety metric version. All the bug workarounds are still required at ADK 2.8.0 even though their issues are closed — the fixes are not in the release. Re-probed 2026-09-08 on the 2.7.1 → 2.8.0 bump: all five unchanged.
 
 **Patch 4b and 7 (added 2026-09-17), and they are confounded on purpose — read this before
 reading a result.**
@@ -255,6 +255,34 @@ rather than crediting whichever is more interesting. The acceptance test is the 
 on a real optimize stage, **not** that rationale text appears in the reflective dataset.
 
 Analysis: [docs/analysis/2026-09-17-gepa-argument-surface.md](docs/analysis/2026-09-17-gepa-argument-surface.md).
+
+**Patch 8 (added 2026-09-17) — the fix for silent failure #12, and it is not applied by
+`_patch_adk()`.** `_deferred_toolset_closes()` is a run-scoped async context manager wrapped
+around the optimize call, because outside that window `McpToolset.close()` must stay a real
+close or the container leaks sessions.
+
+GEPA drives a short-lived `Runner` per candidate over **one shared `McpToolset`** —
+`agent.clone()` is a shallow copy, which CLAUDE.md already records for the tool-list cache
+and is equally true of the session. `Runner.close()` closes the toolsets it collects, so one
+candidate's teardown strands another's in-flight `list_tools()`: **1,812 closes in a single
+572-minute stage**, a burst of ~32 landing 90–150 s before every loss at ~10× baseline,
+p < 0.0001. The victim blocks the full 120 s timeout and ADK hands the agent **zero tools**,
+which GEPA then scores. The patch defers every close for the run and performs each once at
+the end.
+
+**Three fixes shipped for #12 before this one and the rate did not move** (14% → 15% → 12%
+and 24%); two of them passed their own tests. So **the acceptance test is the
+`will run without the tools` rate on a real optimize stage**, counted with
+`scripts/analyze_toolset_loss.py`, expected 0. The run prints a deferred-close count — **a
+stage reporting 0 deferrals did not exercise the patch**, and its clean result means nothing.
+
+**Bust the KFP cache before that acceptance run.** `optimizer.py` rides in the code tarball
+and is *not* a component body, so KFP — which caches on **component body hash + input
+parameter values** — will happily cache-hit an unchanged `run_id` and hand back a *pre-fix*
+optimize stage. The acceptance run would then measure the old code and report the old rate,
+or worse, skip the stage entirely and look clean. Bump `cache_bust` in the manifest. This is
+the same trap as the `evaluator.py` re-baseline above, and the deferred-close count is the
+tell: 0 deferrals means you measured the cache.
 
 **Patch 6 (added 2026-08-20)** — `SafetyEvaluatorV1` hands the eval facade the *unversioned* `PrebuiltMetric.SAFETY`, which the Vertex SDK resolves client-side to `safety_v3`; us-central1 does not serve v3, so every GEPA case returned `400 Unsupported predefined metric: safety_v3`, the score came back `None`, and patch 4 coerced it to `0.0`. GEPA kept running and optimized against a criterion pinned at zero. The version is chosen inside ADK — `sampler_config.json` correctly says `safety_v1` and cannot influence it.
 

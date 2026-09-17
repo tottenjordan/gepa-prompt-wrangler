@@ -736,10 +736,47 @@ can see.
 
 ## 12. A local MCP server stops answering, and GEPA scores a toolless agent
 
-**Found 2026-09-08, live, in campaign 07's validation arm. STILL OPEN. Observability
-fixed in PR #51 — the only shipped fix that did what it claimed. Three mechanisms have been
-proposed and two shipped; the rate has not moved: 14% (c07) -> 15% (c08, with PR #59) ->
-12% and 24% (c08's two arms, with PR #75).**
+**Found 2026-09-08, live, in campaign 07's validation arm. FIX SHIPPED 2026-09-17 (patch 8),
+AWAITING ITS ACCEPTANCE TEST — which is the rate on a real optimize stage, not a green suite.
+Observability fixed in PR #51 — the only earlier fix that did what it claimed. Three
+mechanisms were proposed and two shipped; the rate did not move: 14% (c07) -> 15% (c08, with
+PR #59) -> 12% and 24% (c08's two arms, with PR #75).**
+
+**The fix (2026-09-17): defer `close()` for the duration of the optimize run.**
+`wrangler/optimize/optimizer.py:_deferred_toolset_closes()` swaps `McpToolset.close` for a
+recorder while the run is in flight and closes each toolset exactly once on exit. This
+removes the *precondition* rather than narrowing the race — with no teardown mid-run there
+is nothing to strand, whatever the concurrency and whatever the cache does. Scoped to the
+run and reversed on exit including on the error path, so outside the window `close()` is
+still a real close and the container does not leak sessions.
+
+Verified locally on the real production path, not just against fakes: a real `LlmAgent`,
+`agent.clone()` confirmed to still share one `McpToolset`, and **20 genuine `Runner.close()`
+calls producing 0 session teardowns inside the window and 1 at flush**
+(`tests/test_toolset_close_deferral.py::TestTheRealProductionPath`).
+
+**This is not yet evidence the production rate is zero, and the history here says to
+distrust a green suite.** PR #59 and PR #75 both passed their own tests and changed nothing.
+The acceptance test is `will run without the tools` at **0** on a real optimize stage,
+counted with `scripts/analyze_toolset_loss.py` against the 12–24% baseline. The run log now
+prints a deferred-close count; **a stage reporting 0 deferrals did not exercise the patch at
+all**, and a clean result from such a stage means nothing.
+
+**Bust the KFP cache before that run.** `optimizer.py` is in the code tarball, not a
+component body, so an unchanged `run_id` cache-hits and returns a *pre-fix* optimize stage —
+the acceptance run would measure the old code, or skip the stage and look clean. Bump
+`cache_bust`. Same trap as the `evaluator.py` re-baseline; the deferred-close count is the
+tell.
+
+Note the loss *rate* was 12% and 24% on two identical configurations, so a single post-fix
+stage showing a low-but-nonzero rate does not distinguish "fixed" from "lucky draw". Zero is
+the bar, and one stage at zero is one observation.
+
+One stale claim corrected while here: the 2026-09-12 analysis recorded the run's own
+`_ToolsetFailureCounter` reporting zero against 16 losses and called that defect "still
+live". It is not live in the current tree — the counter matches both ADK phrasings, and
+re-tested on 2026-09-17 it catches ADK 2.9.1's exact warning. That run was a container
+predating the 2026-09-08 counter fix.
 
 **Localised 2026-09-12 by measurement rather than by reading:** a burst of ~32 toolset
 closes lands 90-150s before every loss at ~10x baseline, p<0.0001, with every other band

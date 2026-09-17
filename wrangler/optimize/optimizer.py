@@ -8,7 +8,9 @@ import logging
 import os
 import sys
 import time
+from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
 from ..core.models import DEFAULT_JUDGE_MODEL, DEFAULT_OPTIMIZER_MODEL
 from .optimizer_config import build_optimizer_config
@@ -197,6 +199,10 @@ def _patch_adk():
     Patch 6 — SafetyEvaluatorV1 metric version pin. ADK asks for the
         *unversioned* safety metric; the SDK resolves that client-side to
         safety_v3, which us-central1 does not serve. Still required.
+    Patch 8 — NOT applied here. `_deferred_toolset_closes()` is a run-scoped
+        context manager rather than a process-wide patch, because outside the
+        optimize window `McpToolset.close()` must stay a real close. Applied at
+        the call site in `optimize()`; see that docstring for the mechanism.
 
     Re-run the probe in docs/notes/adk-patch-status.md on every ADK bump.
     """
@@ -401,6 +407,115 @@ async def _prewarm_mcp_toolsets(agent, tag: str = "  ", max_retries: int = 3) ->
                 flush=True,
             )
     return warmed
+
+
+@dataclass
+class _ToolsetClosePatch:
+    """State for patch 8. A dataclass rather than a dict so the fields stay typed."""
+
+    depth: int = 0  # nesting depth; only the outermost window patches and flushes
+    orig: Any = None  # the real McpToolset.close, restored on exit
+    # Identity-keyed: two toolsets may compare equal, and closing one of them twice
+    # while never closing the other is the bug this patch exists to prevent.
+    pending: dict[int, Any] = field(default_factory=dict)
+    deferred: int = 0  # how many closes were swallowed, for the run log
+
+    def reset(self) -> None:
+        self.depth, self.orig, self.pending, self.deferred = 0, None, {}, 0
+
+
+_TOOLSET_CLOSE_PATCH = _ToolsetClosePatch()
+
+
+def _toolset_class_for_patching():
+    """The class whose close() is deferred. Indirected so tests can substitute a fake."""
+    from google.adk.tools.mcp_tool.mcp_toolset import McpToolset
+
+    return McpToolset
+
+
+def _reset_toolset_close_patch_for_tests() -> None:
+    """Restore the patch state to its baseline. Tests only."""
+    _TOOLSET_CLOSE_PATCH.reset()
+
+
+@contextlib.asynccontextmanager
+async def _deferred_toolset_closes(tag: str = "  "):
+    """Patch 8 — stop a runner's close() tearing down a toolset other candidates share.
+
+    This is the fix for silent failure #12, open since 2026-09-08 and localised by
+    measurement on 2026-09-12. The mechanism, end to end:
+
+    1. `agent.clone()` is a **shallow** copy, so every GEPA candidate shares **one**
+       `McpToolset` per server. CLAUDE.md already records this for the tool-list cache;
+       it is equally true of the session.
+    2. GEPA drives a short-lived `Runner` per candidate evaluation. `Runner.close()` calls
+       `_cleanup_toolsets`, which calls `toolset.close()` on everything it collects --
+       **1,812 closes in one 572-minute stage**, arriving in bursts of ~32.
+    3. `McpToolset.close()` clears the tool-list cache and closes the session manager. So
+       one candidate's teardown strands another candidate's in-flight `list_tools()`.
+    4. The victim blocks for the full 120s `MCP_TIMEOUT_SECONDS`, then
+       `TimeoutError -> CancelledError -> ConnectionError` with an empty message, because
+       `str(CancelledError())` is `""`. ADK hands the agent **zero tools**, it scores near
+       zero on tool use, and that score enters the objective GEPA is searching.
+
+    Deferring close() removes the precondition rather than narrowing the race: with no
+    teardown mid-run there is nothing to strand, whatever the concurrency and whatever the
+    cache does. The sessions are still closed -- once each, on exit -- so this defers
+    teardown, it does not skip it.
+
+    **Three fixes shipped for #12 before this one and the rate did not move** (14% -> 15%
+    -> 12% and 24%). Two of them passed their own tests, so a green suite here means very
+    little: **the acceptance test is the `will run without the tools` rate on a real
+    optimize stage**, counted with `scripts/analyze_toolset_loss.py`, expected 0. The
+    deferred-close count printed on exit is the direct check that this window was actually
+    in force -- a stage reporting 0 deferrals did not exercise this patch at all, and its
+    clean result means nothing.
+
+    Scoped to the optimize run and reversed on exit, including on the error path: outside
+    the window `close()` must be a real close, or the pipeline container leaks sessions.
+    """
+    cls = _toolset_class_for_patching()
+    state = _TOOLSET_CLOSE_PATCH
+    state.depth += 1
+    outermost = state.depth == 1
+
+    if outermost:
+        state.orig = cls.close
+        state.pending = {}
+        state.deferred = 0
+
+        async def _deferred_close(self) -> None:
+            """Record the request and return. The real close happens once, on exit."""
+            state.pending[id(self)] = self
+            state.deferred += 1
+
+        cls.close = _deferred_close
+
+    try:
+        yield
+    finally:
+        state.depth -= 1
+        if outermost:
+            cls.close = state.orig
+            deferred = state.deferred
+            to_close = list(state.pending.values())
+            state.reset()
+            for ts in to_close:
+                # Never let a teardown failure propagate: this runs in a finally, so
+                # raising here would replace whatever the optimize run was already
+                # failing with -- and the remaining toolsets would leak.
+                try:
+                    await ts.close()
+                except Exception:
+                    log.warning("Deferred close failed for %s", type(ts).__name__, exc_info=True)
+            if deferred:
+                print(
+                    f"{tag}  Deferred {deferred} toolset close(s) across "
+                    f"{len(to_close)} shared toolset(s); closed them once at teardown "
+                    f"(silent-failures #12)",
+                    flush=True,
+                )
 
 
 def _apply_model_override(root_agent, model: str, tag: str = "") -> None:
@@ -667,6 +782,13 @@ def optimize(
     try:
 
         async def _run_with_warmup():
+            # Patch 8. The window wraps the pre-warm too: the pre-warm itself never
+            # closes anything, but a Runner from a previous stage in the same process
+            # could, and the first generation is exactly when the sessions are newest.
+            async with _deferred_toolset_closes(tag):
+                return await _optimize_within_close_window()
+
+        async def _optimize_within_close_window():
             await _prewarm_mcp_toolsets(root_agent, tag)
 
             # Patch the sampler purely to number the generations in the log. It
