@@ -204,12 +204,25 @@ class TestPrewarmMcpToolsets:
         ts_fail.get_tools.assert_awaited_once()
         ts_ok.get_tools.assert_awaited_once()
 
-    def test_retries_on_failure(self):
+    def test_retries_on_failure(self, monkeypatch):
+        """The retry COUNT is the behaviour under test; the backoff wall clock is not.
+
+        `_prewarm_mcp_toolsets` backs off 2**attempt seconds, so letting it sleep for
+        real cost 3s of every suite run to assert a number that does not depend on it.
+        """
+        slept: list[float] = []
+
+        async def _no_wait(seconds):
+            slept.append(seconds)
+
+        monkeypatch.setattr(asyncio, "sleep", _no_wait)
         ts_fail = _make_toolset(fail=True)
         agent = _make_agent([ts_fail])
         warmed = asyncio.run(_prewarm_mcp_toolsets(agent, max_retries=3))
         assert warmed == 0
         assert ts_fail.get_tools.await_count == 3
+        # Still asserts it backed off, and that the backoff grows -- just without waiting.
+        assert slept == [1, 2]
 
     def test_all_fail_returns_zero(self):
         ts1 = _make_toolset(fail=True)
