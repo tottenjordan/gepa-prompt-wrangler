@@ -783,11 +783,29 @@ counted with `scripts/analyze_toolset_loss.py` against the 12–24% baseline. Th
 prints a deferred-close count; **a stage reporting 0 deferrals did not exercise the patch at
 all**, and a clean result from such a stage means nothing.
 
-**Bust the KFP cache before that run.** `optimizer.py` is in the code tarball, not a
-component body, so an unchanged `run_id` cache-hits and returns a *pre-fix* optimize stage —
-the acceptance run would measure the old code, or skip the stage and look clean. Bump
-`cache_bust`. Same trap as the `evaluator.py` re-baseline; the deferred-close count is the
-tell.
+**Decided 2026-09-17: the acceptance test rides on the next campaign**, as a normal arm,
+rather than a standalone 9-hour verification run — the compute then buys a campaign result
+as well as the check. **Whichever campaign runs next inherits this checklist**, and it is
+not optional, because a stage that silently caches or silently never deferred will look
+exactly like a pass:
+
+1. **Bump `cache_bust` in the manifest.** `optimizer.py` is in the code tarball, not a
+   component body, so an unchanged `run_id` cache-hits and returns a *pre-fix* optimize
+   stage — the run would measure the old code, or skip the stage entirely and look clean.
+   Same trap as the `evaluator.py` re-baseline.
+2. **Check the deferred-close count in the optimize log is non-zero.** The run prints
+   `Deferred N toolset close(s)`. **N = 0 means the stage did not exercise patch 8** and its
+   result says nothing about #12. Expect N in the low thousands (1,812 was one stage).
+3. **Count losses with `scripts/analyze_toolset_loss.py`, not by eye**, and pass
+   `--freshness` — `gcloud logging read` defaults to 1 day and silently truncates, which
+   once turned 29 losses into a reported zero. Grep both wordings.
+4. **Do not read the close count as the verdict.** `Closing toolset` lines survive deferral
+   (see below), so ~1,812 will still appear and the 90–150 s burst will still be there,
+   now harmless.
+
+The bar is **0**, against 12% and 24% on two identical prior configurations — so a
+low-but-nonzero rate does not distinguish "fixed" from "lucky draw", and one stage at zero
+is one observation.
 
 Note the loss *rate* was 12% and 24% on two identical configurations, so a single post-fix
 stage showing a low-but-nonzero rate does not distinguish "fixed" from "lucky draw". Zero is

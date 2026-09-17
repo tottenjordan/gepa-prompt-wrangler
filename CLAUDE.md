@@ -276,13 +276,15 @@ and 24%); two of them passed their own tests. So **the acceptance test is the
 `scripts/analyze_toolset_loss.py`, expected 0. The run prints a deferred-close count — **a
 stage reporting 0 deferrals did not exercise the patch**, and its clean result means nothing.
 
-**Bust the KFP cache before that acceptance run.** `optimizer.py` rides in the code tarball
-and is *not* a component body, so KFP — which caches on **component body hash + input
-parameter values** — will happily cache-hit an unchanged `run_id` and hand back a *pre-fix*
-optimize stage. The acceptance run would then measure the old code and report the old rate,
-or worse, skip the stage entirely and look clean. Bump `cache_bust` in the manifest. This is
-the same trap as the `evaluator.py` re-baseline above, and the deferred-close count is the
-tell: 0 deferrals means you measured the cache.
+**The acceptance test rides on the next campaign** (decided 2026-09-17), as a normal arm
+rather than a standalone run. **Whichever campaign runs next inherits a four-point
+checklist** in silent-failures #12 — bump `cache_bust`, confirm the printed deferred-close
+count is non-zero, count with `analyze_toolset_loss.py --freshness`, and do not read the
+close count as the verdict. The first two are the ones that silently fake a pass:
+`optimizer.py` rides in the code tarball and is *not* a component body, so KFP — which
+caches on **component body hash + input parameter values** — will cache-hit an unchanged
+`run_id` and hand back a *pre-fix* optimize stage, and **0 deferrals means you measured the
+cache**, not the fix.
 
 **Patch 6 (added 2026-08-20)** — `SafetyEvaluatorV1` hands the eval facade the *unversioned* `PrebuiltMetric.SAFETY`, which the Vertex SDK resolves client-side to `safety_v3`; us-central1 does not serve v3, so every GEPA case returned `400 Unsupported predefined metric: safety_v3`, the score came back `None`, and patch 4 coerced it to `0.0`. GEPA kept running and optimized against a criterion pinned at zero. The version is chosen inside ADK — `sampler_config.json` correctly says `safety_v1` and cannot influence it.
 
