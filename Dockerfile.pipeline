@@ -30,7 +30,7 @@ COPY pyproject.toml .
 RUN pip install --no-cache-dir \
     "google-cloud-aiplatform[adk,agent-engines,evaluation]==2.1.0" \
     "google-adk[a2a,agent-identity,eval,mcp]==2.8.0" \
-    "google-genai==2.22.0" \
+    "google-genai==2.23.0" \
     "litellm==1.85.7" \
     "python-dotenv==1.2.3" \
     "pyyaml==6.0.3" \
@@ -39,7 +39,7 @@ RUN pip install --no-cache-dir \
     "paperbanana==0.3.0" \
     "rouge-score==0.1.2" \
     "markdown-it-py==4.2.0" \
-    "google-cloud-storage==3.13.1" \
+    "google-cloud-storage==3.14.1" \
     "google-cloud-secret-manager==2.30.0" \
     "anthropic[vertex]==1.4.0" \
     "fastmcp==3.4.7"
