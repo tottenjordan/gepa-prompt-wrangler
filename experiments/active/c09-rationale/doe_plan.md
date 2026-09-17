@@ -1,7 +1,7 @@
 # Campaign 09 (DOE 12) — does forwarding the judge's rationale help?
 
-**Status:** RUNNING — submitted 2026-09-17 21:39 UTC
-**Pipeline job:** `gepa-run-86239e1924-20260917-213907`  ·  run id `run-86239e1924`
+**Status:** pre-registered, not yet submitted
+**Pipeline job:** _(record here on submit)_
 **Manifest:** [`manifests/c09-rationale_manifest.yaml`](../../../manifests/c09-rationale_manifest.yaml)
 **Plan:** [`docs/plans/2026-09-17-campaign-09.md`](../../../docs/plans/2026-09-17-campaign-09.md)
 
