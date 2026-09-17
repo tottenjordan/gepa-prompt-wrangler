@@ -285,6 +285,32 @@ Batch eval metrics (server-side, usable in eval_before/eval_after):
 
 Fix (in `wrangler/eval/evaluator.py:_tool_use_metric()`): use a **custom `types.LLMMetric`** with an explicit `prompt_template` that rewards correct tool selection + correct parameters and explicitly does NOT penalize tool use, requiring strict JSON `{"explanation", "score"}` output. Constraints learned the hard way: (1) the metric name must NOT be `tool_use_quality_v1` — that exact name is hijacked by the SDK's `PredefinedMetricHandler`, ignoring the custom prompt; use `tool_use_quality` (a non-predefined name routes to `LLMMetricHandler`). (2) Omit `judge_model` — a bare model id is rejected as an invalid autorater resource; the default autorater works. (3) The score key is aliased `tool_use_quality` → `tool_use_quality_v1` via `_alias_tool_use_key()` so downstream report consumers are unchanged. After the fix, eval-before `tool_use_quality_v1` went 0.42 → 1.00 on the same engine. Prefilling rubrics or passing `metric_spec_parameters` does NOT work — the predefined handler ignores both.
 
+**RE-BASELINED 2026-09-17 — the judge prompt is now the JSON-hardened variant.** The criteria
+text is byte-identical; only the output contract changed (`score` first, one-sentence
+explanation with no quotes/newlines/backslashes, code fences forbidden, one worked example).
+Measured over five scoring passes each against one capture, DOE 02 arm 4:
+
+| | original | hardened |
+| --- | --- | --- |
+| cases scored | 312/320 — 8 lost | **320/320 — 0 lost** |
+| sd of the mean | 0.0100 | **0.0043** |
+
+Case loss eliminated, run-to-run variance more than halved, aggregate unmoved (+0.0056,
+inside the original's own sd).
+
+**Per-case `tool_use_quality_v1` comparisons must not cross 2026-09-17** — 14.3% of cases
+re-score across the boundary, above the hardened prompt's own 7.5% pairwise
+self-disagreement. Aggregate comparisons may. Campaigns 07 and 08 are unaffected in
+substance: their tool-use results were already uninterpretable at 12–24% contamination from
+silent failure #12.
+
+**Bust the KFP cache before the first campaign that should use it.** `evaluator.py` is in the
+code tarball, *not* a component body, and KFP caches on **component body hash + input
+parameter values** — so a resubmitted arm with an unchanged `run_id` will cache-hit and
+return **old-prompt** tool-use scores. Without a deliberate bust (a `cache_bust` bump in the
+manifest) a campaign can silently mix pre- and post-re-baseline numbers. Details:
+[docs/analysis/2026-09-16-doe-02-result.md](docs/analysis/2026-09-16-doe-02-result.md).
+
 ### GCP Labels
 
 All GCP resources (agents, eval runs, pipelines, Artifact Registry) use label `{"solution": "promp-wrangler"}`.

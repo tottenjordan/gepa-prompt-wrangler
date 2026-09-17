@@ -101,7 +101,9 @@ Respond with ONLY a single JSON object and nothing else, in exactly this form:
 {{"explanation": "<one-paragraph rationale>", "score": <float between 0.0 and 1.0>}}
 """
 
-# A JSON-hardened variant of the prompt above, for DOE 02 arm 4. NOT in use.
+# The tool-use judge prompt IN USE since 2026-09-17. Introduced as the DOE 02 arm 4
+# variant and promoted after five scoring passes each; see _tool_use_metric() below
+# for the numbers and the re-baseline boundary.
 #
 # **The criteria text is byte-identical to _TOOL_USE_JUDGE_PROMPT.** Only the output
 # contract differs. That is the whole design: if the rubric moved too, a score change
@@ -216,9 +218,26 @@ def _tool_use_metric() -> "types.LLMMetric":
     # API requires a full autorater_model resource name and rejects "gemini-2.5-flash"
     # with INVALID_ARGUMENT. Leaving it unset uses the service default autorater,
     # matching how the predefined metrics behave.
+    # HARDENED variant since 2026-09-17. The criteria text is byte-identical to
+    # _TOOL_USE_JUDGE_PROMPT; only the output contract differs. Measured over five
+    # scoring passes each against one capture (DOE 02 arm 4):
+    #
+    #                     original            hardened
+    #   cases scored      312/320 (8 lost)    320/320 (0 lost)
+    #   per pass          63,63,60,62,64      64,64,64,64,64
+    #   sd of the mean    0.0100              0.0043
+    #
+    # Case loss is eliminated rather than reduced, and run-to-run variance more than
+    # halves. The mean moved +0.0056, inside the ORIGINAL's own sd, so the aggregate
+    # does not shift materially.
+    #
+    # THIS IS A DATED RE-BASELINE. Per-case tool_use_quality_v1 comparisons must not
+    # cross 2026-09-17: 14.3% of cases re-score across the boundary, above the
+    # hardened prompt's own 7.5% pairwise self-disagreement. Aggregate comparisons may.
+    # The original is kept above so the comparison stays reproducible.
     return types.LLMMetric(
         name=_TOOL_USE_METRIC_NAME,
-        prompt_template=_TOOL_USE_JUDGE_PROMPT,
+        prompt_template=_TOOL_USE_JUDGE_PROMPT_HARDENED,
     )
 
 
