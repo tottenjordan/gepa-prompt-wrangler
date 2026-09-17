@@ -1,5 +1,5 @@
 ---
-name: inspecting-pipeline-runs
+name: inspect-vai-pipes
 description: Use when asked to report on, diagnose, or interpret a Vertex pipeline run or DOE campaign arm in this repo — a run that is in flight, stuck, failed with an unhelpful error, or finished and needs its results read.
 ---
 
@@ -148,6 +148,17 @@ one job, found no control and no paired arm, and reported the campaign design
 violated — when both were scheduled and gated behind the arm it was looking at.
 
 "Not yet submitted" and "missing" are different claims. Check which one applies.
+
+## References
+
+Lookup material, kept out of the body so this file stays readable:
+
+- [references/vertex-state-codes.md](references/vertex-state-codes.md) — pipeline and task
+  state codes, our DAG's shape, and the SDK edges (`PipelineJob` has no `start_time`;
+  `display_name` != `resource_name`; container start times vary by minutes).
+- [references/log-queries.md](references/log-queries.md) — copy-paste Cloud Logging queries,
+  the greps that matter here, and the two flags whose absence has produced wrong answers
+  (`--freshness`, `resource.labels.job_id`).
 
 ## Common mistakes
 

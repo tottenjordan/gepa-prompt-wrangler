@@ -804,7 +804,10 @@ gcloud logging read 'resource.type="ml_job" AND resource.labels.job_id="JOB_ID"'
 gcloud logging read 'resource.type="aiplatform.googleapis.com/ReasoningEngine" AND resource.labels.reasoning_engine_id="ENGINE_ID"'
 ```
 
-Known failure patterns are cataloged in `~/.claude/skills/inspect-vai-pipes/references/known-failures.md`.
+Lookup material lives with the skill: state codes and SDK edges in
+`.claude/skills/inspect-vai-pipes/references/vertex-state-codes.md`, and the query
+cookbook in `.claude/skills/inspect-vai-pipes/references/log-queries.md`. Known
+failure patterns are in [docs/notes/silent-failures.md](docs/notes/silent-failures.md).
 
 ### Restart the campaign driver after merging to `wrangler/pipeline/`
 

@@ -890,7 +890,7 @@ that is silent for 120s is wedged, not slow.
   consequence of the case ending, not the cause.
 - **The `tool_list_cache_ttl_seconds` gap.** Already applied in both registries
   (`deploy.py:598`, `registry.py:61`).
-- **Container ADK drift**, the thing the inspecting-pipeline-runs skill tells
+- **Container ADK drift**, the thing the inspect-vai-pipes skill tells
   you to check. Also refuted, and worth recording as a positive: the container's
   traceback cites `mcp_toolset.py` lines 501 and 419, and the local ADK 2.8.0
   has byte-identical content at both lines. The pinning work of 2026-09-08 is
