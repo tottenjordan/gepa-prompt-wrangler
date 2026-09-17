@@ -609,6 +609,14 @@ before changing it.
 it is **3.11** — GEAP's runtime, `Dockerfile.pipeline`'s base, and the version
 every pin in the repo is resolved for. Import it; do not redefine it.
 
+**The CI matrix is 3.11 + 3.14 — the interpreters we deploy to, and only those.** It was
+3.11/3.12/3.13 until 2026-09-17, which tested two versions nothing runs while leaving the
+3.14 that serves every MCP image untested. The pin comparisons *skip* off `TARGET_PYTHON`,
+so those extra jobs were a green tick over a quietly reduced suite. Two tests in
+`tests/test_pipeline_image_pins.py` now keep the list honest in both directions, deriving
+the deployed set from the Dockerfiles so a base bump fails the build instead of going
+untested. Verified on 3.14 before the switch: 1306 passed, 36 skipped.
+
 The three Cloud Run MCP images are on **`python:3.14-slim`**, arrived via
 dependabot on 2026-09-08. They are listed in
 `tests/test_pipeline_image_pins.py:PYTHON_MISMATCH_ACCEPTED` with the evidence

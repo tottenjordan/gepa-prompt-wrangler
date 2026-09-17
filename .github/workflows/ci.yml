@@ -33,7 +33,16 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.11", "3.12", "3.13"]
+        # The interpreters we actually deploy to, and only those.
+        #   3.11 -- GEAP runtime, Dockerfile.pipeline, TARGET_PYTHON
+        #   3.14 -- all three Cloud Run MCP images (python:3.14-slim)
+        # 3.12 and 3.13 were dropped 2026-09-17: nothing runs on them, and the
+        # pin-vs-installed comparisons skip off TARGET_PYTHON, so those jobs were a
+        # green tick over a quietly reduced suite. uv.lock splits litellm at exactly
+        # the 3.14 boundary (1.85.7 below, 1.96.2 at/above), so 3.14 is the entry that
+        # was actually load-bearing and missing.
+        # tests/test_pipeline_image_pins.py keeps this list honest in both directions.
+        python-version: ["3.11", "3.14"]
     steps:
       - uses: actions/checkout@v7
         with:
