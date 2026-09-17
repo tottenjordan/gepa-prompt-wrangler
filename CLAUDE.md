@@ -243,16 +243,33 @@ reading a result.**
   `EvalMetricResult.details.rubric_scores[].rationale`, which is populated. The model writing
   every candidate prompt saw numbers and no diagnosis. GEPA's method rests on that text: a
   metric returning only pass/fail starves the reflection step.
-- **7 — `use_merge=True`.** The installed gepa defaults it `False`; the published guidance
-  says `True` and recommends keeping it. ADK forwards 8 of `gepa.optimize()`'s 46 arguments
-  and this is not one, so it is injected at the call. GEPA+Merge is reported to give prompts
-  up to 9.2× shorter while scoring higher.
+- **7 — `use_merge=True`, and it is INERT here.** The installed gepa defaults it `False`;
+  the published guidance says `True`. ADK forwards 8 of `gepa.optimize()`'s 46 arguments and
+  this is not one, so it is injected at the call — the injection works, and merge is
+  *attempted*. It just can never succeed in this configuration.
 
-**Both plausibly act on prompt quality and length, and they shipped together.** The next
-optimize stage therefore measures the *pair*. If the holdout moves, that result cannot be
-attributed to either one alone without a follow-up that varies them separately — say so
-rather than crediting whichever is more interesting. The acceptance test is the holdout delta
-on a real optimize stage, **not** that rationale text appears in the reflective dataset.
+  **Merge is field-wise recombination across *multiple* predictors** — take predictor A from
+  one parent and predictor B from another, both descending from a common ancestor. It does
+  not ask an LLM to blend two prompts. `does_triplet_have_desirable_predictors` requires some
+  predictor where **one parent is byte-identical to the ancestor** and the other differs.
+  `GEPARootAgentPromptOptimizer` optimizes one predictor (`agent_prompt`), so that demands a
+  descendant whose prompt equals its ancestor's — and a descendant exists *because* the
+  prompt was mutated. Measured on a real run: **34 pairs, all sharing a common ancestor, 0
+  eligible, 0 byte-identical candidates**; the m01 stage logged 19 × `No merge candidates
+  found` and zero merges across 113 generations.
+
+  **So the 9.2×-shorter-prompt figure does not transfer** — it comes from multi-module
+  DSPy-style programs that have separate prompts to recombine. Keeping the flag on costs
+  ~nothing (a failed attempt falls through to the reflective proposer in the *same*
+  iteration, consuming no evaluation budget) and becomes correct automatically if ADK ever
+  optimizes sub-agent instructions too. **Re-check with
+  `scripts/check_merge_eligibility.py` whenever the predictor count changes** — that, not a
+  gepa version bump, is what would make this live.
+
+**4b shipped alongside 7, and 7 turned out to be inert, so the pair is not the confound it
+was written up as.** Read any result from that boundary as measuring **4b plus the writer
+model move**, not three changes. The acceptance test is the holdout delta on a real optimize
+stage, **not** that rationale text appears in the reflective dataset.
 
 Analysis: [docs/analysis/2026-09-17-gepa-argument-surface.md](docs/analysis/2026-09-17-gepa-argument-surface.md).
 

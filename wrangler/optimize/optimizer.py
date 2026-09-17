@@ -138,15 +138,30 @@ def _gepa_extra_kwargs() -> dict:
     observability or tuning surface we do not need. This one is different:
 
     **`use_merge`** is `False` in the installed gepa, while the published guidance says it
-    defaults to `True` and recommends keeping it on. Merge proposes a candidate combining two
-    Pareto-frontier parents that win on *different* examples -- one re-evaluation per
-    attempt, capped at 5 by `max_merge_invocations`. GEPA+Merge is reported to produce
-    prompts **up to 9.2x shorter while scoring higher**, and prompt length is the mechanism
-    this repo hypothesised, could not support from its own arm-level data, and otherwise had
-    no way to act on.
+    defaults to `True`. It is injected here rather than configured because
+    `GEPARootAgentPromptOptimizerConfig` has no field for it.
 
-    Injected rather than configured because `GEPARootAgentPromptOptimizerConfig` has no field
-    for it. Filtered against the live signature below, so an argument gepa drops in a future
+    **It is inert in this repo, and kept deliberately.** Merge is *field-wise recombination
+    across multiple predictors*: `does_triplet_have_desirable_predictors` needs some
+    predictor where one parent is byte-identical to the common ancestor and the other
+    differs, so that selecting whole fields means something. `GEPARootAgentPromptOptimizer`
+    optimizes **one** predictor (`agent_prompt`), which makes that demand a descendant whose
+    prompt equals its ancestor's -- and a descendant exists *because* the prompt was mutated.
+    Measured: 34 pairs on a real run, 0 eligible; 19 x `No merge candidates found` and zero
+    merges across the m01 stage's 113 generations.
+
+    So the **9.2x-shorter-prompt** result that motivated this does **not** transfer -- it is
+    measured on multi-module programs with separate prompts to recombine. Shipping on that
+    citation without first checking our predictor count was the mistake; the claim was true
+    and about a different configuration.
+
+    Kept on anyway because it costs nothing -- a failed attempt falls through to the
+    reflective proposer in the *same* iteration, spending no evaluation budget -- and becomes
+    correct automatically if ADK ever optimizes sub-agent instructions too. That, not a gepa
+    bump, is the trigger to re-run `scripts/check_merge_eligibility.py`;
+    `tests/test_merge_is_inert.py` pins the upstream semantics this rests on.
+
+    Filtered against the live signature below, so an argument gepa drops in a future
     version degrades to "not passed" instead of a `TypeError` nine hours into a stage.
     """
     return {"use_merge": True}
