@@ -1,67 +1,131 @@
-# Campaign 03 — What is the noise floor, really?
+# Campaign 03 — the noise floor is a function of two knobs
 
-**Status:** Not started · **Depends on:** Campaign 02, and the multi-run averaging fix
+**Status:** Collecting (2026-09-17) · **Depends on:** nothing outstanding
+
+> **Rewritten 2026-09-17.** The original version of this campaign asked the one-knob
+> question — *"what is the `num_runs` floor, really?"* — and was written before
+> `score_repeats` existed. Two of its three concerns have since been settled or delivered,
+> and the third is now a special case of a larger question. What it got right is preserved
+> below under *"What the original version asked"*; the design has moved, not the intent.
 
 ## Question
 
-CLAUDE.md instructs every sweep to clear a noise floor of **~0.059 at `num_runs: 1`** and
-**~0.034 at 3**, and says the improvement comes from averaging cutting variance by √n. Two
-problems with that as it stands.
+**At a fixed budget, which knob buys resolution — `num_runs` or `score_repeats`?**
 
-**The 3-run figure was computed through a bug.** `run_batch_eval_averaged` paired per-case
-rows across runs by *list position*, and runs drop different cases, so position k was a
-different case in each run. It also averaged `case_index` itself. Fixed now, but the number
-measured through it has to be re-measured before it is trusted.
+Resolution is the binding constraint on every experiment here. Campaign 08 returned
+*unresolved* because a control arm drifted **0.022** on the holdout. DOE 02 then showed why:
+scoring **byte-identical** responses, the judge disagrees with itself on **64/64 cases** for
+`instruction_following_v1` and **0/64** for `safety_v1`.
 
-**And a floor should be a function, not a remembered constant.** Nobody reading a report
-should have to recall ±0.059. `classify_deltas()` already exists to mark a delta against a
-floor; it should be able to compute the floor from the run's own configuration.
+So the floor has two sources, and since 2026-09-17 there are two knobs:
+
+| knob | repeats | averages | cost / 64 cases | touches the engine? |
+| --- | --- | --- | --- | --- |
+| `num_runs` | the whole eval | agent **and** judge | ~5.4 min | yes — plus dropout risk |
+| `score_repeats` | scoring of one inference pass | **judge only** | ~2.8 min | **no** |
+
+`score_repeats` shipped with no guidance on when to use it. This campaign supplies it.
 
 ## Design
 
-Control arms — the prompt **byte-identical** on both sides, no optimize stage between them —
-at `num_runs ∈ {1, 2, 3, 5}`, **two replicates each**, paired on `case_index` via the
-existing `paired_deltas()` (`wrangler/eval/evaluator.py`).
+**One pool, every cell resampled from it.** Six captures from one engine, each scored five
+times — 30 scoring passes, ~2 h unattended. Every (`num_runs` r, `score_repeats` s) cell is
+then rebuilt **offline**:
 
-Decompose each level using Campaign 02's judge/agent split, so the floor is not just
-measured but attributed. Check the √n prediction explicitly against the measured points
-rather than assuming it — if averaging does not buy √n, the guidance in CLAUDE.md is wrong
-in a way that changes how sweeps are budgeted.
+```
+pick two DISJOINT sets of r captures       -> "before" and "after"
+per capture: combine_results(s of its 5 scorings)    # the score_repeats step
+per side:    combine_results(the r capture results)  # the num_runs step
+delta = after - before, per metric
+```
 
-Where a level can be served from a capture rather than fresh inference, do so; that isolates
-the scoring contribution and cuts cost. State which levels were captured and which were
-live, because they are not the same measurement.
+Both steps call `combine_results`, **the function production calls** — so a cell is not a
+model of production averaging, it *is* production averaging over stored inputs.
+`tests/test_doe03_resampling.py` asserts a rebuilt r=3 side is numerically identical to
+`run_batch_eval_averaged`'s output, scores and per-case rows alike. (Making that true
+required routing `num_runs` through `combine_results`; it previously had its own copy.)
+
+Disjoint splits available: **r=1 → 15, r=2 → 45, r=3 → 10.**
+
+### The headline is iso-cost contrasts
+
+cost(r, s) = r·2.6 + r·s·2.8. Several cells cost the same, which is the decision a campaign
+designer actually faces:
+
+| budget | option A | option B | option C |
+| --- | --- | --- | --- |
+| ~11 min | **(2, 1)** 10.8 | **(1, 3)** 11.0 | — |
+| ~16.5 min | **(3, 1)** 16.2 | **(2, 2)** 16.4 | **(1, 5)** 16.6 |
+
+`(3,1)` is today's default. `(1,5)` costs the same and never touches the engine.
 
 ## Pre-registration
 
-- **Two replicates per `num_runs` level.** Report both separately before pooling.
-- Do not drop a level because it looks noisy — a noisy level is the finding.
-- Report paired *and* unpaired floors at every level, so the value of pairing is visible
-  rather than asserted at "~15%".
-- Report per-metric floors, not one overall number. The 2026-08-22 sweep's apparent wins
-  were metric-specific and so is the noise.
+Written and committed **before the data landed**.
+
+**Directional predictions, per metric, licensed by DOE 02:**
+
+| metric | judge sd | judge disagreement | prediction at ~16.5 min |
+| --- | --- | --- | --- |
+| `instruction_following_v1` | 0.024 | **64/64** | **(1,5) beats (3,1)** — judge-dominated |
+| `safety_v1` | **0.000** | **0/64** | **(3,1) beats (1,5)**; repeats do ~nothing |
+| `final_response_quality_v1` | 0.023 | 59.4% | (1,5) ≥ (3,1), weaker |
+| `hallucination_v1` | 0.010 | 43.8% | no call |
+| `tool_use_quality_v1` | 0.010 | 21.9% | no call |
+
+Two metrics predict **opposite** winners from the same data. **If `safety_v1`'s floor falls
+materially with `score_repeats`, DOE 02's judge/agent split is wrong** and the guidance now
+in CLAUDE.md must be withdrawn rather than patched.
+
+**Reporting rules:**
+
+- **Median, p95 and max — not max alone.** `measure_noise_floor_per_metric` uses
+  `max(|delta|)` over a handful of real control arms. A max over 10 resampled draws and one
+  over 1,000 are *different statistics*; the second is larger for arithmetic reasons. Compare
+  medians across cells, and compare a max to CLAUDE.md's remembered floors only at a matched
+  draw count.
+- **Per metric, never pooled.** The 2026-09-02 control arm spanned 0.0028 to 0.0747 — 27×.
+- **Paired and unpaired at every cell**, so pairing's value is visible rather than asserted.
+- **Cells are not independent** — all built from one pool of six. State it beside every table.
+- **No cell is dropped for looking noisy.** A noisy cell is the finding. Cells with fewer
+  than 8 disjoint splits print `UNDERPOWERED` rather than a number.
+- **Do not re-derive the judge/agent split from this pool.** DOE 02 showed n=5 sds have a
+  95% interval of [0.007, 0.033] around a true 0.020.
 
 ## What each outcome would mean
 
 | Outcome | Reading |
 | --- | --- |
-| **Corrected 3-run floor materially different from 0.034** | Update CLAUDE.md, and re-read the 2026-08-22 sweep's conclusions against the corrected number. |
-| **Same as 0.034** | The bug did not bite in practice. Say so plainly; a fix that changes nothing measurable is still worth having said. |
-| **√n holds** | `num_runs` is a predictable dial and can be budgeted arithmetically. |
-| **√n does not hold** | There is a floor that averaging cannot cross — almost certainly the judge, per Campaign 02 — and the guidance to raise `num_runs` is partly wasted spend. |
-| **Floor exceeds typical effects** | The most important possible result: it would mean the sweeps this repo runs cannot resolve what they are trying to measure, and Campaign 04 must not run until the design changes. |
+| **Predictions hold on both metrics** | The judge/agent split is actionable, not just descriptive. Set the knobs per metric; `cheapest_config_for()` can be trusted. |
+| **`safety_v1`'s floor falls with repeats** | DOE 02's split is wrong. Withdraw the CLAUDE.md guidance; the 0/64 disagreement was measuring something other than what it claimed. |
+| **Neither knob helps much at any budget** | The most important possible result: the floor is dominated by something neither averages — sweeps cannot resolve what they are looking for, and the design must change before the next campaign. |
+| **Corrected (3,1) floor ≠ 0.011–0.014** | Update CLAUDE.md, and re-read past conclusions against the corrected number. |
+| **√n holds for `num_runs`** | Budget arithmetically; pass `scaling_exponent=0.5`. |
+| **√n does not hold** | There is a floor averaging cannot cross — almost certainly the judge — and raising `num_runs` is partly wasted spend. |
 
 ## Repo payoff
 
-`minimum_detectable_effect(num_runs, n_cases)` in `wrangler/reporting/analyzer.py`, wired
-into `classify_deltas()` so a report marks a sub-floor delta automatically instead of relying
-on the reader to remember. Then update the CLAUDE.md numbers with the corrected
-measurement — and date them.
+Shipped with the campaign rather than after it:
 
-## Cost
+- `minimum_detectable_effect()` gains a `score_repeats` axis, keeping its refusal to
+  extrapolate without a **measured** exponent — now on both axes. `repeats_exponent=0.0` is
+  a legitimate answer (that is `safety_v1`'s predicted shape) and is distinct from unknown.
+- `cheapest_config_for(target_mde, floor, ...)` returns the cheapest (r, s) clearing a
+  target, or `None` when no setting in budget does — which is a result, not a reason to
+  round down.
+- `CAPTURE_MIN` / `SCORING_MIN` live in `analyzer.py` as dated measurements, imported by the
+  analysis script rather than copied.
 
-Moderate. Several control evals; partly served from captures, which is the cheap path.
+## What the original version asked, and what became of it
+
+| Original concern | Status |
+| --- | --- |
+| *"Depends on Campaign 02 and the multi-run averaging fix"* | **Cleared.** DOE 02 is written up; `average_per_case` matches on case index. |
+| *"The 3-run figure was computed through a bug"* | **Still true, still unmeasured** — `average_per_case`'s own docstring says so. This campaign's (3,1) cell answers it. |
+| *"A floor should be a function, not a remembered constant"* | **Delivered** — `minimum_detectable_effect()` exists, and now takes both knobs. |
+| Control arms at `num_runs ∈ {1,2,3,5}`, two replicates | **Superseded by resampling**, which gets more splits per cell from less compute. r=5 is out of reach of a 6-capture pool; r≤3 covers the production default. |
+| Check √n explicitly rather than assuming | **Kept**, and the exponent is fitted rather than assumed. |
 
 ## Result
 
-_Not yet run._
+*Pending — collection in progress.*
