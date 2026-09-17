@@ -298,6 +298,7 @@ def eval_single_agent(
     eval_data_path: str,
     phase: str,
     num_runs: int,
+    score_repeats: int,
     judge_model: str,
     redeploy_output: str,
     cache_bust: str,
@@ -371,13 +372,17 @@ def eval_single_agent(
             )
 
     eval_cases = load_eval_file(f"/app/{eval_data_path}")
-    logging.info(f"[{pair_id}] {phase} eval: {len(eval_cases)} cases, {num_runs} runs")
+    logging.info(
+        f"[{pair_id}] {phase} eval: {len(eval_cases)} cases, {num_runs} runs, "
+        f"{score_repeats} scoring pass(es) each"
+    )
 
     t0 = time.time()
     result = run_batch_eval_averaged(
         engine_id,
         eval_cases,
         num_runs=num_runs,
+        score_repeats=score_repeats,
         agent_name=pair_id,
         model=model,
     )
@@ -403,6 +408,7 @@ def eval_single_agent(
         "per_case": result.per_case,
         "scores_std": result.scores_std,
         "num_runs": result.num_runs,
+        "score_repeats": score_repeats,
         "cases_scored": cases_scored,
         "cases_total": cases_total,
         "coverage": cases_scored / cases_total if cases_total else 0.0,

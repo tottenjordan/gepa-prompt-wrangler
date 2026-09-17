@@ -695,6 +695,7 @@ def stage_eval(
     phase: str,
     pair_id: str | None = None,
     num_runs: int | None = None,
+    score_repeats: int | None = None,
     retry_failed: bool = True,
 ) -> None:
     stage_name = f"eval_{phase}"
@@ -707,11 +708,17 @@ def stage_eval(
     pairs = _filter_pairs(manifest, pair_id)
     mdir = _manifest_dir(exp)
     num_runs = num_runs or exp.config.get("defaults", {}).get("num_runs", 1)
+    # Separate knob from num_runs: this re-scores one inference pass rather than
+    # repeating it, so it buys judge-noise reduction without an engine call.
+    # DOE 02: the holdout is judge-dominated, safety is not. Default 1 -- turning it
+    # on re-baselines a campaign's floor, so it must be asked for.
+    score_repeats = score_repeats or exp.config.get("defaults", {}).get("score_repeats", 1)
 
     deploy_data = exp.read_stage("deploy")
     eval_path = _resolve_eval_path(manifest, mdir)
     eval_cases = load_eval_file(str(eval_path))
-    print(f"  Eval cases: {len(eval_cases)}, num_runs: {num_runs}")
+    repeats_note = f", score_repeats: {score_repeats}" if score_repeats > 1 else ""
+    print(f"  Eval cases: {len(eval_cases)}, num_runs: {num_runs}{repeats_note}")
 
     for i, pair in enumerate(pairs, 1):
         engine_id = deploy_data.get(pair.id, {}).get("engine_id") or pair.engine_id
@@ -726,6 +733,7 @@ def stage_eval(
             engine_id,
             eval_cases,
             num_runs=num_runs,
+            score_repeats=score_repeats,
             agent_name=pair.id,
             model=model,
             retry_failed=retry_failed,
@@ -748,6 +756,7 @@ def stage_eval(
                 "per_case": result.per_case,
                 "scores_std": result.scores_std,
                 "num_runs": result.num_runs,
+                "score_repeats": score_repeats,
                 "elapsed": elapsed,
                 "token_usage": result.token_usage,
                 # Cases-per-metric. Persisted because comparing a before/after

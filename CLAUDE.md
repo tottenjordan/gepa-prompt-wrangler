@@ -407,6 +407,27 @@ For multi-model agents: `SEARCH_MCP_SERVER`, `BOOKING_MCP_SERVER`, `EXPENSE_MCP_
   (safety), a 3.4x spread, which is why `classify_deltas` takes a per-metric mapping —
   holding every metric to the loosest one throws away most of the resolution.
 
+  **`num_runs` and `score_repeats` are different knobs, because the floor has two sources.**
+  DOE 02 separated them on byte-identical responses: the judge disagrees with itself on
+  **64/64 cases** for `instruction_following_v1` and **0/64** for `safety_v1`.
+
+  | knob | repeats | averages | cost per 64 cases | touches the engine? |
+  | --- | --- | --- | --- | --- |
+  | `num_runs` | the whole eval | agent **and** judge | ~5.4 min | yes — plus dropout risk |
+  | `score_repeats` | scoring of one inference pass | judge only | ~2.8 min | **no** |
+
+  So for the holdout, `score_repeats` buys comparable variance reduction at roughly half the
+  price and none of the deployment lottery; for `safety_v1` it does nothing at all and
+  `num_runs` is the only lever. Set them independently rather than buying both at one price.
+
+  `score_repeats` also **recovers coverage**: passes drop *different* cases (five passes of
+  one prompt lost 8, no two the same), and combining unions them.
+
+  Both default to 1. Turning `score_repeats` on **re-baselines a campaign's floor**, so it is
+  opt-in — `defaults.score_repeats` in a manifest for the local path, `pipeline.score_repeats`
+  for the pipeline. See
+  [docs/analysis/2026-09-16-doe-02-result.md](docs/analysis/2026-09-16-doe-02-result.md).
+
   **Averaging beats sqrt(n).** Claude fell 5.2x from n=1 to n=3 and Gemini 2.7x, against
   the 1.73x sqrt(3) predicts, replicated independently across publishers. So `num_runs`
   is a *stronger* lever than previously documented, not a weaker one. Report the range;

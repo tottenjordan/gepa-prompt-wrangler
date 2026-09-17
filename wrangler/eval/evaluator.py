@@ -908,39 +908,33 @@ def _drop_unscorable_rows(result_df: "pd.DataFrame", tag: str = "") -> "pd.DataF
     return result_df
 
 
-def run_batch_eval(
-    engine_id: str,
+def _infer_for_eval(
+    client: "Client",
+    agent_resource: str,
     eval_cases: list[dict],
-    metrics: list | None = None,
-    agent_name: str = "",
-    model: str = "",
-    retry_failed: bool = True,
-) -> EvalResult:
-    """Run batch eval against a deployed agent. Returns EvalResult with aggregate and per-case scores."""
-    tag = f"[{agent_name}] " if agent_name else ""
+    model: str,
+    retry_failed: bool,
+    tag: str,
+) -> tuple["types.EvaluationDataset", float]:
+    """Run inference and return the scorable dataset plus the start time.
 
-    vertex_init(
-        project=GCP_PROJECT_ID,
-        location=GCP_REGION,
-        staging_bucket=f"gs://{GCP_STAGING_BUCKET}",
-    )
-    client = agent_client(project=GCP_PROJECT_ID, location=GCP_REGION)
-    agent_resource = _resolve_resource_name(engine_id)
-    if metrics is None:
-        metrics = DEFAULT_METRICS
-
+    The expensive half, and the symmetric partner of ``_score_dataset``. Split out so one
+    inference pass can be scored more than once -- see ``score_repeats`` -- and so the
+    scoring loop is testable without an engine.
+    """
     eval_df = _build_eval_dataset(eval_cases)
     batch_size, delay, max_workers = get_batch_config(model)
+    engine = agent_resource.rsplit("/", 1)[-1]
 
     if batch_size < len(eval_cases):
         print(
             f"  {tag}Inference: sending {len(eval_cases)} cases in batches of {batch_size} "
-            f"({max_workers} workers, {delay}s delay) to engine {engine_id}...",
+            f"({max_workers} workers, {delay}s delay) to engine {engine}...",
             flush=True,
         )
     else:
         print(
-            f"  {tag}Inference: sending {len(eval_cases)} cases to engine {engine_id}...",
+            f"  {tag}Inference: sending {len(eval_cases)} cases to engine {engine}...",
             flush=True,
         )
 
@@ -971,15 +965,63 @@ def run_batch_eval(
         eval_dataset_df=_drop_unscorable_rows(inference_result.eval_dataset_df, tag)
     )
     _assert_scorable(inference_result.eval_dataset_df, tag)
+    return inference_result, t0
 
-    return _score_dataset(
-        client,
-        inference_result,
-        metrics=metrics,
-        agent_resource=agent_resource,
-        tag=tag,
-        t0=t0,
+
+def run_batch_eval(
+    engine_id: str,
+    eval_cases: list[dict],
+    metrics: list | None = None,
+    agent_name: str = "",
+    model: str = "",
+    retry_failed: bool = True,
+    score_repeats: int = 1,
+) -> EvalResult:
+    """Run batch eval against a deployed agent. Returns EvalResult with aggregate and per-case scores."""
+    tag = f"[{agent_name}] " if agent_name else ""
+
+    vertex_init(
+        project=GCP_PROJECT_ID,
+        location=GCP_REGION,
+        staging_bucket=f"gs://{GCP_STAGING_BUCKET}",
     )
+    client = agent_client(project=GCP_PROJECT_ID, location=GCP_REGION)
+    agent_resource = _resolve_resource_name(engine_id)
+    if metrics is None:
+        metrics = DEFAULT_METRICS
+
+    inference_result, t0 = _infer_for_eval(
+        client, agent_resource, eval_cases, model, retry_failed, tag
+    )
+
+    if score_repeats <= 1:
+        return _score_dataset(
+            client,
+            inference_result,
+            metrics=metrics,
+            agent_resource=agent_resource,
+            tag=tag,
+            t0=t0,
+        )
+
+    # Score the SAME responses N times. DOE 02 measured judge non-determinism as the
+    # dominant term in the holdout's floor (64/64 cases disagree on identical text) and
+    # zero for safety, so this buys real resolution on some metrics and nothing on others.
+    # It costs scoring only -- no engine call, no deploy lottery.
+    scorings = []
+    for i in range(score_repeats):
+        print(f"  {tag}Scoring pass {i + 1}/{score_repeats} (same responses)...", flush=True)
+        scorings.append(
+            _score_dataset(
+                client,
+                inference_result,
+                metrics=metrics,
+                agent_resource=agent_resource,
+                tag=tag,
+                t0=t0,
+            )
+        )
+    return combine_results(scorings, label="scoring passes")
 
 
 def _score_dataset(
@@ -1345,6 +1387,58 @@ def score_captured_repeated(
     return summary
 
 
+def combine_results(results: list["EvalResult"], label: str = "runs") -> "EvalResult":
+    """Average a list of EvalResults into one, keeping the spread.
+
+    Shared by the two knobs so they cannot drift apart: `num_runs` combines full evals
+    (agent + judge noise), `score_repeats` combines scorings of one inference pass (judge
+    noise only). Same arithmetic, different inputs.
+
+    Three behaviours worth stating because each was a decision:
+
+    - **Results with no scores are skipped, not counted as zero.** A failed pass should not
+      drag the mean toward nothing; silent-failures #6 is what coercing a missing score to
+      0.0 costs.
+    - **The spread is kept** in `scores_std`. A mean over N scorings hides exactly the
+      quantity DOE 02 exists to measure.
+    - **Per-case rows are unioned, not intersected** (`average_per_case` matches on case
+      index). Passes drop *different* cases -- DOE 02 arm 4 saw five passes lose 8 cases
+      with no two the same -- so a case scored in any pass survives, and combining recovers
+      coverage rather than compounding the loss.
+    """
+    scored = [r for r in results if r.scores]
+    if not scored:
+        return EvalResult(num_runs=len(results))
+
+    all_metrics: set[str] = set()
+    for r in scored:
+        all_metrics.update(r.scores)
+
+    avg_scores: dict[str, float] = {}
+    std_scores: dict[str, float] = {}
+    for metric in sorted(all_metrics):
+        values = [r.scores[metric] for r in scored if metric in r.scores]
+        avg_scores[metric] = statistics.mean(values)
+        std_scores[metric] = statistics.stdev(values) if len(values) > 1 else 0.0
+
+    avg_per_case = average_per_case([r.per_case for r in scored if r.per_case])
+
+    agg_tokens: dict[str, int | bool] = {"input_tokens": 0, "output_tokens": 0, "is_estimate": True}
+    for r in scored:
+        if r.token_usage:
+            agg_tokens["input_tokens"] += r.token_usage.get("input_tokens", 0)
+            agg_tokens["output_tokens"] += r.token_usage.get("output_tokens", 0)
+
+    return EvalResult(
+        scores=avg_scores,
+        per_case=avg_per_case,
+        scores_std=std_scores,
+        num_runs=len(scored),
+        token_usage=agg_tokens,
+        coverage=_metric_coverage(avg_per_case),
+    )
+
+
 def run_batch_eval_averaged(
     engine_id: str,
     eval_cases: list[dict],
@@ -1353,8 +1447,23 @@ def run_batch_eval_averaged(
     agent_name: str = "",
     model: str = "",
     retry_failed: bool = True,
+    score_repeats: int = 1,
 ) -> EvalResult:
-    """Run batch eval N times and return averaged scores with std dev."""
+    """Run batch eval N times and return averaged scores with std dev.
+
+    **Two knobs, because the noise floor has two sources and they need different money.**
+    DOE 02 measured them separately on byte-identical responses: the judge disagrees with
+    itself on 64/64 cases for `instruction_following_v1` and 0/64 for `safety_v1`.
+
+    - ``num_runs`` repeats the whole eval, so it averages **agent and judge** noise. It costs
+      inference every time -- ~2.6 min per 64 cases, plus the engine's dropout risk.
+    - ``score_repeats`` re-scores **one** inference pass, so it averages **judge** noise
+      only. It costs scoring alone -- ~2.8 min -- and never touches the engine.
+
+    For the holdout that is comparable variance reduction at roughly half the price and none
+    of the deployment lottery. For safety it does nothing at all and ``num_runs`` is the only
+    lever. Set them independently rather than buying both at one price.
+    """
     if num_runs <= 1:
         return run_batch_eval(
             engine_id,
@@ -1363,6 +1472,7 @@ def run_batch_eval_averaged(
             agent_name=agent_name,
             model=model,
             retry_failed=retry_failed,
+            score_repeats=score_repeats,
         )
 
     tag = f"[{agent_name}] " if agent_name else ""
@@ -1377,6 +1487,7 @@ def run_batch_eval_averaged(
             agent_name=agent_name,
             model=model,
             retry_failed=retry_failed,
+            score_repeats=score_repeats,
         )
         if result.scores:
             all_results.append(result)

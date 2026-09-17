@@ -257,6 +257,7 @@ def deploy_pipeline(
     manifest_path: str,
     run_id: str | None = None,
     num_runs: int = 1,
+    score_repeats: int = 1,
     quick_test: bool = False,
 ) -> dict:
     """Build image, compile, and submit the GEPA pipeline to Vertex AI.
@@ -302,6 +303,7 @@ def deploy_pipeline(
         run_id = f"run-{cache_key}"
 
     num_runs = pipeline_config.get("num_runs", num_runs)
+    score_repeats = pipeline_config.get("score_repeats", score_repeats)
     judge_model = manifest.eval_config.get("judge_model", DEFAULT_JUDGE_MODEL)
     max_metric_calls = pipeline_config.get("max_metric_calls", 50)
     cache_bust = pipeline_config.get("cache_bust", "")
@@ -395,6 +397,7 @@ def deploy_pipeline(
     disabled_note = f" ({n_disabled} disabled)" if n_disabled else ""
     logger.info(f"  Pairs:          {len(manifest.enabled_pairs)}{disabled_note}")
     logger.info(f"  Num Runs:       {num_runs}")
+    logger.info(f"  Score Repeats:  {score_repeats}")
     logger.info(f"  Judge Model:    {judge_model}")
     logger.info(f"  Bucket:         {bucket_name}")
     logger.info(f"  Secret:         {secret_id or '(none)'}")
@@ -415,6 +418,7 @@ def deploy_pipeline(
             "agent_module": manifest.agent_module,
             "eval_data_path": manifest.eval_data,
             "num_runs": num_runs,
+            "score_repeats": score_repeats,
             "judge_model": judge_model,
             "secret_id": secret_id,
             "max_metric_calls": max_metric_calls,
