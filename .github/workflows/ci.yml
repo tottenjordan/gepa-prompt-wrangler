@@ -15,6 +15,7 @@ concurrency:
 jobs:
   lint:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
         with:
@@ -28,8 +29,14 @@ jobs:
       - run: uv run ruff check .
       - run: uv run ty check wrangler/
 
+  # DO NOT add pytest-xdist here. Measured 2026-09-17 on this suite (1,358 tests,
+  # 32s serial): -n 2 -> 46s, -n 4 -> 44s, -n auto on 32 cores -> 69s and 15m of CPU.
+  # The tests are individually fast and the ADK/vertexai import is heavy, so every
+  # worker pays ~6s of startup to save a few seconds of work. Parallelism is the
+  # obvious optimisation here and it makes things slower.
   test:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
@@ -43,6 +50,14 @@ jobs:
         # was actually load-bearing and missing.
         # tests/test_pipeline_image_pins.py keeps this list honest in both directions.
         python-version: ["3.11", "3.14"]
+        # Coverage measures the SAME source on both interpreters, so running it twice
+        # buys nothing and costs ~38s (the suite is 32s bare, 70s under coverage). It
+        # runs on TARGET_PYTHON, which is also where --cov-fail-under is calibrated.
+        include:
+          - python-version: "3.11"
+            cov-args: ""
+          - python-version: "3.14"
+            cov-args: "--no-cov"
     steps:
       - uses: actions/checkout@v7
         with:
@@ -52,10 +67,33 @@ jobs:
           enable-cache: true
           python-version: ${{ matrix.python-version }}
       - run: uv sync --all-groups --frozen
-      - run: uv run pytest tests/ -v
+      # -q, not -v: 1,300+ PASSED lines push the real failure off the top of the log.
+      # pytest reports failures in the summary either way.
+      - run: uv run pytest tests/ -q ${{ matrix.cov-args }}
+
+      # The ratchet only works if someone raises it. It sat at 49 while coverage
+      # reached 61.21 -- twelve points of slack a regression could have hidden in.
+      # This surfaces the drift on the PR instead of waiting for someone to notice.
+      #
+      # A WARNING, not a failure, and deliberately: failing a build because coverage
+      # went UP would block legitimate work, and the predictable fix would be lowering
+      # the floor -- the one move the pyproject comment forbids.
+      - name: Coverage ratchet drift
+        if: matrix.cov-args == ''
+        run: |
+          total=$(uv run coverage report --format=total)
+          floor=$(grep -oP 'cov-fail-under=\K\d+' pyproject.toml)
+          slack=$((total - floor))
+          echo "coverage ${total}%, floor ${floor}%, slack ${slack} points"
+          if [ "$slack" -gt 5 ]; then
+            echo "::warning file=pyproject.toml::Coverage is ${total}% but the floor is \
+          ${floor}% (${slack} points of slack). Raise cov-fail-under -- a regression \
+          that large would pass unnoticed."
+          fi
 
   audit:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
         with:

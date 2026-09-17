@@ -140,7 +140,18 @@ unused-ignore-comment = "warn"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-# The floor is a ratchet: raise it when coverage rises, never lower it to make a
-# red build pass. Measured baseline was 49.84%; the floor sits just under it rather
-# than at the nearest round number, so a real regression cannot hide in the slack.
-addopts = "--cov=wrangler --cov-report=term-missing --cov-fail-under=49"
+# The floor is a ratchet: raise it when coverage rises, never lower it to make a red
+# build pass. The original baseline was 49.84% and the floor was set to 49. Coverage
+# has since reached **61.21% (2026-09-17)** and the floor was never moved, leaving
+# ~12 points of slack -- a real regression could have hidden in it untouched, which
+# is the one thing a ratchet exists to prevent.
+#
+# 60, not 61. The precedent is not "round down to the integer", it is "sit far enough
+# under the measurement that a regression cannot hide, but not so close that ordinary
+# work trips it": 49.84 -> 49 left 0.84 points of headroom, and 61.21 -> 60 leaves a
+# comparable 1.21. A floor of 61 would leave 0.21, and the predictable result is
+# someone lowering it to get a legitimate change merged -- which this comment forbids
+# and which would undo the ratchet entirely.
+#
+# Measured on TARGET_PYTHON, the only matrix leg that runs coverage.
+addopts = "--cov=wrangler --cov-report=term-missing --cov-fail-under=60"
