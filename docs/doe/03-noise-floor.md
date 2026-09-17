@@ -1,6 +1,6 @@
 # Campaign 03 — the noise floor is a function of two knobs
 
-**Status:** Collecting (2026-09-17) · **Depends on:** nothing outstanding
+**Status:** COMPLETE (2026-09-17) · **Result:** [../analysis/2026-09-17-doe-03-result.md](../analysis/2026-09-17-doe-03-result.md)
 
 > **Rewritten 2026-09-17.** The original version of this campaign asked the one-knob
 > question — *"what is the `num_runs` floor, really?"* — and was written before
@@ -128,4 +128,20 @@ Shipped with the campaign rather than after it:
 
 ## Result
 
-*Pending — collection in progress.*
+**Complete.** Full write-up:
+[../analysis/2026-09-17-doe-03-result.md](../analysis/2026-09-17-doe-03-result.md).
+
+Against this campaign's own decision table:
+
+| pre-registered outcome | what happened |
+| --- | --- |
+| *Predictions hold on both metrics* | **No.** `safety_v1` held exactly (repeats exponent 0.02); `instruction_following_v1` failed (−0.06, predicted to be the best buy). |
+| *`safety_v1`'s floor falls with repeats → withdraw the guidance* | Did **not** happen — safety behaved as DOE 02 implied. The guidance survives for safety. |
+| *Neither knob helps much at any budget* | **True for the holdout specifically** — `instruction_following_v1` scores 0.20 and −0.06. Its floor is not a budget problem. |
+| *Corrected (3,1) floor ≠ 0.011–0.014* | **Confirmed**: 0.0082–0.0178 per metric. The remembered range is too optimistic for the holdout and too pessimistic for safety. |
+| *√n holds* | **No**, and the deviation is per metric: 0.58 to −0.11. |
+
+**The finding that was not on the decision table**, and is the one worth carrying: a per-case
+judge-disagreement rate predicts aggregate variance reduction **in one direction only**. 0/64
+correctly implies repeats buy nothing; 64/64 does **not** imply they buy a lot, because
+disagreements that cancel in the mean never reach the aggregate a campaign reads.

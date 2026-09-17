@@ -49,6 +49,7 @@ from __future__ import annotations
 import argparse
 import itertools
 import json
+import math
 import random
 import statistics as st
 import sys
@@ -275,6 +276,31 @@ def main() -> int:
                 verdict = "  MATCHES prediction" if best == predicted else "  AGAINST prediction"
             detail = "  ".join(f"({r},{s})={v:.4f}" for (r, s), v in scored.items())
             print(f"    {metric:34} best=(r={best[0]},s={best[1]})  {detail}{verdict}")
+
+    # Old DOE 03's question, answered from the same pool: does the floor fall as sqrt(n)?
+    # Fitted, never assumed -- minimum_detectable_effect() refuses to extrapolate without a
+    # measured exponent precisely so this number has to come from data.
+    print("\n  SCALING EXPONENT — floor ~ k * n^-e, fitted 1 -> 3 at the other knob = 1")
+    print(f"  {'metric':34}{'num_runs e':>14}{'score_repeats e':>18}")
+    for metric in metrics:
+        row = [f"  {metric:34}"]
+        for base, hi in ((("r", 1, 1), ("r", 3, 1)), (("s", 1, 1), ("s", 1, 5))):
+            lo_key = (base[1], base[2])
+            hi_key = (hi[1], hi[2])
+            lo = cells.get(lo_key, {}).get("unpaired", {}).get(metric)
+            high = cells.get(hi_key, {}).get("unpaired", {}).get(metric)
+            if not lo or not high:
+                row.append(f"{'—':>14}")
+                continue
+            a, b = summarize(lo)["median"], summarize(high)["median"]
+            n = hi_key[0] if base[0] == "r" else hi_key[1]
+            exp = (math.log(a / b) / math.log(n)) if a > 0 and b > 0 else 0.0
+            row.append(f"{exp:>14.2f}")
+        print("".join(row))
+    print(
+        "  e=0.5 is sqrt(n); e=0 means the knob buys nothing; e<0 means it got WORSE,\n"
+        "  which at these draw counts means the two cells are not distinguishable."
+    )
 
     print(
         "\n  READ BEFORE QUOTING:\n"
