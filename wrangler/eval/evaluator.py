@@ -101,6 +101,77 @@ Respond with ONLY a single JSON object and nothing else, in exactly this form:
 {{"explanation": "<one-paragraph rationale>", "score": <float between 0.0 and 1.0>}}
 """
 
+# A JSON-hardened variant of the prompt above, for DOE 02 arm 4. NOT in use.
+#
+# **The criteria text is byte-identical to _TOOL_USE_JUDGE_PROMPT.** Only the output
+# contract differs. That is the whole design: if the rubric moved too, a score change
+# could not be attributed to the format hardening, and the standing objection to
+# touching this prompt -- "changing it changes every score it produces" -- would be
+# unanswerable rather than measured.
+#
+# What it changes, and why each one:
+#
+# 1. `score` comes FIRST. A truncated response then still carries the number; with
+#    `explanation` first, a long rationale that runs out of tokens loses both.
+# 2. The explanation is capped and restricted to plain prose with no quotes, newlines
+#    or backslashes. Unescaped quotes inside a free-text JSON string are the classic
+#    way an LLM emits invalid JSON, and a one-sentence cap shrinks the surface.
+# 3. Code fences and preamble are forbidden explicitly. "Respond with ONLY a single
+#    JSON object" already implies it; models emit ```json anyway, so it is named.
+# 4. A concrete example of a valid response is shown. Format compliance improves more
+#    from one example than from another sentence of instruction.
+#
+# What the measurement is FOR: tool_use_quality_v1 lost 9 of 320 case-scorings (2.8%)
+# across DOE 02 arm 1's five passes -- the highest of the five metrics, against
+# hallucination_v1's zero. Whether that is malformed JSON or general autorater
+# flakiness is exactly what scoring the same capture with both prompts settles.
+#
+# Note the premise is weaker than silent-failures #9 implies: those losses do NOT
+# cascade. Across all five passes, zero cases lost one metric and another, so
+# hardening this prompt can only recover tool use -- not the other four.
+_TOOL_USE_JUDGE_PROMPT_HARDENED = """\
+You are an expert evaluator scoring whether an AI agent used its tools correctly \
+to fulfill a user's request. You are given the user prompt, the agent's final \
+response, and the agent's execution trajectory (the tools it called and with what \
+arguments).
+
+# User prompt
+{prompt}
+
+# Agent final response
+{response}
+
+# Agent execution trajectory (tool calls + arguments)
+{agent_data}
+
+# Evaluation criteria
+Judge the agent ONLY on tool use. Calling tools to satisfy the request is the \
+correct behavior — do NOT penalize the agent for calling tools, and do NOT reward \
+refusing to act. Score against these two criteria:
+1. Correct tool selection: The agent selected the appropriate tool(s) to fulfill \
+the user's request.
+2. Correct parameters: The agent provided correct and complete parameters to the \
+tool(s) it called.
+
+# Scoring
+Score in [0.0, 1.0]:
+- 1.0  = correct tool(s) selected AND correct/complete parameters.
+- ~0.5 = right tool but missing/incorrect parameters, OR partially correct selection.
+- 0.0  = wrong tool(s), no tool call when one was clearly required, or wrong parameters.
+
+# Output format — follow exactly
+Output a single JSON object and NOTHING else. No markdown, no code fences, no \
+text before or after it.
+
+Put "score" FIRST. Keep "explanation" to ONE short sentence of plain prose. The \
+explanation must NOT contain double quotes, newlines, or backslashes.
+
+Valid response, exactly this shape:
+{{"score": 1.0, "explanation": "Selected search_flights with the correct origin \
+destination and date."}}
+"""
+
+
 # The metric's own name. It must NOT be "tool_use_quality_v1" (a predefined
 # metric name) — the SDK routes any metric with that name to the predefined
 # handler and IGNORES a custom prompt_template (verified against the SDK's
