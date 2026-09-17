@@ -34,7 +34,7 @@ RUN pip install --no-cache-dir \
     "litellm==1.85.7" \
     "python-dotenv==1.2.3" \
     "pyyaml==6.0.3" \
-    "matplotlib==3.11.1" \
+    "matplotlib==3.11.2" \
     "pandas==3.0.5" \
     "paperbanana==0.3.0" \
     "rouge-score==0.1.2" \
