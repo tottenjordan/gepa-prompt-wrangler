@@ -17,9 +17,10 @@ import random
 
 import pytest
 
-from scripts.analyze_doe03 import cost_min, side, splits
+from scripts.analyze_doe03 import side, splits
 from wrangler.eval import evaluator
 from wrangler.eval.evaluator import EvalResult
+from wrangler.reporting.analyzer import arm_side_cost_min as cost_min
 
 
 def _result(value: float, n_cases: int = 4) -> EvalResult:

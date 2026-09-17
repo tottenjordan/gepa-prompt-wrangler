@@ -350,12 +350,33 @@ def drift_sign_summary(arms: dict[str, dict[str, float]]) -> dict:
     }
 
 
+# What one side of a control arm costs, per 64 cases. MEASURED by DOE 02 on 2026-09-16 --
+# these are observations with a date, not constants of nature. Re-measure if the eval set
+# size or the service changes; `scripts/analyze_doe03.py` imports them rather than keeping
+# a second copy.
+CAPTURE_MIN = 2.6  # one inference pass
+SCORING_MIN = 2.8  # one scoring pass over five metrics
+
+
+def arm_side_cost_min(num_runs: int, score_repeats: int = 1) -> float:
+    """Minutes for one side of a control arm at these knob settings.
+
+    The knobs nest the way `run_batch_eval_averaged` runs them: `num_runs` x [one inference
+    + `score_repeats` scorings]. So repeats multiply *inside* runs, which is why
+    (3,1), (2,2) and (1,5) all land near 16.5 minutes and are directly comparable.
+    """
+    return num_runs * CAPTURE_MIN + num_runs * score_repeats * SCORING_MIN
+
+
 def minimum_detectable_effect(
     floor: float | None,
     measured_at_runs: int,
     target_runs: int | None = None,
     *,
     scaling_exponent: float | None = None,
+    measured_at_repeats: int = 1,
+    target_repeats: int | None = None,
+    repeats_exponent: float | None = None,
 ) -> float | None:
     """The smallest delta worth believing, given a measured floor.
 
@@ -381,15 +402,83 @@ def minimum_detectable_effect(
     count has never been measured here -- campaign 06 varies `num_runs`, not
     the eval set -- and inventing a 1/sqrt(n_cases) term would be the same
     error this docstring exists to prevent.
+
+    **`score_repeats` is a second axis with its own scaling, and the same
+    refusal applies to it.** DOE 02 measured the judge disagreeing with itself
+    on 64/64 cases for `instruction_following_v1` and **0/64** for `safety_v1`,
+    so repeats buy a great deal on one metric and nothing at all on another --
+    `repeats_exponent=0.0` is a real, expected answer, and it is not the same
+    as "unknown". Asked to move either axis without that axis's exponent, this
+    returns ``None``. The exponents are per metric; do not pool them.
     """
     if floor is None:
         return None
-    if target_runs is None or target_runs == measured_at_runs:
-        return floor
-    if scaling_exponent is None:
-        # Not knowable from what has been measured. See docstring.
+
+    scaled = floor
+    for measured, target, exponent in (
+        (measured_at_runs, target_runs, scaling_exponent),
+        (measured_at_repeats, target_repeats, repeats_exponent),
+    ):
+        if target is None or target == measured:
+            continue
+        if exponent is None:
+            # Not knowable from what has been measured. See docstring.
+            return None
+        scaled *= (measured / target) ** exponent
+    return scaled
+
+
+def cheapest_config_for(
+    target_mde: float,
+    floor: float | None,
+    *,
+    measured_at_runs: int = 1,
+    measured_at_repeats: int = 1,
+    runs_exponent: float | None = None,
+    repeats_exponent: float | None = None,
+    max_runs: int = 5,
+    max_repeats: int = 5,
+) -> tuple[int, int] | None:
+    """Cheapest ``(num_runs, score_repeats)`` that gets the floor under ``target_mde``.
+
+    The arithmetic answer to "what should I set for this campaign", replacing a reader's
+    memory of two numbers. Minimises `arm_side_cost_min`, so it will recommend the knob
+    that is actually cheaper *for this metric* -- and the two metrics that carry this
+    repo's results want opposite answers:
+
+    - `instruction_following_v1` is judge-dominated, so repeats are the buy and
+      `num_runs` is close to wasted spend.
+    - `safety_v1` has judge sd 0.000, so repeats do literally nothing and `num_runs` is
+      the only lever.
+
+    Returns ``None`` -- never a guess and never a default -- when the floor is unknown,
+    when an exponent needed to reach the target was not supplied, or when no setting
+    inside the budget clears the bar. The last case is the important one: it means the
+    campaign as designed cannot resolve the effect it is looking for, which is a result
+    and not a reason to round down.
+    """
+    if floor is None:
         return None
-    return floor * (measured_at_runs / target_runs) ** scaling_exponent
+
+    best: tuple[int, int] | None = None
+    best_cost = float("inf")
+    for runs in range(1, max_runs + 1):
+        for repeats in range(1, max_repeats + 1):
+            mde = minimum_detectable_effect(
+                floor,
+                measured_at_runs,
+                runs,
+                scaling_exponent=runs_exponent,
+                measured_at_repeats=measured_at_repeats,
+                target_repeats=repeats,
+                repeats_exponent=repeats_exponent,
+            )
+            if mde is None or mde > target_mde:
+                continue
+            cost = arm_side_cost_min(runs, repeats)
+            if cost < best_cost:
+                best, best_cost = (runs, repeats), cost
+    return best
 
 
 def classify_deltas(pair, floor: float | dict[str, float] | None) -> dict[str, str]:

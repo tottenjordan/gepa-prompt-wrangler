@@ -54,11 +54,15 @@ import statistics as st
 import sys
 from pathlib import Path
 
-# Measured by DOE 02 on 64 cases. These price the iso-cost contrasts, so they are
-# measurements with a date, not constants of nature -- re-measure if the eval set or the
-# service changes.
-CAPTURE_MIN = 2.6
-SCORING_MIN = 2.8
+# Imported, not redeclared: `wrangler/reporting/analyzer.py` is the single place these
+# measurements live, so the script and the shipped floor model cannot price the iso-cost
+# contrasts differently.
+from wrangler.reporting.analyzer import (
+    CAPTURE_MIN,
+    SCORING_MIN,
+    arm_side_cost_min,
+)
+
 COST_MEASURED = "2026-09-16 (DOE 02), 64 cases"
 
 # Below this many disjoint splits a cell is reported as UNDERPOWERED rather than as a
@@ -75,11 +79,6 @@ PREDICTIONS = {
     "instruction_following_v1": (1, 5),
     "safety_v1": (3, 1),
 }
-
-
-def cost_min(r: int, s: int) -> float:
-    """What one side of a control arm costs at (num_runs=r, score_repeats=s)."""
-    return r * CAPTURE_MIN + r * s * SCORING_MIN
 
 
 def load_pool(pool_dir: Path) -> list[list]:
@@ -173,7 +172,7 @@ def cell(grid: list[list], r: int, s: int, max_draws: int, seed: int = 0) -> dic
     return {
         "r": r,
         "s": s,
-        "cost_min": cost_min(r, s),
+        "cost_min": arm_side_cost_min(r, s),
         "draws": len(all_splits),
         "available": n_available,
         "unpaired": unpaired,
@@ -240,7 +239,7 @@ def main() -> int:
             continue
         print(
             f"\n  {label}: "
-            + ", ".join(f"(r={r},s={s}) {cost_min(r, s):.1f}min" for r, s in present)
+            + ", ".join(f"(r={r},s={s}) {arm_side_cost_min(r, s):.1f}min" for r, s in present)
         )
         for metric in metrics:
             scored = {
