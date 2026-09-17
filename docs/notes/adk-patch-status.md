@@ -1,8 +1,28 @@
 # ADK Monkey-Patch Status
 
-**Verified on:** 2026-09-08 against `google-adk==2.8.0` with
-`google-cloud-aiplatform==2.1.0` and `anthropic==1.4.0`. Previously 2026-09-08 against
-2.8.0 on aiplatform 1.165.1, and 2026-08-20 against 2.7.1.
+**Verified on:** 2026-09-17 against `google-adk==2.9.1` with
+`google-cloud-aiplatform==2.1.3` and `anthropic==1.6.0`. Previously 2026-09-08 against
+2.8.0 on aiplatform 2.1.0, again 2026-09-08 against 2.8.0 on aiplatform 1.165.1, and
+2026-08-20 against 2.7.1.
+
+**2.9.1 probe result: all five patches still required, none changed.** Same as 2.8.0 on
+every line — 8 `extra="forbid"` classes, no `inferences is None` guard, upstream still
+drops the rubric rationale while keeping `metric_name`/`eval_status`, `PrebuiltMetric.SAFETY`
+still unversioned, and `gepa.optimize` still defaults `use_merge=False`.
+
+**Patch 3 nearly came out on a false positive, and that is the part worth reading.**
+The probe's heuristic searched the source of `_evaluate_single_inference_result` for an
+`is None` guard and reported *"upstream guard present: True"* — which reads as "patch 3 is
+fixed, drop it". It is not. 2.9.1 added a guard on **`eval_case is None`**, raising
+`NotFoundError`. Our patch guards **`inference_result.inferences is None`** and returns a
+`NOT_EVALUATED` result. Different object, different condition, different behaviour:
+upstream reads `inference_result.inferences` and calls `len()` on it with **no null check
+at all**, so on a null inference result 2.9.1 still raises `TypeError` exactly as 2.8.0 did.
+
+Two lessons, both already paid for elsewhere in this repo: a substring match on source is
+not a probe, and a probe that can only answer "some guard exists" cannot answer "*our*
+guard exists". Read what the guard is guarding before removing the patch that guards
+something else.
 
 **Re-probe when the Vertex SDK moves, not only when ADK does.** Patch 6 does not depend
 on ADK alone: it exists because the *SDK* resolves an unversioned metric name through

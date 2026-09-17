@@ -37,14 +37,14 @@ _SOURCE_REQUIREMENTS = [
     # Pinned exactly, and must match the floor in pyproject.toml -- the
     # container and the local env otherwise run different ADK versions and
     # a bug reproduces in only one of them.
-    "google-adk[a2a,agent-identity,eval,mcp]==2.8.0",
-    # anthropic 1.x is a major bump. ADK 2.8.0 declares only >=0.78, so the
+    "google-adk[a2a,agent-identity,eval,mcp]==2.9.1",
+    # anthropic 1.x is a major bump. ADK 2.9.1 declares only >=0.78, so the
     # floor has to carry this: all 31 anthropic.types symbols ADK's Claude
     # wrapper touches are present at 1.4.0, and AsyncAnthropicVertex still
     # takes project_id/region.
     "anthropic[vertex]>=1.4.0",
     # Capped, unlike the rest. litellm >=1.96.2 requires jinja2>=3.1.6, while
-    # google-adk[eval]==2.8.0 resolves jinja2 to 3.1.5 on the GEAP builder --
+    # google-adk[eval]==2.9.1 resolves jinja2 to 3.1.5 on the GEAP builder --
     # ResolutionImpossible, and the deploy fails after three attempts with only
     # "Build failed ... or other dependencies" surfaced to the caller.
     #

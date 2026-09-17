@@ -28,7 +28,12 @@ class TestClaude:
         from google.adk.models.anthropic_llm import _build_anthropic_thinking_param
 
         param = _build_anthropic_thinking_param(build_optimizer_config("claude-opus-4-8"))
-        assert param == {"type": "adaptive"}, (
+        # The TYPE is the load-bearing part -- Vertex returns 400 for
+        # thinking.type.enabled on Opus 4.7+. ADK is free to add adjacent keys, and at
+        # 2.9.1 it started emitting {'type': 'adaptive', 'display': 'summarized'}. An
+        # exact-equality assertion failed on that purely additive change; re-probed live
+        # against claude-opus-4-8 on 2026-09-17 and the new shape is accepted.
+        assert param.get("type") == "adaptive", (
             f"got {param}. Vertex returns 400 for thinking.type.enabled on Opus 4.7+."
         )
 
