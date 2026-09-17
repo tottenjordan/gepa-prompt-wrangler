@@ -1,0 +1,52 @@
+name: "m01-rationale-merge"
+description: >
+  ACCEPTANCE TEST for PR #95 — does feeding the judge's rubric rationale to GEPA's
+  reflector, plus use_merge=True, move the holdout?
+
+  Byte-identical to c08-new-r1 except the cache_bust, so the comparison is against
+  that arm's measured delta IF of -0.068 (and c08-new-r2's -0.036).
+
+  WHAT IT CANNOT SHOW. n=1 against a two-arm baseline whose own spread is 0.032,
+  so only a large change is readable; anything smaller is unresolved, exactly as
+  campaign 08 was. And it crosses TWO other boundaries besides the two patches --
+  the writer moved to claude-opus-4-8, and the tool-use prompt was re-baselined
+  (which does not touch instruction_following_v1). A moved holdout cannot be
+  attributed to the rationale alone, nor even to the rationale plus merge.
+
+  Read it as a smoke alarm, not a measurement.
+
+agent_module: "examples/multi_model_agents/agents/sonnet_agent"
+eval_data: "examples/multi_model_agents/eval_data/eval_cases.yaml"
+
+pairs:
+  - id: "m01-rationale-merge"
+    model: "claude-sonnet-5"
+    description: "campaign 08 treatment — repeat 1"
+    agent_module: "examples/multi_model_agents/agents/sonnet_agent"
+    # Byte-identical across all six arms. Campaign 07 showed GEPA only produces a
+    # real prompt change when started from maximum headroom; a seed that differed
+    # between conditions would confound the criteria comparison with seed value.
+    system_prompt: "You are a helpful assistant. Use the available tools to answer user questions."
+
+eval_config:
+  response_match_threshold: 0.5
+  safety_threshold: 0.8
+
+labels:
+  lifecycle: "ephemeral"
+  campaign: "m01"
+
+pipeline:
+  secret_id: wrangler-agent-env
+  cache_bust: "m01-rationale-merge-v1"
+  # Held at campaign 07's value. Budget is campaign 10's variable, not this
+  # campaign's -- changing it here would confound criteria with budget.
+  max_metric_calls: 600
+  num_runs: 3
+
+health_gate:
+  enabled: true
+  # An arm that runs on a rejected engine measures dropout, not the criteria.
+  # Redeploy is gated too as of PR #70, so the after-side engine is checked as
+  # well -- campaign 07's after-side was ungated and its clean coverage was luck.
+  required: true
