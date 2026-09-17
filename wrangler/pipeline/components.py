@@ -682,6 +682,9 @@ def optimize_single_agent(
             judge_model=judge_model,
             max_metric_calls=max_metric_calls if max_metric_calls > 0 else None,
             initial_instruction=original_prompt,
+            # Per-pair, so one job can run patch 4b on in one arm and off in another.
+            # Defaults True when the manifest omits it, matching every prior campaign.
+            forward_rationale=pair.get("forward_rationale", True),
             # The manifest's model, not the one the _opt module happens to import.
             # stage_optimize has passed this since 7219295; this path did not, so
             # two c07 arms pointing at sonnet_agent -- claude-sonnet-5 and

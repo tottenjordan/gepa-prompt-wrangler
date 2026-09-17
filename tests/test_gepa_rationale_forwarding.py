@@ -114,3 +114,94 @@ class TestItCannotBreakAnOptimizeStage:
 
     def test_none_extracted_is_returned_unchanged(self, enrich):
         assert enrich(None, []) is None
+
+
+class TestForwardingIsSwitchable:
+    """Campaign 09 needs patch 4b off on one arm and on in another, same pipeline job.
+
+    The contrast is only worth running if "off" means **upstream ADK behaviour**, not a
+    half-patched variant of ours. If the off path still routed through
+    `_enrich_with_rationales` and merely skipped the attach, the campaign would be
+    measuring our wrapper rather than the rationale.
+    """
+
+    @staticmethod
+    def _install(monkeypatch, *, forward_rationale: bool, upstream: dict):
+        """Patch ADK with the flag, stub upstream, and spy on the enricher.
+
+        Returns (call_log, patched_extract) so a test can assert both whether the
+        enricher ran and what the caller received.
+        """
+        from google.adk.optimization import local_eval_sampler as sampler_mod
+
+        from wrangler.optimize import optimizer
+
+        calls: list[dict] = []
+        monkeypatch.setattr(
+            optimizer,
+            "_enrich_with_rationales",
+            lambda extracted, results: calls.append(extracted) or {"enriched": True},
+        )
+        monkeypatch.setattr(
+            sampler_mod.LocalEvalSampler,
+            "_extract_eval_data",
+            lambda self, eval_set_id, eval_results: upstream,
+            raising=False,
+        )
+        optimizer._patch_adk(forward_rationale=forward_rationale)
+        return calls, sampler_mod.LocalEvalSampler._extract_eval_data
+
+    def test_on_routes_through_the_enricher(self, monkeypatch):
+        upstream = {"rows": [{"metric_name": "safety_v1", "score": 1.0}]}
+        calls, extract = self._install(monkeypatch, forward_rationale=True, upstream=upstream)
+        got = extract(object(), "set", [])
+        assert calls == [upstream], "patch 4b did not run with forwarding on"
+        assert got == {"enriched": True}
+
+    def test_off_does_not_call_the_enricher_at_all(self, monkeypatch):
+        """Not 'calls it and it returns early' -- does not call it."""
+        from google.adk.optimization import local_eval_sampler as sampler_mod
+
+        from wrangler.optimize import optimizer
+
+        calls: list[int] = []
+        monkeypatch.setattr(
+            optimizer,
+            "_enrich_with_rationales",
+            lambda extracted, results: calls.append(1) or extracted,
+        )
+        monkeypatch.setattr(
+            sampler_mod.LocalEvalSampler,
+            "_extract_eval_data",
+            lambda self, eval_set_id, eval_results: {"rows": []},
+            raising=False,
+        )
+        optimizer._patch_adk(forward_rationale=False)
+        sampler_mod.LocalEvalSampler._extract_eval_data(object(), "set", [])
+        assert calls == [], "the off path still routed through _enrich_with_rationales"
+
+    def test_off_returns_upstream_output_byte_for_byte(self, monkeypatch):
+        """Off must equal what ADK would have produced, or the contrast is confounded."""
+        from google.adk.optimization import local_eval_sampler as sampler_mod
+
+        from wrangler.optimize import optimizer
+
+        upstream = {"rows": [{"metric_name": "safety_v1", "score": 1.0, "eval_status": 1}]}
+        monkeypatch.setattr(
+            sampler_mod.LocalEvalSampler,
+            "_extract_eval_data",
+            lambda self, eval_set_id, eval_results: upstream,
+            raising=False,
+        )
+        optimizer._patch_adk(forward_rationale=False)
+        got = sampler_mod.LocalEvalSampler._extract_eval_data(object(), "set", [])
+        assert got == upstream
+
+    def test_the_default_is_on(self):
+        """Every existing caller must keep patch 4b."""
+        import inspect
+
+        from wrangler.optimize.optimizer import _patch_adk, optimize
+
+        assert inspect.signature(_patch_adk).parameters["forward_rationale"].default is True
+        assert inspect.signature(optimize).parameters["forward_rationale"].default is True

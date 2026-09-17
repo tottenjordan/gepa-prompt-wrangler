@@ -84,6 +84,17 @@ would leak every MCP session in the pipeline container. Probe it by checking tha
 `toolset.close()`; both are asserted in `tests/test_toolset_close_deferral.py`. Verified at
 ADK 2.9.1 on 2026-09-17, including against a real `Runner` over a real shared toolset.
 
+**Patch 4b is conditional as of 2026-09-17.** `optimize(forward_rationale=...)` threads
+through to `_patch_adk()`, driven per pair by a manifest key of the same name (default
+`True`, so every existing manifest is unchanged). Campaign 09 needs it off in one arm and on
+in another within a single pipeline job.
+
+**Off means upstream ADK behaviour, not a softer patch.** The off path returns
+`_orig_extract`'s output untouched rather than routing through `_enrich_with_rationales` and
+skipping the attach -- otherwise the campaign's contrast would measure our wrapper rather
+than the rationale. `tests/test_gepa_rationale_forwarding.py::TestForwardingIsSwitchable`
+asserts both that the enricher is not called and that the output is byte-for-byte upstream.
+
 ## Per-patch findings
 
 | # | Target | Upstream issue | Issue state | Still needed at 2.7.1? |
