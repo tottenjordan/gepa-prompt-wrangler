@@ -772,6 +772,20 @@ Note the loss *rate* was 12% and 24% on two identical configurations, so a singl
 stage showing a low-but-nonzero rate does not distinguish "fixed" from "lucky draw". Zero is
 the bar, and one stage at zero is one observation.
 
+**`Closing toolset` in the log no longer means a toolset was closed — verified 2026-09-17.**
+ADK's `_cleanup_toolsets` logs `Closing toolset: %s`, awaits the close, then logs
+`Successfully closed toolset: %s`. Our deferred close returns cleanly, so **both lines are
+still emitted, at full volume**: measured 5 runner closes → 5 `Closing toolset` and 5
+`Successfully closed toolset`, with zero session teardowns. A post-fix stage will therefore
+*still* show ~1,812 `Closing toolset` events and the band analysis will *still* find the
+burst, because the burst is now harmless.
+
+This matters twice over. Do **not** read a surviving close count as the fix having failed to
+apply — and note it is load-bearing in the other direction too, since
+`analyze_toolset_loss.py` treats *zero* closes as evidence of a broken query rather than a
+clean run, and that guard keeps working. **The count of deferrals printed by the run, and
+the failure count, are the signals. The close count is not.**
+
 One stale claim corrected while here: the 2026-09-12 analysis recorded the run's own
 `_ToolsetFailureCounter` reporting zero against 16 losses and called that defect "still
 live". It is not live in the current tree — the counter matches both ADK phrasings, and

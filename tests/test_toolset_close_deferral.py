@@ -275,3 +275,70 @@ class TestTheRealProductionPath:
                 f"inside the window -- this is the production failure, unfixed"
             )
         assert teardowns["n"] == 1, "the session must still be closed once, at teardown"
+
+    async def test_the_close_log_lines_survive_deferral(self):
+        """`Closing toolset` in a log no longer means a toolset was closed.
+
+        ADK's `_cleanup_toolsets` logs `Closing toolset`, awaits the close, then logs
+        `Successfully closed toolset`. A deferred close returns cleanly, so **both lines
+        are still emitted at full volume** while nothing is torn down.
+
+        Pinned because it is exactly the observation that would mislead the next person
+        reading an acceptance run: a post-fix stage still shows ~1,812 `Closing toolset`
+        events, and `analyze_toolset_loss.py` will still find the 90-150s burst -- now
+        harmless. The signals are the deferred-close count and the failure count, not the
+        close count. (It cuts the other way too: that script treats *zero* closes as a
+        broken query rather than a clean run, and this keeps that guard working.)
+        """
+        import logging
+
+        from google.adk.agents import LlmAgent
+        from google.adk.runners import Runner
+        from google.adk.sessions import InMemorySessionService
+        from google.adk.tools.mcp_tool import McpToolset
+        from google.adk.tools.mcp_tool.mcp_session_manager import StreamableHTTPConnectionParams
+
+        from wrangler.core.models import DEFAULT_JUDGE_MODEL
+
+        optimizer._reset_toolset_close_patch_for_tests()
+        captured: list[str] = []
+
+        class Capture(logging.Handler):
+            def emit(self, record):
+                captured.append(record.getMessage())
+
+        adk_runner_log = logging.getLogger("google_adk.google.adk.runners")
+        handler = Capture()
+        previous_level = adk_runner_log.level
+        adk_runner_log.setLevel(logging.INFO)
+        adk_runner_log.addHandler(handler)
+        try:
+            toolset = McpToolset(
+                connection_params=StreamableHTTPConnectionParams(url="http://127.0.0.1:59999/mcp")
+            )
+            teardowns = {"n": 0}
+            real_close = toolset._mcp_session_manager.close
+
+            async def counting_close():
+                teardowns["n"] += 1
+                await real_close()
+
+            toolset._mcp_session_manager.close = counting_close
+            agent = LlmAgent(name="shared", model=DEFAULT_JUDGE_MODEL, tools=[toolset])
+
+            async with optimizer._deferred_toolset_closes():
+                for _ in range(5):
+                    await Runner(
+                        app_name="t",
+                        agent=agent.clone(),
+                        session_service=InMemorySessionService(),
+                    ).close()
+                assert teardowns["n"] == 0
+                assert sum("Closing toolset" in m for m in captured) == 5, (
+                    "ADK stopped logging Closing toolset per close -- analyze_toolset_loss.py "
+                    "counts that line, and its zero-closes-is-an-error guard depends on it"
+                )
+        finally:
+            adk_runner_log.removeHandler(handler)
+            adk_runner_log.setLevel(previous_level)
+            optimizer._reset_toolset_close_patch_for_tests()
