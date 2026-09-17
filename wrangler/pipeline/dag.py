@@ -94,6 +94,11 @@ def build_pipeline(image_uri: str):
             deploy_task.set_caching_options(enable_caching=True)
             deploy_task.after(archive_task)
             deploy_task.set_display_name("Deploy Agents")
+            # NO set_retry, deliberately. This CREATES AN ENGINE. A retry after a
+            # partial success leaks one and redraws the health gate -- the reach-rate
+            # lottery the gate exists to control (campaign 01 measured a redeploy
+            # moving an engine 0% -> 50%). Retries are for idempotent work; the
+            # health gate already handles a bad draw by rerolling deliberately.
 
         with dsl.ParallelFor(pairs_json, parallelism=1) as pair_config:
             eval_before_task = comps["eval"](
@@ -115,6 +120,13 @@ def build_pipeline(image_uri: str):
             eval_before_task.set_caching_options(enable_caching=True)
             eval_before_task.after(deploy_task)
             eval_before_task.set_display_name("Evaluate Agent (Before)")
+            # Idempotent: reads the engine, writes an artifact keyed by pair.
+            eval_before_task.set_retry(
+                num_retries=2,
+                backoff_duration="60s",
+                backoff_factor=2,
+                backoff_max_duration="600s",
+            )
 
         # Optimize → redeploy → eval_after in ONE ParallelFor block so
         # optimize's output flows as a data dependency to redeploy and
@@ -145,6 +157,15 @@ def build_pipeline(image_uri: str):
                 optimize_task.set_caching_options(enable_caching=True)
                 optimize_task.after(eval_before_task)
                 optimize_task.set_display_name("Optimize Agent")
+                # The judge is 5 RPM and one campaign 07 arm logged 76 x HTTP 429.
+                # Exponential backoff, because a fixed interval against a rate limit
+                # is just more rate limiting.
+                optimize_task.set_retry(
+                    num_retries=2,
+                    backoff_duration="60s",
+                    backoff_factor=2,
+                    backoff_max_duration="600s",
+                )
 
                 redeploy_task = comps["redeploy"](
                     project_id=project_id,
@@ -163,6 +184,7 @@ def build_pipeline(image_uri: str):
                 )
                 redeploy_task.set_caching_options(enable_caching=True)
                 redeploy_task.set_display_name("Re-deploy Optimized Agent")
+                # NO set_retry -- see the note on deploy_task above.
 
                 eval_after_task = comps["eval"](
                     project_id=project_id,
@@ -182,6 +204,12 @@ def build_pipeline(image_uri: str):
                 eval_after_task.set_memory_limit("16G")
                 eval_after_task.set_caching_options(enable_caching=True)
                 eval_after_task.set_display_name("Evaluate Agent (After)")
+                eval_after_task.set_retry(
+                    num_retries=2,
+                    backoff_duration="60s",
+                    backoff_factor=2,
+                    backoff_max_duration="600s",
+                )
 
             # Analysis lives inside each branch rather than after them: a task
             # outside a dsl.If cannot depend on one inside it.

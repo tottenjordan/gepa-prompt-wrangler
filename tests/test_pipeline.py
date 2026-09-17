@@ -523,3 +523,54 @@ class TestAnalysisSurvivesARenderingFailure:
         why = "the worker logs do not carry one, so it must land beside the artifacts"
         assert "traceback" in body, f"no traceback captured; {why}"
         assert "analysis_error" in body, f"no analysis_error artifact; {why}"
+
+
+class TestTransientFailuresAreRetried:
+    """Long tasks get a retry policy; engine-creating tasks deliberately do not.
+
+    Vertex's own guidance is task-level retries with exponential backoff for transient
+    classes, and this pipeline had none anywhere. The case is not hypothetical: the judge
+    is capped at 5 RPM and a single campaign 07 arm logged 76 x HTTP 429.
+
+    The asymmetry is the point. `deploy` and `redeploy` CREATE ENGINES. A retry on a
+    partially-succeeded deploy leaks an engine and redraws the health gate — the reach-rate
+    lottery the gate exists to control, and campaign 01 measured a redeploy moving an engine
+    from 0% to 50%. Retries are for idempotent work.
+    """
+
+    @staticmethod
+    def _tasks_with_retry() -> dict[str, bool]:
+        """Map display name -> whether dag.py sets a retry policy on that task."""
+        import re
+        from pathlib import Path
+
+        source = Path("wrangler/pipeline/dag.py").read_text()
+        out: dict[str, bool] = {}
+        for var, display in re.findall(
+            r"(\w+_task)\.set_display_name\(\s*[\"']([^\"']+)[\"']", source
+        ):
+            out[display] = f"{var}.set_retry(" in source
+        return out
+
+    def test_the_long_idempotent_tasks_retry(self):
+        tasks = self._tasks_with_retry()
+        for display in ("Optimize Agent", "Evaluate Agent (Before)", "Evaluate Agent (After)"):
+            assert tasks.get(display) is True, (
+                f"{display!r} has no retry policy; a transient 429 or 5xx kills the arm"
+            )
+
+    def test_engine_creating_tasks_do_not_retry(self):
+        tasks = self._tasks_with_retry()
+        for display in ("Deploy Agents", "Re-deploy Optimized Agent"):
+            assert tasks.get(display) is False, (
+                f"{display!r} has a retry policy. It creates or updates an engine, so a "
+                f"retry after partial success leaks an engine and redraws the health gate"
+            )
+
+    def test_the_retry_backs_off_rather_than_hammering(self):
+        """A fixed-interval retry against a rate limit is just more rate limiting."""
+        from pathlib import Path
+
+        source = Path("wrangler/pipeline/dag.py").read_text()
+        assert "backoff_duration" in source, "retries have no initial backoff"
+        assert "backoff_factor" in source, "backoff is fixed-interval, not exponential"
