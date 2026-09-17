@@ -28,6 +28,32 @@ IMAGE_REPO = "gepa-wrangler"
 IMAGE_NAME = "pipeline"
 
 
+def _pairs_json(manifest) -> list[dict]:
+    """The per-pair payload the DAG forwards verbatim to every component.
+
+    Extracted so a campaign factor can be tested without submitting a pipeline.
+    `dag.py` passes each entry straight through as `pair_json`, so anything added
+    here reaches the component body with no DAG signature change -- which is how
+    campaign 09 varies rationale forwarding between arms of one job.
+
+    Only `enabled_pairs`: a disabled pair must not reach the pipeline. The local
+    path filtered and this one did not, so a disabled pair still ran here.
+    """
+    return [
+        {
+            "id": p.id,
+            "model": p.model,
+            "system_prompt": p.system_prompt,
+            "engine_id": p.engine_id,
+            "agent_module": p.agent_module,
+            "costs": p.costs,
+            "forward_rationale": p.forward_rationale,
+            "skip_optimize": p.skip_optimize,
+        }
+        for p in manifest.enabled_pairs
+    ]
+
+
 def _compute_image_tag(
     pyproject_path: Path,
     lock_path: Path,
@@ -329,17 +355,7 @@ def deploy_pipeline(
     }
     manifest_json = json.dumps(manifest_dict)
 
-    pairs_json = [
-        {
-            "id": p.id,
-            "model": p.model,
-            "system_prompt": p.system_prompt,
-            "engine_id": p.engine_id,
-            "agent_module": p.agent_module,
-            "costs": p.costs,
-        }
-        for p in manifest.enabled_pairs
-    ]
+    pairs_json = _pairs_json(manifest)
 
     # Step 1: Build pipeline base image (skips if deps unchanged)
     logger.info("Building pipeline image (if needed)...")
