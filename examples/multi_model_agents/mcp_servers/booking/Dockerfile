@@ -10,8 +10,8 @@ RUN pip install --no-cache-dir \
     opentelemetry-api==1.42.1 \
     opentelemetry-sdk==1.42.1 \
     opentelemetry-exporter-otlp-proto-grpc==1.42.1 \
-    google-auth==2.57.1 \
-    grpcio==1.83.1 \
+    google-auth==2.58.0 \
+    grpcio==1.84.0 \
     requests==2.33.0
 COPY . .
 EXPOSE 8002

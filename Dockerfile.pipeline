@@ -20,17 +20,24 @@ COPY pyproject.toml .
 # _ToolsetFailureCounter silently: it matches a log string 2.8.0 no longer
 # emits, so it reported 0 tool failures while 5 had occurred.
 #
-# google-adk moved to 2.8.0 on 2026-09-08 WITH the probe in
-# docs/notes/adk-patch-status.md re-run against it: all five patches are still
-# required, unchanged. Do not move it again without re-running that probe --
-# the point is that the version changes deliberately, never as a side effect of
-# a lockfile bump.
+# google-adk moved to 2.8.0 on 2026-09-08, and to 2.9.1 on 2026-09-17, each time
+# WITH the probe in docs/notes/adk-patch-status.md re-run against it: all five
+# patches are still required, unchanged. Do not move it again without re-running
+# that probe -- the point is that the version changes deliberately, never as a
+# side effect of a lockfile bump.
+#
+# The 2.9.1 probe is worth reading before trusting a future one. Its heuristic
+# reported patch 3 as fixed upstream because _evaluate_single_inference_result
+# had gained an `is None` guard -- but on `eval_case`, a different object from
+# the `inference_result.inferences` our patch guards. Upstream still reads
+# .inferences and calls len() on it with no null check. A string match on the
+# source is not a probe; read what the guard is guarding.
 #
 # tests/test_pipeline_image_pins.py fails if these drift from uv.lock.
 RUN pip install --no-cache-dir \
-    "google-cloud-aiplatform[adk,agent-engines,evaluation]==2.1.0" \
-    "google-adk[a2a,agent-identity,eval,mcp]==2.8.0" \
-    "google-genai==2.23.0" \
+    "google-cloud-aiplatform[adk,agent-engines,evaluation]==2.1.3" \
+    "google-adk[a2a,agent-identity,eval,mcp]==2.9.1" \
+    "google-genai==2.24.0" \
     "litellm==1.85.7" \
     "python-dotenv==1.2.3" \
     "pyyaml==6.0.3" \
@@ -41,5 +48,5 @@ RUN pip install --no-cache-dir \
     "markdown-it-py==4.2.0" \
     "google-cloud-storage==3.14.1" \
     "google-cloud-secret-manager==2.30.0" \
-    "anthropic[vertex]==1.4.0" \
+    "anthropic[vertex]==1.6.0" \
     "fastmcp==3.4.7"
