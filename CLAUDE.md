@@ -235,6 +235,27 @@ fastmcp when ADK ships mcp 2.x support, not before.
 
 `optimize/optimizer.py:_patch_adk()` applies 5 monkey-patches to ADK internals required for GEPA to work. Patches 1–3 compensate for ADK bugs (github.com/google/adk-python issues #5906, #6071); patch 4 is local instrumentation; patch 6 pins the safety metric version. All the bug workarounds are still required at ADK 2.8.0 even though their issues are closed — the fixes are not in the release. Re-probed 2026-09-08 on the 2.7.1 → 2.8.0 bump: all five unchanged.
 
+**Patch 4b and 7 (added 2026-09-17), and they are confounded on purpose — read this before
+reading a result.**
+
+- **4b — the judge's reasoning reaches the reflector.** ADK's `_extract_eval_data` emitted
+  `{metric_name, score, eval_status}` per metric and dropped
+  `EvalMetricResult.details.rubric_scores[].rationale`, which is populated. The model writing
+  every candidate prompt saw numbers and no diagnosis. GEPA's method rests on that text: a
+  metric returning only pass/fail starves the reflection step.
+- **7 — `use_merge=True`.** The installed gepa defaults it `False`; the published guidance
+  says `True` and recommends keeping it. ADK forwards 8 of `gepa.optimize()`'s 46 arguments
+  and this is not one, so it is injected at the call. GEPA+Merge is reported to give prompts
+  up to 9.2× shorter while scoring higher.
+
+**Both plausibly act on prompt quality and length, and they shipped together.** The next
+optimize stage therefore measures the *pair*. If the holdout moves, that result cannot be
+attributed to either one alone without a follow-up that varies them separately — say so
+rather than crediting whichever is more interesting. The acceptance test is the holdout delta
+on a real optimize stage, **not** that rationale text appears in the reflective dataset.
+
+Analysis: [docs/analysis/2026-09-17-gepa-argument-surface.md](docs/analysis/2026-09-17-gepa-argument-surface.md).
+
 **Patch 6 (added 2026-08-20)** — `SafetyEvaluatorV1` hands the eval facade the *unversioned* `PrebuiltMetric.SAFETY`, which the Vertex SDK resolves client-side to `safety_v3`; us-central1 does not serve v3, so every GEPA case returned `400 Unsupported predefined metric: safety_v3`, the score came back `None`, and patch 4 coerced it to `0.0`. GEPA kept running and optimized against a criterion pinned at zero. The version is chosen inside ADK — `sampler_config.json` correctly says `safety_v1` and cannot influence it.
 
 **Patch 5 was removed on 2026-08-20.** It overrode `rubric_based_evaluator._normalize_text` and `convert_auto_rater_response_to_score`. ADK 2.7.1 fixed issue #6072 and went further, adding `rubric_id`-based verdict matching and an empty-response guard; the override, written against ADK 2.2, did text-only matching and silently discarded both, corrupting the rubric scores GEPA optimizes against. A redundant patch is not harmless.
