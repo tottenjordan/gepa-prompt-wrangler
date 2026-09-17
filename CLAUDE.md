@@ -471,13 +471,47 @@ For multi-model agents: `SEARCH_MCP_SERVER`, `BOOKING_MCP_SERVER`, `EXPENSE_MCP_
   **Run the control first, as a gate**, and run it at the same `num_runs` as the real
   arms. **Measured 2026-09-08 by campaign 06** (four arms, both publishers, 100%
   coverage on every side): the floor is **~0.058 at `num_runs: 1` and ~0.011-0.014 at
-  the configured default of 3**. Per metric it ranges 0.017 (hallucination) to 0.058
+  the configured default of 3**.
+
+  **The `num_runs: 3` figure is superseded per metric by DOE 03 (2026-09-17): 0.0082
+  (`safety_v1`) to 0.0178 (`instruction_following_v1`).** 0.011-0.014 sits inside that range
+  but is too optimistic for the holdout and too pessimistic for safety — which is the
+  argument against quoting one pooled number at all. Per metric it ranges 0.017 (hallucination) to 0.058
   (safety), a 3.4x spread, which is why `classify_deltas` takes a per-metric mapping —
   holding every metric to the loosest one throws away most of the resolution.
 
-  **`num_runs` and `score_repeats` are different knobs, because the floor has two sources.**
+  **`num_runs` and `score_repeats` are different knobs — but NOT the way DOE 02 implied.**
   DOE 02 separated them on byte-identical responses: the judge disagrees with itself on
-  **64/64 cases** for `instruction_following_v1` and **0/64** for `safety_v1`.
+  **64/64 cases** for `instruction_following_v1` and **0/64** for `safety_v1`. The natural
+  inference — repeats are the cheap lever for the holdout — **was tested by DOE 03 on
+  2026-09-17 and is false.**
+
+  **A per-case disagreement rate predicts aggregate variance reduction in ONE direction
+  only.** 0/64 correctly implies repeats buy nothing (there is no judge noise to average).
+  64/64 does *not* imply they buy a lot, because disagreements that cancel in the mean never
+  reach the aggregate score a campaign reads. Measured scaling exponents (floor ~ n^-e,
+  e=0.5 is sqrt(n)):
+
+  | metric | judge disagreement | `num_runs` e | `score_repeats` e | cheaper lever |
+  | --- | --- | --- | --- | --- |
+  | `safety_v1` | 0/64 | **0.58** | 0.02 | runs |
+  | `final_response_quality_v1` | 59.4% | 0.34 | **0.66** | repeats |
+  | `hallucination_v1` | 43.8% | 0.39 | 0.35 | either |
+  | `instruction_following_v1` | 64/64 | 0.20 | **-0.06** | **neither** |
+  | `tool_use_quality_v1` | 21.9% | -0.11 | 0.01 | already at its floor |
+
+  **Set `num_runs: 2, score_repeats: 2`.** At ~16.5 min per arm-side that costs the same as
+  today's `(3,1)`, wins or ties on three metrics and is never worst; `(1,5)` is worst on the
+  two metrics carrying this repo's results. **`score_repeats`'s real job is COVERAGE, not
+  variance**: `safety_v1` scores only 57.8/64 cases on a single pass and 64.0 by s=3, and a
+  case missing from one side is the dropout silent-failures #5 showed reads as a prompt
+  effect. s=3 is enough; s=5 adds nothing.
+
+  **The holdout cannot be resolved by spending more.** `instruction_following_v1` has the
+  worst floor at every setting (0.0152 at best) and the weakest response to both knobs. A
+  design needing to resolve it needs a different instrument — more cases, a pinned autorater,
+  or the metric as a real criterion — not a bigger budget.
+  [docs/analysis/2026-09-17-doe-03-result.md](docs/analysis/2026-09-17-doe-03-result.md)
 
   | knob | repeats | averages | cost per 64 cases | touches the engine? |
   | --- | --- | --- | --- | --- |
