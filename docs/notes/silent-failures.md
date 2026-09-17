@@ -755,6 +755,27 @@ Verified locally on the real production path, not just against fakes: a real `Ll
 calls producing 0 session teardowns inside the window and 1 at flush**
 (`tests/test_toolset_close_deferral.py::TestTheRealProductionPath`).
 
+**And reproduced end-to-end against a live MCP server, which is the evidence the earlier
+fixes never had.** `scripts/repro_mcp_refresh_hang.py` was rewritten to the real topology
+the 2026-09-12 analysis asked for — one shared `McpToolset`, 32 short-lived `Runner.close()`
+calls per burst, 6 readers in flight — and run at the **production** 300s cache TTL:
+
+| | hung readers |
+| --- | --- |
+| patch 8 **off** | **15/18** |
+| patch 8 **on** | **0/18** |
+
+Stable across three runs. The old version of that script reported **0/18 in this same
+condition** and was read as exonerating close-racing; the difference is entirely topology.
+
+Two things were needed to reproduce, and the second is the one that hid it: `get_tools()`
+must reach the session (a cache hit never does), so the script now **clears the cache
+immediately before the burst to model the TTL lapse** rather than lowering the TTL to a
+value we do not run. Generations averaged ~286s against a 300s TTL, so the cache covers most
+refresh windows and lapses at a few — which is why the production leak was ~14% rather than
+constant. The script **runs both conditions and refuses to report a pass if the unpatched
+one does not hang**, because a harness that has stopped reproducing cannot demonstrate a fix.
+
 **This is not yet evidence the production rate is zero, and the history here says to
 distrust a green suite.** PR #59 and PR #75 both passed their own tests and changed nothing.
 The acceptance test is `will run without the tools` at **0** on a real optimize stage,

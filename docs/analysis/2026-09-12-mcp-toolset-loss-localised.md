@@ -109,6 +109,18 @@ about the reproduction, not about production.
 **The rewrite needs the real topology:** one shared `McpToolset`, N short-lived runners
 each calling `close()` on it, and a `get_tools()` in flight across the burst.
 
+**Rewritten 2026-09-17, and it reproduces.** At the production 300s TTL, with 32
+`Runner.close()` per burst against one shared toolset and 6 readers in flight:
+**15/18 readers hang with patch 8 off, 0/18 with it on**, stable over three runs. The same
+script reported 0/18 in the same condition before the rewrite, so the earlier negative was
+topology, exactly as suspected here.
+
+The missing ingredient was the cache. `get_tools()` has to reach the session and a cache hit
+never does, so the script now clears the cache immediately before the burst to model the
+**TTL lapse** — rather than setting the TTL to `None`, a value we do not run, which is what
+made the old version's "production setting" result misleading. It also runs the unpatched
+condition every time and refuses to report a pass if that one comes back clean.
+
 ## A near-miss worth recording
 
 The first pass of this analysis used a **60-second** window, because the timeout was
