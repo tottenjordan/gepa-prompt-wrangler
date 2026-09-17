@@ -342,3 +342,35 @@ class TestTheRealProductionPath:
             adk_runner_log.removeHandler(handler)
             adk_runner_log.setLevel(previous_level)
             optimizer._reset_toolset_close_patch_for_tests()
+
+
+class TestTheFixReachesProduction:
+    """The window is useless if the code paths that actually run GEPA skip it.
+
+    Patch 8 is applied inside `optimize()` rather than by `_patch_adk()`, so unlike the
+    other patches it is only in force for callers that go through that one function. Both
+    production paths do today -- the KFP optimize component and the local stage runner --
+    and this pins that, because a second entry point added later would silently run
+    unpatched and reopen silent-failures #12 with no test failing.
+    """
+
+    def test_both_production_paths_call_the_patched_entry_point(self):
+        from pathlib import Path
+
+        for path in ("wrangler/pipeline/components.py", "wrangler/orchestration/stages.py"):
+            source = Path(path).read_text()
+            assert "from wrangler.optimize.optimizer import optimize" in source or (
+                "from ..optimize.optimizer import optimize" in source
+            ), f"{path} no longer imports the patched optimize(); patch 8 would not apply"
+
+    def test_optimize_applies_the_window(self):
+        """Guards against the window being refactored out of the entry point."""
+        import inspect
+
+        from wrangler.optimize.optimizer import optimize
+
+        source = inspect.getsource(optimize)
+        assert "_deferred_toolset_closes" in source, (
+            "optimize() no longer opens the deferred-close window -- silent-failures #12 "
+            "is reopened for every caller, with no other test failing"
+        )
