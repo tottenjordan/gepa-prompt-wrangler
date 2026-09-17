@@ -213,18 +213,37 @@ def main() -> int:
 
     metrics = sorted({m for c in cells.values() for m in c["unpaired"]})
 
-    print("\n  UNPAIRED |delta| per cell — median / p95 / max  (draws)")
-    print(f"  {'metric':34} " + " ".join(f"{f'({r},{s})':>22}" for r, s in cells))
+    header = f"  {'metric':34} " + " ".join(f"{f'({r},{s})':>22}" for r, s in cells)
+    for kind in ("unpaired", "paired"):
+        print(f"\n  {kind.upper()} |delta| per cell — median / p95 / max")
+        print(header)
+        for metric in metrics:
+            row = [f"  {metric:34}"]
+            for c in cells.values():
+                values = c[kind].get(metric)
+                if not values or c["available"] < MIN_SPLITS:
+                    row.append(f"{'UNDERPOWERED':>22}")
+                    continue
+                stats = summarize(values)
+                row.append(f"{stats['median']:.4f}/{stats['p95']:.4f}/{stats['max']:.4f}".rjust(22))
+            print(" ".join(row))
+
+    # Pairing's value, shown rather than asserted. CLAUDE.md records it as "~15% when evals
+    # dropped cases, and no longer material at 100% coverage" -- this is the number behind
+    # that claim, per cell, on this pool.
+    print("\n  PAIRING GAIN — 1 - (paired median / unpaired median); >0 means pairing helps")
+    print(header)
     for metric in metrics:
         row = [f"  {metric:34}"]
         for c in cells.values():
-            values = c["unpaired"].get(metric)
-            if not values or c["available"] < MIN_SPLITS:
-                row.append(f"{'UNDERPOWERED':>22}")
+            up, pa = c["unpaired"].get(metric), c["paired"].get(metric)
+            if not up or not pa or c["available"] < MIN_SPLITS:
+                row.append(f"{'—':>22}")
                 continue
-            stats = summarize(values)
-            row.append(f"{stats['median']:.4f}/{stats['p95']:.4f}/{stats['max']:.4f}".rjust(22))
+            u, p = summarize(up)["median"], summarize(pa)["median"]
+            row.append(f"{(1 - p / u) if u else 0.0:+.1%}".rjust(22))
         print(" ".join(row))
+
     draw_row = " ".join(f"{'n=' + str(c['draws']):>22}" for c in cells.values())
     print(f"  {'draws (of available)':34} {draw_row}")
     avail_row = " ".join(f"{'of ' + str(c['available']):>22}" for c in cells.values())

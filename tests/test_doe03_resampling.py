@@ -113,3 +113,78 @@ class TestCostModel:
     def test_cost_scales_with_both_knobs(self):
         assert cost_min(2, 1) > cost_min(1, 1)
         assert cost_min(1, 2) > cost_min(1, 1)
+
+
+class TestTheAnalysisRunsEndToEnd:
+    """Exercise load_pool and main() on a synthetic pool.
+
+    The unit tests above cover the arithmetic; this covers the parts that only fail when
+    you actually run it -- a KeyError in a table row, a ragged-grid guard that never
+    fires, a division by zero on an empty cell. Those would otherwise surface after two
+    hours of collection, against real data, with nothing to fall back on.
+    """
+
+    @staticmethod
+    def _pool(tmp_path, n_captures: int, n_scorings: int, *, ragged: bool = False):
+        import json
+
+        manifest = {"engine_id": "fake", "captures": {}}
+        for i in range(1, n_captures + 1):
+            passes = {}
+            count = n_scorings - 1 if (ragged and i == n_captures) else n_scorings
+            for j in range(1, count + 1):
+                payload = {
+                    "scores": {"safety_v1": 0.9 + 0.01 * j, "instruction_following_v1": 0.8},
+                    "per_case": [
+                        {
+                            "case_index": c,
+                            "safety_v1": 0.9 + 0.01 * j,
+                            "instruction_following_v1": 0.8,
+                        }
+                        for c in range(4)
+                    ],
+                    "coverage": {"safety_v1": 4, "instruction_following_v1": 4},
+                }
+                f = tmp_path / f"c{i}_pass{j}.json"
+                f.write_text(json.dumps(payload))
+                passes[f"pass{j}"] = {"file": str(f), "cases_scored": 4}
+            manifest["captures"][f"c{i}"] = {"path": "x", "passes": passes}
+        (tmp_path / "manifest.json").write_text(json.dumps(manifest))
+        return tmp_path
+
+    def test_load_pool_returns_a_rectangular_grid(self, tmp_path):
+        from scripts.analyze_doe03 import load_pool
+
+        grid = load_pool(self._pool(tmp_path, 6, 5))
+        assert len(grid) == 6
+        assert {len(row) for row in grid} == {5}
+
+    def test_a_ragged_pool_raises_rather_than_being_analysed(self, tmp_path):
+        """Differing scoring counts bias every quantile toward the better-scored captures."""
+        from scripts.analyze_doe03 import load_pool
+
+        with pytest.raises(SystemExit, match="ragged"):
+            load_pool(self._pool(tmp_path, 3, 5, ragged=True))
+
+    def test_a_single_capture_pool_raises(self, tmp_path):
+        from scripts.analyze_doe03 import load_pool
+
+        with pytest.raises(SystemExit, match="disjoint"):
+            load_pool(self._pool(tmp_path, 1, 5))
+
+    def test_main_runs_and_prints_a_verdict(self, tmp_path, capsys):
+        import sys
+
+        from scripts.analyze_doe03 import main
+
+        pool = self._pool(tmp_path, 6, 5)
+        argv = sys.argv
+        sys.argv = ["analyze_doe03", "--pool", str(pool), "--max-draws", "20"]
+        try:
+            assert main() == 0
+        finally:
+            sys.argv = argv
+        out = capsys.readouterr().out
+        assert "ISO-COST VERDICT" in out
+        assert "READ BEFORE QUOTING" in out
+        assert "safety_v1" in out
