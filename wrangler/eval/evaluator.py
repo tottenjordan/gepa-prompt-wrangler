@@ -1503,27 +1503,15 @@ def run_batch_eval_averaged(
         print(f"  {tag}WARNING: All {num_runs} runs returned no scores", flush=True)
         return EvalResult(num_runs=num_runs)
 
-    all_metrics = set()
-    for r in all_results:
-        all_metrics.update(r.scores.keys())
+    # The same function the `score_repeats` path uses, so the two knobs cannot drift
+    # apart -- this used to be an inline copy of combine_results' arithmetic, which made
+    # that claim in combine_results' docstring aspirational. DOE 03's analysis rebuilds
+    # every (num_runs, score_repeats) cell by calling combine_results and asserts the
+    # cells reproduce production; that only holds if production calls it too.
+    combined = combine_results(all_results, label="runs")
 
-    avg_scores: dict[str, float] = {}
-    std_scores: dict[str, float] = {}
-    for metric in sorted(all_metrics):
-        values = [r.scores[metric] for r in all_results if metric in r.scores]
-        avg_scores[metric] = statistics.mean(values)
-        std_scores[metric] = statistics.stdev(values) if len(values) > 1 else 0.0
-
-    avg_per_case = average_per_case([r.per_case for r in all_results if r.per_case])
-
-    agg_tokens: dict[str, int | bool] = {"input_tokens": 0, "output_tokens": 0, "is_estimate": True}
-    for r in all_results:
-        if r.token_usage:
-            agg_tokens["input_tokens"] += r.token_usage.get("input_tokens", 0)
-            agg_tokens["output_tokens"] += r.token_usage.get("output_tokens", 0)
-
-    overall = sum(avg_scores.values()) / max(len(avg_scores), 1)
-    successful = len(all_results)
+    overall = sum(combined.scores.values()) / max(len(combined.scores), 1)
+    successful = combined.num_runs
     skipped = num_runs - successful
     skip_note = f" ({skipped} skipped — timeout/failure)" if skipped else ""
     print(
@@ -1532,18 +1520,13 @@ def run_batch_eval_averaged(
     )
     # Averaging N runs does not repair a metric that errored in all of them —
     # it just hides the gap behind one more layer of arithmetic.
-    avg_coverage = _metric_coverage(avg_per_case)
-    for line in _coverage_warning(avg_coverage, len(avg_per_case)):
+    for line in _coverage_warning(combined.coverage, len(combined.per_case)):
         print(line, flush=True)
 
-    return EvalResult(
-        scores=avg_scores,
-        per_case=avg_per_case,
-        scores_std=std_scores,
-        num_runs=num_runs,
-        token_usage=agg_tokens,
-        coverage=avg_coverage,
-    )
+    # `num_runs` on the result is the number that PRODUCED SCORES, not the number
+    # requested -- it is read downstream as "how much averaging is behind this number",
+    # and a 3-run eval that lost two passes is a 1-run eval wearing a label.
+    return combined
 
 
 def save_eval_results(
