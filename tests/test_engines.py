@@ -223,6 +223,9 @@ class TestPruneIsDryByDefault:
             engines.plan_prune(rows, traffic={}, referenced=set()),
             delete_fn=deleted.append,
             confirm=True,
+            # Real pacing here cost 8s of wall clock per test to assert nothing about
+            # pacing; TestDeletesArePacedAndRetried covers that deliberately.
+            sleep_fn=lambda _s: None,
         )
         assert deleted == ["1", "2"]
 
@@ -239,6 +242,7 @@ class TestPruneIsDryByDefault:
         out = engines.execute_prune(
             engines.plan_prune(rows, traffic={}, referenced=set()),
             delete_fn=_flaky,
+            sleep_fn=lambda _s: None,
             confirm=True,
         )
         assert seen == ["1", "2"]
