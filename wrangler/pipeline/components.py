@@ -618,6 +618,46 @@ def optimize_single_agent(
     sampler_cfg = agent_path / "sampler_config.json"
 
     original_prompt = pair.get("system_prompt", "")
+
+    # -- Control arm: same job, no optimize stage --
+    #
+    # CLAUDE.md requires every sweep to carry an arm whose prompt does not change, run
+    # "under identical conditions" as the real arms. The pipeline-level `skip_optimize`
+    # parameter cannot express that, because it applies to the whole job -- so a control
+    # used to need a SECOND pipeline submit, and a floor measured in a different job than
+    # the one it calibrates is measuring different container scheduling too.
+    #
+    # Short-circuited here rather than with a `dsl.If` on a ParallelFor loop item, which is
+    # fragile across KFP versions. Returning the prompt UNCHANGED is the contract: redeploy
+    # and eval_after then run against an identical prompt, and PairAnalysis.is_control
+    # detects the arm by `original_prompt == optimized_prompt`.
+    if pair.get("skip_optimize"):
+        logging.info(
+            f"[{pair_id}] CONTROL ARM: skip_optimize set on the pair, so no GEPA run. "
+            f"Returning the prompt unchanged ({len(original_prompt)} chars) so eval_after "
+            f"measures the noise floor."
+        )
+        gcs.bucket(bucket_name).blob(
+            f"pipeline-runs/{run_id}/stages/optimize/{pair_id}.json"
+        ).upload_from_string(
+            json.dumps(
+                {
+                    "optimized_prompt": original_prompt,
+                    "elapsed": 0.0,
+                    "original_chars": len(original_prompt),
+                    "optimized_chars": len(original_prompt),
+                    "thresholds": {},
+                    "control_arm": True,
+                    "token_usage": {"input_tokens": 0, "output_tokens": 0, "is_estimate": True},
+                    "costs": {"input_usd": 0.0, "output_usd": 0.0},
+                },
+                indent=2,
+                default=str,
+            ),
+            content_type="application/json",
+        )
+        return original_prompt
+
     logging.info(f"[{pair_id}] Optimize config: model={model}, opt_dir={agent_path}")
     logging.info(
         f"[{pair_id}] Baseline prompt ({len(original_prompt)}chars): '{original_prompt[:100]}...'"
