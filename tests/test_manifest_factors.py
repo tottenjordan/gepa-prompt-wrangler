@@ -129,3 +129,48 @@ class TestTheFactorsReachThePipeline:
         entry = deploy_pipeline._pairs_json(manifest)[0]
         for key in ("id", "model", "system_prompt", "engine_id", "agent_module", "costs"):
             assert key in entry, f"{key} disappeared from pairs_json"
+
+
+class TestTheFactorsSurviveTheExperimentRoundTrip:
+    """manifest -> `wrangler experiment create` -> config.yaml -> Experiment.manifest.
+
+    The experiment directory is a SECOND representation of the same pairs, written by
+    `Experiment.create()` and read back by `Experiment.manifest`. A field added only to the
+    manifest schema silently vanishes on that hop -- the local stage path and
+    `scripts/run_experiment.py` both read the experiment copy, so campaign 09's control arm
+    would quietly become an optimizing arm and burn ten hours proving nothing.
+    """
+
+    @staticmethod
+    def _round_trip(tmp_path, manifest_path):
+        """create() takes a manifest PATH and re-parses it; load() reads the config back."""
+        from wrangler.orchestration.experiment import Experiment
+
+        exp = Experiment.create(
+            manifest_path, name="rt", version="v1", base_dir=str(tmp_path / "exp")
+        )
+        return {p.id: p for p in Experiment.load(exp.dir).manifest.pairs}
+
+    def test_both_factors_survive(self, tmp_path):
+        _manifest(
+            tmp_path,
+            """
+            - id: keep-on
+              model: gemini-3.5-flash
+              system_prompt: hello
+            - id: control
+              model: gemini-3.5-flash
+              system_prompt: hello
+              forward_rationale: false
+              skip_optimize: true
+            """,
+        )
+        pairs = self._round_trip(tmp_path, tmp_path / "m.yaml")
+
+        assert pairs["control"].skip_optimize is True, (
+            "skip_optimize was lost writing or reading the experiment config -- the control "
+            "arm would run a full ~10 h optimize stage"
+        )
+        assert pairs["control"].forward_rationale is False
+        assert pairs["keep-on"].forward_rationale is True
+        assert pairs["keep-on"].skip_optimize is False

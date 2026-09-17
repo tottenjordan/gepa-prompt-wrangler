@@ -85,6 +85,12 @@ class Experiment:
                 # that already set it there.
                 "max_metric_calls": (manifest.pipeline or {}).get("max_metric_calls"),
             },
+            # Where this experiment came from. Recorded because the pipeline submit path
+            # (`deploy_pipeline`) takes a MANIFEST path and re-parses it with
+            # PairFactory.load, which cannot read this file -- so without the provenance
+            # there is no way to get from an experiment directory back to a submittable
+            # manifest, and `scripts/run_experiment.py --pipeline` would have to ask.
+            "source_manifest": str(manifest_path),
             "pairs": [],
             "eval_config": manifest.eval_config,
             # Read at the top level by stages.health_gate_config(). Carried
@@ -116,6 +122,13 @@ class Experiment:
                     "system_prompt": pair.system_prompt,
                     "enabled": pair.enabled,
                     "disabled_reason": pair.disabled_reason,
+                    # Campaign factors. Carried for the same reason `enabled` is: the
+                    # experiment config is what the local path and run_experiment.py
+                    # actually read, so a field that cannot reach here is a field that
+                    # silently does nothing -- a control arm would quietly become an
+                    # optimizing arm and spend ten hours proving nothing.
+                    "forward_rationale": pair.forward_rationale,
+                    "skip_optimize": pair.skip_optimize,
                 }
             )
 
@@ -180,6 +193,8 @@ class Experiment:
                 # enabled=True regardless of what the manifest said.
                 enabled=entry.get("enabled", True),
                 disabled_reason=entry.get("disabled_reason", ""),
+                forward_rationale=entry.get("forward_rationale", True),
+                skip_optimize=entry.get("skip_optimize", False),
             )
             for entry in cfg.get("pairs", [])
         ]
