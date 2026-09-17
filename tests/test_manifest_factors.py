@@ -174,3 +174,47 @@ class TestTheFactorsSurviveTheExperimentRoundTrip:
         assert pairs["control"].forward_rationale is False
         assert pairs["keep-on"].forward_rationale is True
         assert pairs["keep-on"].skip_optimize is False
+
+
+class TestTheKnobsSurviveTheExperimentRoundTrip:
+    """`defaults` in the experiment config must reflect the manifest, not a hardcode.
+
+    The experiment config is what the local stage path and `scripts/run_experiment.py`
+    read. A knob the manifest sets but cannot reach here is a knob that silently does
+    nothing -- which is the reason `max_metric_calls` was added to this block, and the
+    same trap caught `num_runs` and `score_repeats`.
+
+    `num_runs` was hardcoded to 3. Campaign 09 asks for 2, so its dry-run would have
+    printed a plan that did not match the manifest it came from -- and a dry-run that
+    misreports the plan is worse than none, because it is trusted.
+    """
+
+    def test_num_runs_comes_from_the_manifest(self, tmp_path):
+        from wrangler.orchestration.experiment import Experiment
+
+        path = tmp_path / "m.yaml"
+        path.write_text(
+            "name: k\nagent_module: a\neval_data: e\n"
+            "pairs:\n  - id: p\n    model: gemini-3.5-flash\n    system_prompt: s\n"
+            "pipeline:\n  num_runs: 2\n  score_repeats: 2\n"
+        )
+        exp = Experiment.create(path, name="k", version="v", base_dir=str(tmp_path / "e"))
+        defaults = Experiment.load(exp.dir).config["defaults"]
+
+        assert defaults["num_runs"] == 2, (
+            f"num_runs is {defaults['num_runs']}, not the manifest's 2 -- it is hardcoded"
+        )
+        assert defaults["score_repeats"] == 2, "score_repeats never reached the experiment"
+
+    def test_the_defaults_are_sane_when_the_manifest_is_silent(self, tmp_path):
+        from wrangler.orchestration.experiment import Experiment
+
+        path = tmp_path / "m.yaml"
+        path.write_text(
+            "name: k\nagent_module: a\neval_data: e\n"
+            "pairs:\n  - id: p\n    model: gemini-3.5-flash\n    system_prompt: s\n"
+        )
+        exp = Experiment.create(path, name="k2", version="v", base_dir=str(tmp_path / "e"))
+        defaults = Experiment.load(exp.dir).config["defaults"]
+        assert defaults["num_runs"] >= 1
+        assert defaults["score_repeats"] == 1

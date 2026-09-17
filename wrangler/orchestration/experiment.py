@@ -71,7 +71,15 @@ class Experiment:
             "agent_module": manifest.agent_module,
             "eval_data": manifest.eval_data,
             "defaults": {
-                "num_runs": 3,
+                # From the manifest, not a hardcode. This was pinned at 3 regardless of
+                # what the manifest said, so an experiment created from a `num_runs: 2`
+                # manifest reported 3 here -- and this file, not the manifest, is what the
+                # local path and run_experiment.py read. Same trap as max_metric_calls
+                # below, which is why that comment exists.
+                "num_runs": (manifest.pipeline or {}).get("num_runs", 3),
+                # DOE 03 made this a first-class knob (coverage, not variance). Absent
+                # here it silently stays 1 and safety_v1 loses ~6 of 64 cases a side.
+                "score_repeats": (manifest.pipeline or {}).get("score_repeats", 1),
                 "judge_model": manifest.eval_config.get(
                     "judge_model", DEFAULT_MANIFEST_JUDGE_MODEL
                 ),

@@ -1,0 +1,82 @@
+name: "c09-rationale"
+description: >
+  Campaign 09 (DOE 12) — does forwarding the judge's rationale to GEPA's reflector help?
+  Isolates ADK patch 4b from the writer-model change it shipped with on 2026-09-17.
+  Patch 7 (use_merge) has since been shown structurally inert, so the m01 confound is
+  already down to two factors and this removes the second.
+
+  THREE ARMS IN ONE PIPELINE JOB, serialized by ParallelFor(parallelism=1) so they never
+  contend for the 5 RPM judge: rationale on, rationale off, and a control whose prompt
+  does not change. Everything else is held — same agent, same writer (claude-opus-4-8),
+  same judge, same sampler config, same 64-case eval set, num_runs 2 / score_repeats 2.
+
+  PRIMARY READOUT IS safety_v1, not the holdout. DOE 03 measured the holdout floor at
+  0.0152 against m01's +0.0065 effect, with scaling exponents of 0.20 (num_runs) and
+  -0.06 (score_repeats) — no budget these knobs can buy resolves it. safety_v1's floor is
+  0.0082 against measured effects of +0.13-0.15 and it reproduced within 0.003 across two
+  runs, so a between-arm difference above ~0.01 is real at n=1.
+
+  Also carries silent failure #12's acceptance measurement on both optimize stages.
+  See experiments/active/c09-rationale/doe_plan.md
+
+agent_module: "examples/multi_model_agents/agents/sonnet_agent"
+eval_data: "examples/multi_model_agents/eval_data/eval_cases.yaml"
+
+pairs:
+  # The seed prompt is byte-identical across all three arms, as in campaigns 07 and 08:
+  # a seed that differed between conditions would confound the factor with seed value.
+  - id: "c09-rationale-on"
+    model: "claude-sonnet-5"
+    description: "patch 4b ON — reproduces the m01 configuration"
+    agent_module: "examples/multi_model_agents/agents/sonnet_agent"
+    system_prompt: "You are a helpful assistant. Use the available tools to answer user questions."
+    forward_rationale: true
+
+  - id: "c09-rationale-off"
+    model: "claude-sonnet-5"
+    description: "patch 4b OFF — upstream ADK behaviour, the contrast"
+    agent_module: "examples/multi_model_agents/agents/sonnet_agent"
+    system_prompt: "You are a helpful assistant. Use the available tools to answer user questions."
+    # OFF returns _extract_eval_data's output untouched rather than routing through
+    # _enrich_with_rationales and skipping the attach, so this arm measures the rationale
+    # rather than our wrapper. See docs/notes/adk-patch-status.md.
+    forward_rationale: false
+
+  - id: "c09-control"
+    model: "claude-sonnet-5"
+    description: "control — prompt byte-identical both sides, no optimize stage"
+    agent_module: "examples/multi_model_agents/agents/sonnet_agent"
+    system_prompt: "You are a helpful assistant. Use the available tools to answer user questions."
+    # Runs in THIS job rather than a second one, so the floor is measured under the same
+    # container scheduling as the arms it calibrates. The optimize component short-circuits
+    # and returns the prompt unchanged; redeploy and eval_after still run.
+    skip_optimize: true
+
+eval_config:
+  response_match_threshold: 0.5
+  safety_threshold: 0.8
+
+labels:
+  lifecycle: "ephemeral"
+  campaign: "09"
+
+pipeline:
+  secret_id: wrangler-agent-env
+  # REQUIRED, not cosmetic. optimizer.py rides in the code tarball, NOT a component body,
+  # and KFP caches on component body hash + input parameter values — so an unchanged
+  # run_id would cache-hit a PRE-patch-8 optimize stage and silently hand back the old
+  # result. Without this bump the #12 acceptance measurement would measure the cache.
+  cache_bust: "c09-v1"
+  # Held at campaigns 07 and 08's value. Budget is campaign 10's variable.
+  max_metric_calls: 600
+  # DOE 03: (2,2) costs the same as the old (3,1) default, wins or ties on three metrics
+  # and is never worst. score_repeats' real job here is COVERAGE — safety_v1 scores only
+  # 57.8/64 cases on a single pass and 64.0 by s=3.
+  num_runs: 2
+  score_repeats: 2
+
+health_gate:
+  enabled: true
+  # An arm on a rejected engine measures dropout, not the factor. Redeploy is gated too,
+  # so the after-side engine is checked as well.
+  required: true
