@@ -63,16 +63,34 @@ forwarding, `use_merge`, and the writer moving to `claude-opus-4-8`. Sequencing 
 recommended and not taken, so the honest claim is *"the three together removed the regression
 on one arm"*.
 
+**Narrowed to two on 2026-09-17.** `use_merge` is not merely unlucky here, it is
+*structurally inert* — see below — so it cannot have contributed. The confound is
+**rationale forwarding + the writer model**. That is a real tightening of the attribution
+and it does nothing for the n=1 problem.
+
 **Two things argue against over-reading it:**
 
 - **n=1** against a baseline whose own within-condition spread is 0.032 (c08's two arms:
   −0.068 and −0.036). +0.0065 is about 1.3 spreads above the nearest baseline arm.
   Suggestive, not significant.
-- **`use_merge` contributed nothing mechanically.** The logs show **19 × `No merge candidates
-  found` and zero successful merges** — GEPA attempted merges (which only happens when the
-  flag is on, so the injection works) and never found an eligible Pareto pair. If the effect
-  is real, merge is unlikely to be its cause, which narrows it to the rationale and the
-  writer.
+- **`use_merge` contributed nothing mechanically, and cannot.** The logs show **19 ×
+  `No merge candidates found` and zero successful merges** — GEPA attempted merges (which
+  only happens when the flag is on, so the injection works) and never found an eligible
+  pair. Followed up 2026-09-17 with `scripts/check_merge_eligibility.py`, which runs gepa's
+  own `does_triplet_have_desirable_predictors` over a real candidate tree: **34 pairs, all
+  34 sharing a common ancestor, 0 eligible.**
+
+  The reason is structural, not luck. Merge is *field-wise recombination across multiple
+  predictors* — it requires some predictor where one parent is byte-identical to the common
+  ancestor and the other differs, so there is something to recombine. We optimize **one**
+  predictor (`agent_prompt`), which makes that demand a descendant whose prompt equals its
+  ancestor's; a descendant exists *because* the prompt was mutated. Zero byte-identical
+  candidate pairs in the run, as expected.
+
+  **So the published 9.2×-shorter-prompt result does not transfer** — it is measured on
+  multi-module programs with separate prompts. The flag was shipped on the strength of that
+  number without checking the predictor count first, which is the error worth remembering
+  here: the claim was true and about a different configuration.
 
 ### It is further evidence against the verbosity hypothesis
 

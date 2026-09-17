@@ -60,6 +60,16 @@ it. A 6th `_patch_adk` entry overriding `_extract_eval_data`, or an upstream ADK
 
 ### `use_merge` — off here, and the only knob the literature ties to our problem
 
+> **SUPERSEDED 2026-09-17: shipped, and it is structurally inert.** Merge recombines fields
+> across *multiple* predictors; we optimize one (`agent_prompt`), so no pair can ever be
+> eligible — 34 pairs checked on a real run, 0 passing gepa's own test, and 19 ×
+> `No merge candidates found` with zero merges on the m01 stage. The 9.2× figure comes from
+> multi-module programs and does not transfer. Re-check with
+> `scripts/check_merge_eligibility.py` if the predictor count ever changes. The section
+> below is left as written, because the reasoning error it contains — citing a published
+> result without checking whether our configuration can exhibit it — is the useful part.
+
+
 Our installed gepa defaults `use_merge=False`. The published guidance says it defaults to
 `True` and recommends keeping it on: merge proposes a candidate combining two Pareto-frontier
 parents that win on *different* examples, at a cost of one re-evaluation per attempt, capped
@@ -131,6 +141,8 @@ stage; nice, not needed.
    optimize stage, not that the text appears.
 2. **Turn `use_merge` on.** One argument, off by default here, and the only knob the
    literature ties to shorter prompts and better scores.
+   **Done, and it was a no-op — see the superseding note above. The recommendation was
+   wrong: it needed a check of our predictor count, not a citation.**
 3. **Wire `seed` and `max_reflection_cost`** while touching the config — both cheap. Record
    in the same commit that the seed does **not** buy reproducibility while the judge is
    non-deterministic, or someone will expect it to.
