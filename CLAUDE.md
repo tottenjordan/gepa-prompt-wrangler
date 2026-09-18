@@ -288,16 +288,19 @@ which GEPA then scores. The patch defers every close for the run and performs ea
 the end.
 
 **Three fixes shipped for #12 before this one and the rate did not move** (14% → 15% → 12%
-and 24%); two of them passed their own tests. So **the acceptance test is the
-`will run without the tools` rate on a real optimize stage**, counted with
-`scripts/analyze_toolset_loss.py`, expected 0. The run prints a deferred-close count — **a
-stage reporting 0 deferrals did not exercise the patch**, and its clean result means nothing.
+and 24%); two of them passed their own tests. So the acceptance test was defined as the
+`will run without the tools` rate on a real optimize stage, expected 0.
 
-**The acceptance test rides on the next campaign** (decided 2026-09-17), as a normal arm
-rather than a standalone run. **Whichever campaign runs next inherits a four-point
-checklist** in silent-failures #12 — bump `cache_bust`, confirm the printed deferred-close
-count is non-zero, count with `analyze_toolset_loss.py --freshness`, and do not read the
-close count as the verdict. The first two are the ones that silently fake a pass:
+**PASSED 2026-09-18 on campaign 09: 0 losses in 202 generations against a 16.6% pooled
+baseline (p = 1.2e-16), with 1,776 deferred closes against 1,776 logged closes — a 1:1
+correspondence proving every teardown was absorbed.** Tool-use numbers from campaign 09
+onward are usable; campaigns 07, 08 and m01 are **not** retrospectively cleaned.
+[docs/analysis/2026-09-18-silent-failure-12-fixed.md](docs/analysis/2026-09-18-silent-failure-12-fixed.md)
+
+**The acceptance test rode on campaign 09 and passed** (2026-09-18). The four-point
+checklist in silent-failures #12 still applies to any run that needs to re-verify it: bump
+`cache_bust`, confirm the printed deferred-close count is non-zero, count with
+`analyze_toolset_loss.py --freshness`, and do not read the close count as the verdict. The first two are the ones that silently fake a pass:
 `optimizer.py` rides in the code tarball and is *not* a component body, so KFP — which
 caches on **component body hash + input parameter values** — will cache-hit an unchanged
 `run_id` and hand back a *pre-fix* optimize stage, and **0 deferrals means you measured the
@@ -370,7 +373,8 @@ inside the original's own sd).
 re-score across the boundary, above the hardened prompt's own 7.5% pairwise
 self-disagreement. Aggregate comparisons may. Campaigns 07 and 08 are unaffected in
 substance: their tool-use results were already uninterpretable at 12–24% contamination from
-silent failure #12.
+silent failure #12 — **which was fixed and verified on 2026-09-18, so campaign 09 onward is
+clean while those earlier runs stay uninterpretable.**
 
 **Bust the KFP cache before the first campaign that should use it.** `evaluator.py` is in the
 code tarball, *not* a component body, and KFP caches on **component body hash + input

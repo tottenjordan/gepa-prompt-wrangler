@@ -736,8 +736,10 @@ can see.
 
 ## 12. A local MCP server stops answering, and GEPA scores a toolless agent
 
-**Found 2026-09-08, live, in campaign 07's validation arm. FIX SHIPPED 2026-09-17 (patch 8),
-AWAITING ITS ACCEPTANCE TEST — which is the rate on a real optimize stage, not a green suite.
+**Found 2026-09-08, live, in campaign 07's validation arm. FIXED — patch 8, shipped
+2026-09-17, ACCEPTANCE TEST PASSED 2026-09-18: 0 losses in 202 generations against a 16.6%
+pooled baseline (p = 1.2e-16), with 1,776 deferred closes proving the patch ran.
+[Full result](../analysis/2026-09-18-silent-failure-12-fixed.md).
 Observability fixed in PR #51 — the only earlier fix that did what it claimed. Three
 mechanisms were proposed and two shipped; the rate did not move: 14% (c07) -> 15% (c08, with
 PR #59) -> 12% and 24% (c08's two arms, with PR #75).**
