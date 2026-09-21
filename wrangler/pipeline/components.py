@@ -172,11 +172,12 @@ def deploy_single_agent(
             if k.startswith(("SEARCH_MCP", "BOOKING_MCP", "EXPENSE_MCP"))
         }
 
-        # Merged over the standard ownership label. A campaign that declares
-        # `lifecycle: ephemeral` becomes reapable by `wrangler engines prune`,
-        # which otherwise keeps it forever on its own eval traffic.
-        engine_labels = {"solution": "promp-wrangler"}
-        engine_labels.update(json.loads(engine_labels_json) if engine_labels_json else {})
+        # Merged UNDER the ownership label, so a manifest cannot clobber it -- see
+        # _steps.build_engine_labels for why that ordering matters. Extracted so the
+        # merge is testable; the component body cannot be.
+        from wrangler.pipeline._steps import build_engine_labels
+
+        engine_labels = build_engine_labels(engine_labels_json)
 
         t0 = time.time()
         engine_id = deploy_agent_from_source(
@@ -248,15 +249,17 @@ def deploy_single_agent(
             enforce_health_gate(health, gate_cfg["required"], pair_id)
         elapsed = time.time() - t0
 
-        result = {
-            "pair_id": pair_id,
-            "engine_id": engine_id,
-            "model": model,
-            "original_prompt": pair["system_prompt"],
-            "source": "deployed",
-            "elapsed": elapsed,
-            "health": health,
-        }
+        from wrangler.pipeline._steps import deploy_stage_payload
+
+        result = deploy_stage_payload(
+            pair_id=pair_id,
+            engine_id=engine_id,
+            model=model,
+            original_prompt=pair["system_prompt"],
+            source="deployed",
+            elapsed=elapsed,
+            health=health,
+        )
         logging.info(f"[{pair_id}] Deployed in {elapsed:.0f}s: {engine_id}")
 
     # Upload stage result to GCS

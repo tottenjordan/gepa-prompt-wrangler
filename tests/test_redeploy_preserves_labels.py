@@ -65,6 +65,14 @@ class TestDeployStillWorks:
     """The deploy path was correct; adding redeploy must not disturb it."""
 
     def test_deploy_still_merges_manifest_labels_over_the_default(self):
-        src = _source(components.deploy_single_agent)
-        assert "engine_labels_json" in src
-        assert '"solution": "promp-wrangler"' in src
+        """Asserted on BEHAVIOUR since the merge moved into `_steps.build_engine_labels`.
+
+        This used to grep the component source for the literal. That broke the moment the
+        logic was extracted -- correctly, since the assertion was about where a string
+        appeared rather than what the code does. The extracted function can be called.
+        """
+        from wrangler.pipeline._steps import build_engine_labels
+
+        assert "engine_labels_json" in _source(components.deploy_single_agent)
+        merged = build_engine_labels('{"lifecycle": "ephemeral"}')
+        assert merged == {"solution": "promp-wrangler", "lifecycle": "ephemeral"}

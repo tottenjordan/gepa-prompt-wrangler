@@ -791,6 +791,32 @@ def stage_optimize(exp: Experiment, pair_id: str | None = None) -> None:
     judge = exp.config.get("eval_config", {}).get("judge_model", DEFAULT_JUDGE_MODEL)
 
     for i, pair in enumerate(pairs, 1):
+        # A control arm carries `skip_optimize` on the pair and must come out the far side
+        # with its prompt BYTE-IDENTICAL -- that is what makes it measure the noise floor,
+        # and `PairAnalysis.is_control` detects it by `original == optimized`. The pipeline
+        # path has short-circuited here since 2026-09-17; this path did not, so
+        # `wrangler run` on a campaign manifest optimized the control arm and destroyed the
+        # only calibration the sweep had.
+        if pair.skip_optimize:
+            print(
+                f"\n  [{pair.id}] ({i}/{len(pairs)}) CONTROL ARM — no optimize stage; "
+                f"prompt unchanged ({len(pair.system_prompt)} chars)",
+                flush=True,
+            )
+            exp.merge_pair(
+                "optimize",
+                pair.id,
+                {
+                    "optimized_prompt": pair.system_prompt,
+                    "elapsed": 0.0,
+                    "original_chars": len(pair.system_prompt),
+                    "optimized_chars": len(pair.system_prompt),
+                    "thresholds": {},
+                    "control_arm": True,
+                },
+            )
+            continue
+
         print(f"\n  [{pair.id}] ({i}/{len(pairs)}) Optimizing...", flush=True)
         agent_path = _resolve_optimize_module(manifest, pair, mdir)
         sampler_cfg = agent_path / "sampler_config.json"
@@ -820,6 +846,9 @@ def stage_optimize(exp: Experiment, pair_id: str | None = None) -> None:
             # Without this GEPA optimizes whatever model the _opt module's
             # config names, not the one this pair declares.
             model=pair.model,
+            # ADK patch 4b, per pair. Pipeline-only until now, so a manifest declaring
+            # `forward_rationale: false` still ran with the rationale attached here.
+            forward_rationale=pair.forward_rationale,
         )
         elapsed = time.time() - t0
         print(f"  [{pair.id}] Done ({_fmt_duration(elapsed)}) — {len(optimized)} chars")
