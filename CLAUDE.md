@@ -288,16 +288,20 @@ which GEPA then scores. The patch defers every close for the run and performs ea
 the end.
 
 **Three fixes shipped for #12 before this one and the rate did not move** (14% → 15% → 12%
-and 24%); two of them passed their own tests. So **the acceptance test is the
-`will run without the tools` rate on a real optimize stage**, counted with
-`scripts/analyze_toolset_loss.py`, expected 0. The run prints a deferred-close count — **a
-stage reporting 0 deferrals did not exercise the patch**, and its clean result means nothing.
+and 24%); two of them passed their own tests. So the acceptance test was defined as the
+`will run without the tools` rate on a real optimize stage, expected 0.
 
-**The acceptance test rides on the next campaign** (decided 2026-09-17), as a normal arm
-rather than a standalone run. **Whichever campaign runs next inherits a four-point
-checklist** in silent-failures #12 — bump `cache_bust`, confirm the printed deferred-close
-count is non-zero, count with `analyze_toolset_loss.py --freshness`, and do not read the
-close count as the verdict. The first two are the ones that silently fake a pass:
+**PASSED 2026-09-18 on campaign 09: 0 losses in 253 generations against a 16.6% pooled
+baseline (p = 1.1e-20; 42 losses expected), with 3,576 deferred closes — 1,776 against 1,776
+logged on one arm, a 1:1 correspondence proving every teardown was absorbed.** Tool-use
+numbers from campaign 09 onward are usable; campaigns 07, 08 and m01 are **not** retrospectively cleaned.
+[docs/analysis/2026-09-18-silent-failure-12-fixed.md](docs/analysis/2026-09-18-silent-failure-12-fixed.md)
+
+**The acceptance test rode on campaign 09 and passed** (2026-09-18). The four-point
+checklist in silent-failures #12 still applies to any run that needs to re-verify it: bump
+`cache_bust`, confirm the printed deferred-close count is non-zero, count with
+`analyze_toolset_loss.py --freshness`, and do not read the close count as the verdict.
+The first two are the ones that silently fake a pass:
 `optimizer.py` rides in the code tarball and is *not* a component body, so KFP — which
 caches on **component body hash + input parameter values** — will cache-hit an unchanged
 `run_id` and hand back a *pre-fix* optimize stage, and **0 deferrals means you measured the
@@ -370,7 +374,8 @@ inside the original's own sd).
 re-score across the boundary, above the hardened prompt's own 7.5% pairwise
 self-disagreement. Aggregate comparisons may. Campaigns 07 and 08 are unaffected in
 substance: their tool-use results were already uninterpretable at 12–24% contamination from
-silent failure #12.
+silent failure #12 — **which was fixed and verified on 2026-09-18, so campaign 09 onward is
+clean while those earlier runs stay uninterpretable.**
 
 **Bust the KFP cache before the first campaign that should use it.** `evaluator.py` is in the
 code tarball, *not* a component body, and KFP caches on **component body hash + input
@@ -548,6 +553,16 @@ For multi-model agents: `SEARCH_MCP_SERVER`, `BOOKING_MCP_SERVER`, `EXPENSE_MCP_
   One caveat on all of the above: campaign 06's four engines each drew a perfect health
   gate on the first attempt, which is a ~9% event at the measured 55% healthy rate.
   These floors likely sit at the optimistic end.
+
+  **A FLOOR IS NOT A PROPERTY OF THE METRIC — re-measure it on the day.** Campaign 09's
+  control arm drifted **+0.0732** on `safety_v1` against DOE 03's measured 0.0082, a **9x**
+  disagreement, and its primary contrast landed 17x inside that. All three arms' safety rose
+  0.07-0.17 between eval sides roughly 16 h apart, which is the shape of a service-side
+  autorater change rather than a prompt effect — and nothing records which autorater scored
+  a run. DOE 03's floors came from captures minutes apart; a campaign's two eval sides are
+  hours apart, and that gap is where the floor grows. Do not pick a primary readout on a
+  floor measured under different timing.
+  [docs/analysis/2026-09-21-campaign-09-result.md](docs/analysis/2026-09-21-campaign-09-result.md)
 
   **A control arm is necessary and not sufficient.** It holds the prompt fixed, so it
   bounds *evaluation* noise only. GEPA's search is stochastic, and on 2026-09-09 two runs
