@@ -253,9 +253,30 @@ Per task, before the PR:
    that touches `components.py` or `dag.py`.
 
 End-to-end, once Tasks 2–4 are in: submit `manifests/pipeline_smoke_manifest.yaml`
-(5 cases, ~25–30 min) and confirm all six stages still produce their artifacts. **Coverage on
-`components.py` should move from 2% toward 40–50%** — the extracted logic is now reachable
-by unit tests while the shells stay thin.
+(5 cases, ~25–30 min) and confirm all six stages still produce their artifacts.
+
+### Coverage on `components.py` — the plan's claim was wrong, and the fix was a different one
+
+**As written, this said coverage "should move from 2% toward 40–50%" because the extracted
+logic is now reachable by unit tests. That is not achievable by extraction and was corrected
+when Task 4 landed:** moving code *out* of a file cannot raise that file's coverage. After
+Tasks 2–4 the number was unchanged at **2%**, exactly as the arithmetic requires — the
+extracted logic is covered, but it is covered in `_steps.py`.
+
+**What actually moved it was executing the component bodies.** A `@dsl.component` exposes the
+undecorated function as `comp.python_func`, so it can be called directly against fakes; KFP's
+isolation rule constrains what a component may reach *inside the container*, not what a test
+in this repo may call. Every prior test of this file read `inspect.getsource(...)` and
+asserted on substrings, which executes nothing — hence 2% despite the file being well
+covered by assertions in a nominal sense.
+
+`tests/test_pipeline_component_bodies.py` plus `tests/pipeline_component_harness.py` take it
+**2% → 90%**, with the remainder being MCP process lifecycle that is deliberately out of
+scope (server startup, log shipping, session cleanup, the run_dir size cap).
+
+The extraction in Tasks 2–4 was still worth doing — `_steps.py` is at 100%, the logic is
+unit-testable in isolation, and less code is serialised by KFP, which shrinks the surface
+silent-failures #13 acts on. It just was not the thing that fixed the coverage number.
 
 ## Risks
 
