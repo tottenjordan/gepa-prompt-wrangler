@@ -23,7 +23,10 @@ extraction). Those are why the component exists.
 from __future__ import annotations
 
 import json
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 #: Every engine this project creates carries it, and `wrangler engines prune` refuses to
 #: delete anything without it — an engine that loses it becomes unreapable.
@@ -130,4 +133,81 @@ def redeploy_stage_payload(*, pair_id: str, engine_id: str, elapsed: float, heal
         "updated_at": datetime.now(tz=UTC).isoformat(timespec="seconds"),
         "elapsed": elapsed,
         "health": health,
+    }
+
+
+def resolve_agent_paths(agent_module_path: Path) -> dict[str, Any]:
+    """Find the `*_opt` package GEPA should optimize, and the root to put on `sys.path`.
+
+    The optimizer loads `<stem>_opt/__init__.py` when one exists and falls back to the plain
+    agent module otherwise. **A bare directory is not enough** — without `__init__.py` it is
+    not importable, and treating it as a package fails inside GEPA rather than here.
+
+    `project_root` is two levels up because `config.py` and `registry.py` live alongside
+    `agents/`, not inside it, and the agent imports them by name.
+    """
+    from pathlib import Path
+
+    agent_path = Path(agent_module_path)
+    stem = agent_path.stem.replace("_agent", "")
+    opt_dir = agent_path.parent / f"{stem}_opt"
+    if opt_dir.is_dir() and (opt_dir / "__init__.py").exists():
+        agent_path = opt_dir
+    return {
+        "agent_path": agent_path,
+        "project_root": Path(agent_module_path).parent.parent,
+        "sampler_config": agent_path / "sampler_config.json",
+    }
+
+
+def control_arm_payload(*, original_prompt: str) -> dict:
+    """The optimize-stage artifact for an arm that runs no optimize stage.
+
+    The prompt comes back **byte-identical**, not merely equivalent: `PairAnalysis.is_control`
+    detects a control arm by `original_prompt == optimized_prompt`, and redeploy plus
+    eval_after then run against the same prompt, which is what makes the arm measure the
+    noise floor rather than a prompt change.
+
+    Costs are explicit zeros rather than omitted, so a report summing across arms does not
+    have to special-case a missing key.
+    """
+    return {
+        "optimized_prompt": original_prompt,
+        "elapsed": 0.0,
+        "original_chars": len(original_prompt),
+        "optimized_chars": len(original_prompt),
+        "thresholds": {},
+        "control_arm": True,
+        "token_usage": {"input_tokens": 0, "output_tokens": 0, "is_estimate": True},
+        "costs": {"input_usd": 0.0, "output_usd": 0.0},
+    }
+
+
+#: Tokens-per-character heuristics for the optimize stage's cost estimate. GEPA does not
+#: expose a metered count, so these stand in -- and every consumer must carry
+#: `is_estimate` so the number is never mistaken for billing data.
+_INPUT_TOKENS_PER_CHAR = 50
+_OUTPUT_TOKENS_PER_CHAR = 10
+
+
+def optimize_cost_summary(
+    *, original_prompt: str, optimized_prompt: str, judge_costs: dict
+) -> dict:
+    """Estimated judge spend for one optimize stage.
+
+    **An estimate, and it says so.** GEPA reports no metered token count, so this scales the
+    two prompt lengths by fixed factors. `is_estimate` travels with the numbers because a
+    cost that looks metered gets quoted as though it were.
+
+    An unknown model yields zero rather than raising: a missing cost-table entry must not
+    fail a nine-hour stage at the reporting step, after the expensive work is done.
+    """
+    est_input = len(original_prompt) * _INPUT_TOKENS_PER_CHAR
+    est_output = len(optimized_prompt) * _OUTPUT_TOKENS_PER_CHAR
+    return {
+        "input_tokens": est_input,
+        "output_tokens": est_output,
+        "is_estimate": True,
+        "input_usd": est_input * judge_costs.get("input", 0) / 1_000_000,
+        "output_usd": est_output * judge_costs.get("output", 0) / 1_000_000,
     }

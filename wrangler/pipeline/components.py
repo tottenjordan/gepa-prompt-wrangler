@@ -608,17 +608,18 @@ def optimize_single_agent(
 
     from wrangler.core.config import MODEL_COSTS
     from wrangler.optimize.optimizer import optimize
+    from wrangler.pipeline._steps import (
+        control_arm_payload,
+        optimize_cost_summary,
+        resolve_agent_paths,
+    )
 
     opt_module = pair.get("agent_module") or agent_module
-    agent_path = Path(f"/app/{opt_module}")
-    # Add agent's project root to sys.path so config.py, registry.py are importable
-    sys.path.insert(0, str(agent_path.parent.parent))
-    stem = agent_path.stem.replace("_agent", "")
-    opt_dir = agent_path.parent / f"{stem}_opt"
-    if opt_dir.is_dir() and (opt_dir / "__init__.py").exists():
-        agent_path = opt_dir
-
-    sampler_cfg = agent_path / "sampler_config.json"
+    _paths = resolve_agent_paths(Path(f"/app/{opt_module}"))
+    # config.py and registry.py live alongside agents/, not inside it.
+    sys.path.insert(0, str(_paths["project_root"]))
+    agent_path = _paths["agent_path"]
+    sampler_cfg = _paths["sampler_config"]
 
     original_prompt = pair.get("system_prompt", "")
 
@@ -643,20 +644,7 @@ def optimize_single_agent(
         gcs.bucket(bucket_name).blob(
             f"pipeline-runs/{run_id}/stages/optimize/{pair_id}.json"
         ).upload_from_string(
-            json.dumps(
-                {
-                    "optimized_prompt": original_prompt,
-                    "elapsed": 0.0,
-                    "original_chars": len(original_prompt),
-                    "optimized_chars": len(original_prompt),
-                    "thresholds": {},
-                    "control_arm": True,
-                    "token_usage": {"input_tokens": 0, "output_tokens": 0, "is_estimate": True},
-                    "costs": {"input_usd": 0.0, "output_usd": 0.0},
-                },
-                indent=2,
-                default=str,
-            ),
+            json.dumps(control_arm_payload(original_prompt=original_prompt), indent=2, default=str),
             content_type="application/json",
         )
         return original_prompt
@@ -837,11 +825,15 @@ def optimize_single_agent(
     with contextlib.suppress(RuntimeError):
         asyncio.run(_cleanup_sessions())
 
-    judge_costs = MODEL_COSTS.get(judge_model, {"input": 0, "output": 0})
-    est_input = len(original_prompt) * 50
-    est_output = len(optimized_prompt) * 10
-    input_cost = est_input * judge_costs["input"] / 1_000_000
-    output_cost = est_output * judge_costs["output"] / 1_000_000
+    _cost = optimize_cost_summary(
+        original_prompt=original_prompt,
+        optimized_prompt=optimized_prompt,
+        judge_costs=MODEL_COSTS.get(judge_model, {"input": 0, "output": 0}),
+    )
+    est_input = _cost["input_tokens"]
+    est_output = _cost["output_tokens"]
+    input_cost = _cost["input_usd"]
+    output_cost = _cost["output_usd"]
 
     # Record the GEPA thresholds (from sampler_config.json — the source of truth),
     # keyed by eval/report metric name, for report provenance.
