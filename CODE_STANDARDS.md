@@ -68,6 +68,16 @@ uv run ruff check --fix .     # lint + autofix
 uv run ty check wrangler/
 ```
 
+- **The gate is `wrangler/`, deliberately, and the scope is part of the contract.** Running
+  `ty check` unscoped reports **109 diagnostics** (measured 2026-09-21) — dominated by
+  unresolved sibling imports in `examples/` and `scripts/`, which resolve at runtime via
+  `sys.path` and are not type errors in shipped code. Fixing them would mean config
+  gymnastics or per-file ignores, and none of it catches a bug in `wrangler/`.
+
+  **That 109 is not a regression baseline.** A stale "21-diagnostic baseline" recorded from a
+  differently scoped command cost real time on 2026-09-17, when an unscoped run reported 109
+  and read as a sudden regression. It was neither — the scoped command was clean then and is
+  clean now. Quote the command with the number, always.
 - Config lives under `[tool.ty.environment]` and `[tool.ty.rules]` — **not** a bare
   `[tool.ty]` table.
 - Add type hints to all new and modified function signatures. Use modern syntax:
