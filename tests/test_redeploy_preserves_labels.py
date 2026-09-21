@@ -45,9 +45,16 @@ class TestRedeployCarriesTheLabels:
         )
 
     def test_the_ownership_label_is_still_merged_underneath(self):
-        """An engine that loses `solution` becomes unreapable by a different route."""
-        src = _source(components.redeploy_single_agent)
-        assert '"solution": "promp-wrangler"' in src
+        """An engine that loses `solution` becomes unreapable by a different route.
+
+        Redeploy now shares `_steps.build_engine_labels` with deploy rather than keeping
+        its own copy -- two copies of this merge is how the stages came to disagree. So the
+        assertion is that it calls the shared helper, plus the helper's own behaviour.
+        """
+        from wrangler.pipeline._steps import build_engine_labels
+
+        assert "build_engine_labels" in _source(components.redeploy_single_agent)
+        assert build_engine_labels('{"solution": "hijacked"}') == {"solution": "promp-wrangler"}
 
 
 class TestTheDagWiresItThrough:

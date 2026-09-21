@@ -86,3 +86,48 @@ def deploy_stage_payload(
         "elapsed": elapsed,
         "health": health,
     }
+
+
+def redeploy_inputs(*, deploy_data: dict, optimize_data: dict, pair_model: str) -> dict[str, Any]:
+    """Resolve what the redeploy stage should push, from the two upstream artifacts.
+
+    **The manifest's model wins over the deploy record.** Two campaign 07 arms pointing at
+    the same agent module both optimized whatever `config.py` pinned, so the frontier the
+    campaign measured would have differed only by label. The pair's model is authoritative
+    whenever it is set; the deploy record is the fallback for callers that never set one.
+
+    `prompt_changed` is reported rather than inferred downstream because a control arm
+    legitimately redeploys an identical prompt, and a report that implied work had happened
+    would misdescribe the arm that exists to measure no work at all.
+    """
+    optimized = optimize_data.get("optimized_prompt", "")
+    original = deploy_data.get("original_prompt", "")
+    return {
+        "engine_id": deploy_data["engine_id"],
+        "model": pair_model or deploy_data.get("model", ""),
+        "original_prompt": original,
+        "optimized_prompt": optimized,
+        "prompt_changed": optimized != original,
+    }
+
+
+def redeploy_stage_payload(*, pair_id: str, engine_id: str, elapsed: float, health: dict) -> dict:
+    """The redeploy stage's GCS artifact.
+
+    Timestamped in UTC with an offset, not naive: reports parse this field, and a naive
+    stamp read against a differently-zoned one silently shifts a campaign's timeline.
+
+    `health` is carried verbatim for the same reason as the deploy payload — an in-place
+    update **redraws** the reach lottery (campaign 01 measured 0%→50% and 6%→56%), so the
+    after-side draw is not the one `eval_before` was gated onto, and the verdict has to
+    survive into the artifact.
+    """
+    from datetime import UTC, datetime
+
+    return {
+        "pair_id": pair_id,
+        "engine_id": engine_id,
+        "updated_at": datetime.now(tz=UTC).isoformat(timespec="seconds"),
+        "elapsed": elapsed,
+        "health": health,
+    }

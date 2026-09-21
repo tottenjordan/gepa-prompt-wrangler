@@ -197,9 +197,28 @@ class TestTheVerdictIsRecorded:
         ],
     )
     def test_health_is_written_into_the_stage_record(self, path, marker):
+        """The pipeline path builds its payload in `_steps.redeploy_stage_payload` now.
+
+        This used to grep the component body for `"health"`. The extraction moved the
+        literal out, which is the assertion being brittle rather than the behaviour
+        changing -- so the pipeline case checks the payload builder directly and the local
+        case still reads the source, because `stage_redeploy` still builds its own dict.
+        """
         src = Path(path).read_text()
         i = src.index(marker)
         body = src[i : i + 9000]
+        if "components.py" in path:
+            from wrangler.pipeline._steps import redeploy_stage_payload
+
+            built = redeploy_stage_payload(
+                pair_id="a", engine_id="e", elapsed=0.0, health={"passed": True}
+            )
+            assert built["health"] == {"passed": True}
+            assert "redeploy_stage_payload" in body, (
+                f"{marker} no longer builds its record through _steps, so the verdict "
+                "could be dropped without this test noticing"
+            )
+            return
         assert '"health"' in body, (
             f"{marker} must record the gate verdict; c07-pro's redeploy stage had no "
             "health key, so its clean 64/64 after-side could not be distinguished from luck"

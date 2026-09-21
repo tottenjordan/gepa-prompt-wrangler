@@ -944,7 +944,6 @@ def redeploy_single_agent(
     import sys
     import tarfile
     import time
-    from datetime import UTC, datetime
 
     from google.cloud import storage
 
@@ -1002,17 +1001,26 @@ def redeploy_single_agent(
         .download_as_text()
     )
 
-    engine_id = deploy_data["engine_id"]
-    optimized_prompt = optimize_data["optimized_prompt"]
-    original_prompt = deploy_data.get("original_prompt", "")
-    model = model or deploy_data.get("model", "")
-    prompt_changed = optimized_prompt != original_prompt
+    from wrangler.pipeline._steps import redeploy_inputs
+
+    _inputs = redeploy_inputs(
+        deploy_data=deploy_data, optimize_data=optimize_data, pair_model=model
+    )
+    engine_id = _inputs["engine_id"]
+    optimized_prompt = _inputs["optimized_prompt"]
+    original_prompt = _inputs["original_prompt"]
+    model = _inputs["model"]
+    prompt_changed = _inputs["prompt_changed"]
     logging.info(f"[{pair_id}] Redeploy: engine={engine_id}, model={model}")
     logging.info(
         f"[{pair_id}] Prompt: {len(original_prompt)}→{len(optimized_prompt)}chars, changed={prompt_changed}"
     )
 
     from wrangler.core.deploy import update_agent_from_source
+    from wrangler.pipeline._steps import (
+        build_engine_labels,
+        redeploy_stage_payload,
+    )
 
     mcp_env = {
         k: v
@@ -1026,8 +1034,10 @@ def redeploy_single_agent(
         # redeploy, so until 2026-09-21 no engine ever kept its `lifecycle: ephemeral`
         # or `campaign: <id>` -- the evidence `wrangler engines prune` needs to reap it.
         # Campaign 09's engines were found carrying only the ownership label.
-        redeploy_labels = {"solution": "promp-wrangler"}
-        redeploy_labels.update(json.loads(engine_labels_json) if engine_labels_json else {})
+        #
+        # SHARED with deploy rather than duplicated: two copies of this merge is how the
+        # two stages came to disagree about labels in the first place.
+        redeploy_labels = build_engine_labels(engine_labels_json)
         update_agent_from_source(
             engine_id=engine_id,
             agent_module=f"/app/{agent_module}",
@@ -1077,13 +1087,9 @@ def redeploy_single_agent(
         )
         engine_id = health["engine_id"]
 
-    result = {
-        "pair_id": pair_id,
-        "engine_id": engine_id,
-        "updated_at": datetime.now(tz=UTC).isoformat(timespec="seconds"),
-        "elapsed": elapsed,
-        "health": health,
-    }
+    result = redeploy_stage_payload(
+        pair_id=pair_id, engine_id=engine_id, elapsed=elapsed, health=health
+    )
     stage_blob = f"pipeline-runs/{run_id}/stages/redeploy/{pair_id}.json"
     gcs.bucket(bucket_name).blob(stage_blob).upload_from_string(
         json.dumps(result, indent=2, default=str), content_type="application/json"
