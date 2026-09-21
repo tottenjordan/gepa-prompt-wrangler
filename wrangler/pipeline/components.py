@@ -924,6 +924,7 @@ def redeploy_single_agent(
     optimize_output: str,
     cache_bust: str,
     health_gate_json: str,
+    engine_labels_json: str,
     metrics: Output[Metrics],
     summary: Output[Markdown],
     agent_prompt: Output[Markdown],
@@ -1017,6 +1018,13 @@ def redeploy_single_agent(
     }
 
     def _update():
+        # `runtimes.update()` OVERWRITES labels rather than merging, so omitting them
+        # here silently strips whatever deploy set. Every campaign arm passes through
+        # redeploy, so until 2026-09-21 no engine ever kept its `lifecycle: ephemeral`
+        # or `campaign: <id>` -- the evidence `wrangler engines prune` needs to reap it.
+        # Campaign 09's engines were found carrying only the ownership label.
+        redeploy_labels = {"solution": "promp-wrangler"}
+        redeploy_labels.update(json.loads(engine_labels_json) if engine_labels_json else {})
         update_agent_from_source(
             engine_id=engine_id,
             agent_module=f"/app/{agent_module}",
@@ -1024,6 +1032,7 @@ def redeploy_single_agent(
             instruction=optimized_prompt,
             display_name=f"gepa-{pair_id}",
             env_vars=mcp_env,
+            labels=redeploy_labels,
         )
         # Updated in place: the same engine comes back, not a replacement.
         return engine_id
