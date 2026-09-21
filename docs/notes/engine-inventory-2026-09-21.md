@@ -1,12 +1,44 @@
 # Agent Engine inventory — 2026-09-21
 
 Snapshot taken before a teardown. 39 engines; traffic measured since 2026-08-22.
+**Ten were deleted that day — 3 automated, 7 manual. See _Teardown outcome_ below.**
 
 - **delete:** 3
 - **keep:** 36
 - **always-warm instances:** 14 -> 14
 
 The policy and its reasoning live in [engine-lifecycle.md](engine-lifecycle.md).
+
+## Teardown outcome
+
+This snapshot was written **before** the teardown and is left as the point-in-time record.
+What actually happened on 2026-09-21:
+
+| batch | engines | how |
+| --- | --- | --- |
+| automated | **3** — `gepa-sonnet`, `gepa-flash`, `gepa-pro` (all 2026-08-22, zero traffic) | `wrangler engines prune --yes` |
+| manual | **7** — c07 x2, `c08-new-r2`, `m01`, c09 x3 | deleted by id, 8 s pacing, after verifying each id against its display name |
+| | **39 -> 29 engines** | no failures, no 429s |
+
+**Why the manual batch needed a human.** All seven belong to campaigns that are complete and
+written up, but each was protected by the traffic heuristic — traffic it generated itself
+during its own campaign. They should have been released by their `lifecycle: ephemeral`
+label, and were not, because redeploy was overwriting that label. That bug is fixed
+(`tests/test_redeploy_preserves_labels.py`), so the next campaign's engines will be reapable
+automatically once their traffic window closes.
+
+**Deliberately kept:**
+
+- `gepa-c08-new-r1` (`4023875557346246656`) — DOE 02 and DOE 03's capture source, and the
+  natural comparison point for the `safety_v1` floor question campaign 09 raised. Its
+  captures are on disk, but deleting it would end the ability to re-capture from the same
+  deployment.
+- `gepa-sonnet` (`6943994822277464064`) — referenced in `.env` / manifest; deleting it breaks
+  the example scripts.
+
+Neither the automated nor the manual batch touched the 19 unlabelled engines or the 8
+labelled `solution=geap-tour`. An unlabelled engine may be someone else's live work, which is
+the rule that stopped an age-based sweep from deleting production.
 
 | disposition | created | display name | id | warm | reason |
 | --- | --- | --- | --- | --- | --- |
@@ -40,12 +72,12 @@ The policy and its reasoning live in [engine-lifecycle.md](engine-lifecycle.md).
 | keep | 2026-08-23 00:20 | `sonnet_agent_jt1` | `5659047259942158336` |  | not ours to delete — labelled solution=geap-tour |
 | keep | 2026-08-23 00:25 | `opus_agent_jt1` | `3508578437872746496` |  | not ours to delete — labelled solution=geap-tour |
 | keep | 2026-09-01 04:29 | `novastorm-20260901042920` | `3274140568598347776` |  | not ours to delete — no ownership label |
-| keep | 2026-09-08 14:18 | `gepa-c07-sonnet5` | `8490988990860623872` |  | traffic in window (1017 requests) |
-| keep | 2026-09-09 13:17 | `gepa-c07-pro` | `7109369067676368896` |  | traffic in window (444 requests) |
+| **DELETED (manual)** | 2026-09-08 14:18 | `gepa-c07-sonnet5` | `8490988990860623872` |  | campaign complete; deleted 2026-09-21, see outcome above |
+| **DELETED (manual)** | 2026-09-09 13:17 | `gepa-c07-pro` | `7109369067676368896` |  | campaign complete; deleted 2026-09-21, see outcome above |
 | keep | 2026-09-11 19:08 | `gepa-c08-new-r1` | `4023875557346246656` |  | traffic in window (1417 requests) |
-| keep | 2026-09-12 18:03 | `gepa-c08-new-r2` | `5389381038113816576` |  | traffic in window (584 requests) |
-| keep | 2026-09-17 01:24 | `gepa-m01-rationale-merge` | `6907322810956251136` |  | traffic in window (581 requests) |
+| **DELETED (manual)** | 2026-09-12 18:03 | `gepa-c08-new-r2` | `5389381038113816576` |  | campaign complete; deleted 2026-09-21, see outcome above |
+| **DELETED (manual)** | 2026-09-17 01:24 | `gepa-m01-rationale-merge` | `6907322810956251136` |  | campaign complete; deleted 2026-09-21, see outcome above |
 | keep | 2026-09-17 20:13 | `novastorm-20260917201300` | `212510858637475840` |  | not ours to delete — no ownership label |
-| keep | 2026-09-17 21:43 | `gepa-c09-rationale-on` | `2979972829656645632` |  | traffic in window (439 requests) |
-| keep | 2026-09-17 21:56 | `gepa-c09-control` | `2326950883687923712` |  | traffic in window (444 requests) |
-| keep | 2026-09-17 22:07 | `gepa-c09-rationale-off` | `6616629528758321152` |  | traffic in window (421 requests) |
+| **DELETED (manual)** | 2026-09-17 21:43 | `gepa-c09-rationale-on` | `2979972829656645632` |  | campaign complete; deleted 2026-09-21, see outcome above |
+| **DELETED (manual)** | 2026-09-17 21:56 | `gepa-c09-control` | `2326950883687923712` |  | campaign complete; deleted 2026-09-21, see outcome above |
+| **DELETED (manual)** | 2026-09-17 22:07 | `gepa-c09-rationale-off` | `6616629528758321152` |  | campaign complete; deleted 2026-09-21, see outcome above |

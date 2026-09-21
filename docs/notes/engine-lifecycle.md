@@ -19,7 +19,10 @@ traffic heuristic because the evidence that would have released them was gone.
 Two consequences worth keeping in mind:
 
 - **Engines deployed before 2026-09-21 have no lifecycle labels and never will.** They age
-  out of the traffic window instead, roughly 30 days after their campaign's last eval.
+  out of the traffic window instead, roughly 30 days after their campaign's last eval — or
+  get deleted by hand, which is what happened to seven of them on 2026-09-21. The count
+  went 39 -> 29 that day; see
+  [engine-inventory-2026-09-21.md](engine-inventory-2026-09-21.md) for which and why.
 - **A label-based sweep is only as good as the labels.** `tests/test_redeploy_preserves_labels.py`
   now fails if redeploy stops forwarding them, because the failure mode is silent: the engine
   keeps working, the campaign succeeds, and only the inventory is wrong.
