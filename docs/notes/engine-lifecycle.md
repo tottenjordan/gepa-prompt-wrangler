@@ -3,6 +3,27 @@
 **Verified 2026-08-24**, when the project held **80 engines**, the oldest from 2026-02-13.
 Tool: `wrangler engines list` / `prune` (`wrangler/tools/engines.py`).
 
+## Redeploy stripped the reaping labels (fixed 2026-09-21)
+
+`runtimes.update()` **overwrites** labels rather than merging them, and the redeploy
+component never received `engine_labels_json`. So `update_agent_from_source(labels=None)`
+rebuilt the config with only `solution: promp-wrangler` and every campaign arm lost its
+`lifecycle: ephemeral` and `campaign: <id>` on its first redeploy.
+
+**The policy depended on labels that no campaign engine ever kept.** Found by reading them
+off campaign 09's engines: the manifest declared them, the pipeline submitted
+`engine_labels_json={"lifecycle": "ephemeral", "campaign": "09"}`, and the deployed engines
+carried only the ownership label. Eight completed-campaign engines were being held by the
+traffic heuristic because the evidence that would have released them was gone.
+
+Two consequences worth keeping in mind:
+
+- **Engines deployed before 2026-09-21 have no lifecycle labels and never will.** They age
+  out of the traffic window instead, roughly 30 days after their campaign's last eval.
+- **A label-based sweep is only as good as the labels.** `tests/test_redeploy_preserves_labels.py`
+  now fails if redeploy stops forwarding them, because the failure mode is silent: the engine
+  keeps working, the campaign succeeds, and only the inventory is wrong.
+
 ## Why they accumulate
 
 CLAUDE.md forbids pinning engine ids — a good rule, because an id names one deployment and

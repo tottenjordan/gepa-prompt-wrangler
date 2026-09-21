@@ -181,6 +181,7 @@ def build_pipeline(image_uri: str):
                     # same config as deploy. Without this the after-side engine
                     # is ungated and its dropout reads as a regression.
                     health_gate_json=health_gate_json,
+                    engine_labels_json=engine_labels_json,
                 )
                 redeploy_task.set_caching_options(enable_caching=True)
                 redeploy_task.set_display_name("Re-deploy Optimized Agent")
