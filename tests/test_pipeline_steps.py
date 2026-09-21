@@ -224,3 +224,134 @@ class TestRedeployUsesTheSharedLabelMerge:
         from wrangler.pipeline import components
 
         ast.parse(inspect.getsource(components.redeploy_single_agent.python_func))
+
+
+class TestResolveAgentPaths:
+    """The `_opt` directory lookup, currently ~10 inline lines with a silent fallback."""
+
+    @staticmethod
+    def _tree(tmp_path, *, with_opt: bool, with_init: bool = True):
+        agents = tmp_path / "agents"
+        agents.mkdir(parents=True)
+        (agents / "sonnet_agent.py").write_text("root_agent = None\n")
+        if with_opt:
+            opt = agents / "sonnet_opt"
+            opt.mkdir()
+            if with_init:
+                (opt / "__init__.py").write_text("")
+            (opt / "sampler_config.json").write_text("{}")
+        return agents / "sonnet_agent.py"
+
+    def test_it_prefers_the_opt_package_when_present(self, tmp_path):
+        from wrangler.pipeline._steps import resolve_agent_paths
+
+        agent = self._tree(tmp_path, with_opt=True)
+        got = resolve_agent_paths(agent)
+        assert got["agent_path"].name == "sonnet_opt"
+        assert got["sampler_config"].exists()
+
+    def test_it_falls_back_to_the_agent_module(self, tmp_path):
+        from wrangler.pipeline._steps import resolve_agent_paths
+
+        agent = self._tree(tmp_path, with_opt=False)
+        assert resolve_agent_paths(agent)["agent_path"] == agent
+
+    def test_an_opt_dir_without_init_is_not_a_package(self, tmp_path):
+        """A bare directory is not importable; treating it as one fails inside GEPA."""
+        from wrangler.pipeline._steps import resolve_agent_paths
+
+        agent = self._tree(tmp_path, with_opt=True, with_init=False)
+        assert resolve_agent_paths(agent)["agent_path"] == agent
+
+    def test_it_reports_the_project_root_to_put_on_syspath(self, tmp_path):
+        """config.py and registry.py live two levels up and must be importable."""
+        from wrangler.pipeline._steps import resolve_agent_paths
+
+        agent = self._tree(tmp_path, with_opt=True)
+        assert resolve_agent_paths(agent)["project_root"] == agent.parent.parent
+
+
+class TestControlArmPayload:
+    def test_the_prompt_comes_back_byte_identical(self):
+        """`PairAnalysis.is_control` compares with `==`; anything else breaks detection."""
+        from wrangler.pipeline._steps import control_arm_payload
+
+        prompt = "You are a helpful assistant."
+        got = control_arm_payload(original_prompt=prompt)
+        assert got["optimized_prompt"] == prompt
+        assert got["original_chars"] == got["optimized_chars"] == len(prompt)
+
+    def test_it_is_flagged_and_costs_nothing(self):
+        from wrangler.pipeline._steps import control_arm_payload
+
+        got = control_arm_payload(original_prompt="p")
+        assert got["control_arm"] is True
+        assert got["elapsed"] == 0.0
+        assert got["costs"] == {"input_usd": 0.0, "output_usd": 0.0}
+
+    def test_it_serialises(self):
+        import json
+
+        from wrangler.pipeline._steps import control_arm_payload
+
+        assert json.loads(json.dumps(control_arm_payload(original_prompt="p")))["control_arm"]
+
+
+class TestOptimizeCostSummary:
+    def test_it_scales_with_both_prompt_lengths(self):
+        from wrangler.pipeline._steps import optimize_cost_summary
+
+        small = optimize_cost_summary(
+            original_prompt="x", optimized_prompt="y", judge_costs={"input": 1.0, "output": 2.0}
+        )
+        big = optimize_cost_summary(
+            original_prompt="x" * 100,
+            optimized_prompt="y" * 100,
+            judge_costs={"input": 1.0, "output": 2.0},
+        )
+        assert big["input_usd"] > small["input_usd"]
+        assert big["output_usd"] > small["output_usd"]
+
+    def test_an_unknown_model_costs_zero_rather_than_raising(self):
+        """A missing cost entry must not fail a nine-hour stage at the reporting step."""
+        from wrangler.pipeline._steps import optimize_cost_summary
+
+        got = optimize_cost_summary(
+            original_prompt="p", optimized_prompt="o", judge_costs={"input": 0, "output": 0}
+        )
+        assert got["input_usd"] == 0.0
+
+    def test_it_reports_the_token_estimate_as_an_estimate(self):
+        """These are heuristics (len x 50 / len x 10), not metered counts."""
+        from wrangler.pipeline._steps import optimize_cost_summary
+
+        got = optimize_cost_summary(
+            original_prompt="p", optimized_prompt="o", judge_costs={"input": 1, "output": 1}
+        )
+        assert got["is_estimate"] is True
+
+
+class TestTheOptimizeComponentStillWorks:
+    def test_it_parses(self):
+        import ast
+        import inspect
+
+        from wrangler.pipeline import components
+
+        ast.parse(inspect.getsource(components.optimize_single_agent.python_func))
+
+    def test_the_deferred_close_window_is_untouched(self):
+        """Patch 8 is out of scope for this refactor and must stay where it is."""
+        import inspect
+
+        from wrangler.optimize.optimizer import optimize
+
+        assert "_deferred_toolset_closes" in inspect.getsource(optimize)
+
+    def test_the_control_short_circuit_still_precedes_gepa(self):
+        import inspect
+
+        from wrangler.pipeline import components
+
+        src = inspect.getsource(components.optimize_single_agent.python_func)
+        assert src.find("skip_optimize") < src.find("optimized_prompt = optimize(")
