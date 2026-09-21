@@ -170,6 +170,34 @@ same day (369, 401). **Fixed by removing the number** rather than updating it �
 enforces a count in prose, so quoting one guarantees it will be wrong. The same applies
 to any other figure a doc quotes about the code.
 
+## The legacy runner does not health-gate, and README still advertises it
+
+**Audited 2026-09-21 (Task 5).** `WranglerPipeline` (`orchestration/runner.py`) is reachable
+two ways — `wrangler deploy <manifest>` when the target is a manifest rather than an
+experiment directory, and `wrangler run --resume-from` / `--from-phase`. Both are documented
+in README. It is **functionally behind** the supported path in ways a caller cannot see:
+
+| | `stages.py` (supported) | `runner.py` (legacy) |
+| --- | --- | --- |
+| health-gates deploys | 14 references | **none** |
+| `score_repeats` | yes | ignored |
+| `skip_optimize` (control arms) | yes | ignored |
+| `forward_rationale` (ADK patch 4b) | yes | ignored |
+
+**The health gate is the expensive one.** Roughly four in ten deployments come up unable to
+serve, returning 200 with no inference, so an ungated deploy hands the eval an engine that
+silently drops a third of its cases — and the resulting delta measures dropout rather than
+the prompt. `_deploy_pair` calls `deploy_agent_from_source` with no gate and no reroll.
+
+Its last six commits are all repo-wide sweeps (lint, timezone-awareness, the registry
+migration). It has had no feature work while `stages.py` gained all three knobs above.
+
+**Deprecated, not deleted.** Constructing it now raises a `DeprecationWarning` naming the
+replacement and the missing gate. Deleting it would break a documented flag mid-cycle and
+nothing proves no one relies on it. `tests/test_legacy_runner_is_deprecated.py` pins the
+evidence, so if the runner ever catches up the test fails and the deprecation gets revisited
+rather than outliving its reason.
+
 ## `wrangler run --max-concurrent` is silently ignored on the default path
 
 `cli.py` threads `max_concurrent` into `WranglerPipeline(...)`, and that constructor

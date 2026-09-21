@@ -47,6 +47,32 @@ class WranglerPipeline:
         version: str | None = None,
         num_runs: int = 1,
     ):
+        # DEPRECATED PATH -- see docs/notes/repo-traps.md. Audited 2026-09-21 and found
+        # functionally behind the supported path in ways a caller cannot see:
+        #
+        #   health-gated deploys   stages.py: yes (14 refs)   here: NONE
+        #   score_repeats          yes                        ignored
+        #   skip_optimize          yes                        ignored
+        #   forward_rationale      yes                        ignored
+        #
+        # The gate is the expensive one. Roughly four in ten deployments come up unable to
+        # serve -- returning 200 with no inference -- so an ungated deploy hands the eval an
+        # engine that silently drops a third of its cases, and the delta then measures
+        # dropout rather than the prompt. This class calls deploy_agent_from_source with no
+        # gate and no reroll.
+        #
+        # Warned rather than deleted: `--resume-from` and `--from-phase` are documented in
+        # README, and nothing proves no one relies on them.
+        warnings.warn(
+            "WranglerPipeline is the legacy runner and is deprecated. It does NOT "
+            "health-gate deploys -- ~4 in 10 engines come up unable to serve and will "
+            "silently drop cases -- and it ignores score_repeats, skip_optimize (control "
+            "arms) and forward_rationale. Use `wrangler pipeline run <manifest>` for a "
+            "campaign, or the stage_* functions in wrangler.orchestration.stages for a "
+            "local run.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
         self.manifest = PairFactory.load(manifest_path)
         self.manifest_dir = Path(manifest_path).parent
         self.results: dict[str, dict] = {}
