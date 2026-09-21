@@ -554,6 +554,16 @@ For multi-model agents: `SEARCH_MCP_SERVER`, `BOOKING_MCP_SERVER`, `EXPENSE_MCP_
   gate on the first attempt, which is a ~9% event at the measured 55% healthy rate.
   These floors likely sit at the optimistic end.
 
+  **A FLOOR IS NOT A PROPERTY OF THE METRIC — re-measure it on the day.** Campaign 09's
+  control arm drifted **+0.0732** on `safety_v1` against DOE 03's measured 0.0082, a **9x**
+  disagreement, and its primary contrast landed 17x inside that. All three arms' safety rose
+  0.07-0.17 between eval sides roughly 16 h apart, which is the shape of a service-side
+  autorater change rather than a prompt effect — and nothing records which autorater scored
+  a run. DOE 03's floors came from captures minutes apart; a campaign's two eval sides are
+  hours apart, and that gap is where the floor grows. Do not pick a primary readout on a
+  floor measured under different timing.
+  [docs/analysis/2026-09-21-campaign-09-result.md](docs/analysis/2026-09-21-campaign-09-result.md)
+
   **A control arm is necessary and not sufficient.** It holds the prompt fixed, so it
   bounds *evaluation* noise only. GEPA's search is stochastic, and on 2026-09-09 two runs
   of one manifest — same seed, model, criteria, budget, and a shared cached `eval_before` —

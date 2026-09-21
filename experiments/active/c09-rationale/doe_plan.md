@@ -1,6 +1,7 @@
 # Campaign 09 (DOE 12) — does forwarding the judge's rationale help?
 
-**Status:** RUNNING — submitted 2026-09-17 21:39 UTC
+**Status:** COMPLETE — submitted 2026-09-17 21:39 UTC, finished 2026-09-18 ~20:30 UTC
+**Result:** [../../../docs/analysis/2026-09-21-campaign-09-result.md](../../../docs/analysis/2026-09-21-campaign-09-result.md)
 **Pipeline job:** `gepa-run-86239e1924-20260917-213907`  ·  run id `run-86239e1924`
 **Manifest:** [`manifests/c09-rationale_manifest.yaml`](../../../manifests/c09-rationale_manifest.yaml)
 **Plan:** [`docs/plans/2026-09-17-campaign-09.md`](../../../docs/plans/2026-09-17-campaign-09.md)
@@ -85,4 +86,16 @@ written up as one. State the MDE beside the number every time it appears.
 
 ## Result
 
-_Pending._
+**UNRESOLVED on the primary readout, by this campaign's own gate.**
+
+`on − off` on `safety_v1` is **−0.0044** against a control arm that drifted **+0.0732** — 17×
+inside the floor, and 9× the 0.0082 DOE 03 measured for that metric. The pre-registered
+"control drift > the DOE 03 floors ⇒ unresolved" outcome fired.
+
+The secondary metrics, pre-registered as under-powered, moved in a coherent pattern that all
+exceeded their own control drifts: rationale forwarding **removed the holdout regression**
+(`instruction_following_v1` +0.021 with it on, −0.040 with it off) while costing response
+quality, hallucination and tool use. n=1, so that is a lead for a follow-up, not a result.
+
+Full write-up, including why `safety_v1` was the wrong primary readout to choose:
+[../../../docs/analysis/2026-09-21-campaign-09-result.md](../../../docs/analysis/2026-09-21-campaign-09-result.md)
