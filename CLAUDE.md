@@ -291,16 +291,17 @@ the end.
 and 24%); two of them passed their own tests. So the acceptance test was defined as the
 `will run without the tools` rate on a real optimize stage, expected 0.
 
-**PASSED 2026-09-18 on campaign 09: 0 losses in 202 generations against a 16.6% pooled
-baseline (p = 1.2e-16), with 1,776 deferred closes against 1,776 logged closes — a 1:1
-correspondence proving every teardown was absorbed.** Tool-use numbers from campaign 09
-onward are usable; campaigns 07, 08 and m01 are **not** retrospectively cleaned.
+**PASSED 2026-09-18 on campaign 09: 0 losses in 253 generations against a 16.6% pooled
+baseline (p = 1.1e-20; 42 losses expected), with 3,576 deferred closes — 1,776 against 1,776
+logged on one arm, a 1:1 correspondence proving every teardown was absorbed.** Tool-use
+numbers from campaign 09 onward are usable; campaigns 07, 08 and m01 are **not** retrospectively cleaned.
 [docs/analysis/2026-09-18-silent-failure-12-fixed.md](docs/analysis/2026-09-18-silent-failure-12-fixed.md)
 
 **The acceptance test rode on campaign 09 and passed** (2026-09-18). The four-point
 checklist in silent-failures #12 still applies to any run that needs to re-verify it: bump
 `cache_bust`, confirm the printed deferred-close count is non-zero, count with
-`analyze_toolset_loss.py --freshness`, and do not read the close count as the verdict. The first two are the ones that silently fake a pass:
+`analyze_toolset_loss.py --freshness`, and do not read the close count as the verdict.
+The first two are the ones that silently fake a pass:
 `optimizer.py` rides in the code tarball and is *not* a component body, so KFP — which
 caches on **component body hash + input parameter values** — will cache-hit an unchanged
 `run_id` and hand back a *pre-fix* optimize stage, and **0 deferrals means you measured the

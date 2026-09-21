@@ -1,26 +1,28 @@
-# Silent failure #12 is fixed — 0 losses in 202 generations, against a 16.6% baseline
+# Silent failure #12 is fixed — 0 losses in 253 generations, against a 16.6% baseline
 
 **Date:** 2026-09-18
 **Campaign:** 09 (DOE 12), pipeline job `gepa-run-86239e1924-20260917-213907`
 **Fix under test:** ADK patch 8, `_deferred_toolset_closes()` (merged 2026-09-17, PR #101)
 **Pre-registration:** [../../experiments/active/c09-rationale/doe_plan.md](../../experiments/active/c09-rationale/doe_plan.md)
-**Status:** **PASSED** on two arms; third arm in flight
+**Status:** **PASSED** — campaign 09 complete (`PIPELINE_STATE_SUCCEEDED`), both optimize arms
 
 ## The result
 
-| | losses | generations | rate |
-| --- | --- | --- | --- |
-| `c09-rationale-off` (complete) | **0** | 136 | **0%** |
-| `c09-rationale-on` (in flight) | **0** | 66 | **0%** |
-| **c09 so far** | **0** | **202** | **0%** |
-| historical pooled | 82 | 494 | **16.6%** |
+| | losses | generations | deferred closes | rate |
+| --- | --- | --- | --- | --- |
+| `c09-rationale-off` | **0** | 136 | 1,776 | **0%** |
+| `c09-rationale-on` | **0** | 117 | 1,800 | **0%** |
+| **c09 total** | **0** | **253** | **3,576** | **0%** |
+| historical pooled | 82 | 494 | — | **16.6%** |
 
 Both ADK wordings were counted — `will run without the tools` (≥ 2.8.0) and
 `Failed to get tools from toolset` (≤ 2.7.1). Matching only one is how the in-run counter
 read zero through a live campaign on 2026-09-08.
 
-**P(0 losses in 202 generations at the pooled 16.6% rate) = 1.2 × 10⁻¹⁶.**
-95% upper bound on the true rate, by the rule of three: **1.5%**.
+At the pooled 16.6% rate, 253 generations would have expected **42 losses**.
+
+**P(0 losses in 253 generations) = 1.1 × 10⁻²⁰.**
+95% upper bound on the true rate, by the rule of three: **1.2%**.
 
 ### The baseline this replaces
 
@@ -52,7 +54,10 @@ Every teardown the runners issued was absorbed by the window and none reached a 
 For scale, the contaminated stages logged ~1,812 closes each, so the patch is operating at
 full production volume rather than on a quiet run.
 
-`c09-rationale-on` has logged 1,065 closes so far and will print its own count on completion.
+`c09-rationale-on` printed **1,800** on completion — **3,576 deferrals across the campaign**,
+and the two arms agree to within 1.4% despite differing generation counts (136 vs 117).
+Teardown volume tracks the metric-call budget, not the generation count, which is what
+`max_metric_calls: 600` predicts.
 
 ## Why the earlier fixes failed and this one did not
 
@@ -95,7 +100,9 @@ mid-run there is nothing to strand, whatever the concurrency and whatever the ca
   that happened to ride along; the rationale-forwarding analysis is separate and pending.
 
 One caveat stated plainly: the third arm (`c09-control`) runs no optimize stage by design, so
-this campaign yields **two** #12 observations, not three.
+this campaign yields **two** #12 observations, not three. Both are on the same agent and the
+same three local MCP servers, so they are two samples of one configuration rather than two
+independent tests of the fix.
 
 ## Reading a future run
 
