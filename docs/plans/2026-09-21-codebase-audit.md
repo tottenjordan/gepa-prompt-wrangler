@@ -85,6 +85,33 @@ this week. Nothing tests that the two paths agree.
 `runner.py` is the sharpest: labelled legacy, 19% covered, and still wired into two CLI
 commands. Either it is supported and should be tested, or it is not and should be retired.
 
+**STATUS (2026-09-22) — closed.** Note that Phase 2 only turned the `runner.py` row into a
+task; the other three were diagnostic findings with no task behind them, so for a day this
+warning read as handled when three-quarters of it was not.
+
+| module | at audit | now | how |
+| --- | --- | --- | --- |
+| `orchestration/runner.py` | 19% | 19% | **retired, not tested** — Task 5 took the other branch above. Deprecated with the evidence; #116 tracks deletion. Raising coverage on code being removed would be waste |
+| `eval/online_monitors.py` | 21% | **79%** | `tests/test_online_monitors.py` |
+| `eval/online_evaluators.py` | 28% | **39%** | `tests/test_trace_health_gate.py` |
+| `pipeline/deploy_pipeline.py` | 20% | **32%** | `tests/test_code_tarball_packaging.py` |
+
+The two partial numbers are deliberate. **Coverage was the symptom, not the target** — each
+file was tested at the point where a quiet mistake produces a plausible number rather than an
+error, and the remainder is Vertex submission plumbing whose failures are loud:
+
+- `online_evaluators.py` — the `trace-health` **gate**: that it exits non-zero on a confirmed
+  drop, survives the 429s that once took it down mid-run, and never reports an unreadable
+  engine as clean. The other ~180 statements are evaluator CRUD that fails visibly.
+- `deploy_pipeline.py` — the **code tarball**, the one CLAUDE.md records as having "caused
+  multiple pipeline failures". The rest is image build and job submission, which need a live
+  project to mean anything.
+
+One thing found while testing, recorded rather than changed: `trace-health` exits **0** on
+UNKNOWN. Only a confirmed drop fails the gate, so a Logging API outage does not block every
+campaign — but a run whose health could not be measured looks identical to a clean one under
+`&&`. Current behaviour is pinned by test, so changing it is a decision rather than a drift.
+
 ### W2 · Ten functions over 190 lines
 
 Beyond C1: `optimize` (`optimizer.py:587`, 333), `format_analysis_report`

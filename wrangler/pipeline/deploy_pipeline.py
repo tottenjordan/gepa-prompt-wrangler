@@ -240,11 +240,20 @@ def package_and_upload_code(
     bucket_name: str,
     run_id: str,
     project_id: str,
+    project_root: Path | None = None,
 ) -> str:
-    """Package the project source and upload to GCS. Returns the GCS URI."""
+    """Package the project source and upload to GCS. Returns the GCS URI.
+
+    `project_root` defaults to this file's repo root, which is what every caller wants. It
+    is a parameter only so the exclusion rules can be exercised against a synthetic tree --
+    packaging the real repo takes ~4.5 s and cannot be made to contain a directory the test
+    needs to reason about. A missing directory here has failed a campaign more than once,
+    which is why the rules are worth a test at all.
+    """
     from google.cloud import storage
 
-    project_root = Path(__file__).resolve().parent.parent.parent
+    if project_root is None:
+        project_root = Path(__file__).resolve().parent.parent.parent
     tarball_path = "/tmp/wrangler_code.tar.gz"
 
     excludes = {
