@@ -5,7 +5,7 @@
 **Pipeline job:** `gepa-run-86239e1924-20260917-213907` (SUCCEEDED, ~23 h)
 **Engines:** three, all health-gated at reach **1.0**, all `claude-sonnet-5`
 **Eval set:** 64 cases · **Knobs:** `num_runs=2`, `score_repeats=2`
-**Coverage:** 64/64 on every arm, both sides
+**Coverage:** ~~64/64 on every arm, both sides~~ — **WRONG, corrected 2026-09-22.** Two of three arms scored **63/64** on their before side. See the correction at the end.
 
 ## Headline
 
@@ -108,8 +108,9 @@ the pre-registration required reporting it, not because the gate was passed.
 ## Infrastructure: everything worked
 
 - Three health gates at reach **1.0**, two redeploy gates at 1.0.
-- **64/64 coverage on all six eval sides** — the first campaign with no dropout anywhere,
-  which is `score_repeats=2` doing the job DOE 03 predicted.
+- ~~**64/64 coverage on all six eval sides** — the first campaign with no dropout anywhere~~
+  **This is wrong; see the correction at the end.** Four of six sides were 64/64; the
+  before sides of `c09-control` and `c09-rationale-on` were **63/64**.
 - **Silent failure #12: 0 losses in 253 generations, 3,576 deferred closes.** Separate
   report: [2026-09-18-silent-failure-12-fixed.md](2026-09-18-silent-failure-12-fixed.md).
 - The control arm ran in the same pipeline job as the arms it calibrates, for the first time.
@@ -128,3 +129,47 @@ the pre-registration required reporting it, not because the gate was passed.
    judge-quota escalation.
 4. **Patch 4b stays on** in the meantime. It is not shown to help, but it is not shown to hurt
    the criterion either, and the holdout signal points the right way.
+
+---
+
+## Correction, 2026-09-22 — the coverage claim was wrong, the verdict is not
+
+Re-read from this run's own stage artifacts on GCS
+(`pipeline-runs/run-86239e1924/stages/eval_{before,after}/`).
+
+**The error.** This write-up claims 64/64 on all six eval sides. Two before sides were
+**63/64**:
+
+| arm | before | after | |
+| --- | --- | --- | --- |
+| `c09-control` | **63/64** | 64/64 | uneven |
+| `c09-rationale-on` | **63/64** | 64/64 | uneven |
+| `c09-rationale-off` | 64/64 | 64/64 | even |
+
+That matters because dropout was ruled out *on this basis* — and silent-failures #5 is
+precisely about two sides scoring different case subsets producing a spurious delta.
+
+**The correction does not change the conclusion.** Recomputing **paired over the cases present
+on both sides**:
+
+| arm | as reported | paired | shared |
+| --- | --- | --- | --- |
+| `c09-control` | +0.0732 | **+0.0794** | 63 |
+| `c09-rationale-on` | +0.1607 | +0.1746 | 63 |
+| `c09-rationale-off` | +0.1651 | +0.1719 | 64 |
+
+Primary contrast (on − off) on `safety_v1`: **+0.0027** paired, against **−0.0044** unpaired.
+Either way it is ~30x inside the control's drift. **The campaign stays UNRESOLVED**, and the
+pre-registered gate still fires.
+
+**What it does change:** the control drift is now *confirmed* to be real rather than dropout —
+pairing makes it slightly larger, not smaller — so "the two sides scored different cases" is
+eliminated as an explanation on correct evidence instead of incorrect evidence.
+
+**One further number, not previously extracted.** The control's across-run spread *within*
+each side, from `scores_std` at `num_runs: 2`, is **0.0018** (before) and **0.0086** (after) on
+`safety_v1`. Two inference passes minutes apart agree to 0.002; the two sides sixteen hours
+apart differ by 0.079 — a factor of ~44. Whatever moved was not run-to-run noise.
+
+Follow-on analysis:
+[2026-09-22-agent-side-floor.md](2026-09-22-agent-side-floor.md).
