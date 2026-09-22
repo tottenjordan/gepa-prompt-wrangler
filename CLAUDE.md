@@ -625,14 +625,25 @@ For multi-model agents: `SEARCH_MCP_SERVER`, `BOOKING_MCP_SERVER`, `EXPENSE_MCP_
   eval set five days on moved `safety_v1` **+0.0095**, 0.8 within-day agent sd; nothing moved
   past 2.0 sd. Campaign 09's control moved +0.0732 in sixteen hours.
 
-  So four candidates are now ruled out for that drift: the judge (canary, ≤0.005/5 days),
-  elapsed time (+0.0095/5 days), dropout (campaign 09 was 64/64 both sides) and an engine
-  change (the control branch skips redeploy). **What survives is configuration**, and the
-  sharper of the two candidates is that **the agent-side floor is a property of the prompt**:
-  campaign 09's control ran the **78-character seed** on both sides, which is the widest
-  response distribution available, and lent that floor to arms running 5,000+ character
-  optimized prompts. Untested — and worth testing before campaign 10's control is designed,
-  because every floor in this repo is measured that way.
+  So five candidates are now ruled out for that drift: the judge (canary, ≤0.005/5 days),
+  elapsed time (+0.0095/5 days), dropout (two sides were 63/64 — pairing makes the drift
+  *larger*, +0.0794), an engine change (the control branch skips redeploy), and **prompt
+  variance**.
+
+  **Prompt variance was the sharp candidate and it is dead.** The idea was that the control's
+  **78-character seed** leaves so much latitude that its response distribution is far wider
+  than a specified prompt's, making every control arm a worst-case instrument. It predicts
+  something checkable for free: `scores_std` records the across-run spread *within* each eval
+  side at `num_runs: 2`, and campaign 09 has four seed-prompt sides against two running 5-6k
+  optimized prompts. **Seed sides are NARROWER** — pooled 0.0090 vs 0.0141, wrong-signed on
+  four of five metrics including `safety_v1` (2.55x). The control's before side is **0.0018**,
+  the tightest number in the run, on the arm that then moved +0.0794 across the gap. Dropped;
+  the planned 2x2 would have spent two hours confirming a null.
+
+  **What survives is engine age / platform state** — campaign 09's engines were hours old, the
+  one measured above had been up ten days — and it is **no longer separable from campaign 09's
+  data**, because those engines were reaped on 2026-09-21. Testing it needs a fresh deploy
+  captured at t=0 and t+16 h.
 
   **Split judge from agent variance whenever a DOE takes multiple captures and scores each
   multiple times** — it is free and it says which lever to buy. On DOE 03's own data:

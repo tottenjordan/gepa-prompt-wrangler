@@ -70,21 +70,51 @@ So campaign 09's control drift is explained by **neither**:
 | dropout | campaign 09 was 64/64 both sides | ruled out by the campaign itself |
 | engine change | control skips redeploy; same engine both sides | ruled out by the DAG |
 
-Something specific to campaign 09's *configuration* produced it. Two candidates survive, and
-this measurement cannot separate them:
+Something specific to campaign 09's *configuration* produced it. Two candidates were raised;
+**one has since been tested and dropped.**
 
-1. **Engine age.** Campaign 09's engines were **hours old** and freshly health-gated. This one
-   had been up and unchanged for ten days. A new engine's output distribution may not be
-   stationary across its first day — instance churn, autoscaling, cold paths.
-2. **Prompt specificity.** Campaign 09's control ran the **78-character seed** on both sides.
-   A prompt that short leaves enormous latitude, so its response distribution should be far
-   wider than a specified one's. **This engine runs campaign 08's deployed prompt**, which is
-   not 78 characters.
+### Prompt specificity — TESTED AND CONTRADICTED, 2026-09-22
 
-If (2) is right it is the more consequential finding, because it would mean **the agent-side
-floor is a property of the prompt** — and a control arm running the *seed* measures the floor
-in the highest-variance regime available, then lends that floor to arms running optimized
-prompts that are far more specified. Every campaign floor in this repo is measured that way.
+The hypothesis: campaign 09's control ran the **78-character seed** on both sides, and a prompt
+that short leaves enormous latitude, so its response distribution should be far wider than a
+specified one's. If true, the agent-side floor would be a property of the *prompt*, and every
+control arm in this repo would be measuring the floor in the highest-variance regime available.
+
+It predicts something directly checkable in campaign 09's own artifacts. `scores_std` records
+the spread across the two inference runs *within* each eval side at `num_runs: 2`. Four sides
+ran the seed (control both sides, both treatments' before sides) and two ran 5–6k-character
+optimized prompts. **Seed sides should be wider.**
+
+| metric | seed (n=4) | optimized (n=2) | ratio | |
+| --- | --- | --- | --- | --- |
+| `safety_v1` | 0.0110 | 0.0280 | **2.55×** | contradicted |
+| `instruction_following_v1` | 0.0032 | 0.0144 | **4.52×** | contradicted |
+| `hallucination_v1` | 0.0070 | 0.0124 | **1.78×** | contradicted |
+| `tool_use_quality_v1` | 0.0060 | 0.0077 | **1.29×** | contradicted |
+| `final_response_quality_v1` | 0.0180 | 0.0078 | 0.43× | consistent |
+| **pooled** | **0.0090** | **0.0141** | **1.57×** | **contradicted** |
+
+**The direction is wrong on four of five metrics, including the one in question.** The
+78-character seed produced the *narrowest* within-side spread in the campaign — the control's
+before side was **0.0018** on `safety_v1`, the smallest number anywhere in the run, while that
+same arm moved **+0.0794** across the 16-hour gap. A prompt whose vagueness supposedly widens
+the response distribution cannot also produce its tightest measurement.
+
+**Dropped.** Caveats worth keeping: n=4 against n=2, and a two-sample `scores_std` is a noisy
+estimate of spread. But this was never a close call in a direction that favours the
+hypothesis — it is wrong-signed and consistent about it.
+
+### Engine age / platform state — the surviving candidate
+
+Campaign 09's engines were **hours old** and freshly health-gated; the engine measured in this
+note had been up and unchanged for ten days. A new engine's output distribution may not be
+stationary across its first day — instance churn, autoscaling, cold paths — or the platform may
+have rolled a new Claude build underneath it.
+
+**This is no longer separable from campaign 09's own data.** Its three engines were reaped on
+2026-09-21; the capture that would settle it does not exist. Testing it now needs a fresh
+deploy captured at t=0 and t+16 h, and the engine kept —
+[capture-before-reap](../notes/engine-lifecycle.md) exists so the next one survives.
 
 ## CAVEAT added after the fact — this was measured near the ceiling
 
@@ -112,11 +142,10 @@ noise of any kind — and the control arm does not redeploy, so whatever changed
 1. **Stop attributing control drift to elapsed time.** Neither the judge nor the agent drifts
    materially over days. `num_runs` remains the right lever for `safety_v1` — the within-day
    agent sd of 0.0124 is real and is what it averages down.
-2. **Test the prompt hypothesis before designing campaign 10's control.** The cheap version:
-   deploy one engine with the 78-char seed and one with a long specified prompt, take three
-   captures from each minutes apart, and compare the *within-day agent sd* between them. No
-   optimize stage, no 24-hour wait. If the seed's sd is several times larger, the control-arm
-   convention needs rethinking.
+2. ~~Test the prompt hypothesis~~ — **done, and dropped** (above). It was contradicted by
+   campaign 09's own `scores_std`, at no cost, and the planned 2×2 would have spent two hours
+   confirming a null. The surviving candidate is engine age / platform state, which needs a
+   fresh deploy captured at t=0 and t+16 h.
 3. **Use the variance split, not just the exponents.** The judge/agent decomposition above is
    computable from any DOE that takes multiple captures and scores each multiple times, and it
    says directly which lever to buy. It cost nothing here — the data was already on disk.
