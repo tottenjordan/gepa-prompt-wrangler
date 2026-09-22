@@ -118,6 +118,157 @@ class TestScoresAreReadOutOfTheEvaluationRun:
         assert om.run_quick_eval("eng-1", num_cases=1) == {}
 
 
+def _raising_run(state: str = "SUCCEEDED"):
+    """An evaluation run whose metrics cannot be read.
+
+    **A non-numeric metric value, not a missing attribute.** `getattr(sm, "metrics", None)`
+    takes a default, so an `AttributeError` from a moved attribute is swallowed and the
+    `except` never sees it -- the extraction degrades to `{}` silently by a different route.
+    What does reach the handler is the conversion in the loop body: `float(v)` on a value
+    that is not a number, or `dict(nested)` on something that is not a mapping. Both are
+    what an upstream shape change actually looks like from here, and that surface already
+    moved once at google-cloud-aiplatform 2.1.0.
+
+    Found by writing this test: the first version raised `AttributeError` and the handler
+    never fired, which would have made every assertion below vacuous.
+    """
+    run = mock.MagicMock()
+    run.name = "runs/monitor-1"
+    run.state = state
+    run.evaluation_run_results.summary_metrics.metrics = {_avg("safety_v1"): "not-a-number"}
+    return run
+
+
+class TestAFailedExtractionIsDistinguishableFromAnEmptyResult:
+    """The record is durable, so this asymmetry outlives the run that produced it.
+
+    Before 2026-09-22 both "the agent scored nothing" and "we could not read the scores"
+    produced `{}` plus a `Warning:` line that scrolls past in a long log -- and the empty
+    record was then written into the directory this module exists to accumulate for trend
+    analysis, where a missing measurement plots as a zero.
+    """
+
+    def _record(self, tmp_path):
+        written = list((tmp_path / "monitors").glob("*.json"))
+        assert len(written) == 1
+        return json.loads(written[0].read_text())
+
+    def test_a_failed_extraction_is_recorded_as_an_error(self, monitor):
+        client, tmp_path = monitor
+        client.evals.get_evaluation_run.return_value = _raising_run()
+
+        scores = om.run_quick_eval("eng-1", num_cases=1)
+
+        assert scores == {}, "the return type is unchanged; the distinction is in the record"
+        record = self._record(tmp_path)
+        assert record["scores"] == {}
+        assert "ValueError" in record["scores_error"]
+
+    def test_a_genuinely_empty_result_carries_no_error(self, monitor):
+        """The other half. Without this the new field could be set unconditionally and every
+        test above would still pass."""
+        client, tmp_path = monitor
+        client.evals.get_evaluation_run.return_value = _evaluation_run("JOB_STATE_FAILED")
+
+        om.run_quick_eval("eng-1", num_cases=1)
+
+        record = self._record(tmp_path)
+        assert record["scores"] == {}
+        assert record["scores_error"] == ""
+        assert record["scores_empty_reason"] == "no evaluation_run_results"
+
+    def test_a_successful_run_carries_no_error(self, monitor):
+        client, tmp_path = monitor
+        client.evals.get_evaluation_run.return_value = _evaluation_run(
+            "SUCCEEDED", {_avg("safety_v1"): 0.9}
+        )
+
+        om.run_quick_eval("eng-1", num_cases=1)
+
+        record = self._record(tmp_path)
+        assert record["scores_error"] == ""
+
+    def test_the_run_state_is_recorded_so_an_empty_result_is_explicable(self, monitor):
+        """`{}` with no error is ambiguous on its own: a FAILED run and a SUCCEEDED one that
+        reported no metrics are different things. The state was already computed by the poll
+        loop and thrown away."""
+        client, tmp_path = monitor
+        client.evals.get_evaluation_run.return_value = _evaluation_run("JOB_STATE_FAILED")
+
+        om.run_quick_eval("eng-1", num_cases=1)
+
+        assert self._record(tmp_path)["eval_run_state"] == "JOB_STATE_FAILED"
+
+    def test_the_operator_is_told_the_run_measured_nothing(self, monitor, capsys):
+        """A `Warning:` line above a blank "Results:" block reads like a clean run with no
+        findings. It has to say the scores are unavailable, not zero."""
+        client, _ = monitor
+        client.evals.get_evaluation_run.return_value = _raising_run()
+
+        om.run_quick_eval("eng-1", num_cases=1)
+
+        out = capsys.readouterr().out
+        assert "UNREADABLE" in out
+        assert "Not the same as a zero" in out
+
+
+class TestASilentlyCollapsedResponseIsAlsoExplained:
+    """The second route to an empty result, and the one a `try/except` cannot see.
+
+    Every `getattr` in the extraction chain passes a default, so a response whose shape has
+    moved yields `{}` with nothing raised -- indistinguishable from an agent that scored
+    nothing. Naming the level that was absent is what separates them.
+    """
+
+    def _reason(self, tmp_path):
+        written = list((tmp_path / "monitors").glob("*.json"))
+        assert len(written) == 1
+        record = json.loads(written[0].read_text())
+        assert record["scores_error"] == "", "nothing raised on these paths"
+        return record["scores_empty_reason"]
+
+    def test_missing_summary_metrics_is_named(self, monitor):
+        client, tmp_path = monitor
+        run = mock.MagicMock()
+        run.name, run.state = "r", "SUCCEEDED"
+        run.evaluation_run_results.summary_metrics = None
+        client.evals.get_evaluation_run.return_value = run
+
+        om.run_quick_eval("eng-1", num_cases=1)
+
+        assert self._reason(tmp_path) == "results present but no summary_metrics"
+
+    def test_missing_metrics_is_named(self, monitor):
+        client, tmp_path = monitor
+        client.evals.get_evaluation_run.return_value = _evaluation_run("SUCCEEDED", {})
+
+        om.run_quick_eval("eng-1", num_cases=1)
+
+        assert self._reason(tmp_path) == "summary_metrics present but no metrics"
+
+    def test_a_changed_key_format_is_named_rather_than_reported_as_zero_scores(self, monitor):
+        """The worst of the three: if Vertex renames `/AVERAGE`, every monitor on every
+        engine reports `{}` forever and it looks like the agents stopped scoring."""
+        client, tmp_path = monitor
+        client.evals.get_evaluation_run.return_value = _evaluation_run(
+            "SUCCEEDED", {"metric/safety_v1/MEAN": 0.9, "metric/safety_v1/STDDEV": 0.1}
+        )
+
+        om.run_quick_eval("eng-1", num_cases=1)
+
+        assert self._reason(tmp_path) == "2 metric(s), none matching /AVERAGE"
+
+    def test_a_successful_extraction_has_no_reason(self, monitor):
+        client, tmp_path = monitor
+        client.evals.get_evaluation_run.return_value = _evaluation_run(
+            "SUCCEEDED", {_avg("safety_v1"): 0.9}
+        )
+
+        om.run_quick_eval("eng-1", num_cases=1)
+
+        assert self._reason(tmp_path) == ""
+
+
 class TestThePollLoopStopsOnATerminalState:
     @pytest.mark.parametrize("state", ["JOB_STATE_SUCCEEDED", "JOB_STATE_FAILED"])
     def test_a_terminal_state_ends_polling_immediately(self, monitor, state):
