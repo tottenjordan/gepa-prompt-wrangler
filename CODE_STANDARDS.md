@@ -69,15 +69,22 @@ uv run ty check wrangler/
 ```
 
 - **The gate is `wrangler/`, deliberately, and the scope is part of the contract.** Running
-  `ty check` unscoped reports **109 diagnostics** (measured 2026-09-21) — dominated by
-  unresolved sibling imports in `examples/` and `scripts/`, which resolve at runtime via
-  `sys.path` and are not type errors in shipped code. Fixing them would mean config
-  gymnastics or per-file ignores, and none of it catches a bug in `wrangler/`.
+  `ty check` unscoped reports **on the order of 100+ diagnostics** — dominated by unresolved
+  sibling imports in `examples/` and `scripts/`, which resolve at runtime via `sys.path` and
+  are not type errors in shipped code. Fixing them would mean config gymnastics or per-file
+  ignores, and none of it catches a bug in `wrangler/`.
 
-  **That 109 is not a regression baseline.** A stale "21-diagnostic baseline" recorded from a
-  differently scoped command cost real time on 2026-09-17, when an unscoped run reported 109
-  and read as a sudden regression. It was neither — the scoped command was clean then and is
-  clean now. Quote the command with the number, always.
+  **It is not a regression baseline, and it tracks file count.** 109 on 2026-09-21, **121 on
+  2026-09-22** after a week of test files landed — the number moved 12 without a single new
+  type error. That drift is the argument: a stale "21-diagnostic baseline" from a differently
+  scoped command cost real time on 2026-09-17, when an unscoped run reported 109 and read as a
+  sudden regression. It was neither, and the scoped command has been clean throughout. Quote
+  the command with the number, always, and expect the unscoped one to be out of date.
+
+  **A `wrangler/` path in unscoped output is not a gap in the gate.** Five of the location
+  lines point into `wrangler/`, all of them `info: Function defined here` — secondary
+  annotations on diagnostics whose *primary* location is a caller in `examples/` or `scripts/`
+  passing a `dict[str, str | bool]` value into a typed parameter. Checked 2026-09-22.
 - Config lives under `[tool.ty.environment]` and `[tool.ty.rules]` — **not** a bare
   `[tool.ty]` table.
 - Add type hints to all new and modified function signatures. Use modern syntax:
