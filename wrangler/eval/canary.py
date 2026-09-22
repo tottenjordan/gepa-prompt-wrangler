@@ -160,6 +160,7 @@ def score_canary(
     client = agent_client(project=GCP_PROJECT_ID, location=GCP_REGION)
 
     passes: list[dict[str, float]] = []
+    coverages: list[dict[str, int]] = []
     for i in range(max(1, repeats)):
         # agent_resource is None: a canary's engine may be long deleted, and engine ids are
         # never pinned in this repo. `_score_dataset` already treats it as optional.
@@ -171,17 +172,26 @@ def score_canary(
             tag=f"{tag} {i + 1}/{repeats}" if repeats > 1 else tag,
         )
         passes.append(dict(result.scores))
+        coverages.append(dict(result.coverage))
 
     keys = sorted({k for p in passes for k in p})
     scores = {
         k: sum(p[k] for p in passes if k in p) / max(1, sum(k in p for p in passes)) for k in keys
     }
+    # Cases-per-metric, recorded because a mean is not comparable across differing
+    # coverage -- that is the dropout silent-failures #5 showed reads as a real effect, and
+    # it is exactly what a drift reading would otherwise mistake for the judge moving.
+    # Measured on the first real run: a 2026-09-22 re-score of a 2026-09-17 capture came
+    # back 61/64 on `instruction_following_v1` against 64/64 originally.
+    coverage = {k: min((c[k] for c in coverages if k in c), default=0) for k in keys}
     return {
         "label": canary_metadata(path).get("label", ""),
         "canary_path": str(path),
         "scored_at": datetime.now(tz=UTC).isoformat(),
         "repeats": max(1, repeats),
+        "rows": canary_metadata(path).get("rows", 0),
         "scores": scores,
+        "coverage": coverage,
         "passes": passes,
     }
 
@@ -204,12 +214,22 @@ def canary_drift(before: dict, after: dict) -> dict:
     s_before, s_after = before.get("scores", {}), after.get("scores", {})
     shared = sorted(set(s_before) & set(s_after))
     deltas = {k: s_after[k] - s_before[k] for k in shared}
+
+    # A metric whose coverage moved is NOT a drift reading: the two means are over different
+    # case sets, so the difference mixes dropout with the judge. Reported separately rather
+    # than folded in, and excluded from max_abs_drift, which a campaign reads as a threshold.
+    c_before, c_after = before.get("coverage", {}), after.get("coverage", {})
+    uneven = sorted(
+        k for k in shared if k in c_before and k in c_after and c_before[k] != c_after[k]
+    )
+    comparable = {k: v for k, v in deltas.items() if k not in uneven}
     return {
         "label": before.get("label", ""),
         "from": before.get("scored_at", ""),
         "to": after.get("scored_at", ""),
         "deltas": deltas,
-        "max_abs_drift": max((abs(v) for v in deltas.values()), default=0.0),
+        "uneven_coverage": uneven,
+        "max_abs_drift": max((abs(v) for v in comparable.values()), default=0.0),
         # Named rather than silently dropped: a metric present on one side only usually means
         # the metric set changed between readings, which invalidates the comparison for it.
         "unmatched": sorted(set(s_before) ^ set(s_after)),

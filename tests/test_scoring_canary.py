@@ -159,9 +159,16 @@ class TestTheFileOutlivesTheSdk:
         assert "cases" not in meta
 
 
-def _fake_score(*score_sets):
-    """Patch `_score_dataset` to return fixed scores, one per call."""
-    results = [mock.Mock(scores=s) for s in score_sets]
+def _fake_score(*score_sets, coverage=None):
+    """Patch `_score_dataset` to return fixed scores, one per call.
+
+    `coverage` defaults to full (64 cases per metric), because the interesting case is the
+    uneven one and it should have to be asked for.
+    """
+    results = [
+        mock.Mock(scores=s, coverage=coverage if coverage is not None else dict.fromkeys(s, 64))
+        for s in score_sets
+    ]
     return mock.patch("wrangler.eval.evaluator._score_dataset", side_effect=results)
 
 
@@ -339,3 +346,66 @@ class TestBothExecutionPathsScoreTheCanary:
         src = inspect.getsource(stages.stage_eval)
         assert '"canary"' in src
         assert "canary_reading_for_stage" in src
+
+
+class TestCoverageIsRecordedAndGuardsTheDrift:
+    """A mean is not comparable across differing coverage.
+
+    That is the dropout silent-failures #5 showed reads as a real effect, and a drift reading
+    would otherwise mistake it for the judge moving. **Found on the first real run**: a
+    2026-09-22 re-score of a 2026-09-17 capture came back 61/64 on
+    `instruction_following_v1` against 64/64 originally — the reading recorded the score and
+    said nothing about the shrunken denominator.
+    """
+
+    def test_a_reading_records_cases_per_metric(self, frame, tmp_path):
+        path = cn.freeze_canary(frame, tmp_path / "c.json", label="probe")
+        with (
+            _fake_score({"safety_v1": 0.9}, coverage={"safety_v1": 61}),
+            mock.patch("wrangler.eval.evaluator.agent_client"),
+        ):
+            reading = cn.score_canary(path)
+
+        assert reading["coverage"] == {"safety_v1": 61}
+
+    def test_a_metric_whose_coverage_moved_is_excluded_from_the_drift(self):
+        """Excluded from `max_abs_drift` specifically, because a campaign reads that as a
+        threshold — folding in a dropout artefact would raise the bar for every metric."""
+        before = {
+            "canary_path": "c",
+            "scores": {"safety_v1": 1.00, "instruction_following_v1": 0.80},
+            "coverage": {"safety_v1": 64, "instruction_following_v1": 64},
+        }
+        after = {
+            "canary_path": "c",
+            "scores": {"safety_v1": 1.00, "instruction_following_v1": 0.60},
+            "coverage": {"safety_v1": 64, "instruction_following_v1": 61},
+        }
+
+        drift = cn.canary_drift(before, after)
+
+        assert drift["uneven_coverage"] == ["instruction_following_v1"]
+        assert drift["max_abs_drift"] == 0.0, "the 0.20 move is dropout, not the judge"
+        assert drift["deltas"]["instruction_following_v1"] == pytest.approx(-0.20), (
+            "still reported, so it is visible -- just not counted as drift"
+        )
+
+    def test_even_coverage_is_compared_normally(self):
+        before = {"canary_path": "c", "scores": {"a": 0.80}, "coverage": {"a": 64}}
+        after = {"canary_path": "c", "scores": {"a": 0.87}, "coverage": {"a": 64}}
+
+        drift = cn.canary_drift(before, after)
+
+        assert drift["uneven_coverage"] == []
+        assert drift["max_abs_drift"] == pytest.approx(0.07)
+
+    def test_readings_without_coverage_still_compare(self):
+        """Backwards-compatible: a reading taken before coverage was recorded has no
+        coverage key, and must not silently become 'uneven'."""
+        before = {"canary_path": "c", "scores": {"a": 0.80}}
+        after = {"canary_path": "c", "scores": {"a": 0.87}}
+
+        drift = cn.canary_drift(before, after)
+
+        assert drift["uneven_coverage"] == []
+        assert drift["max_abs_drift"] == pytest.approx(0.07)

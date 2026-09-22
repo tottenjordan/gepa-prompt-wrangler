@@ -598,6 +598,27 @@ For multi-model agents: `SEARCH_MCP_SERVER`, `BOOKING_MCP_SERVER`, `EXPENSE_MCP_
   ~2.8 min per side, and it touches no engine, so it carries none of the deployment lottery
   that makes `num_runs` expensive.
 
+  **FIRST RESULT (2026-09-22): the autorater is NOT what drifted.** Two DOE 03 captures were
+  frozen and re-scored five days after their original five-pass scoring. `safety_v1` moved
+  **exactly 0.0000** on one (1.0000 both dates, sd 0.0000 across the original five passes) and
+  **−0.0051 / 0.6 sd** on the other. Campaign 09's control moved **+0.0732 in ~16 h** — fifteen
+  times larger over a thirtieth of the interval, so the service-side-shift hypothesis does not
+  fit.
+
+  **A control arm re-runs inference; a canary does not.** That is the whole difference. A
+  control holds the *prompt* fixed, so its delta carries **agent variability plus judge
+  variability**; a canary holds the *responses* fixed and isolates the judge. Two earlier
+  measurements already said the same and were not read together: DOE 02 put `safety_v1`'s
+  per-case judge disagreement at **0/64**, and DOE 03 measured its `score_repeats` exponent at
+  **0.02** against `num_runs` at **0.58**. A judge-side floor falls with re-scoring. Safety's
+  does not move at all. **For `safety_v1` the floor is agent-side, and `num_runs` is the only
+  lever** — which is what DOE 03's table already said.
+
+  Also measured, and a caveat on DOE 03 itself: **coverage is less stable than assumed.**
+  `doe03-c5`'s `safety_v1` scored **48/64** on one 2026-09-17 pass and 63/64 on re-score, so
+  those floors were computed over case sets varying by up to 16 cases.
+  [docs/analysis/2026-09-22-canary-retrospective-drift.md](docs/analysis/2026-09-22-canary-retrospective-drift.md)
+
   **A control arm is necessary and not sufficient.** It holds the prompt fixed, so it
   bounds *evaluation* noise only. GEPA's search is stochastic, and on 2026-09-09 two runs
   of one manifest — same seed, model, criteria, budget, and a shared cached `eval_before` —
