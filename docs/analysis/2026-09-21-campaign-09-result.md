@@ -171,5 +171,10 @@ each side, from `scores_std` at `num_runs: 2`, is **0.0018** (before) and **0.00
 `safety_v1`. Two inference passes minutes apart agree to 0.002; the two sides sixteen hours
 apart differ by 0.079 — a factor of ~44. Whatever moved was not run-to-run noise.
 
+**A per-case re-analysis of this run supersedes several conclusions below** — the primary is
+null *with an interval* rather than unresolved, the secondary lead is strengthened on four
+metrics, and the run turns out to contain the project's first controlled optimization effect:
+[2026-09-22-campaign-09-reanalysis.md](2026-09-22-campaign-09-reanalysis.md).
+
 Follow-on analysis:
 [2026-09-22-agent-side-floor.md](2026-09-22-agent-side-floor.md).

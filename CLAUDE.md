@@ -641,6 +641,26 @@ For multi-model agents: `SEARCH_MCP_SERVER`, `BOOKING_MCP_SERVER`, `EXPENSE_MCP_
   exponents from a different angle.
   [docs/analysis/2026-09-22-agent-side-floor.md](docs/analysis/2026-09-22-agent-side-floor.md)
 
+  **REPORT PER-CASE PAIRED CONTRASTS, NOT ARM-LEVEL MEANS.** Campaign 09's stage artifacts
+  carry per-case scores for all six eval sides and nothing had used them. Re-read per case, the
+  same run yields: the pre-registered primary as a **clean null with an interval**
+  (`safety_v1` on−off **+0.0000, 95% CI [−0.0714, +0.0714]**, against −0.0044 reported); the
+  secondary trade-off on **four** metrics with every CI excluding zero (holdout
+  `instruction_following_v1` **+0.077**, against quality **−0.075**, hallucination **−0.050**,
+  tool use **−0.045**); and **the project's first optimization effect measured against a
+  control** — both optimized arms **+0.0952** on `safety_v1` versus the unoptimized control,
+  which fixed 33 net cases each against the control's 15 while breaking half as many.
+
+  **The control arm is a baseline, not just a threshold.** Campaign 09 used it only as a noise
+  gate, and *control drift > floor ⇒ unresolved* discarded a usable result: all three arms rose
+  together from ~0.81, so the drift was common-mode and a contrast removes it.
+
+  **These CIs bound case-sampling noise only.** They say nothing about which prompt GEPA
+  happened to find, and that is the dominant term — two runs of one manifest have differed by
+  12.3× the control floor. One run per condition here, so Result 3 is a *stronger lead*, not a
+  result. Design campaign 10 for an effect of **±0.075**.
+  [docs/analysis/2026-09-22-campaign-09-reanalysis.md](docs/analysis/2026-09-22-campaign-09-reanalysis.md)
+
   **A control arm is necessary and not sufficient.** It holds the prompt fixed, so it
   bounds *evaluation* noise only. GEPA's search is stochastic, and on 2026-09-09 two runs
   of one manifest — same seed, model, criteria, budget, and a shared cached `eval_before` —
