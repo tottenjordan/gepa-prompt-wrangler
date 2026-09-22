@@ -568,6 +568,36 @@ For multi-model agents: `SEARCH_MCP_SERVER`, `BOOKING_MCP_SERVER`, `EXPENSE_MCP_
   floor measured under different timing.
   [docs/analysis/2026-09-21-campaign-09-result.md](docs/analysis/2026-09-21-campaign-09-result.md)
 
+  **MEASURE THE DRIFT INSTEAD OF INFERRING IT — the scoring canary.** The autorater cannot be
+  *recorded*: `create_evaluation_run()` takes no judge parameter. It can be *measured*. Freeze
+  one inference pass as a canary and re-score it on **both** eval sides; because the responses
+  are byte-identical by construction, the difference between the two readings is the judge's
+  drift over that campaign's own window. **A campaign delta smaller than its canary drift is
+  not a prompt effect**, whatever the control arm says.
+
+  ```bash
+  uv run wrangler capture --engine-id <id> --eval-data data/eval.json --label c10
+  uv run wrangler canary freeze outputs/captures/c10_*.pkl --label c10   # -> data/canaries/c10.json
+  ```
+
+  Then set `canary: data/canaries/c10.json` under `defaults:` (local) or `pipeline:`
+  (pipeline). Both paths score it on every eval side — including the **control arm's**, which
+  is the one campaign 09 misread — and write the reading into the eval stage artifact under
+  `canary`, beside `health`. Drift is `eval_after.canary` minus `eval_before.canary`.
+
+  **JSON, not the capture pickle, deliberately.** `save_capture`'s own docstring calls its
+  output *"scratch, not archive — an SDK bump can render an old one unloadable"*, and a canary
+  whose only job is comparing across time has to outlive exactly that. The one non-JSON-native
+  field (`thought_signature`) is base64-encoded rather than dropped; "the same bytes" has to
+  be literally true or the reading measures the codec. Verified byte-exact on a real capture:
+  44 bytes-leaves, 31,900 bytes.
+
+  **Opt-in, and it never fails the stage it measures.** No `canary:` key means `{}` and no
+  spend. A canary that cannot be scored records `{"error": ...}` and the eval continues — a
+  stage that died because its thermometer broke would be worse than an unmeasured window.
+  ~2.8 min per side, and it touches no engine, so it carries none of the deployment lottery
+  that makes `num_runs` expensive.
+
   **A control arm is necessary and not sufficient.** It holds the prompt fixed, so it
   bounds *evaluation* noise only. GEPA's search is stochastic, and on 2026-09-09 two runs
   of one manifest — same seed, model, criteria, budget, and a shared cached `eval_before` —

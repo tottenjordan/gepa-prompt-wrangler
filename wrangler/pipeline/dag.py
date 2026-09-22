@@ -61,6 +61,7 @@ def build_pipeline(image_uri: str):
         eval_data_path: str,
         num_runs: int = 1,
         score_repeats: int = 1,
+        canary_path: str = "",
         judge_model: str = DEFAULT_JUDGE_MODEL,
         secret_id: str = "",
         max_metric_calls: int = 50,
@@ -114,6 +115,7 @@ def build_pipeline(image_uri: str):
                 judge_model=judge_model,
                 redeploy_output="",
                 cache_bust=cache_bust,
+                canary_path=canary_path,
             )
             eval_before_task.set_cpu_limit("4")
             eval_before_task.set_memory_limit("16G")
@@ -197,6 +199,7 @@ def build_pipeline(image_uri: str):
                     phase="after",
                     num_runs=num_runs,
                     score_repeats=score_repeats,
+                    canary_path=canary_path,
                     judge_model=judge_model,
                     redeploy_output=redeploy_task.outputs["Output"],
                     cache_bust=cache_bust,
@@ -243,6 +246,7 @@ def build_pipeline(image_uri: str):
                     phase="after",
                     num_runs=num_runs,
                     score_repeats=score_repeats,
+                    canary_path=canary_path,
                     judge_model=judge_model,
                     redeploy_output="",
                     cache_bust=cache_bust,

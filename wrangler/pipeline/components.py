@@ -305,6 +305,7 @@ def eval_single_agent(
     judge_model: str,
     redeploy_output: str,
     cache_bust: str,
+    canary_path: str,
     metrics: Output[Metrics],
     summary: Output[Markdown],
     agent_prompt: Output[Markdown],
@@ -406,12 +407,22 @@ def eval_single_agent(
     cases_scored = len(result.per_case or [])
     cases_total = len(eval_cases)
 
+    # Autorater canary, scored on both eval sides from the SAME frozen responses, so the
+    # difference between the two readings is the judge's drift over this campaign's window.
+    # Campaign 09 could not separate a service-side shift from a prompt effect and reported
+    # its primary readout UNRESOLVED; this is the measurement it lacked. Opt-in: empty
+    # `canary_path` yields {} and costs nothing.
+    from wrangler.eval.canary import canary_reading_for_stage
+
+    canary = canary_reading_for_stage(canary_path, root="/app", tag=f"{pair_id} {phase}")
+
     stage_data = {
         "scores": result.scores,
         "per_case": result.per_case,
         "scores_std": result.scores_std,
         "num_runs": result.num_runs,
         "score_repeats": score_repeats,
+        "canary": canary,
         "cases_scored": cases_scored,
         "cases_total": cases_total,
         "coverage": cases_scored / cases_total if cases_total else 0.0,
