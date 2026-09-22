@@ -267,14 +267,49 @@ def package_and_upload_code(
         "node_modules",
         ".mypy_cache",
         "_geap_build_pkg",
+        # 9.1 MB, 71% of the tarball, and no stage imports it -- 6 MB of that is the
+        # README banner PNG, re-uploaded and re-extracted for every stage of every arm.
+        # Every `docs/` mention in shipped code is a comment or a URL; the only real read
+        # is scripts/generate_diagrams.py, a local authoring tool that drives PaperBanana
+        # and never runs in a pipeline container.
+        "docs",
     }
 
+    def _excluded(name: str) -> bool:
+        """The rule, applied to one path component."""
+        return name in excludes or name.startswith(".")
+
+    def _filter(info: tarfile.TarInfo) -> tarfile.TarInfo | None:
+        """Apply the exclusion rule at **every depth**, not just the top level.
+
+        `tar.add()` recurses, so testing only `os.listdir(project_root)` excluded a
+        directory named `outputs` at the root and shipped every `outputs/` nested inside an
+        included one. Measured on this repo before the fix: **475 `__pycache__` members
+        (455 `.pyc`)**, 18 nested `outputs/` entries, and
+        `examples/multi_model_agents/.env` -- a real, gitignored, 63-line credentials file
+        uploaded to GCS and extracted at `/app` in every stage.
+
+        That last one is the same mistake `build_source_package` already fixed for the
+        agent build package ("it uploaded a secrets file to a server that never reads it",
+        pinned by `tests/test_deploy.py::test_no_env_file_shipped`). The fix was applied to
+        one of the two upload paths; this is the other. Neither `.gitignore` nor the
+        detect-secrets hook can catch it, because both guard what reaches *git* and this
+        file never does.
+
+        **Leaf name only, deliberately.** `tar.add()` skips the whole subtree when the
+        filter rejects a directory, so testing every ancestor in `info.name` can never
+        reject anything this does not -- verified by mutation: the two forms are
+        indistinguishable to every test here, which is the definition of a branch that
+        cannot be maintained.
+        """
+        return None if _excluded(Path(info.name).name) else info
+
     with tarfile.open(tarball_path, "w:gz") as tar:
-        for item in os.listdir(str(project_root)):
-            if item in excludes or item.startswith("."):
+        for item in sorted(os.listdir(str(project_root))):
+            if _excluded(item):
                 continue
             full_path = project_root / item
-            tar.add(str(full_path), arcname=item)
+            tar.add(str(full_path), arcname=item, filter=_filter)
 
     client = storage.Client(project=project_id)
     bucket = client.bucket(bucket_name)

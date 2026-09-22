@@ -684,7 +684,31 @@ KFP caches each component independently based on: **(1) component function body 
 **Verified behavior:** After changing optimize + analysis component code but not deploy/eval code, archive/deploy/eval_before cached correctly and the pipeline started directly at optimize.
 
 ### Tarball Packaging
-`deploy_pipeline.py` packages the **full project tree** using an exclude-list (`.venv`, `.git`, `__pycache__`, `outputs`, `experiments`, `_geap_build_pkg`). Missing directories have caused multiple pipeline failures. If you add new directories the agents depend on, they'll be included automatically. The `_geap_build_pkg` directory is excluded because it's a transient build artifact created during deployment.
+`deploy_pipeline.py` packages the **full project tree** using an exclude-list (`.venv`, `.git`, `__pycache__`, `outputs`, `experiments`, `_geap_build_pkg`, `docs`, and anything starting with `.`). Missing directories have caused multiple pipeline failures. If you add new directories the agents depend on, they'll be included automatically. The `_geap_build_pkg` directory is excluded because it's a transient build artifact created during deployment.
+
+**The rules apply at every depth, and until 2026-09-22 they did not.** `tar.add()` recurses,
+but the exclusion was only tested against `os.listdir(project_root)` — so the rules held at
+the root and nothing below it. Measured on this repo before the fix:
+
+| shipped | why it mattered |
+| --- | --- |
+| **475 `__pycache__` members, 455 `.pyc`** | bytecode from whichever interpreter last ran locally (3.11 here, 3.14 in the MCP images) |
+| 18 nested `outputs/` entries | stale result data |
+| `examples/multi_model_agents/.env` | **a real, gitignored, 63-line credentials file** — `GCP_PROJECT_ID`, `PROJECT_NUMBER`, `GCP_STAGING_BUCKET` — uploaded to GCS and extracted at `/app` in every stage |
+
+That last one is the same mistake `build_source_package` already fixed on the *other* upload
+path, where the comment reads *"it uploaded a secrets file to a server that never reads it"*
+(`tests/test_deploy.py::test_no_env_file_shipped`). The fix had only been applied to one of
+the two paths. **Neither `.gitignore` nor the detect-secrets hook can catch this** — both
+guard what reaches *git*, and that file never does; only a test can.
+`tests/test_code_tarball_packaging.py` now pins both halves.
+
+`docs/` was added to the list at the same time: 9.1 MB and **71% of the tarball**, 6 MB of it
+the README banner PNG, re-uploaded and re-extracted for every stage of every arm. No stage
+imports it — every `docs/` reference in shipped code is a comment or a URL, and the one real
+read (`scripts/generate_diagrams.py`) is a local authoring tool that drives PaperBanana.
+
+Net effect: **12,638 KB → 1,063 KB** compressed, 4,044 → 3,430 members.
 
 ### Docker Image
 Pre-built via Cloud Build, tagged by `md5(pyproject.toml + uv.lock + Dockerfile.pipeline)[:12]` (`_compute_image_tag()` in `wrangler/pipeline/deploy_pipeline.py`). Adding a dependency to any of the three triggers a rebuild (~3 min). All three are needed: `pyproject.toml` holds ranges rather than resolved versions, and `Dockerfile.pipeline` installs from its own hardcoded `pip install` list — it copies `pyproject.toml` but does not install from it.
