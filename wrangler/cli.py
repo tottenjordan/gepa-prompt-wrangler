@@ -223,7 +223,18 @@ def engines_list(days: int):
 @click.option("--days", default=30, help="Traffic window (default: 30).")
 @click.option("--yes", is_flag=True, help="Actually delete. Without this, nothing happens.")
 @click.option("--snapshot/--no-snapshot", default=True, help="Write a dated inventory first.")
-def engines_prune(days: int, yes: bool, snapshot: bool):
+@click.option(
+    "--capture/--no-capture",
+    default=True,
+    help="Freeze a final capture from every CAMPAIGN-labelled engine before deleting it. "
+    "A capture that fails cancels that engine's deletion. ~5 min per engine.",
+)
+@click.option(
+    "--eval-data",
+    default="examples/multi_model_agents/eval_data/eval_cases.yaml",
+    help="Eval set for the pre-reap capture.",
+)
+def engines_prune(days: int, yes: bool, snapshot: bool, capture: bool, eval_data: str):
     """Delete engines every signal agrees are disposable. Dry run by default.
 
     An engine is only deletable when it is labelled ours, has served no traffic
@@ -261,8 +272,28 @@ def engines_prune(days: int, yes: bool, snapshot: bool):
         )
         return
 
+    from .tools.forensics import capture_engine, needs_forensics, summarise
+
+    capture_fn = None
+    if capture:
+        targets = [r for r in plan["delete"] if needs_forensics(r)]
+        if targets:
+            click.echo(
+                f"\n  Pre-reap capture: {len(targets)} campaign engine(s), ~5 min each. "
+                f"A failed capture cancels that engine's deletion (--no-capture to skip)."
+            )
+
+        def capture_fn(row):
+            # Campaign engines only: those are the ones whose numbers are in a write-up and
+            # may have to be re-measured. Scratch engines are not worth five minutes.
+            if not needs_forensics(row):
+                return None
+            return capture_engine(row, eval_data=eval_data)
+
     click.echo(f"\nDeleting {len(plan['delete'])} engines...")
-    result = execute_prune(plan, delete_fn=delete_engine, confirm=True)
+    result = execute_prune(plan, delete_fn=delete_engine, confirm=True, capture_fn=capture_fn)
+    for line in summarise(result.get("captured") or []):
+        click.echo(line)
     click.echo(f"  deleted: {len(result['deleted'])}")
     for eid, err in result["failed"].items():
         click.echo(f"  FAILED {eid}: {err}")
