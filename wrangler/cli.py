@@ -1009,3 +1009,103 @@ def preflight_cmd():
 
 if __name__ == "__main__":
     main()
+
+
+@main.group("canary")
+def canary_group():
+    """Measure autorater drift by re-scoring a fixed set of responses.
+
+    Campaign 09's control arm drifted 9x the floor DOE 03 measured for the same
+    metric, and the campaign could not say whether that was a service-side
+    autorater change or a real effect -- so its primary readout was UNRESOLVED.
+
+    The autorater cannot be recorded: `create_evaluation_run()` takes no judge
+    parameter. It can be *measured*. Freeze one inference pass, re-score it at
+    each eval side, and the difference is the judge's drift over that window
+    with the agent and the prompt held exactly constant.
+    """
+
+
+@canary_group.command("freeze")
+@click.argument("capture_path")
+@click.option("--label", required=True, help="Name for this canary; readings are matched on it.")
+@click.option(
+    "--out", "out_path", default="", help="Output path (default: data/canaries/<label>.json)."
+)
+def canary_freeze(capture_path: str, label: str, out_path: str):
+    """Turn a capture into a durable canary.
+
+    JSON, not the capture's pickle: `save_capture` calls its own output "scratch,
+    not archive -- an SDK bump can render an old one unloadable", and a canary
+    whose only job is comparing across time has to outlive exactly that.
+    """
+    import json
+    from pathlib import Path
+
+    from .eval.canary import CANARY_DIR, freeze_canary
+    from .eval.evaluator import load_capture
+
+    dest = out_path or str(Path(CANARY_DIR) / f"{label}.json")
+    meta_path = Path(capture_path).with_suffix(".json")
+    meta = json.loads(meta_path.read_text()) if meta_path.exists() else {}
+    path = freeze_canary(
+        load_capture(capture_path),
+        dest,
+        label=label,
+        source=capture_path,
+        engine_id=meta.get("engine_id", ""),
+        model=meta.get("model", ""),
+    )
+    click.echo(f"\n  Canary: {path}")
+    click.echo(f"  Score it at each eval side: wrangler canary score {path}")
+
+
+@canary_group.command("score")
+@click.argument("canary_path")
+@click.option("--repeat", "-r", default=1, type=int, help="Average N scoring passes.")
+@click.option("--out", "out_path", default="", help="Append the reading to this JSONL file.")
+def canary_score(canary_path: str, repeat: int, out_path: str):
+    """Score a canary and record the reading. Makes no agent calls."""
+    import json
+
+    from .eval.canary import score_canary
+
+    reading = score_canary(canary_path, repeats=repeat)
+    click.echo(f"\n  Canary reading ({reading['label']}, {reading['scored_at']}):")
+    for metric, score in sorted(reading["scores"].items()):
+        click.echo(f"    {metric:40s} {score:.4f}")
+    if out_path:
+        with Path(out_path).open("a") as fh:
+            fh.write(json.dumps(reading) + "\n")
+        click.echo(f"\n  Appended to {out_path}")
+
+
+@canary_group.command("drift")
+@click.argument("readings_path")
+def canary_drift_cmd(readings_path: str):
+    """Report movement between the first and last reading in a JSONL file.
+
+    Whatever moved is the judge: the responses underneath are identical by
+    construction. A campaign delta smaller than this is not a prompt effect,
+    whatever its control arm says.
+    """
+    import json
+
+    from .eval.canary import canary_drift
+
+    readings = [
+        json.loads(line) for line in Path(readings_path).read_text().splitlines() if line.strip()
+    ]
+    if len(readings) < 2:
+        click.echo(f"  Need two readings to compute drift; {readings_path} has {len(readings)}.")
+        raise SystemExit(1)
+
+    drift = canary_drift(readings[0], readings[-1])
+    click.echo(f"\n  Autorater drift for '{drift['label']}'")
+    click.echo(f"    {drift['from']}  ->  {drift['to']}")
+    for metric, delta in sorted(drift["deltas"].items()):
+        click.echo(f"    {metric:40s} {delta:+.4f}")
+    click.echo(f"\n    max |drift| = {drift['max_abs_drift']:.4f}")
+    click.echo("    A campaign delta smaller than this is not a prompt effect.")
+    if drift["unmatched"]:
+        click.echo(f"    NOT COMPARED (metric set changed): {', '.join(drift['unmatched'])}")

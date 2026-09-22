@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING
 from ..core import deploy as deployer
 from ..core.converter import load_eval_file
 from ..core.models import DEFAULT_JUDGE_MODEL, DEFAULT_MANIFEST_JUDGE_MODEL
+from ..eval.canary import canary_reading_for_stage
 from ..eval.evaluator import run_batch_eval_averaged
 from ..optimize.optimizer import optimize
 from ..reporting.reporter import generate_report as _generate_report
@@ -713,6 +714,10 @@ def stage_eval(
     # DOE 02: the holdout is judge-dominated, safety is not. Default 1 -- turning it
     # on re-baselines a campaign's floor, so it must be asked for.
     score_repeats = score_repeats or exp.config.get("defaults", {}).get("score_repeats", 1)
+    # Opt-in autorater canary. Scored on BOTH eval sides so the delta between the two
+    # readings is the judge's drift over this campaign's own window -- the measurement
+    # campaign 09 lacked when its control drifted 9x the floor DOE 03 had measured.
+    canary_path = exp.config.get("defaults", {}).get("canary", "")
 
     deploy_data = exp.read_stage("deploy")
     eval_path = _resolve_eval_path(manifest, mdir)
@@ -757,6 +762,10 @@ def stage_eval(
                 "scores_std": result.scores_std,
                 "num_runs": result.num_runs,
                 "score_repeats": score_repeats,
+                # Empty dict when no canary is configured, which is the default.
+                "canary": canary_reading_for_stage(
+                    canary_path, root=str(mdir), tag=f"{pair.id} {phase}"
+                ),
                 "elapsed": elapsed,
                 "token_usage": result.token_usage,
                 # Cases-per-metric. Persisted because comparing a before/after

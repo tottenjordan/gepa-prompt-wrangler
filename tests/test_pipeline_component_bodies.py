@@ -278,7 +278,7 @@ class _FakeEvalResult:
         self.token_usage = {"input_tokens": 1000, "output_tokens": 200}
 
 
-def _run_eval(io, *, phase: str, pair_json: str | None = None):
+def _run_eval(io, *, phase: str, pair_json: str | None = None, canary_path: str = ""):
     return components.eval_single_agent.python_func(
         project_id=PROJECT,
         location="us-central1",
@@ -292,6 +292,7 @@ def _run_eval(io, *, phase: str, pair_json: str | None = None):
         judge_model="gemini-3.5-flash",
         redeploy_output="",
         cache_bust="v1",
+        canary_path=canary_path,
         **io.outputs,
     )
 
