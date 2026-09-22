@@ -233,3 +233,42 @@ the refusal notice above it.
 
 Cloud Run MCP services, Artifact Registry images and GCS staging artifacts accumulate the
 same way and have not been audited. Worth its own pass.
+
+
+## `gepa-c08-new-r1` (`4023875557346246656`) — retain, with a reason
+
+Created 2026-09-11, last updated 2026-09-12. **Do not reap it while
+[docs/analysis/2026-09-22-agent-side-floor.md](../analysis/2026-09-22-agent-side-floor.md)
+is live.** It is the only comparator for the DOE 03 baseline of 2026-09-17: the six captures
+on disk were taken from this engine, so deleting it makes every agent-side-drift measurement
+against that baseline unrepeatable. A settled engine is also the control for the "engine age"
+hypothesis in that note.
+
+Its age is the point. Reaping it costs a measurement that cannot be recreated.
+
+
+## Capture before you reap
+
+**The last step of teardown is a capture, not a delete.** `wrangler engines prune` now freezes
+a final inference pass from every **campaign-labelled** engine before deleting it, as a durable
+canary JSON that can be re-scored indefinitely. `--no-capture` skips it; `--eval-data` chooses
+the set.
+
+**A capture that fails cancels that engine's deletion.** Losing the engine *and* its responses
+is the failure this prevents, so the engine survives to be pruned again — or deliberately with
+`--no-capture`, which is a decision someone makes rather than a silent loss. Other engines in
+the batch are unaffected.
+
+**Why.** Campaign 09's three engines were reaped on 2026-09-21, correctly and by this policy.
+On 2026-09-22 its control arm's drift turned out to be **44x** larger between eval sides than
+between two inference passes minutes apart — a state change, not noise — and the measurement
+that would have said whether it was permanent or transient needed those engines. They were
+gone.
+
+That ordering is the general case rather than bad luck: **engines are reaped on a schedule and
+anomalies are investigated afterwards**, because a write-up is published before anyone knows
+which number will turn out to be interesting. Five minutes per campaign engine buys the
+ability to answer a question nobody has asked yet.
+
+Scratch engines are skipped deliberately — the project reached 80 engines, and a sweep that
+took hours is a sweep nobody runs.

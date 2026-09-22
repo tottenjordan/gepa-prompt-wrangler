@@ -195,6 +195,7 @@ def execute_prune(
     pause: float = DELETE_PAUSE_SECONDS,
     sleep_fn=None,
     progress_fn=None,
+    capture_fn=None,
 ) -> dict:
     """Delete the planned engines. **Does nothing unless ``confirm``.**
 
@@ -202,18 +203,39 @@ def execute_prune(
     rather than lost to whichever engine happened to fail first. Quota errors
     are retried with a backoff; anything else is not, since retrying a
     permission error only burns the quota budget that the next engine needs.
+
+    **``capture_fn`` freezes an engine's responses before it goes**, and a capture that
+    fails **cancels that engine's deletion**. Campaign 09's engines were reaped by policy on
+    2026-09-21 and the measurement that needed them became interesting on 2026-09-22; engines
+    are reaped on a schedule and anomalies are investigated afterwards, so the default has to
+    be "keep the evidence". The engine survives to be pruned again once the capture works, or
+    deliberately with capture turned off -- which is a decision someone makes, not a silent
+    loss. Returns the records under ``captured``.
     """
     if not confirm:
-        return {"deleted": [], "failed": {}, "dry_run": True}
+        return {"deleted": [], "failed": {}, "captured": [], "dry_run": True}
 
     import time as _time
 
     nap = sleep_fn or _time.sleep
-    deleted, failed = [], {}
+    deleted, failed, captured = [], {}, []
     for i, row in enumerate(plan["delete"]):
         if i and pause:
             nap(pause)
         eid = row["id"]
+
+        if capture_fn is not None:
+            record = capture_fn(row)
+            if record is not None:
+                captured.append(record)
+                if record.get("error"):
+                    # Not deleted: losing the engine AND its responses is the failure this
+                    # exists to prevent.
+                    failed[eid] = f"pre-reap capture failed, not deleted — {record['error']}"
+                    if progress_fn:
+                        progress_fn(len(deleted), len(failed), len(plan["delete"]))
+                    continue
+
         last = None
         for attempt in range(DELETE_MAX_ATTEMPTS):
             try:
@@ -230,7 +252,7 @@ def execute_prune(
             failed[eid] = last
         if progress_fn:
             progress_fn(len(deleted), len(failed), len(plan["delete"]))
-    return {"deleted": deleted, "failed": failed, "dry_run": False}
+    return {"deleted": deleted, "failed": failed, "captured": captured, "dry_run": False}
 
 
 def referenced_ids(paths: tuple[str, ...] | list[str] = DEFAULT_REFERENCE_PATHS) -> set[str]:

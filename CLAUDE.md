@@ -619,6 +619,59 @@ For multi-model agents: `SEARCH_MCP_SERVER`, `BOOKING_MCP_SERVER`, `EXPENSE_MCP_
   those floors were computed over case sets varying by up to 16 cases.
   [docs/analysis/2026-09-22-canary-retrospective-drift.md](docs/analysis/2026-09-22-canary-retrospective-drift.md)
 
+  **AND IT IS NOT ELAPSED TIME EITHER (2026-09-22).** The obvious follow-up — that the
+  *agent*-side floor grows with the 12-20 h gap between eval sides, since DOE 03 measured its
+  floors minutes apart — was tested and **refuted**. A fresh capture from the same engine and
+  eval set five days on moved `safety_v1` **+0.0095**, 0.8 within-day agent sd; nothing moved
+  past 2.0 sd. Campaign 09's control moved +0.0732 in sixteen hours.
+
+  So five candidates are now ruled out for that drift: the judge (canary, ≤0.005/5 days),
+  elapsed time (+0.0095/5 days), dropout (two sides were 63/64 — pairing makes the drift
+  *larger*, +0.0794), an engine change (the control branch skips redeploy), and **prompt
+  variance**.
+
+  **Prompt variance was the sharp candidate and it is dead.** The idea was that the control's
+  **78-character seed** leaves so much latitude that its response distribution is far wider
+  than a specified prompt's, making every control arm a worst-case instrument. It predicts
+  something checkable for free: `scores_std` records the across-run spread *within* each eval
+  side at `num_runs: 2`, and campaign 09 has four seed-prompt sides against two running 5-6k
+  optimized prompts. **Seed sides are NARROWER** — pooled 0.0090 vs 0.0141, wrong-signed on
+  four of five metrics including `safety_v1` (2.55x). The control's before side is **0.0018**,
+  the tightest number in the run, on the arm that then moved +0.0794 across the gap. Dropped;
+  the planned 2x2 would have spent two hours confirming a null.
+
+  **What survives is engine age / platform state** — campaign 09's engines were hours old, the
+  one measured above had been up ten days — and it is **no longer separable from campaign 09's
+  data**, because those engines were reaped on 2026-09-21. Testing it needs a fresh deploy
+  captured at t=0 and t+16 h.
+
+  **Split judge from agent variance whenever a DOE takes multiple captures and scores each
+  multiple times** — it is free and it says which lever to buy. On DOE 03's own data:
+  `safety_v1` agent/judge **2.6** (agent-dominated), `final_response_quality_v1` **0.5**
+  (judge-dominated), which independently reproduces that DOE's `num_runs`/`score_repeats`
+  exponents from a different angle.
+  [docs/analysis/2026-09-22-agent-side-floor.md](docs/analysis/2026-09-22-agent-side-floor.md)
+
+  **REPORT PER-CASE PAIRED CONTRASTS, NOT ARM-LEVEL MEANS.** Campaign 09's stage artifacts
+  carry per-case scores for all six eval sides and nothing had used them. Re-read per case, the
+  same run yields: the pre-registered primary as a **clean null with an interval**
+  (`safety_v1` on−off **+0.0000, 95% CI [−0.0714, +0.0714]**, against −0.0044 reported); the
+  secondary trade-off on **four** metrics with every CI excluding zero (holdout
+  `instruction_following_v1` **+0.077**, against quality **−0.075**, hallucination **−0.050**,
+  tool use **−0.045**); and **the project's first optimization effect measured against a
+  control** — both optimized arms **+0.0952** on `safety_v1` versus the unoptimized control,
+  which fixed 33 net cases each against the control's 15 while breaking half as many.
+
+  **The control arm is a baseline, not just a threshold.** Campaign 09 used it only as a noise
+  gate, and *control drift > floor ⇒ unresolved* discarded a usable result: all three arms rose
+  together from ~0.81, so the drift was common-mode and a contrast removes it.
+
+  **These CIs bound case-sampling noise only.** They say nothing about which prompt GEPA
+  happened to find, and that is the dominant term — two runs of one manifest have differed by
+  12.3× the control floor. One run per condition here, so Result 3 is a *stronger lead*, not a
+  result. Design campaign 10 for an effect of **±0.075**.
+  [docs/analysis/2026-09-22-campaign-09-reanalysis.md](docs/analysis/2026-09-22-campaign-09-reanalysis.md)
+
   **A control arm is necessary and not sufficient.** It holds the prompt fixed, so it
   bounds *evaluation* noise only. GEPA's search is stochastic, and on 2026-09-09 two runs
   of one manifest — same seed, model, criteria, budget, and a shared cached `eval_before` —
