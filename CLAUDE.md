@@ -619,6 +619,28 @@ For multi-model agents: `SEARCH_MCP_SERVER`, `BOOKING_MCP_SERVER`, `EXPENSE_MCP_
   those floors were computed over case sets varying by up to 16 cases.
   [docs/analysis/2026-09-22-canary-retrospective-drift.md](docs/analysis/2026-09-22-canary-retrospective-drift.md)
 
+  **AND IT IS NOT ELAPSED TIME EITHER (2026-09-22).** The obvious follow-up — that the
+  *agent*-side floor grows with the 12-20 h gap between eval sides, since DOE 03 measured its
+  floors minutes apart — was tested and **refuted**. A fresh capture from the same engine and
+  eval set five days on moved `safety_v1` **+0.0095**, 0.8 within-day agent sd; nothing moved
+  past 2.0 sd. Campaign 09's control moved +0.0732 in sixteen hours.
+
+  So four candidates are now ruled out for that drift: the judge (canary, ≤0.005/5 days),
+  elapsed time (+0.0095/5 days), dropout (campaign 09 was 64/64 both sides) and an engine
+  change (the control branch skips redeploy). **What survives is configuration**, and the
+  sharper of the two candidates is that **the agent-side floor is a property of the prompt**:
+  campaign 09's control ran the **78-character seed** on both sides, which is the widest
+  response distribution available, and lent that floor to arms running 5,000+ character
+  optimized prompts. Untested — and worth testing before campaign 10's control is designed,
+  because every floor in this repo is measured that way.
+
+  **Split judge from agent variance whenever a DOE takes multiple captures and scores each
+  multiple times** — it is free and it says which lever to buy. On DOE 03's own data:
+  `safety_v1` agent/judge **2.6** (agent-dominated), `final_response_quality_v1` **0.5**
+  (judge-dominated), which independently reproduces that DOE's `num_runs`/`score_repeats`
+  exponents from a different angle.
+  [docs/analysis/2026-09-22-agent-side-floor.md](docs/analysis/2026-09-22-agent-side-floor.md)
+
   **A control arm is necessary and not sufficient.** It holds the prompt fixed, so it
   bounds *evaluation* noise only. GEPA's search is stochastic, and on 2026-09-09 two runs
   of one manifest — same seed, model, criteria, budget, and a shared cached `eval_before` —

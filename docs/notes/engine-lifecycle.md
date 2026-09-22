@@ -233,3 +233,15 @@ the refusal notice above it.
 
 Cloud Run MCP services, Artifact Registry images and GCS staging artifacts accumulate the
 same way and have not been audited. Worth its own pass.
+
+
+## `gepa-c08-new-r1` (`4023875557346246656`) — retain, with a reason
+
+Created 2026-09-11, last updated 2026-09-12. **Do not reap it while
+[docs/analysis/2026-09-22-agent-side-floor.md](../analysis/2026-09-22-agent-side-floor.md)
+is live.** It is the only comparator for the DOE 03 baseline of 2026-09-17: the six captures
+on disk were taken from this engine, so deleting it makes every agent-side-drift measurement
+against that baseline unrepeatable. A settled engine is also the control for the "engine age"
+hypothesis in that note.
+
+Its age is the point. Reaping it costs a measurement that cannot be recreated.
