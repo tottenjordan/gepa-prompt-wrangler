@@ -107,10 +107,34 @@ error, and the remainder is Vertex submission plumbing whose failures are loud:
   multiple pipeline failures". The rest is image build and job submission, which need a live
   project to mean anything.
 
-One thing found while testing, recorded rather than changed: `trace-health` exits **0** on
-UNKNOWN. Only a confirmed drop fails the gate, so a Logging API outage does not block every
-campaign — but a run whose health could not be measured looks identical to a clean one under
-`&&`. Current behaviour is pinned by test, so changing it is a decision rather than a drift.
+One thing found while testing, recorded rather than changed at the time and **fixed on
+2026-09-22**: `trace-health` exited **0** on UNKNOWN. Only a confirmed drop failed the gate,
+so a Logging API outage did not block every campaign — but a run whose health could not be
+measured looked identical to a clean one under `&&`. The printed text said "Unknown is not
+clean" while the exit code said the opposite, and **the exit code is what a gate is made
+of**.
+
+Now:
+
+| code | meaning |
+| --- | --- |
+| 0 | measured, and clean |
+| 1 | confirmed dropped batches |
+| 2 | could not measure |
+
+Distinct codes rather than folding UNKNOWN into 1, so `&&` blocks on either while a caller
+that wants to tell them apart still can. A run that is both degraded *and* partly unreadable
+exits 1 — a problem you can see outranks one you cannot.
+
+The original reasoning is preserved as `--allow-unknown`, which restores exit 0. It tolerates
+*not knowing*; it does not excuse a measured failure, and the pass line then reads
+`PASS (--allow-unknown): N clean, M unmeasured` rather than claiming a clean sweep. The
+change is that it is now a decision at the call site instead of a silent default.
+
+Safe to change because nothing automated depended on it: no CI job runs `trace-health`, and
+the only caller is the CLI wrapper. Six scenarios are pinned at the process-exit-code level
+through `CliRunner`, since that — not `trace_health`'s internal `sys.exit` — is the contract
+a gate actually has.
 
 ### W2 · Ten functions over 190 lines
 

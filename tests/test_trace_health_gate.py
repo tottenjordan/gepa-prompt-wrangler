@@ -194,31 +194,109 @@ class TestTheGateExitsOnRealTroubleOnly:
         assert count.call_args.args[1] == 15
 
 
-class TestAnUnreadableEngineIsReportedButDoesNotFailTheGate:
-    """Deliberate asymmetry, and worth knowing about: UNKNOWN prints a warning and exits
-    **0**. Only a confirmed drop fails the gate.
+def _unknown(engine_ids=("eng-1",)):
+    """Every engine reports an error, i.e. health could not be measured."""
+    return (
+        _with_engines({f"a{i}": e for i, e in enumerate(engine_ids)}),
+        mock.patch.object(
+            oe,
+            "count_span_export_errors",
+            return_value={"dropped_batches": 0, "truncated": False, "error": "HTTP 429"},
+        ),
+    )
 
-    The reasoning is that a Logging API outage should not block every campaign. The cost is
-    that a run whose health could not be measured looks the same to `&&` as one that was
-    measured and clean -- which is why the output says "Unknown is not clean" in words.
-    These tests pin the current behaviour so a change to it is a decision rather than a
-    drift.
+
+class TestAnUnmeasurableEngineFailsTheGateToo:
+    """**A check that cannot see is not a check that passed.**
+
+    Until 2026-09-22 an unreadable engine exited **0**: the printed text said "Unknown is not
+    clean" while the exit code said the opposite, and the exit code is what a gate is made
+    of. A Logging API outage was indistinguishable from a clean sweep to any `&&`.
+
+    It now exits **2** -- distinct from the 1 a confirmed drop gives, so `&&` blocks on
+    either while a caller who wants to tell them apart still can.
     """
 
-    def test_an_error_result_is_surfaced_as_unknown(self, capsys):
+    def test_an_unreadable_engine_exits_two(self, capsys):
+        engines, counter = _unknown()
+        with engines, counter, pytest.raises(SystemExit) as exc:
+            oe.trace_health([])
+
+        assert exc.value.code == 2
+        out = capsys.readouterr().out
+        assert "UNKNOWN" in out
+        assert "unverified rather than clean" in out
+
+    def test_an_exception_rather_than_an_error_field_also_exits_two(self):
+        """The two unreadable paths -- a non-200 recorded in `error`, and a raised
+        exception -- must reach the same verdict."""
+        with (
+            _with_engines({"sonnet": "eng-1"}),
+            mock.patch.object(
+                oe, "count_span_export_errors", side_effect=RuntimeError("connection reset")
+            ),
+            pytest.raises(SystemExit) as exc,
+        ):
+            oe.trace_health([])
+
+        assert exc.value.code == 2
+
+    def test_a_confirmed_drop_outranks_an_unmeasured_engine(self):
+        """Both conditions at once exits **1**, not 2: a problem you can see is worse news
+        than one you cannot, and the caller should read the more specific code."""
+        results = {
+            "eng-1": {"dropped_batches": 0, "truncated": False, "error": "HTTP 429"},
+            "eng-2": {"dropped_batches": 5, "truncated": False, "error": ""},
+        }
+        with (
+            _with_engines({"a": "eng-1", "b": "eng-2"}),
+            mock.patch.object(oe, "count_span_export_errors", side_effect=lambda e, m: results[e]),
+            pytest.raises(SystemExit) as exc,
+        ):
+            oe.trace_health([])
+
+        assert exc.value.code == 1
+
+    def test_allow_unknown_restores_the_old_tolerance(self, capsys):
+        """The original reasoning -- an outage should not block every campaign -- kept as an
+        explicit decision at the call site rather than a silent default."""
+        engines, counter = _unknown()
+        with engines, counter:
+            oe.trace_health(["--allow-unknown"])
+
+        out = capsys.readouterr().out
+        assert "PASS (--allow-unknown)" in out
+        assert "1 unmeasured" in out, "the pass must still say what it could not measure"
+
+    def test_allow_unknown_does_not_excuse_a_confirmed_drop(self):
+        """The flag tolerates *not knowing*; it must not tolerate a measured failure."""
         with (
             _with_engines({"sonnet": "eng-1"}),
             mock.patch.object(
                 oe,
                 "count_span_export_errors",
-                return_value={"dropped_batches": 0, "truncated": False, "error": "HTTP 429"},
+                return_value={"dropped_batches": 9, "truncated": False, "error": ""},
             ),
+            pytest.raises(SystemExit) as exc,
         ):
-            oe.trace_health([])
+            oe.trace_health(["--allow-unknown"])
 
-        out = capsys.readouterr().out
-        assert "UNKNOWN" in out
-        assert "Unknown is not clean" in out
+        assert exc.value.code == 1
+
+    def test_a_flag_is_not_parsed_as_the_window(self):
+        """`minutes` and the flags share one argument list. Reading `args[0]` blindly makes
+        `trace-health --allow-unknown` die on `int("--allow-unknown")`."""
+        with (
+            _with_engines({"sonnet": "eng-1"}),
+            mock.patch.object(
+                oe,
+                "count_span_export_errors",
+                return_value={"dropped_batches": 0, "truncated": False, "error": ""},
+            ) as count,
+        ):
+            oe.trace_health(["--allow-unknown"])
+
+        assert count.call_args.args[1] == 60, "the default window, not a parse failure"
 
     def test_an_exception_reading_one_engine_does_not_abort_the_others(self, capsys):
         """A raised exception must be contained per engine, or the first bad engine hides
@@ -237,9 +315,48 @@ class TestAnUnreadableEngineIsReportedButDoesNotFailTheGate:
         with (
             _with_engines({"a": "eng-1", "b": "eng-2"}),
             mock.patch.object(oe, "count_span_export_errors", side_effect=fake),
+            pytest.raises(SystemExit),
         ):
             oe.trace_health([])
 
         out = capsys.readouterr().out
         assert "UNKNOWN" in out
         assert "eng-2" in out, "the second engine must still be checked"
+
+
+# ── the CLI wiring ────────────────────────────────────────────────
+
+
+class TestTheExitCodeSurvivesTheCliWrapper:
+    """The gate is invoked as `wrangler evaluators trace-health`, so the contract that
+    matters is the process exit code, not `trace_health`'s internal `sys.exit`.
+
+    `--minutes` and `--allow-unknown` share one argument list by the time they reach
+    `trace_health`, which is how a flag can get parsed as the look-back window.
+    """
+
+    @pytest.mark.parametrize(
+        ("argv", "result", "expected"),
+        [
+            ([], {"dropped_batches": 0, "error": ""}, 0),
+            ([], {"dropped_batches": 4, "error": ""}, 1),
+            ([], {"dropped_batches": 0, "error": "HTTP 429"}, 2),
+            (["--allow-unknown"], {"dropped_batches": 0, "error": "HTTP 429"}, 0),
+            (["--allow-unknown"], {"dropped_batches": 4, "error": ""}, 1),
+            (["--minutes", "15"], {"dropped_batches": 0, "error": "HTTP 429"}, 2),
+        ],
+    )
+    def test_the_process_exit_code(self, argv, result, expected):
+        from click.testing import CliRunner
+
+        from wrangler.cli import main
+
+        with (
+            _with_engines({"sonnet": "eng-1"}),
+            mock.patch.object(
+                oe, "count_span_export_errors", return_value={"truncated": False, **result}
+            ),
+        ):
+            invoked = CliRunner().invoke(main, ["evaluators", "trace-health", *argv])
+
+        assert invoked.exit_code == expected

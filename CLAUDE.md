@@ -27,7 +27,11 @@ uv run wrangler evaluators --help # Online (trace-scoring) evaluators — 7 comm
 
 `wrangler evaluators trace-health` is the diagnostic for the OTel span-drop
 failure in [docs/notes/silent-failures.md](docs/notes/silent-failures.md) #8 and
-exits non-zero when an engine drops batches, so it can gate a run.
+exits non-zero when an engine drops batches, so it can gate a run. **Exit 1 is a
+confirmed drop; exit 2 means health could not be measured**, which until 2026-09-22
+exited 0 — the printed text said "Unknown is not clean" while the exit code said the
+opposite, and the exit code is what a gate is made of. `--allow-unknown` restores the
+old tolerance as an explicit choice.
 
 ## Project Overview
 

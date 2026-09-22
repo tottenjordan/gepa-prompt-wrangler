@@ -53,7 +53,8 @@ uv run wrangler evaluators --help         # 6 more online-eval commands
 - **Dropped span batches.** Online eval scores traces; when OTel drops batches
   under load, scoring silently sees fewer cases. `trace-health` exits non-zero
   when any engine is dropping, so it can gate a run rather than merely inform
-  one. These seven commands were unreachable from `wrangler --help` until
+  one — **1** for a confirmed drop, **2** when health could not be read at all
+  (`--allow-unknown` to accept that). These seven commands were unreachable from `wrangler --help` until
   2026-09-08 — if a diagnostic seems to be missing, check that it is not just
   undiscoverable.
 - **A stage reporting SUCCEEDED is not a stage that worked.** Grep an optimize
