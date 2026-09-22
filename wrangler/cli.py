@@ -930,15 +930,28 @@ def evaluators_verify():
 
 @evaluators_group.command("trace-health")
 @click.option("--minutes", default=60, help="Look-back window (default: 60).")
-def evaluators_trace_health(minutes: int):
+@click.option(
+    "--allow-unknown",
+    is_flag=True,
+    help="Exit 0 when an engine's health cannot be read (default: exit 2).",
+)
+def evaluators_trace_health(minutes: int, allow_unknown: bool):
     """Report span-export health; exits non-zero if any engine drops batches.
 
     Non-zero on failure is deliberate, so this can gate a run rather than
     merely inform one. See docs/notes/silent-failures.md #8.
+
+    Exit codes: 0 measured clean, 1 confirmed drops, 2 could not measure.
+    `--allow-unknown` folds 2 back into 0 — use it when a Logging API outage
+    should not block a campaign, and know that it makes an unverified window
+    look the same as a clean one.
     """
     from .eval.online_evaluators import trace_health
 
-    trace_health([str(minutes)])
+    args = [str(minutes)]
+    if allow_unknown:
+        args.append("--allow-unknown")
+    trace_health(args)
 
 
 @evaluators_group.command("prune")

@@ -15,6 +15,10 @@ Usage:
 `trace-health` answers the question these evaluators cannot answer for
 themselves: did the traces they scored actually all arrive? It exits non-zero
 when spans were dropped, so it can gate a run. See docs/notes/silent-failures.md #8.
+
+Exit codes: **0** measured clean, **1** confirmed drops, **2** could not measure.
+`--allow-unknown` folds 2 back into 0 for callers that would rather proceed than
+block on a Logging API outage -- deliberately, at the call site.
 """
 
 import datetime as dt
@@ -578,8 +582,31 @@ def trace_health(args: list[str]):
 
     Exits non-zero when any engine is dropping batches, so this can gate a run
     rather than merely inform one.
+
+    **Exit codes, and why UNKNOWN is not 0.**
+
+    | code | meaning |
+    | --- | --- |
+    | 0 | measured, and clean |
+    | 1 | confirmed dropped batches -- online-eval scores are a lower bound |
+    | 2 | **could not measure** -- health is unknown |
+
+    Until 2026-09-22 an unreadable engine exited **0**, so a Logging API outage was
+    indistinguishable from a clean sweep to any `&&`. The printed text said "Unknown is not
+    clean" while the exit code said otherwise, and the exit code is what a gate is made of.
+    A check that cannot see is not a check that passed.
+
+    The original reasoning -- that an outage should not block every campaign -- is preserved
+    as `--allow-unknown`, which restores exit 0. It is now an explicit decision at the call
+    site rather than a silent default, which is the whole difference.
+
+    Code **2** rather than 1 so the two are distinguishable: `&&` blocks on either (fail
+    closed), while a caller who wants to treat them differently still can.
     """
-    minutes = int(args[0]) if args else 60
+    allow_unknown = "--allow-unknown" in args
+    # Flags and the positional `minutes` share one list, so filter before int().
+    positional = [a for a in args if not a.startswith("-")]
+    minutes = int(positional[0]) if positional else 60
     agents = _get_agent_engine_ids()
     if not agents:
         print("  No *_ENGINE_ID set — nothing to check.")
@@ -620,6 +647,23 @@ def trace_health(args: list[str]):
         )
         print("  See docs/notes/silent-failures.md #8.")
         sys.exit(1)
+
+    if unknown and not allow_unknown:
+        # Reported *after* `degraded`, so a run that is both degraded and partly unreadable
+        # exits 1: a confirmed problem outranks an unmeasured one.
+        print(
+            f"\n  UNKNOWN: could not measure {len(unknown)} of {len(agents)} engine(s), so "
+            "this window is unverified rather than clean."
+        )
+        print("  Re-run, or pass --allow-unknown to proceed deliberately.")
+        sys.exit(2)
+
+    if unknown:
+        print(
+            f"\n  PASS (--allow-unknown): {len(agents) - len(unknown)} clean, "
+            f"{len(unknown)} unmeasured"
+        )
+        return
     print(f"\n  PASS: {len(agents)} engine(s), no dropped batches")
 
 

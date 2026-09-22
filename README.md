@@ -479,7 +479,10 @@ The GEPA evalset uses all 64 cases with a stratified train/val split (49/15). Th
 | `wrangler floor <arms>` | Compute the noise floor from one or more control arms |
 
 `wrangler evaluators trace-health` exits non-zero when an engine is dropping OTel
-span batches, so it can gate a run rather than merely inform one.
+span batches, so it can gate a run rather than merely inform one. It exits **1** on
+confirmed drops and **2** when an engine's health could not be read at all — a check
+that cannot see is not a check that passed. Pass `--allow-unknown` to accept the
+latter, when a Logging API outage should not block a campaign.
 
 ### Options
 

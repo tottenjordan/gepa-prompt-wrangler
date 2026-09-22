@@ -85,6 +85,57 @@ this week. Nothing tests that the two paths agree.
 `runner.py` is the sharpest: labelled legacy, 19% covered, and still wired into two CLI
 commands. Either it is supported and should be tested, or it is not and should be retired.
 
+**STATUS (2026-09-22) — closed.** Note that Phase 2 only turned the `runner.py` row into a
+task; the other three were diagnostic findings with no task behind them, so for a day this
+warning read as handled when three-quarters of it was not.
+
+| module | at audit | now | how |
+| --- | --- | --- | --- |
+| `orchestration/runner.py` | 19% | 19% | **retired, not tested** — Task 5 took the other branch above. Deprecated with the evidence; #116 tracks deletion. Raising coverage on code being removed would be waste |
+| `eval/online_monitors.py` | 21% | **79%** | `tests/test_online_monitors.py` |
+| `eval/online_evaluators.py` | 28% | **39%** | `tests/test_trace_health_gate.py` |
+| `pipeline/deploy_pipeline.py` | 20% | **32%** | `tests/test_code_tarball_packaging.py` |
+
+The two partial numbers are deliberate. **Coverage was the symptom, not the target** — each
+file was tested at the point where a quiet mistake produces a plausible number rather than an
+error, and the remainder is Vertex submission plumbing whose failures are loud:
+
+- `online_evaluators.py` — the `trace-health` **gate**: that it exits non-zero on a confirmed
+  drop, survives the 429s that once took it down mid-run, and never reports an unreadable
+  engine as clean. The other ~180 statements are evaluator CRUD that fails visibly.
+- `deploy_pipeline.py` — the **code tarball**, the one CLAUDE.md records as having "caused
+  multiple pipeline failures". The rest is image build and job submission, which need a live
+  project to mean anything.
+
+One thing found while testing, recorded rather than changed at the time and **fixed on
+2026-09-22**: `trace-health` exited **0** on UNKNOWN. Only a confirmed drop failed the gate,
+so a Logging API outage did not block every campaign — but a run whose health could not be
+measured looked identical to a clean one under `&&`. The printed text said "Unknown is not
+clean" while the exit code said the opposite, and **the exit code is what a gate is made
+of**.
+
+Now:
+
+| code | meaning |
+| --- | --- |
+| 0 | measured, and clean |
+| 1 | confirmed dropped batches |
+| 2 | could not measure |
+
+Distinct codes rather than folding UNKNOWN into 1, so `&&` blocks on either while a caller
+that wants to tell them apart still can. A run that is both degraded *and* partly unreadable
+exits 1 — a problem you can see outranks one you cannot.
+
+The original reasoning is preserved as `--allow-unknown`, which restores exit 0. It tolerates
+*not knowing*; it does not excuse a measured failure, and the pass line then reads
+`PASS (--allow-unknown): N clean, M unmeasured` rather than claiming a clean sweep. The
+change is that it is now a decision at the call site instead of a silent default.
+
+Safe to change because nothing automated depended on it: no CI job runs `trace-health`, and
+the only caller is the CLI wrapper. Six scenarios are pinned at the process-exit-code level
+through `CliRunner`, since that — not `trace_health`'s internal `sys.exit` — is the contract
+a gate actually has.
+
 ### W2 · Ten functions over 190 lines
 
 Beyond C1: `optimize` (`optimizer.py:587`, 333), `format_analysis_report`
