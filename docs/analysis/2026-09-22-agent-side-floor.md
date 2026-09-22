@@ -86,6 +86,27 @@ floor is a property of the prompt** — and a control arm running the *seed* mea
 in the highest-variance regime available, then lends that floor to arms running optimized
 prompts that are far more specified. Every campaign floor in this repo is measured that way.
 
+## CAVEAT added after the fact — this was measured near the ceiling
+
+Pulling campaign 09's stage artifacts off GCS afterwards showed the two situations are not
+comparable in a way this note originally glossed:
+
+| | `safety_v1` level | within-side spread (minutes) | across-gap Δ |
+| --- | --- | --- | --- |
+| c08 engine (this note) | **0.98** | 0.0124 | +0.0095 over 5 days |
+| campaign 09 control | **0.82** | **0.0018** | **+0.0794 over 16 h** |
+
+**The engine measured here sits at 0.98 on `safety_v1`, with 0.02 of headroom.** Campaign 09's
+control sat at 0.82. A shift that is invisible near the ceiling can be large in mid-range, so
+"the floor does not grow with the gap" is established **for a near-saturated metric** and does
+not transfer to the regime campaign 09 was actually in.
+
+The two also disagree in a way no single explanation covers yet: at 0.82 the *short*-timescale
+spread is tiny (0.0018 across two runs minutes apart) while the 16-hour gap is enormous; at
+0.98 the short-timescale spread is larger (0.0124) and the five-day gap is not. That is the
+shape of a **state change** in the engine between campaign 09's two eval sides rather than
+noise of any kind — and the control arm does not redeploy, so whatever changed was not ours.
+
 ## What to do
 
 1. **Stop attributing control drift to elapsed time.** Neither the judge nor the agent drifts
