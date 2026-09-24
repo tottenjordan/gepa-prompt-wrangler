@@ -22,6 +22,10 @@ Miller, *Adding Error Bars to Evals* (arXiv, 2024-11-01):
   ``K_OBSERVED = 2``.
 - ``n`` -- number of cases. alpha = 0.05 two-sided, power = 0.80.
 
+The arithmetic itself lives in `wrangler.reporting.inference` so the reporting
+this gate guards can reuse it; this file is the CLI, the artifact IO and the
+report. What follows is how the estimators are wired, not how they compute.
+
 ## Estimators, and why these ones
 
 Every number below is measured off campaign 09's six eval sides
@@ -51,7 +55,8 @@ what makes this hold: without it a large sigma^2 estimate would let the
 The held-out verdict is read at ``K = K_OBSERVED``, so **no sigma^2 estimate
 can move it** -- not a different one, not a mis-scaled one, not an inverted
 one. Measured across all 15 test-partition cells, the two estimators' MDEs
-differ by at most 5.6e-17. ``tests/test_partition_mde.py`` pins this.
+differ by at most 5.6e-17. ``tests/test_inference.py`` pins the identity and
+``tests/test_partition_mde.py`` pins the verdict it produces here.
 
 The decomposition therefore answers only the follow-up question, "could a
 bigger `num_runs` budget rescue it?", which is where the ``K != K_OBSERVED``
@@ -116,24 +121,33 @@ from __future__ import annotations
 
 import argparse
 import json
-import math
 import os
 import statistics as st
 import subprocess
 import sys
-from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 from wrangler.core.partitions import load_partitions
+from wrangler.reporting.inference import (
+    K_OBSERVED,
+    Components,
+    Contrast,
+    EvalSide,
+    _variance,
+    common_cases,
+    cross_window_measurement,
+    minimum_detectable_effect,
+    per_case_contrast,
+    required_cases,
+    variance_components,
+    within_window_measurement,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
 
 # --- Design constants -------------------------------------------------------
-
-ALPHA = 0.05
-POWER = 0.80
 
 #: Exit codes. A NO-GO is a measurement; a missing artifact is not. Collapsing
 #: them onto 1 lets a caller act on a verdict that was never computed.
@@ -159,10 +173,6 @@ class Unmeasurable(SystemExit):
         self.code = EXIT_UNMEASURABLE
 
 
-#: Campaign 09 ran `num_runs: 2`, so every variance read off it is a K = 2
-#: measurement. Re-apportioning to other K is only meaningful relative to this.
-K_OBSERVED = 2
-
 #: The two effects the held-out reporting would have to detect. Both from
 #: docs/analysis/2026-09-22-campaign-09-reanalysis.md.
 EFFECT_DID = 0.0952  # optimized arm vs unoptimized control, `safety_v1`
@@ -184,141 +194,7 @@ CASE_COUNTS = (12, 16, 20, 24)
 REPEAT_LEVELS = (1, 2)
 
 
-# --- The formula ------------------------------------------------------------
-
-
-def z_multiplier(alpha: float = ALPHA, power: float = POWER) -> float:
-    """``z_{alpha/2} + z_beta``, two-sided. ~2.80159 at 0.05 / 0.80."""
-    normal = st.NormalDist()
-    return normal.inv_cdf(1 - alpha / 2) + normal.inv_cdf(power)
-
-
-def minimum_detectable_effect(
-    *,
-    omega2: float,
-    sigma2_a: float,
-    sigma2_b: float,
-    n: int,
-    k_a: int = 1,
-    k_b: int = 1,
-    alpha: float = ALPHA,
-    power: float = POWER,
-) -> float:
-    """Miller's MDE. See the module docstring for what each term means here."""
-    if n <= 0:
-        raise ValueError(f"n must be a positive case count, got {n}")
-    if k_a <= 0 or k_b <= 0:
-        raise ValueError(f"K must be a positive repeat count, got ({k_a}, {k_b})")
-    bracket = omega2 + sigma2_a / k_a + sigma2_b / k_b
-    return z_multiplier(alpha, power) * math.sqrt(bracket / n)
-
-
-def required_cases(
-    *,
-    omega2: float,
-    sigma2_a: float,
-    sigma2_b: float,
-    target: float,
-    k_a: int = 1,
-    k_b: int = 1,
-    alpha: float = ALPHA,
-    power: float = POWER,
-) -> int:
-    """Smallest ``n`` whose MDE reaches ``target``. Inverts the formula exactly."""
-    if target <= 0:
-        raise ValueError(f"target effect must be positive, got {target}")
-    bracket = omega2 + sigma2_a / k_a + sigma2_b / k_b
-    exact = (z_multiplier(alpha, power) ** 2) * bracket / target**2
-    return max(1, math.ceil(exact))
-
-
-# --- Variance components ----------------------------------------------------
-
-
-@dataclass(frozen=True)
-class Components:
-    """One contrast's variance, split into what K can and cannot reduce.
-
-    ``total`` is the directly measured per-case variance at ``k_observed``, and
-    ``bracket_at(k_observed)`` reproduces it exactly. ``clamped`` records that
-    the measurement estimate exceeded the total, i.e. the split failed and only
-    the total should be quoted.
-    """
-
-    total: float
-    omega2: float
-    sigma2_combined: float
-    k_observed: int
-    clamped: bool
-
-    def bracket_at(self, k: int) -> float:
-        """``omega^2 + sum sigma^2 / k``, re-apportioned from the measured total."""
-        if k <= 0:
-            raise ValueError(f"K must be a positive repeat count, got {k}")
-        return self.omega2 + self.sigma2_combined / k
-
-    def mde(self, n: int, k: int) -> float:
-        half = self.sigma2_combined / 2
-        return minimum_detectable_effect(
-            omega2=self.omega2, sigma2_a=half, sigma2_b=half, n=n, k_a=k, k_b=k
-        )
-
-    def cases_for(self, target: float, k: int) -> int:
-        half = self.sigma2_combined / 2
-        return required_cases(
-            omega2=self.omega2, sigma2_a=half, sigma2_b=half, target=target, k_a=k, k_b=k
-        )
-
-
-def variance_components(
-    *, total: float, measurement_at_k_observed: float, k_observed: int = K_OBSERVED
-) -> Components:
-    """Split a measured per-case variance into ``omega^2`` and a K-reducible part.
-
-    ``measurement_at_k_observed`` is the estimated measurement contribution *at
-    the K the total was measured at*, and is capped at ``total`` so the split
-    can never invent variance. A cap that bites means the sigma^2 estimator
-    exceeded what was observed, which is reported, not hidden.
-    """
-    reducible = min(measurement_at_k_observed, total)
-    return Components(
-        total=total,
-        omega2=max(0.0, total - measurement_at_k_observed),
-        sigma2_combined=reducible * k_observed,
-        k_observed=k_observed,
-        clamped=measurement_at_k_observed > total,
-    )
-
-
 # --- Reading the artifacts --------------------------------------------------
-
-
-@dataclass(frozen=True)
-class EvalSide:
-    """One arm's ``eval_before`` or ``eval_after`` stage artifact."""
-
-    arm: str
-    phase: str
-    per_case: Mapping[int, Mapping[str, float]]
-    scores_std: Mapping[str, float]
-    num_runs: int
-    score_repeats: int
-
-    def within_side_variance(self, metric: str) -> float:
-        """Per-question variance implied by ``scores_std``.
-
-        ``scores_std`` is the across-`num_runs` spread of the ARM MEAN over
-        ``len(per_case)`` cases, so the per-question variance behind it is
-        ``n * std**2``. Reading ``scores_std**2`` directly would understate
-        sigma^2 by the case count.
-
-        ``len(per_case)`` is the UNION of cases across the side's runs (63 or
-        64 here), which slightly overstates what any single run scored. Worth
-        under 2%, and it cannot reach the verdict at all: that is read at
-        ``K = K_OBSERVED``, where the bracket equals the measured total
-        whatever sigma^2 says.
-        """
-        return len(self.per_case) * self.scores_std.get(metric, 0.0) ** 2
 
 
 def load_sides(stages_dir: str | Path) -> dict[tuple[str, str], EvalSide]:
@@ -348,77 +224,6 @@ def load_sides(stages_dir: str | Path) -> dict[tuple[str, str], EvalSide]:
                 score_repeats=int(payload.get("score_repeats") or 1),
             )
     return sides
-
-
-def common_cases(sides: Mapping[tuple[str, str], EvalSide]) -> list[int]:
-    """Case indices scored on every side.
-
-    Pairing is not optional: two of campaign 09's six sides scored 63/64, and
-    differencing means over different case subsets is silent-failures #5.
-    """
-    shared: set[int] | None = None
-    for side in sides.values():
-        keys = set(side.per_case)
-        shared = keys if shared is None else shared & keys
-    return sorted(shared or set())
-
-
-def per_case_delta(
-    sides: Mapping[tuple[str, str], EvalSide],
-    arm: str,
-    metric: str,
-    cases: Sequence[int],
-) -> list[float]:
-    """``after - before`` for one arm, per case."""
-    before, after = sides[("eval_before", arm)], sides[("eval_after", arm)]
-    return [after.per_case[i][metric] - before.per_case[i][metric] for i in cases]
-
-
-def per_case_contrast(
-    sides: Mapping[tuple[str, str], EvalSide],
-    treatment: str,
-    baseline: str,
-    metric: str,
-    cases: Sequence[int],
-) -> list[float]:
-    """Difference in differences, per case: ``delta(treatment) - delta(baseline)``."""
-    treat = per_case_delta(sides, treatment, metric, cases)
-    base = per_case_delta(sides, baseline, metric, cases)
-    return [t - b for t, b in zip(treat, base, strict=True)]
-
-
-def _variance(values: Sequence[float]) -> float:
-    return st.variance(values) if len(values) > 1 else 0.0
-
-
-def within_window_measurement(
-    sides: Mapping[tuple[str, str], EvalSide], metric: str, *, n_sides: int
-) -> float:
-    """Measurement variance of an ``n_sides``-sided contrast, from ``scores_std``.
-
-    Averaged over the six sides rather than taken per side: each side gives one
-    stdev from two runs, which is a 1-degree-of-freedom estimate and swings by
-    an order of magnitude between arms. Pooling gives six.
-    """
-    per_side = st.mean(side.within_side_variance(metric) for side in sides.values())
-    return n_sides * per_side / K_OBSERVED
-
-
-def cross_window_measurement(
-    sides: Mapping[tuple[str, str], EvalSide],
-    metric: str,
-    cases: Sequence[int],
-    *,
-    n_sides: int,
-) -> float:
-    """Measurement variance of an ``n_sides``-sided contrast, from the control arm.
-
-    The control's two sides share a byte-identical prompt, so ``Var_i`` of its
-    per-case delta is a pure two-side measurement variance spanning the real
-    gap between eval sides. An ``n_sides``-sided contrast stacks ``n_sides / 2``
-    such pairs.
-    """
-    return (n_sides / 2) * _variance(per_case_delta(sides, CONTROL_ARM, metric, cases))
 
 
 # --- Fetching ---------------------------------------------------------------
@@ -451,24 +256,6 @@ def fetch_stage_artifacts(run_id: str, dest: Path, *, bucket: str | None = None)
 
 
 # --- Report -----------------------------------------------------------------
-
-
-@dataclass(frozen=True)
-class Contrast:
-    """A contrast the held-out reporting would have to measure.
-
-    ``headline`` marks the ones the verdict is computed over. The two DiD arms
-    are **not independent replicates** -- the reanalysis found both deltas are
-    exactly 11/63 because they fixed overlapping case sets -- so counting both
-    in the verdict would double-weight one measurement.
-    """
-
-    label: str
-    treatment: str
-    baseline: str
-    target: float
-    n_sides: int = 4
-    headline: bool = True
 
 
 CONTRASTS = (
@@ -513,7 +300,9 @@ def _components(
     if scenario == "within-window":
         measurement = within_window_measurement(sides, metric, n_sides=contrast.n_sides)
     else:
-        measurement = cross_window_measurement(sides, metric, cases, n_sides=contrast.n_sides)
+        measurement = cross_window_measurement(
+            sides, metric, cases, n_sides=contrast.n_sides, control_arm=CONTROL_ARM
+        )
     return variance_components(total=_variance(values), measurement_at_k_observed=measurement)
 
 
@@ -550,7 +339,10 @@ def _print_variance_table(sides: Mapping[tuple[str, str], EvalSide], report: dic
     )
     for metric in METRICS:
         within = within_window_measurement(sides, metric, n_sides=2) * K_OBSERVED
-        cross = cross_window_measurement(sides, metric, cases, n_sides=2) * K_OBSERVED
+        cross = (
+            cross_window_measurement(sides, metric, cases, n_sides=2, control_arm=CONTROL_ARM)
+            * K_OBSERVED
+        )
         key = ("rationale on - off", metric, "within-window")
         comp_w = report["components"][key]
         comp_c = report["components"][("rationale on - off", metric, "cross-window")]

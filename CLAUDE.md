@@ -549,10 +549,29 @@ For multi-model agents: `SEARCH_MCP_SERVER`, `BOOKING_MCP_SERVER`, `EXPENSE_MCP_
   right; the n=3 end was 2.4-3x too pessimistic, because it was measured through dropout
   that `EVAL_MAX_RETRIES` has since removed.
 
-  **Pairing on case index no longer helps materially.** It was worth ~15% when evals
-  dropped cases; at 100% coverage there are no unmatched cases for it to remove, and at
-  n=3 paired is sometimes *worse* than unpaired. Pairing was compensating for dropout,
-  and the dropout is gone.
+  ~~**Pairing on case index no longer helps materially.**~~ **WRONG, and measured wrong on
+  2026-09-24.** The claim was that pairing was worth ~15% and only compensated for dropout. On
+  campaign 09's artifacts it moves the per-metric floors by **−66.6%** (`final_response_quality_v1`)
+  to **+880%** (`tool_use_quality_v1`, whose 0.0004 floor was itself a dropout artefact). It does
+  not uniformly shrink floors either — `safety_v1`'s **grows** 8.5%. A later revision had put the
+  figure at 44–64%; that also understates it.
+
+  **Reporting is paired as of 2026-09-24, and that is a comparison boundary.** Every delta and
+  floor a report *judges against* now pairs on `case_index`; descriptive score tables still print
+  `after − before` so their columns tie out. Deltas either side of this date are not directly
+  comparable, like the 2026-09-17 judge re-baseline. Floors and deltas are kept on one basis
+  structurally — `measure_noise_floor*` reads `pair.deltas`, so they cannot drift apart — and
+  `test_the_floor_is_measured_the_same_way_the_delta_is` fails the moment one side stops pairing.
+  One verdict changed on the fixtures (`c09-rationale-on`/`hallucination_v1`, `regressed` →
+  `within-noise`).
+  [docs/analysis/2026-09-24-paired-reporting-switch.md](docs/analysis/2026-09-24-paired-reporting-switch.md)
+
+  **`wrangler preflight --manifest <path>` now states a design's minimum detectable effect before
+  the run**, advisory-only (it never blocks). Against campaign 09's measured variance, a 64-case
+  design at `num_runs=2` resolves 0.060–0.103 depending on metric — so campaign 09's own
+  `safety_v1` target of **+0.0952 sat below its MDE of 0.1031** and could not have been resolved.
+  The variance source is named in the output every time, because a floor is not a property of a
+  metric.
 
   One caveat on all of the above: campaign 06's four engines each drew a perfect health
   gate on the first attempt, which is a ~9% event at the measured 55% healthy rate.

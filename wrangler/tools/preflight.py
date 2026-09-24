@@ -41,6 +41,8 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
+from ..reporting.inference import VarianceSource, campaign_09_variance, mde_for_design
+
 # GEAP runs 3.11, and Dockerfile.pipeline is pinned to python:3.11-slim. Both
 # sets are therefore checked at 3.11. This is not cosmetic: uv.lock carries two
 # litellm entries either side of a python>=3.14 marker, and reading the wrong
@@ -52,11 +54,21 @@ DOCKERFILE = Path("Dockerfile.pipeline")
 Resolver = Callable[[list[str], str], tuple[int, str]]
 
 
+#: The third check's name, exported so a caller can find it among the results
+#: without matching on prose.
+MDE_CHECK_NAME = "design sensitivity"
+
+
 @dataclass(frozen=True)
 class PreflightResult:
     name: str
     ok: bool
     detail: str
+    #: An advisory result reports numbers rather than a verdict, and its ``ok``
+    #: is always True. `render` prints its detail whether it passed or not --
+    #: the existing two checks print detail only on failure, which for a
+    #: warning would mean printing nothing, ever.
+    advisory: bool = False
 
 
 def _instructions(path: Path) -> str:
@@ -119,13 +131,79 @@ def check_requirements(
     return PreflightResult(name=name, ok=code == 0, detail=output)
 
 
+def manifest_design(manifest_path: str | Path) -> tuple[int, int]:
+    """``(eval cases, num_runs)`` -- the design a manifest describes.
+
+    Read through `PairFactory.load` rather than by re-parsing the YAML, so a
+    manifest this repo can run is a manifest this check can read, and the two
+    can never disagree about what `num_runs` a campaign will use.
+
+    ``num_runs`` defaults to 1, matching `deploy_pipeline.submit`'s own default
+    for a manifest with no ``pipeline.num_runs``. Defaulting to campaign 09's 2
+    would quietly describe a better design than the one about to run.
+    """
+    from ..core.converter import load_eval_file
+    from ..core.factory import PairFactory
+
+    manifest = PairFactory.load(manifest_path)
+    # Same two-base search as `orchestration.stages._resolve_eval_path`: a
+    # manifest's eval_data is written relative to the repo root, but a manifest
+    # kept beside its own eval set must also work.
+    eval_data = Path(manifest.eval_data)
+    for base in (Path(), Path(manifest_path).parent):
+        if (base / eval_data).exists():
+            eval_data = base / eval_data
+            break
+    return len(load_eval_file(eval_data)), int(manifest.pipeline.get("num_runs") or 1)
+
+
+def design_sensitivity(
+    manifest_path: str | Path, *, variance_source: VarianceSource | None = None
+) -> PreflightResult:
+    """What effect this manifest's design could detect. **Warn-only, always.**
+
+    ``ok`` is True whatever the arithmetic says. Every campaign this repo has
+    run would trip this check -- campaign 09's `safety_v1` MDE (0.1031 over its
+    64 cases at `num_runs: 2`) exceeds the +0.0952 effect it went looking for,
+    which is why it spent forty hours to be filed UNRESOLVED. A check that
+    blocked on day one would be switched off rather than heeded, so the numbers
+    go in ``detail`` and the exit code is left alone.
+
+    It also never fails on its own account: if the design cannot be read, the
+    reason is reported and preflight continues. The dependency resolution this
+    rides on is what actually stops a campaign dying in a GEAP build, and a
+    broken thermometer must not take it down.
+    """
+    try:
+        n_cases, num_runs = manifest_design(manifest_path)
+        design = mde_for_design(
+            n_cases=n_cases,
+            num_runs=num_runs,
+            variance_source=variance_source or campaign_09_variance(),
+        )
+        detail = "\n".join(design.render())
+    except (OSError, ValueError, KeyError) as exc:
+        detail = (
+            f"not measured: {exc}\n"
+            "Reported rather than raised: this warning must not stop the dependency "
+            "resolution a campaign actually depends on."
+        )
+    return PreflightResult(name=MDE_CHECK_NAME, ok=True, detail=detail, advisory=True)
+
+
 def run_preflight(
     python_version: str = TARGET_PYTHON,
     *,
     resolver: Resolver | None = None,
+    manifest: str | Path | None = None,
 ) -> list[PreflightResult]:
-    """Check both sets. Returns one result per set, in check order."""
-    return [
+    """Check both dependency sets, plus the manifest's design if one is given.
+
+    **No manifest, no MDE.** The design check needs a case count and a
+    `num_runs`; without a manifest there is neither, and a warning computed
+    over a guessed design would be a confident number with nothing behind it.
+    """
+    results = [
         check_requirements(
             agent_requirements(), python_version, name="agent requirements", resolver=resolver
         ),
@@ -133,12 +211,22 @@ def run_preflight(
             image_requirements(), python_version, name="pipeline image pins", resolver=resolver
         ),
     ]
+    if manifest:
+        results.append(design_sensitivity(manifest))
+    return results
 
 
 def render(results: list[PreflightResult]) -> list[str]:
     """Human-readable lines for the CLI and the campaign gate."""
     lines = [f"Preflight — resolving both dependency sets on Python {TARGET_PYTHON}", ""]
     for r in results:
+        if r.advisory:
+            # Not PASS/FAIL: this one reports numbers, and its detail is the
+            # whole point, so it prints whether or not anything is wrong.
+            lines.append(f"  NOTE  {r.name} (advisory — never blocks)")
+            lines.extend(f"        {line}".rstrip() for line in r.detail.splitlines())
+            lines.append("")
+            continue
         lines.append(
             f"  {'PASS' if r.ok else 'FAIL'}  {r.name} ({len(r.detail.splitlines())} lines)"
         )

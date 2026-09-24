@@ -23,6 +23,64 @@ METRIC_LABELS = {
 }
 
 
+def delta_comparison(
+    before: dict[str, float],
+    after: dict[str, float],
+    before_per_case: list[dict] | None = None,
+    after_per_case: list[dict] | None = None,
+) -> dict:
+    """Per-metric deltas, paired on ``case_index`` and unpaired, side by side.
+
+    ``after_mean - before_mean`` partly measures *which cases were scored*. On
+    2026-08-22 an arm scored 30 cases before and 57 after, and the resulting
+    +0.039 came from a prompt that was byte-identical on both sides. Pairing
+    compares the same cases to the same cases and removes that term.
+
+    Both are returned, following `floor_from_control_arm`: they disagree by a
+    lot -- 44-64% on the arm that function was built against -- and that
+    disagreement is information about an eval side's dropout, not something to
+    hide behind one preferred number.
+
+    ``deltas`` is the one to judge against a floor: paired where the per-case
+    rows support it, the aggregate where they do not. ``source`` says which,
+    and ``aggregate_metrics`` names the metrics that fell back individually --
+    dropping them instead would silently shorten a report's metric table.
+    ``n_paired`` must be carried alongside: a paired delta over 12 of 64 cases
+    is a different claim from one over 63.
+
+    A metric scored on only one side is not a delta. Treating the absent side
+    as 0.0 invents a full-scale movement out of a missing measurement, and on a
+    control arm that phantom becomes the floor every other metric is judged
+    against. Same rule as `floor_from_control_arm` and `reporter._metric_deltas`.
+    """
+    unpaired = {m: after[m] - before[m] for m in before.keys() & after.keys()}
+    paired_result = paired_deltas(before_per_case or [], after_per_case or [])
+    paired = paired_result["deltas"]
+
+    deltas = dict(unpaired)
+    deltas.update(paired)
+    fallback = sorted(m for m in unpaired if m not in paired)
+    if not paired:
+        source = "aggregate"
+    elif fallback:
+        source = "mixed"
+    else:
+        source = "paired"
+
+    return {
+        "paired": paired,
+        "unpaired": unpaired,
+        "deltas": deltas,
+        "source": source,
+        "aggregate_metrics": fallback if paired else [],
+        "n_paired": paired_result["n_paired"],
+        "dropped": {
+            "before": paired_result["dropped_before"],
+            "after": paired_result["dropped_after"],
+        },
+    }
+
+
 @dataclass
 class PairAnalysis:
     """Analysis results for a single agent-prompt pair."""
@@ -40,9 +98,37 @@ class PairAnalysis:
     after_per_case: list[dict[str, float]] = field(default_factory=list)
 
     @property
+    def delta_detail(self) -> dict:
+        """Paired and unpaired deltas side by side. See `delta_comparison`."""
+        return delta_comparison(self.before, self.after, self.before_per_case, self.after_per_case)
+
+    @property
     def deltas(self) -> dict[str, float]:
-        metrics = set(self.before) | set(self.after)
-        return {m: self.after.get(m, 0) - self.before.get(m, 0) for m in metrics}
+        """The deltas to judge: paired per case, aggregate only as a fallback.
+
+        This used to subtract two separately-averaged score sets, which mixes
+        the prompt change with the difference in which cases each side scored.
+        Changed 2026-09-24; `delta_detail` carries both numbers so a comparison
+        crossing that date can see how far they moved.
+        """
+        return self.delta_detail["deltas"]
+
+    @property
+    def n_paired(self) -> int:
+        """Cases behind the paired deltas. Zero means the aggregate fallback."""
+        return self.delta_detail["n_paired"]
+
+    @property
+    def avg_delta(self) -> float:
+        """Mean delta across metrics, on the same basis as `deltas`.
+
+        The summary row used to be `avg_after - avg_before`, which is unpaired
+        while the floor it is compared against is now paired. That mismatch is
+        the thing to avoid: a paired delta held to an unpaired bar flips
+        verdicts for reasons nobody chose.
+        """
+        values = list(self.deltas.values())
+        return sum(values) / len(values) if values else 0.0
 
     @property
     def avg_before(self) -> float:
@@ -124,7 +210,10 @@ class ExperimentAnalysis:
         floor = self.noise_floor
         if floor is None:
             return False
-        gain = sum(p.avg_after - p.avg_before for p in self.pairs if not p.is_control)
+        # `avg_delta`, not `avg_after - avg_before`: the floor above is paired
+        # per case wherever the artifacts allow, and a gain measured the other
+        # way would be held to a bar built from a different comparison.
+        gain = sum(p.avg_delta for p in self.pairs if not p.is_control)
         return gain > floor
 
     @property
@@ -260,6 +349,9 @@ def measure_noise_floor(pairs: list) -> float | None:
     would assert that there is no noise, which is the claim this exists to
     stop anyone making by accident. CLAUDE.md requires a control arm in every
     sweep for exactly this reason.
+
+    Paired per case since 2026-09-24, because ``pair.deltas`` is -- the floor
+    and the delta it judges have to be measured the same way.
     """
     controls = [p for p in pairs if getattr(p, "is_control", False)]
     if not controls:
@@ -286,6 +378,12 @@ def measure_noise_floor_per_metric(pairs: list) -> dict[str, float] | None:
 
     Returns ``None``, not ``{}``, when there is no control arm -- same contract
     as the scalar version, for the same reason: absent is not zero.
+
+    Reads ``pair.deltas``, which is **paired per case** wherever the artifacts
+    carry case indices (2026-09-24). That is deliberate and not separable: the
+    deltas `classify_deltas` judges come from the same property, so pairing one
+    without the other would weigh a paired delta against an unpaired bar. Use
+    `noise_floor_comparison` to see both numbers.
     """
     controls = [p for p in pairs if getattr(p, "is_control", False)]
     if not controls:
@@ -295,6 +393,59 @@ def measure_noise_floor_per_metric(pairs: list) -> dict[str, float] | None:
         for metric, delta in pair.deltas.items():
             floors[metric] = max(floors.get(metric, 0.0), abs(delta))
     return floors
+
+
+def noise_floor_comparison(pairs: list) -> dict | None:
+    """The control arms' floors measured both ways, with the evidence.
+
+    `measure_noise_floor_per_metric` returns one mapping -- the effective
+    floor, paired where the per-case rows allow it. This shows the working:
+    ``paired`` and ``unpaired`` per metric, the ``n_paired`` behind each control
+    arm, and which arms were controls.
+
+    Same house pattern as `floor_from_control_arm`, for the same reason. The two
+    floors disagreed by 44-64% on the arm that function was built against, where
+    CLAUDE.md claimed ~15%; a report that prints only the one in force hides a
+    re-baseline of every number a reader might compare against.
+
+    ``paired`` omits a metric no control arm could pair, rather than showing a
+    zero -- a floor of 0.0 asserts a metric is noiseless and marks every later
+    movement real.
+
+    Arms carrying only ``.deltas`` (the reporter's `_ArmView`, the
+    summarize_arm_metrics script) contribute to ``unpaired`` and to the
+    effective floor, and to ``paired`` only if they expose ``delta_detail``.
+
+    ``None``, not ``{}``, when no arm is a control.
+    """
+    controls = [p for p in pairs if getattr(p, "is_control", False)]
+    if not controls:
+        return None
+
+    paired: dict[str, float] = {}
+    unpaired: dict[str, float] = {}
+    n_paired: dict[str, int] = {}
+    for pair in controls:
+        detail = getattr(pair, "delta_detail", None)
+        arm_paired: dict[str, float] = dict(detail["paired"]) if detail else {}
+        arm_unpaired: dict[str, float] = dict(detail["unpaired"] if detail else pair.deltas)
+        n_paired[_arm_name(pair)] = int(detail["n_paired"]) if detail else 0
+        for target, source in ((paired, arm_paired), (unpaired, arm_unpaired)):
+            for metric, delta in source.items():
+                target[metric] = max(target.get(metric, 0.0), abs(delta))
+
+    return {
+        "paired": paired,
+        "unpaired": unpaired,
+        "floors": measure_noise_floor_per_metric(pairs),
+        "n_paired": n_paired,
+        "controls": [_arm_name(p) for p in controls],
+    }
+
+
+def _arm_name(pair: object) -> str:
+    """Whatever this arm calls itself: `PairAnalysis.pair_id` or `_ArmView.name`."""
+    return str(getattr(pair, "pair_id", None) or getattr(pair, "name", None) or "?")
 
 
 def drift_sign_summary(arms: dict[str, dict[str, float]]) -> dict:
@@ -715,6 +866,38 @@ def _format_tool_audit(
     return lines
 
 
+def _floor_comparison_lines(pairs: list) -> list[str]:
+    """Both floors, so a reader can see how much the pairing moved the bar.
+
+    Every verdict below rests on the paired column. Printing only that column
+    would make a report that crosses the 2026-09-24 switch look comparable with
+    one that does not.
+    """
+    comparison = noise_floor_comparison(pairs)
+    if comparison is None:
+        return []
+
+    n_paired = comparison["n_paired"]
+    lines = ["**Noise floor, measured both ways**\n"]
+    lines.append("| Metric | Floor (paired) | Floor (unpaired) | Verdicts use |")
+    lines.append("|--------|---------------|------------------|--------------|")
+    for metric in sorted(comparison["unpaired"].keys() | comparison["paired"].keys()):
+        p = comparison["paired"].get(metric)
+        u = comparison["unpaired"].get(metric)
+        lines.append(
+            f"| {metric} | {f'{p:.4f}' if p is not None else '—'} "
+            f"| {f'{u:.4f}' if u is not None else '—'} "
+            f"| {'paired' if p is not None else 'unpaired (no paired cases)'} |"
+        )
+    paired_note = ", ".join(f"{arm} n={n}" for arm, n in sorted(n_paired.items()))
+    lines.append(
+        f"\nFrom control arm(s) {paired_note}. The paired column compares each case "
+        "against itself; the unpaired one subtracts two separately-averaged case "
+        "subsets and carries that sampling difference into the bar.\n"
+    )
+    return lines
+
+
 def format_analysis_report(
     analysis: ExperimentAnalysis,
     run_stats: dict[str, GepaRunStats] | None = None,
@@ -751,6 +934,8 @@ def format_analysis_report(
             "every delta below compares two different subsets._\n"
         )
 
+    lines.extend(_floor_comparison_lines(analysis.pairs))
+
     # --- Aggregate summary ---
     lines.append("## Summary\n")
     lines.append("| Pair | Model | Avg Before | Avg After | Delta | Verdict |")
@@ -760,7 +945,9 @@ def format_analysis_report(
     # rather than inventing a verdict. See CLAUDE.md, control-arm rule.
     floor = analysis.noise_floor
     for p in analysis.pairs:
-        delta = p.avg_after - p.avg_before
+        # Paired where the artifacts allow it, so this delta and the floor it
+        # is compared against are the same kind of measurement.
+        delta = p.avg_delta
         if p.is_control:
             verdict = "control (unchanged prompt)"
         elif floor is None:
@@ -788,16 +975,26 @@ def format_analysis_report(
         if threshold is not None:
             lines.append(f"GEPA threshold: **{threshold}**\n")
 
-        lines.append("| Pair | Before | After | Delta | Significant? |")
-        lines.append("|------|--------|-------|-------|-------------|")
+        # Delta is paired on case_index; the unpaired column is the difference
+        # of the two run means this repo reported until 2026-09-24. Both are
+        # shown because they disagree, and the count says how far the paired
+        # one can be trusted.
+        lines.append("| Pair | Before | After | Delta (paired) | Delta (unpaired) | n | Sig? |")
+        lines.append("|------|--------|-------|----------------|------------------|---|------|")
         for p in analysis.pairs:
             b = p.before.get(metric, 0)
             a = p.after.get(metric, 0)
-            d = a - b
+            detail = p.delta_detail
+            d = detail["deltas"].get(metric, 0.0)
+            u = detail["unpaired"].get(metric)
             b_std = p.before_std.get(metric, 0)
             a_std = p.after_std.get(metric, 0)
             sig = "YES" if abs(d) > max(b_std, a_std, 0.01) else "no"
-            lines.append(f"| {p.pair_id} | {b:.3f} | {a:.3f} | {d:+.3f} | {sig} |")
+            n = detail["n_paired"] if metric in detail["paired"] else 0
+            lines.append(
+                f"| {p.pair_id} | {b:.3f} | {a:.3f} | {d:+.4f} "
+                f"| {f'{u:+.4f}' if u is not None else '—'} | {n} | {sig} |"
+            )
         lines.append("")
 
     # --- Prompt analysis ---
@@ -894,8 +1091,7 @@ def format_analysis_report(
     for p in analysis.pairs:
         cost = blended_cost(p.model)
         if cost > 0:
-            delta = p.avg_after - p.avg_before
-            cost_rows.append((p.pair_id, p.model, cost, delta))
+            cost_rows.append((p.pair_id, p.model, cost, p.avg_delta))
     if cost_rows:
         lines.append("## Cost Efficiency\n")
         lines.append("| Pair | Model | Blended $/M | Avg Delta | Cost per +0.01 |")
@@ -972,11 +1168,12 @@ def _print_summary(analysis: ExperimentAnalysis) -> None:
     print(f"  Analysis: {analysis.experiment_name}")
     print(f"  {'=' * 60}")
     for p in analysis.pairs:
-        delta = p.avg_after - p.avg_before
+        delta = p.avg_delta
         icon = "+" if delta > 0.005 else "-" if delta < -0.005 else "="
         imp = len(p.improved_metrics)
         deg = len(p.degraded_metrics)
-        print(f"  [{icon}] {p.pair_id:30s}  {delta:+.3f}  ({imp} up, {deg} down)")
+        paired = f", {p.n_paired} paired" if p.n_paired else ""
+        print(f"  [{icon}] {p.pair_id:30s}  {delta:+.3f}  ({imp} up, {deg} down{paired})")
 
         for m in p.degraded_metrics:
             d = p.deltas[m]
