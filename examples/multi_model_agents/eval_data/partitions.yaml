@@ -1,0 +1,100 @@
+# Train / validation / test partition of eval_cases.yaml.
+#
+# GENERATED, AND CHECKED IN ON PURPOSE. Regenerate and audit with:
+#   uv run python -m wrangler.core.partitions --write
+# Recomputing the split per run would make every campaign a different
+# experiment. Changing the seed invalidates comparison with every
+# campaign that ran before the change.
+#
+# Stratified on (tier, category): each partition gets the floor or the
+# ceiling of its proportional share of every cell, never more. An
+# unstratified split is measurable -- on campaign 09 the train-vs-
+# validation safety_v1 gap was negative on ALL THREE arms, including
+# the control (-0.1146), which runs no optimize stage and so cannot
+# overfit. The control's gap was not the largest; it sits between the
+# two optimized arms (-0.0333, -0.1456). No overfitting was observed --
+# the gap is subset composition. Measured in
+# docs/analysis/2026-09-23-train-validation-composition.md.
+#
+# index is the 0-based case_index used by eval artifacts; id is the
+# 1-based GEPA id used by sampler_config.json. Both are written so the
+# loader can reject a file that has drifted from eval_cases.yaml.
+#
+# seed and fractions below RECORD how this file was made; the loader
+# does not read them back. They are provenance, not configuration --
+# to change either, edit wrangler/core/partitions.py and regenerate.
+# seed 20260923 -- train 40, validation 12, test 12
+
+seed: 20260923
+fractions:
+  train: 0.625
+  validation: 0.1875
+  test: 0.1875
+partitions:
+  train:
+    - {index: 1, id: case_2_low_search}
+    - {index: 2, id: case_3_low_search}
+    - {index: 7, id: case_8_low_policy}
+    - {index: 9, id: case_10_low_booking}
+    - {index: 10, id: case_11_low_expense}
+    - {index: 11, id: case_12_low_error_handling}
+    - {index: 12, id: case_13_low_error_handling}
+    - {index: 13, id: case_14_low_error_handling}
+    - {index: 15, id: case_16_medium_expense}
+    - {index: 16, id: case_17_medium_planning}
+    - {index: 17, id: case_18_medium_planning}
+    - {index: 18, id: case_19_medium_policy}
+    - {index: 21, id: case_22_medium_booking}
+    - {index: 22, id: case_23_medium_expense}
+    - {index: 23, id: case_24_high_planning}
+    - {index: 26, id: case_27_high_expense}
+    - {index: 27, id: case_28_high_planning}
+    - {index: 29, id: case_30_low_search}
+    - {index: 30, id: case_31_low_search}
+    - {index: 32, id: case_33_medium_cancellation}
+    - {index: 34, id: case_35_low_boundary}
+    - {index: 35, id: case_36_medium_boundary}
+    - {index: 37, id: case_38_low_error_handling}
+    - {index: 38, id: case_39_medium_error_handling}
+    - {index: 39, id: case_40_medium_booking}
+    - {index: 40, id: case_41_low_booking}
+    - {index: 42, id: case_43_low_booking}
+    - {index: 43, id: case_44_high_booking}
+    - {index: 47, id: case_48_medium_cancellation}
+    - {index: 48, id: case_49_medium_cancellation}
+    - {index: 50, id: case_51_low_cancellation}
+    - {index: 51, id: case_52_low_boundary}
+    - {index: 52, id: case_53_low_boundary}
+    - {index: 53, id: case_54_medium_boundary}
+    - {index: 56, id: case_57_low_search}
+    - {index: 57, id: case_58_low_search}
+    - {index: 59, id: case_60_low_policy}
+    - {index: 61, id: case_62_high_planning}
+    - {index: 62, id: case_63_medium_expense}
+    - {index: 63, id: case_64_low_error_handling}
+  validation:
+    - {index: 3, id: case_4_low_search}
+    - {index: 4, id: case_5_low_search}
+    - {index: 8, id: case_9_low_policy}
+    - {index: 19, id: case_20_medium_expense}
+    - {index: 20, id: case_21_medium_planning}
+    - {index: 25, id: case_26_high_planning}
+    - {index: 41, id: case_42_medium_booking}
+    - {index: 44, id: case_45_low_booking}
+    - {index: 46, id: case_47_medium_cancellation}
+    - {index: 49, id: case_50_high_cancellation}
+    - {index: 54, id: case_55_low_boundary}
+    - {index: 60, id: case_61_low_error_handling}
+  test:
+    - {index: 0, id: case_1_low_search}
+    - {index: 5, id: case_6_low_search}
+    - {index: 6, id: case_7_low_policy}
+    - {index: 14, id: case_15_medium_expense}
+    - {index: 24, id: case_25_high_planning}
+    - {index: 28, id: case_29_high_expense}
+    - {index: 31, id: case_32_medium_cancellation}
+    - {index: 33, id: case_34_low_boundary}
+    - {index: 36, id: case_37_low_error_handling}
+    - {index: 45, id: case_46_low_cancellation}
+    - {index: 55, id: case_56_medium_boundary}
+    - {index: 58, id: case_59_medium_policy}
