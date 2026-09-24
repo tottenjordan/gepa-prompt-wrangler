@@ -273,3 +273,120 @@ def summarize_frontier(
         ),
         "caveats": list(source.caveats),
     }
+
+
+def crosses_tier(
+    arms: dict[str, tuple[dict, dict]],
+    cheap: str,
+    expensive: str,
+    metric: str,
+    resolution: float,
+) -> dict:
+    """Does optimizing the cheap tier's prompt reach what the expensive tier gives untuned?
+
+    The bar is the expensive arm's **before** score, deliberately. The practical question a
+    tier choice turns on is not "can a tuned cheap model beat a tuned expensive one" -- that
+    needs both budgets -- but "does prompt work on the cheap tier buy what the expensive tier
+    gives you off the shelf". That is the question this harness can already answer and nothing
+    asked.
+
+    Returns ``crossed=None`` when either arm is absent, rather than raising: a frontier report
+    over ten tiers must not die because one pair was not run.
+    """
+    if cheap not in arms or expensive not in arms:
+        return {
+            "crossed": None,
+            "verdict": f"not comparable: {cheap!r} or {expensive!r} has no artifacts",
+            "metric": metric,
+        }
+
+    reached = (arms[cheap][1].get("scores") or {}).get(metric)
+    baseline = (arms[expensive][0].get("scores") or {}).get(metric)
+    if reached is None or baseline is None:
+        return {
+            "crossed": None,
+            "verdict": f"not comparable: {metric} missing on one side",
+            "metric": metric,
+        }
+
+    gap = reached - baseline
+    crossed = gap > resolution
+    if crossed:
+        verdict = (
+            f"{cheap} optimized reaches {reached:.4f}, past {expensive} untuned "
+            f"({baseline:.4f}) by {gap:+.4f}, beyond the {resolution:.4f} resolution"
+        )
+    else:
+        verdict = (
+            f"{cheap} optimized reaches {reached:.4f} against {expensive} untuned "
+            f"({baseline:.4f}); the {gap:+.4f} gap is inside the {resolution:.4f} "
+            f"resolution, so this design cannot call it a crossing"
+        )
+    return {
+        "crossed": crossed,
+        "gap": gap,
+        "reached": reached,
+        "baseline": baseline,
+        "resolution": resolution,
+        "metric": metric,
+        "verdict": verdict,
+    }
+
+
+def complementarity(
+    arms: dict[str, tuple[dict, dict]],
+    a: str,
+    b: str,
+    metric: str,
+    phase: int = 1,
+) -> dict:
+    """Per case, how often each arm beats the other on one metric.
+
+    A leaderboard says which model is better on average. This says whether the worse one is
+    better *somewhere* -- FrugalGPT measured 13% of COQA items that GPT-4 got wrong and GPT-3
+    got right, which is the argument for routing rather than picking. A near-zero number here
+    means the cheap tier is strictly worse and the frontier is the whole story; a large one
+    means the average is hiding a real split.
+
+    Compared over cases **both** arms scored. Unmatched cases are exactly the dropout
+    silent-failures #5 showed reads as a prompt effect, and including them would let coverage
+    differences masquerade as complementarity.
+
+    **THIS CONFLATES REAL DISAGREEMENT WITH JUDGE NOISE, and on one metric it is almost all
+    noise.** A per-case win is only evidence about the models if the judge would score the
+    same pair the same way twice. DOE 02 measured per-case judge self-disagreement on
+    byte-identical responses at **64/64 for `instruction_following_v1`** and **0/64 for
+    `safety_v1`**. Measured here on campaign 09's two treatment arms: 99% of cases have a
+    "winner" on `instruction_following_v1` against 21% on `safety_v1` -- the first number is
+    the judge, not the models. Read this metric by metric against those disagreement rates,
+    never pooled.
+    """
+    from .inference import eval_side_from_payload
+
+    if a not in arms or b not in arms:
+        return {"n_common": 0, "a_only": 0, "b_only": 0, "a_only_frac": 0.0, "b_only_frac": 0.0}
+
+    side_a = eval_side_from_payload(a, "x", arms[a][phase])
+    side_b = eval_side_from_payload(b, "x", arms[b][phase])
+    common = sorted(set(side_a.per_case) & set(side_b.per_case))
+
+    a_only = b_only = 0
+    for case in common:
+        va = side_a.per_case[case].get(metric)
+        vb = side_b.per_case[case].get(metric)
+        if va is None or vb is None:
+            continue
+        if va > vb:
+            a_only += 1
+        elif vb > va:
+            b_only += 1
+
+    n = len(common)
+    return {
+        "metric": metric,
+        "n_common": n,
+        "a_only": a_only,
+        "b_only": b_only,
+        "a_only_frac": a_only / n if n else 0.0,
+        "b_only_frac": b_only / n if n else 0.0,
+    }

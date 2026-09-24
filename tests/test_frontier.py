@@ -317,3 +317,120 @@ class TestIncomparableArmsAreExcludedLoudly:
         }
         s = summarize_frontier(arms, {"c07-pro": "gemini-3.5-flash"}, pre_fix_arms={"c07-pro"})
         assert any("c07-pro" in w and "tool_use" in w for w in s["warnings"])
+
+
+def _pc(rows):
+    """A stage artifact carrying per-case scores."""
+    return {"per_case": [{"case_index": i, **r} for i, r in enumerate(rows)]}
+
+
+class TestCrossesTier:
+    """The demo-worthy question: does optimizing a cheap tier move it past an expensive one?"""
+
+    def test_a_cheap_tier_that_overtakes_reports_crossed(self):
+        from wrangler.reporting.frontier import crosses_tier
+
+        arms = {
+            "cheap": (_arm_side({M: 0.50}), _arm_side({M: 0.90})),
+            "dear": (_arm_side({M: 0.70}), _arm_side({M: 0.72})),
+        }
+        got = crosses_tier(arms, "cheap", "dear", M, resolution=0.05)
+        assert got["crossed"] is True
+        assert got["gap"] == pytest.approx(0.20)
+
+    def test_a_gap_inside_the_resolution_is_not_a_crossing(self):
+        """Same discipline as domination: an unresolvable gap is not a result."""
+        from wrangler.reporting.frontier import crosses_tier
+
+        arms = {
+            "cheap": (_arm_side({M: 0.50}), _arm_side({M: 0.72})),
+            "dear": (_arm_side({M: 0.70}), _arm_side({M: 0.71})),
+        }
+        got = crosses_tier(arms, "cheap", "dear", M, resolution=0.05)
+        assert got["crossed"] is False
+        assert "resolution" in got["verdict"].lower()
+
+    def test_it_compares_cheap_after_against_expensive_before(self):
+        """The expensive tier's UNoptimized point is the bar: the question is whether a cheap
+        optimized prompt buys what an expensive model gives you off the shelf."""
+        from wrangler.reporting.frontier import crosses_tier
+
+        arms = {
+            "cheap": (_arm_side({M: 0.10}), _arm_side({M: 0.80})),
+            "dear": (_arm_side({M: 0.70}), _arm_side({M: 0.99})),
+        }
+        got = crosses_tier(arms, "cheap", "dear", M, resolution=0.05)
+        assert got["baseline"] == pytest.approx(0.70)
+        assert got["crossed"] is True
+
+    def test_a_missing_arm_is_reported_not_raised(self):
+        from wrangler.reporting.frontier import crosses_tier
+
+        got = crosses_tier({}, "cheap", "dear", M, resolution=0.05)
+        assert got["crossed"] is None
+
+
+class TestComplementarity:
+    """FrugalGPT measured 13% of COQA items that GPT-4 got wrong and GPT-3 got right. A
+    non-trivial number is what justifies a tier choice over a leaderboard ranking."""
+
+    def test_it_counts_cases_each_arm_wins(self):
+        from wrangler.reporting.frontier import complementarity
+
+        a = _pc([{M: 1.0}, {M: 0.0}, {M: 1.0}, {M: 0.0}])
+        b = _pc([{M: 0.0}, {M: 1.0}, {M: 1.0}, {M: 0.0}])
+        got = complementarity({"a": (a, a), "b": (b, b)}, "a", "b", M)
+        assert got["a_only"] == 1
+        assert got["b_only"] == 1
+        assert got["n_common"] == 4
+
+    def test_it_reports_a_fraction_not_just_a_count(self):
+        from wrangler.reporting.frontier import complementarity
+
+        a = _pc([{M: 1.0}, {M: 0.0}])
+        b = _pc([{M: 0.0}, {M: 0.0}])
+        got = complementarity({"a": (a, a), "b": (b, b)}, "a", "b", M)
+        assert got["a_only_frac"] == pytest.approx(0.5)
+
+    def test_only_cases_both_arms_scored_are_compared(self):
+        """Unmatched cases are the dropout that silent-failures #5 showed reads as an effect."""
+        from wrangler.reporting.frontier import complementarity
+
+        a = {"per_case": [{"case_index": 0, M: 1.0}, {"case_index": 1, M: 1.0}]}
+        b = {"per_case": [{"case_index": 0, M: 0.0}]}
+        got = complementarity({"a": (a, a), "b": (b, b)}, "a", "b", M)
+        assert got["n_common"] == 1
+
+    def test_no_common_cases_reports_zero_rather_than_dividing(self):
+        from wrangler.reporting.frontier import complementarity
+
+        a = {"per_case": [{"case_index": 0, M: 1.0}]}
+        b = {"per_case": [{"case_index": 9, M: 1.0}]}
+        got = complementarity({"a": (a, a), "b": (b, b)}, "a", "b", M)
+        assert got["n_common"] == 0
+        assert got["a_only_frac"] == 0.0
+
+    def test_a_high_judge_noise_metric_shows_near_total_disagreement(self):
+        """Regression pin on the caveat: on campaign 09's real artifacts,
+        instruction_following_v1 (64/64 judge self-disagreement per DOE 02) has a winner on
+        nearly every case, while safety_v1 (0/64) has one on about a fifth. If this inverts,
+        the caveat in the docstring is wrong."""
+        import json
+
+        from wrangler.reporting.frontier import complementarity
+
+        arms = {
+            a: (
+                json.loads(Path(f"tests/fixtures/c09/eval_before/{a}.json").read_text()),
+                json.loads(Path(f"tests/fixtures/c09/eval_after/{a}.json").read_text()),
+            )
+            for a in ("c09-rationale-on", "c09-rationale-off")
+        }
+        noisy = complementarity(
+            arms, "c09-rationale-on", "c09-rationale-off", "instruction_following_v1"
+        )
+        quiet = complementarity(arms, "c09-rationale-on", "c09-rationale-off", "safety_v1")
+        noisy_rate = noisy["a_only_frac"] + noisy["b_only_frac"]
+        quiet_rate = quiet["a_only_frac"] + quiet["b_only_frac"]
+        assert noisy_rate > 0.9
+        assert quiet_rate < 0.4
