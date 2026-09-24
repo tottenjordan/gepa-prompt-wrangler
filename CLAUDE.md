@@ -343,6 +343,22 @@ campaign, and the budget early stopping frees is what would pay for one.
 Default patience is **15**, not 10, because the lossless threshold is run-dependent (5, 8, 10) and
 15 clears all three by 5–10 iterations for ~4 points of pooled saving. Re-run
 `scripts/replay_stopping.py` when replicated runs exist.
+
+**Re-derived against the continuous signal (2026-09-24): 15 still holds, and is conservative by
+about 3x.** Campaign 09's continuous validation scores were recovered from the optimize logs rather
+than re-run — ordering verified against an independent quantity, seconds-between-batches vs
+calls-between-discoveries, at r = +0.971 and +0.993. Patience **5** is lossless on both arms where
+the binary signal needed 10, because more distinguishable levels identify the winner sooner. 15 is
+kept: it is lossless under both signals on all five measured arms, and the evidence for cutting it
+is one informative arm at the *old* 15-case subset.
+
+**The same replay found that the binary and continuous signals rank candidates almost
+independently** — r = **+0.071** and **+0.274** between the archived binary aggregate and the
+continuous composite over the same candidates. The ordering check rules out a data artifact. So
+option A does not merely separate candidates more finely, it **selects substantially different
+prompts**, which makes the one-arm-on/one-arm-off validation the thing that should gate adopting it
+as a default rather than a nicety.
+[docs/analysis/2026-09-24-patience-under-continuous-scoring.md](docs/analysis/2026-09-24-patience-under-continuous-scoring.md)
 [docs/analysis/2026-09-24-stopping-replay.md](docs/analysis/2026-09-24-stopping-replay.md)
 
 **Racing the arms was evaluated and REJECTED — do not rebuild it.** Idea 3 of the harness
