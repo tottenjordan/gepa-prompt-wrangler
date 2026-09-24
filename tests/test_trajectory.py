@@ -22,7 +22,7 @@ from wrangler.optimize.trajectory import (
     val_scores,
 )
 
-FIXTURES = Path(__file__).parent / "fixtures" / "c09_trajectories"
+FIXTURES = Path(__file__).parent / "fixtures" / "gepa_trajectories"
 
 
 def _synthetic_state(scores_per_candidate, discoveries, calls, iterations):
@@ -139,6 +139,7 @@ class TestCampaign09Regression:
         [
             ("c09-rationale-on", 21, 64, 603, 4),
             ("c09-rationale-off", 16, 91, 600, 6),
+            ("m01-rationale-merge", 22, 57, 603, 4),
         ],
     )
     def test_fixture_shape(self, arm, candidates, iterations, calls, best_idx):
@@ -149,12 +150,32 @@ class TestCampaign09Regression:
         assert traj.best_idx == best_idx
         assert traj.val_subset_size == 15
 
-    def test_both_arms_saturate_the_validation_subset(self):
-        """The finding that qualifies the whole result: the selection signal hits its
-        ceiling, so most of the budget is spent where it cannot rank candidates."""
-        for arm in ("c09-rationale-on", "c09-rationale-off"):
-            traj = load_trajectory(FIXTURES / f"{arm}.json")
-            assert traj.scores[traj.best_idx] == 1.0
+    def test_saturation_is_frequent_but_not_universal(self):
+        """The finding that qualifies the whole result, and its limit.
+
+        Both campaign 09 arms hit the ceiling of their 15-case validation subset, so
+        the selection signal spent most of the run unable to rank candidates. m01 did
+        not — it topped out at 14/15 — which is why this is stated as 2 of 3 rather
+        than a property of the harness.
+        """
+        best = {
+            arm: load_trajectory(FIXTURES / f"{arm}.json").scores[
+                load_trajectory(FIXTURES / f"{arm}.json").best_idx
+            ]
+            for arm in ("c09-rationale-on", "c09-rationale-off", "m01-rationale-merge")
+        }
+        assert best["c09-rationale-on"] == 1.0
+        assert best["c09-rationale-off"] == 1.0
+        assert best["m01-rationale-merge"] < 1.0
+
+    def test_the_unsaturated_run_still_stops_losslessly(self):
+        """The case there was no evidence for when the default was chosen. m01 is a
+        real run whose validation score never reached the ceiling, and patience 15
+        still returns its winning candidate."""
+        traj = load_trajectory(FIXTURES / "m01-rationale-merge.json")
+        point = replay(traj, 15)
+        assert point.same_candidate
+        assert point.calls_at_stop < traj.total_calls
 
     @pytest.mark.parametrize(
         ("arm", "patience", "same", "calls"),
@@ -172,7 +193,7 @@ class TestCampaign09Regression:
 
     def test_recommended_patience_is_lossless_on_both_arms(self):
         """Patience 15 is the shipped default; if this breaks, the default is wrong."""
-        for arm in ("c09-rationale-on", "c09-rationale-off"):
+        for arm in ("c09-rationale-on", "c09-rationale-off", "m01-rationale-merge"):
             traj = load_trajectory(FIXTURES / f"{arm}.json")
             point = replay(traj, 15)
             assert point.same_candidate

@@ -7,7 +7,7 @@ validation subset early and then searched for another 50–77 iterations against
 no longer rank anything.
 
 Reproduce with `uv run python scripts/replay_stopping.py` (no GCS needed; trajectories are
-committed at `tests/fixtures/c09_trajectories/`).
+committed at `tests/fixtures/gepa_trajectories/`).
 
 ## Method
 
@@ -33,18 +33,22 @@ would **silently return False forever** if the state object stopped exposing the
 
 ## Result
 
+All three archived runs in the project — campaign 09's two arms and m01. Campaigns 07 and 08
+predate run_dir archiving, so this is every optimize trajectory that still exists.
+
 | arm | iterations | metric calls | candidates | best candidate | first reached |
 | --- | --- | --- | --- | --- | --- |
 | `c09-rationale-on` | 64 | 603 | 21 | 4 (score 1.0000) | iteration 7, 102 calls |
 | `c09-rationale-off` | 91 | 600 | 16 | 6 (score 1.0000) | iteration 14, 159 calls |
+| `m01-rationale-merge` | 57 | 603 | 22 | 4 (score **0.9333**) | iteration 5, 150 calls |
 
-| patience | rationale-on: saved / returns | rationale-off: saved / returns |
-| --- | --- | --- |
-| 3 | 92.5% / **different** | 85.0% / **different** |
-| 5 | 87.1% / **different** | 85.0% / **different** |
-| 8 | 79.1% / same | 78.5% / **different** |
-| **10** | **79.1% / same** | **57.5% / same** |
-| **15** | **66.7% / same** | **57.5% / same** |
+| patience | rationale-on | rationale-off | m01 |
+| --- | --- | --- | --- |
+| 3 | 92.5% / **different** | 85.0% / **different** | 89.6% / **different** |
+| 5 | 87.1% / **different** | 85.0% / **different** | 75.1% / same |
+| 8 | 79.1% / same | 78.5% / **different** | 75.1% / same |
+| **10** | **79.1% / same** | **57.5% / same** | **68.2% / same** |
+| **15** | **66.7% / same** | **57.5% / same** | **68.2% / same** |
 
 "Same" means the candidate GEPA returns is the same index, hence the same prompt, hence the same
 campaign result. This is not a statistical claim — it is an identity.
@@ -56,10 +60,16 @@ can only tie, never displace.
 
 ## The finding that qualifies the result
 
-**Both arms saturated their validation subset.** The subset is 15 cases, so it resolves 1/15 =
-0.0667 and tops out at 1.0000 — which both arms reached, at iteration 7 of 64 and iteration 14 of
-91 respectively. **73–83% of each optimize budget was spent in a regime where the selection signal
-could not distinguish one candidate from another.**
+**Two of the three runs saturated their validation subset.** The subset is 15 cases, so it
+resolves 1/15 = 0.0667 and tops out at 1.0000 — which both campaign 09 arms reached, at iteration
+7 of 64 and 14 of 91. **73–83% of those two budgets was spent in a regime where the selection
+signal could not distinguish one candidate from another.**
+
+**m01 is the counter-example, and it is a near miss rather than a refutation**: it topped out at
+0.9333, one case short of the ceiling, having reached that at iteration 5 of 57. So the signal was
+not formally saturated, but it still could not improve for 52 of 57 iterations. Across the whole
+useful range a 15-case subset admits only about six distinct values, which is the underlying
+problem in both shapes.
 
 That reframes the headline. Early stopping is not detecting convergence here; it is detecting that
 the instrument ran out of range. The 62% pooled saving is real and bankable, but it is the size of
@@ -73,25 +83,28 @@ Two consequences worth carrying forward:
    stochastic. A tie-break on a coarse, saturated signal is an amplifier for exactly that kind of
    spread. This is a hypothesis, not a measurement; it is testable with the replicates this work
    is funding.
-2. **A patience tuned on saturated runs says nothing about unsaturated ones.** Both observed runs
-   hit the ceiling, so we have no evidence at all about a run that does not. The default below is
-   chosen for margin on that account.
+2. **The unsaturated case now has one data point, and the default survives it.** m01 never
+   reached the ceiling and patience 15 still returns its winning candidate, at 68.2% saved. That
+   was the gap this analysis originally flagged as having no evidence behind it; one run is not
+   many, but it is no longer zero.
 
 ## Decision
 
 **Default patience = 15**, and it stays opt-in.
 
-Both 10 and 15 are lossless on both arms. 15 is preferred because the observed threshold is
-**arm-dependent** — 8 on one arm, 10 on the other — so patience 10 cleared one arm with zero
-margin. 15 clears both by 5 and 7 iterations and costs about 6 percentage points of pooled saving
-(62.1% versus 68.3%). With n=2 runs behind the number, margin is worth more than the six points.
+Both 10 and 15 are lossless on all three runs. 15 is preferred because the observed threshold is
+**run-dependent** — 5 on m01, 8 on one campaign 09 arm, 10 on the other — so patience 10 cleared
+one run with zero margin. 15 clears all three by 5 to 10 iterations and costs about 4 percentage
+points of pooled saving (64.1% versus 68.3%). With three runs behind the number, margin is worth
+more than the five points.
 
-Pooled: 747 of 1,203 metric calls saved, **62.1%**.
+Pooled across all three: 1,158 of 1,806 metric calls saved, **64.1%**.
 
 ## Caveats
 
-- **n=2, one campaign, both saturated.** Re-run this replay once replicated runs exist; the script
-  takes new trajectories as arguments.
+- **Three runs, two campaigns.** Every archived trajectory in the project is used here, which is
+  as much evidence as exists rather than as much as one would want. Re-run the replay once
+  replicated runs exist; the script takes new trajectories as arguments.
 - **The saving is optimize-stage only.** A replicate also costs a deploy, a health gate, a
   redeploy and two eval sides, so this does not fund a blanket n=2. See the plan for the
   arithmetic.

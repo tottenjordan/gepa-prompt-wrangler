@@ -39,7 +39,7 @@ from wrangler.optimize.trajectory import (
     to_trajectory,
 )
 
-FIXTURES = Path(__file__).resolve().parent.parent / "tests" / "fixtures" / "c09_trajectories"
+FIXTURES = Path(__file__).resolve().parent.parent / "tests" / "fixtures" / "gepa_trajectories"
 
 
 def _report(traj) -> bool:

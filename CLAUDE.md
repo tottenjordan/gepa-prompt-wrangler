@@ -302,17 +302,25 @@ and an absent key are byte-identical — a suffix would change `run_id` and inva
 in-flight campaign's cache. Adding `replicates:` to an existing manifest *does* change
 `run_id`, which is correct but means the first replicated run pays full price for every stage.
 
-**Early stopping was free on campaign 09, and the reason is a defect.** Replaying gepa's real
-stopper against the archived `gepa_state.bin` of both optimizing arms: **patience ≥ 10 returns
-a byte-identical prompt** while spending 57.5% and 79.1% fewer metric calls. It is an identity,
-not a statistical claim — `gepa.core.result.best_idx` is the **first** argmax, so the winner is
-fixed the moment the best score is first reached. **But both arms saturated their 15-case
-validation subset at 1.0000 by iteration 7 of 64 and 14 of 91**, so 73–83% of each budget was
-spent where the selection signal could not rank candidates at all. That is the instrument
-running out of range, not convergence — and it is a candidate explanation for the run-to-run
-spread, since on a saturated subset the winner is whichever candidate *first* fluked 15/15.
-Default patience is **15**, not 10, because the observed threshold is arm-dependent (8 and 10)
-and n=2. Re-run `scripts/replay_stopping.py` when replicated runs exist.
+**Early stopping is free on every run we can still measure, and the reason is a defect.**
+Replaying gepa's real stopper against all three archived `gepa_state.bin` files — campaign 09's
+two arms and m01; 07 and 08 predate run_dir archiving — **patience ≥ 10 returns a byte-identical
+prompt on all three**, pooled **64.1% of metric calls saved** at the shipped default of 15. It is
+an identity, not a statistical claim: `gepa.core.result.best_idx` is the **first** argmax, so the
+winner is fixed the moment the best score is first reached.
+
+**The qualifier: the 15-case validation subset has almost no resolution.** It admits about six
+distinct values, and **both campaign 09 arms saturated it at 1.0000** by iteration 7 of 64 and 14
+of 91 — so 73–83% of those budgets was spent where the selection signal could not rank candidates
+at all. m01 is the counter-example and a near miss: it topped out at 0.9333, one case short, and
+still could not improve for 52 of its 57 iterations. That is the instrument running out of range
+rather than convergence, and it is a **candidate explanation for the run-to-run spread** — on a
+saturated subset the winner is whichever candidate *first* fluked 15/15. Untested; it needs a
+campaign, and the budget early stopping frees is what would pay for one.
+
+Default patience is **15**, not 10, because the lossless threshold is run-dependent (5, 8, 10) and
+15 clears all three by 5–10 iterations for ~4 points of pooled saving. Re-run
+`scripts/replay_stopping.py` when replicated runs exist.
 [docs/analysis/2026-09-24-stopping-replay.md](docs/analysis/2026-09-24-stopping-replay.md)
 
 **Racing the arms was evaluated and REJECTED — do not rebuild it.** Idea 3 of the harness
