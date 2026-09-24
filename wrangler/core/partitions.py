@@ -17,13 +17,19 @@ A split resampled at run time would make every campaign a different
 experiment, and cross-campaign comparison is most of what this repo does.
 
 **It is stratified on ``(tier, category)``, and that is not cosmetic.** The old
-49/15 split was not stratified — train covered 18 cells, validation 11 — and on
-a real campaign the CONTROL arm, which runs no optimize stage and therefore
-cannot overfit, showed a train-versus-validation gap of -0.1146: larger than
-either optimized arm's, and in the opposite direction. That entire gap was
-subset composition being read as an optimization effect. Allocation below is
+49/15 split was not stratified — train covered 18 cells, validation 11 — and
+that difference is large enough to be read as a result. On campaign 09 the
+``safety_v1`` train-versus-validation gap came out **negative on all three
+arms**, including the CONTROL arm (-0.1146), which runs no optimize stage and
+therefore cannot overfit. The control's gap was not uniquely large: it sits
+between the two optimized arms (-0.0333 and -0.1456). That ordering — arms not
+ranked by how much optimization they received — is the evidence that the gap is
+subset composition rather than overfitting, and **no overfitting was observed
+in either direction**. An unstratified test set would put the same composition
+artifact underneath every held-out number from here on. Allocation below is
 integer apportionment per cell, so each partition gets the floor or the ceiling
-of its proportional share of every cell and never more.
+of its proportional share of every cell and never more. Measured in
+``docs/analysis/2026-09-23-train-validation-composition.md``.
 
 **Two positional id schemes meet here.** Eval result artifacts record
 ``case_index``, the 0-based position in ``eval_cases.yaml``. GEPA (see
@@ -31,15 +37,25 @@ of its proportional share of every cell and never more.
 {category}`` — 1-based — and those are the ids in every ``*_opt/
 sampler_config.json``. Indices in ``partitions.yaml`` are 0-based; the ``id``
 recorded beside each one is the GEPA form, and :func:`load_partitions` refuses
-a file where the two disagree, so re-ordering ``eval_cases.yaml`` fails loudly
-instead of silently re-labelling cases.
+a file where the two disagree.
+
+**What that id check does and does not guarantee.** It catches any change to
+``eval_cases.yaml`` that puts a different ``(tier, category)`` at a recorded
+position — an insertion, a deletion, a truncation, or a reorder across cells.
+It does **not** catch a permutation *within* a cell: swapping two
+``low_search`` rows leaves every id intact while silently moving both cases
+between partitions. Closing that would take a content digest per entry, which
+was considered and rejected — a digest also fires on an in-place edit to a
+case's wording, where the partition is still entirely correct, so its common
+case would be a false alarm, and the habit that teaches (regenerate to silence
+it) would silence the real alarm too.
 """
 
 from __future__ import annotations
 
 import random
 import sys
-from collections import defaultdict
+from collections import Counter, defaultdict
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
@@ -105,16 +121,34 @@ def load_eval_cases(path: str | Path = DEFAULT_EVAL_CASES_PATH) -> list[dict[str
 
 
 def stratum_of(case: Case) -> tuple[str, str]:
-    """The ``(tier, category)`` cell a case belongs to."""
-    return (str(case.get("tier", "")), str(case.get("category", "")))
+    """The ``(tier, category)`` cell a case belongs to.
+
+    ``complexity`` is the accepted alternative spelling of ``tier`` — see
+    ``converter.generate_gepa_evalset``, which reads
+    ``case.get("tier") or case.get("complexity")``, and
+    ``converter._sample_balanced``, which buckets on ``complexity``. Every
+    case in ``eval_cases.yaml`` currently sets ``tier``, so the fallback is
+    inert today; without it a ``complexity``-only eval set would stratify into
+    one giant ``("", category)`` cell here while GEPA named the same cases
+    ``case_N_low_search``.
+    """
+    tier = case.get("tier", "") or case.get("complexity", "")
+    return (str(tier), str(case.get("category", "")))
 
 
 def case_ids(cases: Sequence[Case] | None = None) -> list[str]:
     """The GEPA-style, **1-based** case ids in eval-file order.
 
     ``case_ids()[n]`` is the id of the case whose 0-based ``case_index`` is
-    ``n``. Mirrors ``converter.generate_gepa_evalset``; the ids it returns are
-    the ones in the checked-in sampler configs.
+    ``n``, and the ids are the ones in the checked-in sampler configs.
+
+    Built by the same rule as ``converter.generate_gepa_evalset``, and
+    ``tests/test_partitions.py`` runs the two over one case list to keep them
+    in step. They agree **on a full, unsampled case list only**: the converter
+    enumerates the cases it *selected*, and it defaults to ``count=15,
+    balanced=True`` — the call in ``optimizer.py`` takes those defaults — so
+    under sampling its ``i`` counts positions in the subset while ours counts
+    positions in the file.
     """
     if cases is None:
         cases = load_eval_cases()
@@ -135,25 +169,9 @@ def case_ids(cases: Sequence[Case] | None = None) -> list[str]:
 # ---------------------------------------------------------------------------
 
 
-def _validated_fractions(fractions: Mapping[str, float] | None) -> dict[str, float]:
-    if fractions is None:
-        return dict(DEFAULT_FRACTIONS)
-    unknown = sorted(set(fractions) - set(PARTITIONS))
-    if unknown:
-        raise ValueError(f"unknown partition name(s): {', '.join(unknown)}")
-    missing = sorted(set(PARTITIONS) - set(fractions))
-    if missing:
-        raise ValueError(f"missing partition name(s): {', '.join(missing)}")
-    total = sum(fractions.values())
-    if abs(total - 1.0) > 1e-9:
-        raise ValueError(f"fractions must sum to 1, got {total}")
-    return dict(fractions)
-
-
 def stratified_split(
     cases: Sequence[Case] | None = None,
     *,
-    fractions: Mapping[str, float] | None = None,
     seed: int = SPLIT_SEED,
 ) -> dict[str, list[int]]:
     """Partition case indices across ``PARTITIONS``, balanced per stratum.
@@ -162,8 +180,13 @@ def stratified_split(
     partition receives ``floor(cell_size * fraction)`` cases, and the leftover
     seats go to whichever partitions are furthest below their running global
     quota. Each partition therefore lands within one whole case of its
-    proportional share of *every* cell, while the totals still track the
-    requested fractions.
+    proportional share of *every* cell, while the totals still track
+    :data:`DEFAULT_FRACTIONS`.
+
+    The fractions are fixed rather than a parameter on purpose: a second set
+    of them is a second split, and a second split is a different experiment
+    that cannot be compared with any campaign that ran before it. Change
+    :data:`DEFAULT_FRACTIONS` and regenerate, so the change lands in a commit.
 
     ``seed`` only chooses *which* member of a cell goes where, never how many.
 
@@ -171,7 +194,7 @@ def stratified_split(
     """
     if cases is None:
         cases = load_eval_cases()
-    fracs = _validated_fractions(fractions)
+    fracs = DEFAULT_FRACTIONS
 
     strata: dict[tuple[str, str], list[int]] = defaultdict(list)
     for i, case in enumerate(cases):
@@ -225,16 +248,42 @@ def stratified_split(
 # ---------------------------------------------------------------------------
 
 
-def load_partitions(path: str | Path = DEFAULT_PARTITIONS_PATH) -> dict[str, list[int]]:
+def load_partitions(
+    path: str | Path = DEFAULT_PARTITIONS_PATH,
+    *,
+    cases_path: str | Path = DEFAULT_EVAL_CASES_PATH,
+) -> dict[str, list[int]]:
     """0-based case indices per partition, from the checked-in split.
 
-    Raises if the file is not a partition of the eval set, or if any recorded
-    ``id`` disagrees with the id reconstructed from that index — which is what
-    catches a re-ordered ``eval_cases.yaml`` before it re-labels a case.
+    Raises if the file is not a partition of ``cases_path``, or if any
+    recorded ``id`` disagrees with the id reconstructed from that index — see
+    the module docstring for exactly which drifts that does and does not
+    catch.
+
+    ``cases_path`` is what makes a non-default ``path`` usable: a partitions
+    file describes one eval set, and validating it against a different one
+    would report drift that is really just the wrong pairing.
+
+    Every rejection names the file and says what moved. The alternative is a
+    bare ``IndexError`` or ``KeyError`` from inside the loop, and "the eval set
+    moved under the split" is the exact accident this module exists to catch,
+    so it is the last place that should fail without a sentence.
     """
     with open(path) as f:
         raw = yaml.safe_load(f)
-    blocks = (raw or {}).get("partitions", {})
+    if raw is None:
+        raw = {}
+    if not isinstance(raw, Mapping):
+        raise ValueError(  # noqa: TRY004  (file content, not a call argument)
+            f"{path}: expected a mapping with a 'partitions:' block, got "
+            f"{type(raw).__name__} -- this is not a partitions file"
+        )
+    blocks = raw.get("partitions") or {}
+    if not isinstance(blocks, Mapping):
+        raise ValueError(  # noqa: TRY004
+            f"{path}: 'partitions' must map each partition name to a list of "
+            f"cases, got {type(blocks).__name__}"
+        )
     missing = sorted(set(PARTITIONS) - set(blocks))
     if missing:
         raise ValueError(f"{path}: missing partition(s): {', '.join(missing)}")
@@ -242,17 +291,34 @@ def load_partitions(path: str | Path = DEFAULT_PARTITIONS_PATH) -> dict[str, lis
     if unknown:
         raise ValueError(f"{path}: unknown partition(s): {', '.join(unknown)}")
 
-    ids = case_ids()
+    ids = case_ids(load_eval_cases(cases_path))
     out: dict[str, list[int]] = {}
     for part in PARTITIONS:
         indices = []
-        for entry in blocks[part] or []:
-            index = int(entry["index"])
+        for position, entry in enumerate(blocks[part] or []):
+            if not isinstance(entry, Mapping) or "index" not in entry:
+                raise ValueError(
+                    f"{path}: {part}[{position}] is {entry!r}; every entry needs an "
+                    f"'index:' key holding a 0-based case_index"
+                )
+            try:
+                index = int(entry["index"])
+            except (TypeError, ValueError):
+                raise ValueError(
+                    f"{path}: {part}[{position}] has index {entry['index']!r}, "
+                    f"which is not an integer case_index"
+                ) from None
+            if not 0 <= index < len(ids):
+                raise ValueError(
+                    f"{path}: {part}[{position}] refers to case_index {index}, but "
+                    f"{cases_path} holds {len(ids)} cases (0..{len(ids) - 1}) -- the "
+                    f"eval set moved under the split"
+                )
             recorded = entry.get("id")
             if recorded is not None and recorded != ids[index]:
                 raise ValueError(
                     f"{path}: {part} case_index {index} is recorded as {recorded!r} "
-                    f"but eval_cases.yaml says {ids[index]!r} -- the eval set moved "
+                    f"but {cases_path} says {ids[index]!r} -- the eval set moved "
                     f"under the split"
                 )
             indices.append(index)
@@ -260,9 +326,15 @@ def load_partitions(path: str | Path = DEFAULT_PARTITIONS_PATH) -> dict[str, lis
 
     allocated = sorted(i for part in PARTITIONS for i in out[part])
     if allocated != list(range(len(ids))):
+        duplicated = sorted(i for i, n in Counter(allocated).items() if n > 1)
+        absent = sorted(set(range(len(ids))) - set(allocated))
+        faults = []
+        if duplicated:
+            faults.append(f"case_index {duplicated} appear in more than one partition")
+        if absent:
+            faults.append(f"case_index {absent} are in no partition")
         raise ValueError(
-            f"{path}: partitions cover {len(allocated)} case slots "
-            f"({len(set(allocated))} distinct); the eval set has {len(ids)}"
+            f"{path}: not a partition of the {len(ids)} cases in {cases_path}: " + "; ".join(faults)
         )
     return out
 
@@ -271,11 +343,14 @@ def render_partitions_yaml(
     split: Mapping[str, Sequence[int]],
     *,
     seed: int = SPLIT_SEED,
-    fractions: Mapping[str, float] | None = None,
+    cases_path: str | Path = DEFAULT_EVAL_CASES_PATH,
 ) -> str:
-    """Render a split as the checked-in ``partitions.yaml`` text."""
-    fracs = _validated_fractions(fractions)
-    ids = case_ids()
+    """Render a split as the checked-in ``partitions.yaml`` text.
+
+    ``cases_path`` must be the eval set ``split`` was computed over; the ids
+    written beside each index come from it.
+    """
+    ids = case_ids(load_eval_cases(cases_path))
     sizes = ", ".join(f"{part} {len(split[part])}" for part in PARTITIONS)
     lines = [
         "# Train / validation / test partition of eval_cases.yaml.",
@@ -288,18 +363,27 @@ def render_partitions_yaml(
         "#",
         "# Stratified on (tier, category): each partition gets the floor or the",
         "# ceiling of its proportional share of every cell, never more. An",
-        "# unstratified split is measurable -- a control arm that cannot overfit",
-        "# showed a -0.1146 train-vs-validation gap from composition alone.",
+        "# unstratified split is measurable -- on campaign 09 the train-vs-",
+        "# validation safety_v1 gap was negative on ALL THREE arms, including",
+        "# the control (-0.1146), which runs no optimize stage and so cannot",
+        "# overfit. The control's gap was not the largest; it sits between the",
+        "# two optimized arms (-0.0333, -0.1456). No overfitting was observed --",
+        "# the gap is subset composition. Measured in",
+        "# docs/analysis/2026-09-23-train-validation-composition.md.",
         "#",
         "# index is the 0-based case_index used by eval artifacts; id is the",
         "# 1-based GEPA id used by sampler_config.json. Both are written so the",
         "# loader can reject a file that has drifted from eval_cases.yaml.",
+        "#",
+        "# seed and fractions below RECORD how this file was made; the loader",
+        "# does not read them back. They are provenance, not configuration --",
+        "# to change either, edit wrangler/core/partitions.py and regenerate.",
         f"# seed {seed} -- {sizes}",
         "",
         f"seed: {seed}",
         "fractions:",
     ]
-    lines += [f"  {part}: {fracs[part]:.6g}" for part in PARTITIONS]
+    lines += [f"  {part}: {DEFAULT_FRACTIONS[part]:.6g}" for part in PARTITIONS]
     lines.append("partitions:")
     for part in PARTITIONS:
         lines.append(f"  {part}:")

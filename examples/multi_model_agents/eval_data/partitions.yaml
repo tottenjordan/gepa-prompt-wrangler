@@ -8,12 +8,21 @@
 #
 # Stratified on (tier, category): each partition gets the floor or the
 # ceiling of its proportional share of every cell, never more. An
-# unstratified split is measurable -- a control arm that cannot overfit
-# showed a -0.1146 train-vs-validation gap from composition alone.
+# unstratified split is measurable -- on campaign 09 the train-vs-
+# validation safety_v1 gap was negative on ALL THREE arms, including
+# the control (-0.1146), which runs no optimize stage and so cannot
+# overfit. The control's gap was not the largest; it sits between the
+# two optimized arms (-0.0333, -0.1456). No overfitting was observed --
+# the gap is subset composition. Measured in
+# docs/analysis/2026-09-23-train-validation-composition.md.
 #
 # index is the 0-based case_index used by eval artifacts; id is the
 # 1-based GEPA id used by sampler_config.json. Both are written so the
 # loader can reject a file that has drifted from eval_cases.yaml.
+#
+# seed and fractions below RECORD how this file was made; the loader
+# does not read them back. They are provenance, not configuration --
+# to change either, edit wrangler/core/partitions.py and regenerate.
 # seed 20260923 -- train 40, validation 12, test 12
 
 seed: 20260923
