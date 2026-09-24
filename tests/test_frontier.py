@@ -434,3 +434,29 @@ class TestComplementarity:
         quiet_rate = quiet["a_only_frac"] + quiet["b_only_frac"]
         assert noisy_rate > 0.9
         assert quiet_rate < 0.4
+
+
+class TestCrossingVerdictDistinguishesBehindFromUnresolvable:
+    """A negative gap larger than the resolution is not 'too close to call' -- it is a
+    resolvable loss, and saying otherwise flatters the cheap tier."""
+
+    def _arms(self, reached, baseline):
+        return {
+            "cheap": (_arm_side({M: 0.0}), _arm_side({M: reached})),
+            "dear": (_arm_side({M: baseline}), _arm_side({M: baseline})),
+        }
+
+    def test_clearly_behind_is_reported_as_behind(self):
+        from wrangler.reporting.frontier import crosses_tier
+
+        got = crosses_tier(self._arms(0.73, 0.84), "cheap", "dear", M, resolution=0.09)
+        assert got["crossed"] is False
+        assert "behind" in got["verdict"].lower()
+        assert "inside" not in got["verdict"].lower()
+
+    def test_genuinely_unresolvable_still_says_so(self):
+        from wrangler.reporting.frontier import crosses_tier
+
+        got = crosses_tier(self._arms(0.80, 0.82), "cheap", "dear", M, resolution=0.09)
+        assert got["crossed"] is False
+        assert "inside" in got["verdict"].lower()

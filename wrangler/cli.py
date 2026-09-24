@@ -395,6 +395,61 @@ def floor_cmd(run_ids: tuple[str, ...], bucket: str | None, markdown: bool):
         click.echo(f"\nWARNING  {warning}", err=True)
 
 
+@main.command("frontier")
+@click.argument("run_ids", nargs=-1, required=True)
+@click.option("--bucket", default=None, help="GCS bucket (default: GCP_STAGING_BUCKET).")
+@click.option("--cheap", default=None, help="Cheap tier arm id, for the crossing test.")
+@click.option("--expensive", default=None, help="Expensive tier arm id, for the crossing test.")
+def frontier_cmd(
+    run_ids: tuple[str, ...], bucket: str | None, cheap: str | None, expensive: str | None
+):
+    """Per-metric cost-quality frontier across pipeline runs.
+
+    Replaces a chart that averaged five metrics into one scalar and priced models at list
+    rate. Reports which metrics each tier is on the frontier for, rather than a pooled score,
+    because per-metric floors span 3.4x and campaign 09 measured metrics moving in opposite
+    directions.
+
+    Costs are ESTIMATED -- token counts are len(text)//4 and nothing here is metered.
+
+    Standalone rather than part of `report` for the same reason `floor` is: a cross-run
+    analysis whose inputs are chosen by hand should not run implicitly.
+
+        wrangler frontier run-5aa73d6191 run-8a5905dee0 --cheap c07-pro --expensive c07-sonnet5
+    """
+    from .core.config import GCP_STAGING_BUCKET
+    from .reporting.campaign_floor import fetch_arms
+    from .reporting.frontier import (
+        crosses_tier,
+        fetch_models,
+        pre_fix_arms_in,
+        render_markdown,
+        summarize_frontier,
+    )
+
+    target = bucket or GCP_STAGING_BUCKET
+    click.echo(f"Reading {len(run_ids)} run(s) from gs://{target}/pipeline-runs/")
+    arms = fetch_arms(list(run_ids), target)
+    if not arms:
+        raise click.ClickException("no arms found — check the run ids")
+    models = fetch_models(list(run_ids), target)
+    missing = sorted(set(arms) - set(models))
+    if missing:
+        # An unknown model cannot be priced, and an unpriced arm on a cost axis is worse
+        # than an absent one.
+        click.echo(f"  no deploy artifact for: {', '.join(missing)} — they will be unpriced")
+
+    click.echo(f"Found {len(arms)} arm(s): {', '.join(sorted(arms))}\n")
+    summary = summarize_frontier(arms, models, pre_fix_arms=pre_fix_arms_in(arms))
+    click.echo(render_markdown(summary))
+
+    if cheap and expensive:
+        click.echo("### Does optimizing the cheap tier reach the expensive tier untuned?\n")
+        for metric, resolution in sorted(summary["resolutions"].items()):
+            got = crosses_tier(arms, cheap, expensive, metric, resolution)
+            click.echo(f"- **{metric}** — {got['verdict']}")
+
+
 @main.command("probe")
 @click.option("--engine-id", required=True, help="Engine to health-check.")
 @click.option("--n", default=None, type=int, help="Attempts (default: 60).")

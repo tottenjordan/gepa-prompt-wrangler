@@ -316,11 +316,19 @@ def crosses_tier(
             f"{cheap} optimized reaches {reached:.4f}, past {expensive} untuned "
             f"({baseline:.4f}) by {gap:+.4f}, beyond the {resolution:.4f} resolution"
         )
+    elif gap < -resolution:
+        # A loss larger than the resolution is a result, not a tie. Folding it into
+        # "too close to call" would flatter the cheap tier on exactly the metric where
+        # it lost -- and on campaign 07 that metric is the holdout.
+        verdict = (
+            f"{cheap} optimized reaches {reached:.4f}, BEHIND {expensive} untuned "
+            f"({baseline:.4f}) by {gap:+.4f}, beyond the {resolution:.4f} resolution"
+        )
     else:
         verdict = (
             f"{cheap} optimized reaches {reached:.4f} against {expensive} untuned "
             f"({baseline:.4f}); the {gap:+.4f} gap is inside the {resolution:.4f} "
-            f"resolution, so this design cannot call it a crossing"
+            f"resolution, so this design cannot call it either way"
         )
     return {
         "crossed": crossed,
@@ -390,3 +398,81 @@ def complementarity(
         "a_only_frac": a_only / n if n else 0.0,
         "b_only_frac": b_only / n if n else 0.0,
     }
+
+
+#: Runs whose optimize stage predates the silent-failure-12 fix (2026-09-18). Campaign 09
+#: onward is clean; 07, 08 and m01 are not, and CLAUDE.md records they are not retrospectively
+#: cleaned. Listed by arm-id prefix because that is what the artifacts are keyed by.
+PRE_FIX_ARM_PREFIXES = ("c07-", "c08-", "m01-")
+
+
+def pre_fix_arms_in(arms) -> frozenset[str]:
+    """Arms whose tool-use numbers predate the 2026-09-18 fix.
+
+    Derived from the arm id rather than a blob timestamp: the id is what a reader sees in the
+    table, and a prefix they can check beats a date they have to trust us about.
+    """
+    return frozenset(a for a in arms if a.startswith(PRE_FIX_ARM_PREFIXES))
+
+
+def fetch_models(run_ids: list[str], bucket_name: str) -> dict[str, str]:
+    """Each arm's model id, from its deploy stage artifact.
+
+    Separate from `campaign_floor.fetch_arms` because that returns only the two eval
+    artifacts, and the model id is not in them. Kept as thin as that one is -- it maps run ids
+    to a field and does nothing else -- so the arithmetic stays testable without a bucket.
+    """
+    import json as _json
+
+    from google.cloud import storage
+
+    bucket = storage.Client().bucket(bucket_name)
+    models: dict[str, str] = {}
+    for run_id in run_ids:
+        for blob in bucket.list_blobs(prefix=f"pipeline-runs/{run_id}/stages/deploy/"):
+            if not blob.name.endswith(".json"):
+                continue
+            arm = blob.name.rsplit("/", 1)[-1][: -len(".json")]
+            payload = _json.loads(blob.download_as_text())
+            if payload.get("model"):
+                models[arm] = payload["model"]
+    return models
+
+
+def render_markdown(summary: dict) -> str:
+    """The frontier report. Membership table first, chart nowhere.
+
+    Ordered so the thing that survives being copied into a doc is the thing that is true: the
+    per-metric membership counts, then the caveats that qualify them. A pooled score would fit
+    on one line and would be the wrong number.
+    """
+    points = {p.arm: p for p in summary["points_after"]}
+    metrics = sorted(summary["resolutions"])
+    lines: list[str] = ["## Cost-quality frontier", ""]
+
+    lines += [f"_{summary['cost_note']}_", "", f"_{summary['resolution_note']}_", ""]
+
+    lines += ["| arm | model | est. cost | " + " | ".join(metrics) + " | on frontier |"]
+    lines += ["| --- | --- | ---: | " + " | ".join(["---:"] * len(metrics)) + " | ---: |"]
+    for arm in sorted(points):
+        p = points[arm]
+        cost = f"${p.cost_usd:.3f}" if p.priced else "n/a"
+        cells = []
+        for m in metrics:
+            v = p.quality.get(m)
+            mark = "*" if arm in summary["frontier_after"].get(m, []) else ""
+            cells.append(f"{v:.4f}{mark}" if v is not None else "—")
+        lines.append(
+            f"| {arm} | {p.model} | {cost} | "
+            + " | ".join(cells)
+            + f" | {summary['membership'].get(arm, 0)}/{len(metrics)} |"
+        )
+    lines += ["", "`*` = on that metric's frontier.", ""]
+
+    if summary["excluded"]:
+        lines += ["### Excluded", ""] + [f"- {e}" for e in summary["excluded"]] + [""]
+    if summary["warnings"]:
+        lines += ["### Warnings", ""] + [f"- {w}" for w in summary["warnings"]] + [""]
+
+    lines += ["### Caveats", ""] + [f"- {c}" for c in summary["caveats"]] + [""]
+    return "\n".join(lines)
