@@ -13,6 +13,7 @@ from __future__ import annotations
 
 from pathlib import Path
 from types import SimpleNamespace
+from typing import ClassVar
 
 import pytest
 
@@ -195,13 +196,36 @@ class TestManifestPlumbing:
         m = PairFactory.load(self._manifest(tmp_path, {"continuous_val_score": True}))
         assert _pairs_json(m)[0]["continuous_val_score"] is True
 
-    def test_every_checked_in_manifest_still_has_it_off(self):
-        """It re-baselines a campaign, so no shipped manifest may acquire it by accident."""
+    #: Manifests that turn continuous scoring on deliberately. Naming them here is the
+    #: point: the flag re-baselines a campaign, so acquiring it must be an edit someone
+    #: made on purpose and defended, not a default that drifted.
+    DELIBERATELY_ON: ClassVar[set[str]] = {
+        # Measures the plateau under the new signal so patience can be re-derived.
+        # docs/analysis/2026-09-24-patience-under-continuous-scoring.md
+        "patience-rederive_manifest.yaml",
+    }
+
+    def test_no_manifest_acquires_continuous_scoring_by_accident(self):
+        """It re-baselines a campaign, so every manifest carrying it must be listed above."""
         from wrangler.core.factory import PairFactory
 
-        for path in sorted(Path("manifests").glob("*.yaml")):
-            for pair in PairFactory.load(path).pairs:
-                assert pair.continuous_val_score is False, f"{path.name}:{pair.id}"
+        on = {
+            path.name
+            for path in sorted(Path("manifests").glob("*.yaml"))
+            if any(p.continuous_val_score for p in PairFactory.load(path).pairs)
+        }
+        assert on == self.DELIBERATELY_ON, (
+            f"unexpected: {sorted(on - self.DELIBERATELY_ON)}; "
+            f"no longer on: {sorted(self.DELIBERATELY_ON - on)}"
+        )
+
+    def test_the_measurement_manifest_sets_no_patience(self):
+        """It has to run past its own plateau for the replay to see where a stopper would
+        fire; a patience would truncate the trajectory that is the point of the run."""
+        from wrangler.core.factory import PairFactory
+
+        m = PairFactory.load("manifests/patience-rederive_manifest.yaml")
+        assert all(p.patience is None for p in m.pairs)
 
 
 class TestSubstitutionSemantics:
