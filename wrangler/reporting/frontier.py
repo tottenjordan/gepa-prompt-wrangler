@@ -168,3 +168,108 @@ def cost_for_arm(
         "is_estimate": is_estimate or not saw_usage,
         "convention": COST_CONVENTION,
     }
+
+
+#: Metrics whose numbers are uninterpretable for runs predating the silent-failure-12 fix
+#: (2026-09-18). Tool use is the one affected: 12-24% of cases in campaigns 07 and 08 were
+#: scored against an agent that had been handed zero tools. CLAUDE.md records that those runs
+#: are NOT retrospectively cleaned.
+PRE_FIX_SUSPECT_METRICS = ("tool_use_quality_v1",)
+
+
+def summarize_frontier(
+    arms: dict[str, tuple[dict, dict]],
+    models: dict[str, str],
+    *,
+    variance_source=None,
+    pre_fix_arms: frozenset[str] | set[str] = frozenset(),
+    custom_costs: dict[str, dict[str, float]] | None = None,
+) -> dict:
+    """Assemble a cross-run tier comparison from stage artifacts.
+
+    Takes `campaign_floor.fetch_arms`' exact output shape, so the GCS reader is reused rather
+    than reimplemented -- and, as there, every piece of arithmetic here stays testable without
+    a bucket.
+
+    `models` is a separate mapping because the eval artifacts do not carry a model id; it
+    lives in the deploy stage artifact. Pricing the wrong id moves the answer by more than
+    25% (`TestCostAgreesWithTheArtifact`), so it is read, never inferred.
+    """
+    from .campaign_floor import COVERAGE_GAP_LIMIT
+    from .inference import campaign_09_variance, mde_for_design
+
+    custom_costs = custom_costs or {}
+    source = variance_source or campaign_09_variance()
+
+    points: dict[str, list[ArmPoint]] = {"before": [], "after": []}
+    excluded: list[str] = []
+    warnings: list[str] = []
+    n_cases = 0
+
+    for arm in sorted(arms):
+        before, after = arms[arm]
+        cov_b, cov_a = before.get("coverage"), after.get("coverage")
+        if cov_b is not None and cov_a is not None and abs(cov_b - cov_a) > COVERAGE_GAP_LIMIT:
+            # Same rule as the noise floor: a delta across a coverage gap this wide measures
+            # dropout, so the arm is dropped with its reason rather than quietly plotted.
+            excluded.append(
+                f"{arm}: coverage gap {abs(cov_b - cov_a):.0%} exceeds "
+                f"{COVERAGE_GAP_LIMIT:.0%} — its scores describe dropout, not quality"
+            )
+            continue
+
+        cost = cost_for_arm(before, after, models.get(arm, ""), custom_costs.get(arm))
+        n_cases = max(n_cases, int(before.get("cases_total") or 0))
+        for phase, side in (("before", before), ("after", after)):
+            points[phase].append(
+                ArmPoint(
+                    arm=arm,
+                    model=models.get(arm, "unknown"),
+                    cost_usd=cost["cost_usd"],
+                    quality=dict(side.get("scores") or {}),
+                    coverage=side.get("coverage") or 0.0,
+                    is_estimate=cost["is_estimate"],
+                    priced=cost["priced"],
+                )
+            )
+
+        if arm in pre_fix_arms:
+            warnings.extend(
+                f"{arm}: {metric} predates the 2026-09-18 silent-failure-12 fix — "
+                f"12-24% of cases scored a toolless agent; not retrospectively cleaned"
+                for metric in PRE_FIX_SUSPECT_METRICS
+                if metric in (after.get("scores") or {})
+            )
+
+    design = mde_for_design(
+        n_cases=n_cases or source.n_cases,
+        num_runs=int(arms[next(iter(arms))][0].get("num_runs") or 1) if arms else 1,
+        variance_source=source,
+    )
+    resolutions = dict(design.per_metric)
+
+    return {
+        "points_before": points["before"],
+        "points_after": points["after"],
+        "resolutions": resolutions,
+        "frontier_before": {
+            m: frontier_for_metric(points["before"], m, r) for m, r in resolutions.items()
+        },
+        "frontier_after": {
+            m: frontier_for_metric(points["after"], m, r) for m, r in resolutions.items()
+        },
+        "membership": frontier_membership(points["after"], resolutions),
+        "excluded": excluded,
+        "warnings": warnings,
+        "cost_note": (
+            f"Costs are ESTIMATED, not metered: token counts are len(text)//4 and no "
+            f"usage_metadata is available. Convention: {COST_CONVENTION}."
+        ),
+        "resolution_note": (
+            f"An arm dominates another only if it is cheaper AND better by more than the "
+            f"design's minimum detectable effect ({design.n_cases} cases, "
+            f"num_runs={design.num_runs}, variance from {source.label}). Arms closer than "
+            f"that both stay on the frontier."
+        ),
+        "caveats": list(source.caveats),
+    }

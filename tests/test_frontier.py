@@ -218,3 +218,102 @@ class TestCostAgreesWithTheArtifact:
         right = cost_for_arm(side, {}, "claude-sonnet-5")["cost_usd"]
         wrong = cost_for_arm(side, {}, "claude-sonnet-4-6")["cost_usd"]
         assert abs(wrong - right) / right > 0.25
+
+
+def _arm_side(scores, *, coverage=1.0, inp=1000, out=1000):
+    return {
+        "scores": dict(scores),
+        "coverage": coverage,
+        "token_usage": {"input_tokens": inp, "output_tokens": out, "is_estimate": True},
+    }
+
+
+class TestSummarizeFrontier:
+    """Takes `fetch_arms`' exact output shape so the GCS reader is reused, not rewritten."""
+
+    def _arms(self):
+        return {
+            "cheap": (
+                _arm_side({"safety_v1": 0.60}, inp=1000, out=1000),
+                _arm_side({"safety_v1": 0.95}, inp=1000, out=1000),
+            ),
+            "dear": (
+                _arm_side({"safety_v1": 0.90}, inp=50_000, out=50_000),
+                _arm_side({"safety_v1": 0.92}, inp=50_000, out=50_000),
+            ),
+        }
+
+    def _models(self):
+        return {"cheap": "gemini-3.5-flash", "dear": "claude-sonnet-5"}
+
+    def test_it_builds_a_point_per_arm_with_cost_and_quality(self):
+        from wrangler.reporting.frontier import summarize_frontier
+
+        s = summarize_frontier(self._arms(), self._models())
+        assert {p.arm for p in s["points_after"]} == {"cheap", "dear"}
+        cheap = next(p for p in s["points_after"] if p.arm == "cheap")
+        assert cheap.quality["safety_v1"] == 0.95
+        assert cheap.cost_usd > 0
+
+    def test_it_reports_both_phases_so_an_arrow_can_be_drawn(self):
+        from wrangler.reporting.frontier import summarize_frontier
+
+        s = summarize_frontier(self._arms(), self._models())
+        before = next(p for p in s["points_before"] if p.arm == "cheap")
+        after = next(p for p in s["points_after"] if p.arm == "cheap")
+        assert before.quality["safety_v1"] == 0.60
+        assert after.quality["safety_v1"] == 0.95
+
+    def test_every_dollar_figure_is_flagged_estimated(self):
+        from wrangler.reporting.frontier import summarize_frontier
+
+        s = summarize_frontier(self._arms(), self._models())
+        assert all(p.is_estimate for p in s["points_after"])
+        assert "estimate" in s["cost_note"].lower()
+
+    def test_resolutions_come_from_the_design_not_from_zero(self):
+        from wrangler.reporting.frontier import summarize_frontier
+
+        s = summarize_frontier(self._arms(), self._models())
+        assert s["resolutions"]["safety_v1"] > 0
+
+    def test_the_variance_source_caveats_are_carried_into_the_output(self):
+        """A caveat that stays in a docstring does not travel with a copied table."""
+        from wrangler.reporting.frontier import summarize_frontier
+
+        s = summarize_frontier(self._arms(), self._models())
+        assert s["caveats"]
+        assert any("one run per condition" in c.lower() for c in s["caveats"])
+
+
+class TestIncomparableArmsAreExcludedLoudly:
+    def test_a_large_coverage_gap_excludes_the_arm_with_a_reason(self):
+        """campaign_floor.COVERAGE_GAP_LIMIT exists because a delta between a 47%- and an
+        89%-covered side measures dropout. Plotting it would do the same."""
+        from wrangler.reporting.frontier import summarize_frontier
+
+        arms = {
+            "lopsided": (
+                _arm_side({"safety_v1": 0.5}, coverage=0.47),
+                _arm_side({"safety_v1": 0.9}, coverage=0.89),
+            ),
+            "fine": (_arm_side({"safety_v1": 0.8}), _arm_side({"safety_v1": 0.85})),
+        }
+        s = summarize_frontier(arms, {"lopsided": "gemini-3.5-flash", "fine": "gemini-3.5-flash"})
+        assert "lopsided" not in {p.arm for p in s["points_after"]}
+        assert any("lopsided" in e for e in s["excluded"])
+        assert any("coverage" in e.lower() for e in s["excluded"])
+
+    def test_a_contaminated_arm_is_flagged_beside_its_tool_use_number(self):
+        """Campaign 07 predates the silent-failure-12 fix; its tool-use numbers are
+        uninterpretable and the note must travel with the table."""
+        from wrangler.reporting.frontier import summarize_frontier
+
+        arms = {
+            "c07-pro": (
+                _arm_side({"tool_use_quality_v1": 0.9}),
+                _arm_side({"tool_use_quality_v1": 0.95}),
+            )
+        }
+        s = summarize_frontier(arms, {"c07-pro": "gemini-3.5-flash"}, pre_fix_arms={"c07-pro"})
+        assert any("c07-pro" in w and "tool_use" in w for w in s["warnings"])
