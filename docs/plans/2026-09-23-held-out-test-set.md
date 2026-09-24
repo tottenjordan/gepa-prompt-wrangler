@@ -1,5 +1,33 @@
 # Held-Out Test Set Implementation Plan
 
+> # STOPPED AT TASK 2 — DO NOT BUILD TASKS 3–6
+>
+> Tasks 1 and 2 were executed (PR #124). **Task 2 is a decision gate and it returned NO-GO.**
+> Tasks 3–6 are deliberately not built, and should not be picked up without the eval set
+> growing first.
+>
+> **What the gate measured.** The 12-case test partition has an MDE of **0.2634** on
+> `safety_v1` against the **+0.0952** effect this project reports — 2.8× too coarse. All 10
+> metric/contrast pairs are underpowered by 1.4–3.1×. Detecting ±0.075 needs ~42–121 cases at
+> `num_runs=2`, and **32–84 even at K→∞**, so more runs cannot fix it: ω² is untouched by K.
+>
+> **Partitioning is not the blocker — eval-set size is.** Handing the test partition all 64
+> cases still falls short on 3 of 5 metrics. And the finding generalises beyond this plan:
+> **the full 64-case eval set is already underpowered for the effect campaign 09 published**
+> (it needs 76–99). That is why that campaign's bootstrap CI barely excluded zero.
+>
+> **The decision, taken 2026-09-24: do not grow the eval set.** Reaching ~100–150 curated
+> cases is disproportionate for this repo's purpose. A harness that measures and reports that
+> it cannot answer a question is the better artifact.
+>
+> **What replaces this plan:** wire the MDE check into campaign pre-registration
+> (`uv run wrangler preflight`), so every readout states its minimum detectable effect before
+> 40 hours are spent. `scripts/partition_mde.py` is the seed. Campaign 09 would have been
+> stopped from pre-registering `safety_v1` as primary.
+>
+> Tasks 1 and 2 remain worth having: the partition is inert and checked in, and the gate is a
+> reusable measurement. Everything below Task 2 is superseded.
+
 > **For Claude:** REQUIRED SUB-SKILL: Use `executing-plans` skill to implement this plan task-by-task.
 
 **Goal:** Give the harness a test partition GEPA never sees, so that "GEPA improved the metric"
