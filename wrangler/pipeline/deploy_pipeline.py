@@ -49,6 +49,7 @@ def _pairs_json(manifest) -> list[dict]:
             "costs": p.costs,
             "forward_rationale": p.forward_rationale,
             "skip_optimize": p.skip_optimize,
+            "patience": p.patience,
         }
         for p in manifest.enabled_pairs
     ]

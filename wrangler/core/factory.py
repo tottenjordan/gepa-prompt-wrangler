@@ -49,6 +49,12 @@ class AgentPromptPair:
     # so grouping replicates of one condition never depends on a regex over ids that
     # users also choose by hand.
     replicate_of: str = ""
+    # Stop GEPA after this many iterations with no improvement in the best validation
+    # score. Resolved at load time from the pair, then `defaults:`, then `pipeline:`, so
+    # a campaign sets it once but an arm can still differ -- which is how a stopping
+    # rule gets validated against an unstopped arm in the same job. None = no stopper,
+    # exactly as every run before 2026-09-24.
+    patience: int | None = None
 
     def summary(self) -> str:
         """One-line summary for display."""
@@ -150,6 +156,13 @@ class PairFactory:
             if key not in raw:
                 raise ValueError(f"Manifest is missing required field: {key!r}")
 
+        # One campaign-wide patience, honoured by both run paths. The local path reads
+        # `defaults:` and the pipeline reads `pipeline:` for every other knob, so accept
+        # either here rather than making the key depend on how the campaign is launched.
+        default_patience = raw.get("defaults", {}).get("patience") or raw.get("pipeline", {}).get(
+            "patience"
+        )
+
         pairs = []
         for i, entry in enumerate(raw["pairs"]):
             pair_id = entry.get("id", f"pair-{i + 1}")
@@ -204,6 +217,7 @@ class PairFactory:
                 disabled_reason=entry.get("disabled_reason", ""),
                 forward_rationale=entry.get("forward_rationale", True),
                 skip_optimize=entry.get("skip_optimize", False),
+                patience=entry.get("patience", default_patience),
             )
 
             # A replicate is just another pair. Everything downstream then works
