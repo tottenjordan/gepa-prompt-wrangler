@@ -16,7 +16,12 @@ from .analysis import (
     generate_all_charts,
     normalize_agent_keys,
 )
-from .analyzer import classify_deltas, measure_noise_floor_per_metric
+from .analyzer import (
+    classify_deltas,
+    delta_comparison,
+    measure_noise_floor_per_metric,
+    noise_floor_comparison,
+)
 from .stage_economics import STAGE_ORDER, stage_totals
 
 REPORTS_DIR = Path("outputs/reports")
@@ -65,30 +70,56 @@ def _arm_delta(data: dict) -> float:
     return avg_a - avg_b
 
 
+def _arm_avg_delta(data: dict) -> float:
+    """Mean of an arm's per-metric deltas, on the same basis as the floor.
+
+    Not `avg(after) - avg(before)`: the floor these averages are judged against
+    is built from `_metric_deltas`, which pairs per case. Two ways of measuring
+    one movement, compared to each other, is how a verdict changes without
+    anyone deciding it should.
+    """
+    values = list(_metric_deltas(data).values())
+    return sum(values) / len(values) if values else 0.0
+
+
 def _metric_deltas(data: dict) -> dict[str, float]:
-    """Per-metric after-minus-before, for metrics scored on *both* sides.
+    """Per-metric delta for one arm: paired on `case_index` where possible.
 
     A metric present on only one side is skipped rather than treated as a move
     from zero -- that would manufacture a delta the size of the whole score.
+
+    Paired since 2026-09-24. The per-case rows are already in `results[name]`
+    (`before_per_case` / `after_per_case`, the same ones the tier tables read),
+    so an unpaired delta here was measuring case dropout for free.
     """
-    before = data.get("before") or {}
-    after = data.get("after") or {}
-    return {m: after[m] - before[m] for m in before if m in after}
+    return _delta_detail(data)["deltas"]
+
+
+def _delta_detail(data: dict) -> dict:
+    return delta_comparison(
+        data.get("before") or {},
+        data.get("after") or {},
+        data.get("before_per_case") or [],
+        data.get("after_per_case") or [],
+    )
 
 
 class _ArmView:
     """Adapts a report `results[name]` dict to what analyzer expects.
 
-    `measure_noise_floor_per_metric` and `classify_deltas` read `.deltas` and
-    `.is_control`; the reporter holds plain dicts. This is the bridge, and it
-    is why those two functions sat with no caller for so long.
+    `measure_noise_floor_per_metric`, `noise_floor_comparison` and
+    `classify_deltas` read `.deltas`, `.delta_detail` and `.is_control`; the
+    reporter holds plain dicts. This is the bridge, and it is why those
+    functions sat with no caller for so long.
     """
 
-    __slots__ = ("deltas", "is_control", "name")
+    __slots__ = ("delta_detail", "deltas", "is_control", "name", "pair_id")
 
     def __init__(self, name: str, data: dict):
         self.name = name
-        self.deltas = _metric_deltas(data)
+        self.pair_id = name
+        self.delta_detail = _delta_detail(data)
+        self.deltas = self.delta_detail["deltas"]
         self.is_control = _is_control_arm(data)
 
 
@@ -101,6 +132,7 @@ def _per_metric_verdict_lines(results: dict, ordered: list) -> list[str]:
     resolution the control arms were run to buy.
     """
     arms = [_ArmView(n, results[n]) for n in ordered]
+    comparison = noise_floor_comparison(arms)
     floors = measure_noise_floor_per_metric(arms)
     if floors:
         # Drop metrics whose measured floor is exactly zero. A control that did
@@ -127,14 +159,30 @@ def _per_metric_verdict_lines(results: dict, ordered: list) -> list[str]:
             f"{len(arms) - len(real)} control arm(s). A single scalar floor would "
             f"hold every metric to the loosest one."
         )
-    lines.append("| arm | metric | Δ | floor | verdict |")
-    lines.append("| --- | --- | --- | --- | --- |")
+    # Δ and floor are both paired on `case_index` wherever the artifacts carry
+    # per-case rows; the unpaired columns are what this repo reported until
+    # 2026-09-24. Showing one without the other would either hide a
+    # re-baseline or invite reading a paired delta against an unpaired bar.
+    lines.append(
+        "Δ and floor are **paired per case** where the artifacts allow it; the unpaired "
+        "columns subtract two separately-averaged case subsets, as reports did before "
+        "2026-09-24. `n` is how many cases back the paired delta."
+    )
+    lines.append("| arm | metric | Δ | Δ unpaired | n | floor | floor unpaired | verdict |")
+    lines.append("| --- | --- | --- | --- | --- | --- | --- | --- |")
+    unpaired_floors = (comparison or {}).get("unpaired", {})
     for arm in real:
+        detail = arm.delta_detail
         for metric, verdict in classify_deltas(arm, floors).items():
             bar = (floors or {}).get(metric)
-            bar_txt = f"{bar:.4f}" if bar is not None else "—"
+            stale = unpaired_floors.get(metric)
+            raw = detail["unpaired"].get(metric)
+            n = detail["n_paired"] if metric in detail["paired"] else 0
             lines.append(
-                f"| {arm.name} | {metric} | {arm.deltas[metric]:+.4f} | {bar_txt} | {verdict} |"
+                f"| {arm.name} | {metric} | {arm.deltas[metric]:+.4f} "
+                f"| {f'{raw:+.4f}' if raw is not None else '—'} | {n} "
+                f"| {f'{bar:.4f}' if bar is not None else '—'} "
+                f"| {f'{stale:.4f}' if stale is not None else '—'} | {verdict} |"
             )
     lines.append("")
     return lines
@@ -150,13 +198,9 @@ def _executive_summary(results: dict, ordered: list[str]) -> list[str]:
         lines.append("Baseline evaluation complete. No optimization results yet.\n")
         return lines
 
-    agent_deltas = {}
-    for name in ordered:
-        before = results[name].get("before", {})
-        after = results[name].get("after", {})
-        avg_b = sum(before.values()) / max(len(before), 1) if before else 0
-        avg_a = sum(after.values()) / max(len(after), 1) if after else 0
-        agent_deltas[name] = avg_a - avg_b
+    # Paired per case where the artifacts allow it, so an arm's average delta
+    # and the control floor it is judged against are one kind of measurement.
+    agent_deltas = {n: _arm_avg_delta(results[n]) for n in ordered}
 
     # Which arms never had their prompt changed? Those are controls, and their
     # movement IS the noise floor -- not a result. Reporting a control's drift
@@ -846,13 +890,9 @@ def _conclusions_section(results: dict, ordered: list[str]) -> list[str]:
 
     lines.append("## Conclusions & Next Steps\n")
 
-    agent_deltas = {}
-    for name in ordered:
-        before = results[name].get("before", {})
-        after = results[name].get("after", {})
-        avg_b = sum(before.values()) / max(len(before), 1) if before else 0
-        avg_a = sum(after.values()) / max(len(after), 1) if after else 0
-        agent_deltas[name] = avg_a - avg_b
+    # Paired per case where the artifacts allow it, so an arm's average delta
+    # and the control floor it is judged against are one kind of measurement.
+    agent_deltas = {n: _arm_avg_delta(results[n]) for n in ordered}
 
     improved = [n for n in ordered if agent_deltas[n] > 0.005]
     regressed = [n for n in ordered if agent_deltas[n] < -0.005]
