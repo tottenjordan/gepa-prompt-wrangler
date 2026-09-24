@@ -6,7 +6,25 @@ no optimizer stage has read. Before it existed, GEPA trained on 49 of the 64
 cases while ``eval_before``/``eval_after`` scored all 64, so every published
 delta was partly measured on training data.
 
-**The split is checked in, not recomputed.** ``examples/multi_model_agents/
+**TWO SPLITS LIVE HERE AND THEY ARE NOT THE SAME THING.**
+
+* :func:`stratified_split` — the three-way 40/12/12 partition built for the
+  held-out-test-set plan, written to ``partitions.yaml``.
+* :func:`gepa_split` — GEPA's own two-way 34/30 train/validation split, applied
+  to every ``sampler_config.json`` by ``scripts/apply_gepa_split.py``.
+
+**The ``test`` partition is NOT held out from GEPA's validation subset**, and that
+is deliberate rather than an oversight. The plan that reserved it was stopped at
+its own gate on 2026-09-24: 12 cases give an MDE of 0.2634 against the +0.0952
+effect this project reports, and handing that partition all 64 cases still falls
+short on 3 of 5 metrics, so no partition size makes it usable. The qualitative
+fallback — using it to detect overfitting — is confounded too, since the control
+arm, which cannot overfit, showed the largest train/validation gap. Nothing in
+the campaign path reads ``partitions.yaml``; the only consumer is
+``scripts/partition_mde.py``, the gate that measured it away. Do not re-impose
+the reservation without new evidence; it costs cases and buys nothing.
+
+**The three-way split is checked in, not recomputed.** ``examples/multi_model_agents/
 eval_data/partitions.yaml`` is the source of truth; :func:`stratified_split` is
 how it was made and is seeded so it can be regenerated and audited::
 
@@ -64,9 +82,12 @@ import yaml
 
 __all__ = [
     "DEFAULT_FRACTIONS",
+    "GEPA_SPLIT_SEED",
+    "GEPA_VALIDATION_SIZE",
     "PARTITIONS",
     "SPLIT_SEED",
     "case_ids",
+    "gepa_split",
     "load_eval_cases",
     "load_partitions",
     "render_partitions_yaml",
@@ -86,6 +107,17 @@ DEFAULT_FRACTIONS: dict[str, float] = {
 #: Seed for the checked-in split. Changing it re-partitions the eval set, which
 #: invalidates comparison with every campaign run before the change.
 SPLIT_SEED = 20260923
+
+#: GEPA's train/validation split is separate from the three-way partition above, and so is
+#: its seed: re-rolling one must not silently re-roll the other, because they invalidate
+#: different things -- the MDE gate's pinned verdict, and every campaign's comparability.
+GEPA_SPLIT_SEED = 20260924
+
+#: Validation cases for GEPA's candidate selection. Raised from the hand-written 15 on
+#: 2026-09-24. 15 gave the selection signal 1/15 resolution and left 7 of 18 strata
+#: unrepresented; two of three archived runs saturated it outright. 30 was chosen over 25 by
+#: Jordan, trading a train pool of 34 for the resolution.
+GEPA_VALIDATION_SIZE = 30
 
 _EVAL_DATA_DIR = (
     Path(__file__).resolve().parents[2] / "examples" / "multi_model_agents" / "eval_data"
@@ -240,6 +272,87 @@ def stratified_split(
             assigned[part] += take
             cursor += take
 
+    return {part: sorted(idxs) for part, idxs in out.items()}
+
+
+def gepa_split(
+    cases: Sequence[Case] | None = None,
+    *,
+    validation_size: int = GEPA_VALIDATION_SIZE,
+    seed: int = GEPA_SPLIT_SEED,
+) -> dict[str, list[int]]:
+    """GEPA's own train/validation split — a *different* split from :func:`stratified_split`.
+
+    **Why a second function rather than new fractions.** :func:`stratified_split` produces the
+    three-way 40/12/12 partition built for the held-out-test-set plan, and
+    ``scripts/partition_mde.py`` pins its output by md5. Re-pointing ``DEFAULT_FRACTIONS`` at
+    GEPA's split would silently move that published NO-GO verdict. The two splits answer
+    different questions and are kept apart on purpose.
+
+    **What this fixes.** The hand-written split in ``sampler_config.json`` was 49 train / 15
+    validation and unstratified: 7 of 18 ``(tier, category)`` cells never appeared in validation,
+    so no candidate was ever *selected* on them. See
+    ``docs/analysis/2026-09-24-validation-subset-scoping.md``.
+
+    **Full coverage on both sides is impossible here, and the shortfall is the eval set's.**
+    Four strata contain exactly one case (``low/expense``, ``medium/error_handling``,
+    ``high/booking``, ``high/cancellation``). On a disjoint split that case is either reflected
+    on or selected on, never both. Singletons are left in **train**, because a lone case is a
+    real diagnostic for reflection and only ~1/30 of a validation score. Every stratum with two
+    or more cases is guaranteed at least one case on **each** side, so both sides see 14 of 18.
+
+    Returns 0-based case indices, sorted, keyed by partition name.
+    """
+    if cases is None:
+        cases = load_eval_cases()
+
+    strata: dict[tuple[str, str], list[int]] = defaultdict(list)
+    for i, case in enumerate(cases):
+        strata[stratum_of(case)].append(i)
+
+    rng = random.Random(seed)
+    order = sorted(strata)
+
+    # Floor: one validation seat for every stratum that can spare one.
+    floor = {s: (1 if len(strata[s]) >= 2 else 0) for s in order}
+    # Ceiling: never empty a stratum out of train.
+    ceiling = {s: max(len(strata[s]) - 1, 0) for s in order}
+
+    low, high = sum(floor.values()), sum(ceiling.values())
+    if not low <= validation_size <= high:
+        raise ValueError(
+            f"validation_size={validation_size} is outside [{low}, {high}] for this eval set: "
+            f"{len(order)} strata, {len(cases)} cases, and every stratum with 2+ cases must "
+            f"keep at least one case on each side."
+        )
+
+    counts = dict(floor)
+    # Largest-remainder over the seats left after the floor, proportional to the
+    # spare capacity of each stratum so big cells absorb most of the remainder.
+    spare = {s: ceiling[s] - floor[s] for s in order}
+    total_spare = sum(spare.values())
+    remaining = validation_size - low
+    if remaining and total_spare:
+        exact = {s: remaining * spare[s] / total_spare for s in order}
+        for s in order:
+            counts[s] += int(exact[s])
+        short = validation_size - sum(counts.values())
+        # Ties break on stratum name, never on dict iteration order.
+        ranked = sorted(order, key=lambda s: (-(exact[s] - int(exact[s])), s))
+        for s in ranked:
+            if short <= 0:
+                break
+            if counts[s] < ceiling[s]:
+                counts[s] += 1
+                short -= 1
+
+    out: dict[str, list[int]] = {"train": [], "validation": []}
+    for s in order:
+        members = list(strata[s])
+        rng.shuffle(members)
+        take = counts[s]
+        out["validation"].extend(members[:take])
+        out["train"].extend(members[take:])
     return {part: sorted(idxs) for part, idxs in out.items()}
 
 

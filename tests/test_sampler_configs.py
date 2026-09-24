@@ -113,10 +113,17 @@ def test_rubrics_say_enough_to_judge_consistently(path):
 
 @pytest.mark.parametrize("path", CONFIGS, ids=lambda p: p.parent.name)
 def test_train_validation_split_is_preserved(path):
-    """These are hand-tuned; a rubric edit must not disturb them."""
+    """A rubric edit must not disturb the split.
+
+    No longer hand-tuned: as of 2026-09-24 the split is derived by
+    `wrangler.core.partitions.gepa_split()` and applied by `scripts/apply_gepa_split.py`.
+    It went 49/15 -> 34/30 because 15 validation cases gave the selection signal 1/15
+    resolution and left 7 of 18 strata unrepresented. `tests/test_gepa_split.py` owns the
+    exact contents; this stays as a cheap local tripwire on the sizes.
+    """
     d = json.loads(path.read_text())
-    assert len(d["train_eval_case_ids"]) == 49
-    assert len(d["validation_eval_case_ids"]) == 15
+    assert len(d["train_eval_case_ids"]) == 34
+    assert len(d["validation_eval_case_ids"]) == 30
 
 
 # --- Instruction-following pressure (campaign 08 experiment) -------------------
