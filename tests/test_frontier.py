@@ -11,6 +11,8 @@ at list rate. Two things here are load-bearing:
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from wrangler.reporting.frontier import (
@@ -122,3 +124,97 @@ class TestFrontierMembership:
         pts = [_pt("a", 1.0, safety_v1=0.9, unknown_v1=0.9)]
         counts = frontier_membership(pts, {"safety_v1": 0.05})
         assert counts == {"a": 1}
+
+
+class TestCostForArm:
+    """Cost is summed across both eval sides and is never metered. Each assertion here
+    guards a distinct way the number can be misread."""
+
+    def _side(self, inp, out, *, estimate=True):
+        return {"token_usage": {"input_tokens": inp, "output_tokens": out, "is_estimate": estimate}}
+
+    def test_it_sums_both_eval_sides(self):
+        from wrangler.reporting.frontier import cost_for_arm
+
+        got = cost_for_arm(self._side(1000, 1000), self._side(1000, 1000), "gemini-3.5-flash")
+        one = cost_for_arm(self._side(1000, 1000), {}, "gemini-3.5-flash")
+        assert got["cost_usd"] == pytest.approx(2 * one["cost_usd"])
+
+    def test_estimate_flag_travels_with_the_number(self):
+        """There is no metered token count in this system; a dollar figure that does not
+        say so gets quoted as though it were billing data."""
+        from wrangler.reporting.frontier import cost_for_arm
+
+        assert cost_for_arm(self._side(10, 10), self._side(10, 10), "gemini-3.5-flash")[
+            "is_estimate"
+        ]
+
+    def test_an_unregistered_model_is_unpriced_not_free(self):
+        """A $0.00 row with no explanation is how an unpriced model is read as a free one."""
+        from wrangler.reporting.frontier import cost_for_arm
+
+        got = cost_for_arm(self._side(10_000, 10_000), self._side(0, 0), "not-a-real-model")
+        assert got["priced"] is False
+
+    def test_a_registered_model_is_priced_and_positive(self):
+        from wrangler.reporting.frontier import cost_for_arm
+
+        got = cost_for_arm(self._side(1_000_000, 1_000_000), {}, "gemini-3.5-flash")
+        assert got["priced"] is True
+        assert got["cost_usd"] > 0
+
+    def test_a_manifest_cost_override_is_honoured(self):
+        from wrangler.reporting.frontier import cost_for_arm
+
+        got = cost_for_arm(
+            self._side(1_000_000, 0),
+            {},
+            "not-a-real-model",
+            custom_costs={"input": 2.0, "output": 4.0},
+        )
+        assert got["cost_usd"] == pytest.approx(2.0)
+        assert got["priced"] is True
+
+    def test_a_missing_side_is_treated_as_zero_not_an_error(self):
+        """An eval-only or failed-stage arm must still price what it did spend."""
+        from wrangler.reporting.frontier import cost_for_arm
+
+        assert cost_for_arm({}, {}, "gemini-3.5-flash")["cost_usd"] == 0.0
+
+    def test_a_side_that_never_recorded_an_estimate_flag_is_still_called_an_estimate(self):
+        """Defaulting to 'metered' on a missing flag would upgrade an unknown to a promise."""
+        from wrangler.reporting.frontier import cost_for_arm
+
+        assert cost_for_arm({"token_usage": {"input_tokens": 5}}, {}, "gemini-3.5-flash")[
+            "is_estimate"
+        ]
+
+
+class TestCostAgreesWithTheArtifact:
+    """Recomputing from tokens must reproduce what the stage recorded, or a report carries
+    two different cost numbers for one run."""
+
+    FIXTURE = "tests/fixtures/c09/eval_before/c09-rationale-on.json"
+
+    def test_recomputed_cost_matches_the_recorded_cost(self):
+        import json
+
+        from wrangler.reporting.frontier import cost_for_arm
+
+        side = json.loads(Path(self.FIXTURE).read_text())
+        recorded = side["costs"]["input_usd"] + side["costs"]["output_usd"]
+        # campaign 09 ran claude-sonnet-5; the stage priced it from the same registry.
+        got = cost_for_arm(side, {}, "claude-sonnet-5")
+        assert got["cost_usd"] == pytest.approx(recorded, rel=1e-6)
+
+    def test_the_wrong_model_id_changes_the_answer_materially(self):
+        """Guards against inferring a tier's model rather than reading it: the same tokens
+        priced as sonnet-4-6 cost 50% more than as sonnet-5."""
+        import json
+
+        from wrangler.reporting.frontier import cost_for_arm
+
+        side = json.loads(Path(self.FIXTURE).read_text())
+        right = cost_for_arm(side, {}, "claude-sonnet-5")["cost_usd"]
+        wrong = cost_for_arm(side, {}, "claude-sonnet-4-6")["cost_usd"]
+        assert abs(wrong - right) / right > 0.25

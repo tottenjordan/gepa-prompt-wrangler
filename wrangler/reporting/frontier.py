@@ -34,10 +34,16 @@ from dataclasses import dataclass, field
 
 __all__ = [
     "ArmPoint",
+    "cost_for_arm",
     "dominates",
     "frontier_for_metric",
     "frontier_membership",
 ]
+
+#: What the cost figure covers. Artificial Analysis notes published model costs routinely
+#: exclude judge/grader inference, so ours states its convention rather than leaving it to be
+#: assumed. Judge spend is real and is reported separately by `stage_economics`.
+COST_CONVENTION = "agent inference only, both eval sides; excludes judge/grader inference"
 
 
 @dataclass
@@ -114,3 +120,51 @@ def frontier_membership(points: list[ArmPoint], resolutions: dict[str, float]) -
         for arm in frontier_for_metric(points, metric, resolution):
             counts[arm] += 1
     return counts
+
+
+def cost_for_arm(
+    before: dict,
+    after: dict,
+    model: str,
+    custom_costs: dict[str, float] | None = None,
+) -> dict:
+    """Estimated dollars for one arm, summed over both eval sides.
+
+    Prices the token counts the artifacts carry. Those counts are `len(text) // 4`, so the
+    result is an estimate of an estimate -- but it is still strictly better than
+    `blended_cost`, which assumes a fixed 4:1 input:output ratio and therefore cannot see that
+    a cheap-per-token model answering verbosely costs more per run than a terse expensive one.
+    That difference is a real part of what separates tiers, and it is the thing a tier
+    comparison is for.
+
+    `is_estimate` defaults to **True** when a side does not record the flag. An unknown
+    provenance must not be promoted to a metered one; the only safe default is the one that
+    understates our confidence.
+
+    A missing side contributes zero rather than raising, so an eval-only arm or one whose
+    stage failed still prices what it did spend.
+    """
+    from ..core.models import measured_cost
+
+    total_in = total_out = 0
+    is_estimate = False
+    saw_usage = False
+    for side in (before, after):
+        usage = (side or {}).get("token_usage") or {}
+        if usage:
+            saw_usage = True
+            total_in += int(usage.get("input_tokens") or 0)
+            total_out += int(usage.get("output_tokens") or 0)
+            # Absent flag means unknown, and unknown is reported as estimated.
+            is_estimate = is_estimate or bool(usage.get("is_estimate", True))
+
+    priced_parts = measured_cost(model, total_in, total_out, custom_costs)
+    return {
+        "cost_usd": priced_parts["total_usd"],
+        "input_tokens": total_in,
+        "output_tokens": total_out,
+        "priced": priced_parts["priced"],
+        # No usage recorded at all is still not a metered zero.
+        "is_estimate": is_estimate or not saw_usage,
+        "convention": COST_CONVENTION,
+    }
