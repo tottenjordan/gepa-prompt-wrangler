@@ -277,6 +277,54 @@ stage, **not** that rationale text appears in the reflective dataset.
 
 Analysis: [docs/analysis/2026-09-17-gepa-argument-surface.md](docs/analysis/2026-09-17-gepa-argument-surface.md).
 
+**Two more injected arguments (added 2026-09-24), through the same hook.** ADK forwards 8
+of `gepa.optimize()`'s 46 arguments and neither of these is among them, so both ride
+`_gepa_extra_kwargs()` with no ADK patch. `_GEPA_RUN_KWARGS` carries the per-run ones and
+is cleared in `optimize()`'s `finally`, so one arm's values cannot leak into the next in a
+shared container.
+
+- **`seed`** — derived from the arm id by `seed_for_arm()`, md5 rather than `hash()`
+  because `PYTHONHASHSEED` salts the latter and two stages of one campaign would disagree.
+  **Until now every optimize run in the project's history used gepa's default `seed=0`**,
+  so two replicates of an arm shared a minibatch schedule. Derived rather than plumbed
+  because `components.py` already passes the pair id as `agent_name`, which keeps the whole
+  feature out of the component bodies and their cache.
+- **`stop_callbacks`** — gepa's own `NoImprovementStopper` at `patience`. **Opt-in and off
+  by default**; `max_metric_calls` is still the ceiling and this can only stop earlier. A
+  campaign run with a patience is **not budget-comparable** to one without.
+
+**`replicates: N` on a manifest pair** expands to N pairs (`{id}-r1 … {id}-rN`) at
+`PairFactory.load()`. A replicate is just another pair, so nothing downstream changed:
+`run_id` hashes the pair-id list, artifacts key on `{run_id}/stages/{stage}/{pair_id}.json`,
+`_pairs_json` iterates `enabled_pairs`, and `PairAnalysis.is_control` keys off the prompt
+rather than an id convention, so a replicated control still registers as one. `replicates: 1`
+and an absent key are byte-identical — a suffix would change `run_id` and invalidate every
+in-flight campaign's cache. Adding `replicates:` to an existing manifest *does* change
+`run_id`, which is correct but means the first replicated run pays full price for every stage.
+
+**Early stopping was free on campaign 09, and the reason is a defect.** Replaying gepa's real
+stopper against the archived `gepa_state.bin` of both optimizing arms: **patience ≥ 10 returns
+a byte-identical prompt** while spending 57.5% and 79.1% fewer metric calls. It is an identity,
+not a statistical claim — `gepa.core.result.best_idx` is the **first** argmax, so the winner is
+fixed the moment the best score is first reached. **But both arms saturated their 15-case
+validation subset at 1.0000 by iteration 7 of 64 and 14 of 91**, so 73–83% of each budget was
+spent where the selection signal could not rank candidates at all. That is the instrument
+running out of range, not convergence — and it is a candidate explanation for the run-to-run
+spread, since on a saturated subset the winner is whichever candidate *first* fluked 15/15.
+Default patience is **15**, not 10, because the observed threshold is arm-dependent (8 and 10)
+and n=2. Re-run `scripts/replay_stopping.py` when replicated runs exist.
+[docs/analysis/2026-09-24-stopping-replay.md](docs/analysis/2026-09-24-stopping-replay.md)
+
+**Racing the arms was evaluated and REJECTED — do not rebuild it.** Idea 3 of the harness
+research proposed fixed-budget best-arm identification (Sequential Halving / Successive
+Rejects) across arms. A race eliminates arms on *partial* data, and against campaign 09's
+measured variance the MDE is **0.060–0.103 at the full n=64**, **0.085–0.146 at n=32** and
+**0.120–0.206 at n=16** — against between-arm differences of ~0.075. The full eval is already
+at the boundary, so eliminating on a fraction of it is a coin flip, which is exactly irace's
+documented failure mode of discarding genuinely-best configurations. Idea 1 closed the door on
+growing the eval set (2026-09-24), so this does not become viable without a new instrument.
+Reproduce the table with `wrangler.reporting.inference.mde_for_design`.
+
 **Patch 8 (added 2026-09-17) — the fix for silent failure #12, and it is not applied by
 `_patch_adk()`.** `_deferred_toolset_closes()` is a run-scoped async context manager wrapped
 around the optimize call, because outside that window `McpToolset.close()` must stay a real
