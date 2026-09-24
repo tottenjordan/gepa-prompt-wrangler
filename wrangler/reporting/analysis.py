@@ -12,7 +12,6 @@ import numpy as np
 
 from ..core.config import REPORTS_DIR
 from ..core.models import AGENT_ORDER, MODEL_MAP
-from ..core.models import blended_cost_for_report as blended_cost
 from ..eval.evaluator import case_metrics
 
 METRIC_LABELS = {
@@ -99,162 +98,129 @@ def generate_comparison_chart(results: dict, charts_dir: Path | None = None):
 
 
 def generate_cost_quality_chart(results: dict, charts_dir: Path | None = None):
-    """Cost vs quality scatter with before/after arrows and Pareto frontier."""
+    """Per-metric cost vs quality panels with before/after arrows and a Pareto frontier.
+
+    **The matplotlib FALLBACK for `charts.generate_cost_quality_chart_pb`.** Per CLAUDE.md
+    PaperBanana draws the figures; this runs when it is unreachable. Both must show the same
+    thing or the report's content depends on whether an API call succeeded.
+
+    This used to plot ``np.mean(list(before_scores.values()))`` -- five metrics averaged into
+    one number -- against ``blended_cost``, which is list price at an assumed 4:1 ratio. Per
+    metric floors span 3.4x and campaign 09 measured metrics moving in opposite directions, so
+    the average hid the tradeoff the chart existed to show. Cost is now priced from the run's
+    own token counts, which are themselves estimates (``len(text)//4``) and labelled as such.
+    """
+    from .frontier import default_resolutions, frontier_for_metric, points_from_results
+
     charts_dir = Path(charts_dir or CHARTS_DIR)
     charts_dir.mkdir(parents=True, exist_ok=True)
-    has_after = any(results[a].get("after") for a in results if not a.startswith("_"))
-    _fig, ax = plt.subplots(figsize=(12, 7))
 
-    pareto_points = []
+    after = points_from_results(results, "after")
+    before = {p.arm: p for p in points_from_results(results, "before")}
+    resolutions = default_resolutions(after)
+    metrics = sorted(resolutions)
+    if not after or not metrics:
+        return
 
-    for agent_name, data in results.items():
-        if agent_name.startswith("_"):
-            continue
-        model = data.get("model", "unknown")
-        cost = blended_cost(model)
-        is_gemini = "gemini" in model
+    cols = min(3, len(metrics))
+    rows = (len(metrics) + cols - 1) // cols
+    fig, axes = plt.subplots(rows, cols, figsize=(6 * cols, 4.6 * rows), squeeze=False)
 
-        before_scores = data.get("before", {})
-        avg_before = np.mean(list(before_scores.values())) if before_scores else 0
-        before_color = "#93C5FD" if is_gemini else "#FDBA74"
-        ax.scatter(
-            cost,
-            avg_before,
-            s=160,
-            c=before_color,
-            zorder=4,
-            edgecolors="black",
-            linewidth=0.5,
-            marker="o",
-        )
-        label_offset = (-45, -15) if has_after else (10, 5)
-        ax.annotate(
-            agent_name.title(),
-            (cost, avg_before),
-            textcoords="offset points",
-            xytext=label_offset,
-            fontsize=8,
-            color="gray",
-        )
-
-        if has_after and data.get("after"):
-            after_scores = data["after"]
-            avg_after = np.mean(list(after_scores.values())) if after_scores else 0
-            after_color = "#2563EB" if is_gemini else "#EA580C"
+    for idx, metric in enumerate(metrics):
+        ax = axes[idx // cols][idx % cols]
+        on_frontier = set(frontier_for_metric(after, metric, resolutions[metric]))
+        for point in after:
+            if metric not in point.quality:
+                continue
+            is_gemini = "gemini" in (point.model or "")
+            colour = "#2563EB" if is_gemini else "#EA580C"
+            prior = before.get(point.arm)
+            if prior is not None and metric in prior.quality:
+                ax.annotate(
+                    "",
+                    xy=(point.cost_usd, point.quality[metric]),
+                    xytext=(prior.cost_usd, prior.quality[metric]),
+                    arrowprops={"arrowstyle": "->", "color": "gray", "lw": 1.0, "ls": "--"},
+                )
+                ax.scatter(
+                    prior.cost_usd,
+                    prior.quality[metric],
+                    s=70,
+                    c="#93C5FD" if is_gemini else "#FDBA74",
+                    edgecolors="black",
+                    linewidth=0.4,
+                    zorder=4,
+                )
             ax.scatter(
-                cost,
-                avg_after,
-                s=220,
-                c=after_color,
-                zorder=5,
+                point.cost_usd,
+                point.quality[metric],
+                s=150,
+                c=colour,
+                marker="D" if point.arm in on_frontier else "o",
                 edgecolors="black",
-                linewidth=0.5,
-                marker="D",
+                linewidth=0.6,
+                zorder=5,
+            )
+            # The resolution, drawn. A reader can see directly whether two arms are
+            # separated by more than this design can detect.
+            ax.errorbar(
+                point.cost_usd,
+                point.quality[metric],
+                yerr=resolutions[metric] / 2,
+                fmt="none",
+                ecolor="gray",
+                alpha=0.5,
+                capsize=3,
+                zorder=3,
             )
             ax.annotate(
-                agent_name.title(),
-                (cost, avg_after),
+                point.arm,
+                (point.cost_usd, point.quality[metric]),
                 textcoords="offset points",
-                xytext=(10, 5),
-                fontsize=9,
-                fontweight="bold",
-            )
-            ax.annotate(
-                "",
-                xy=(cost, avg_after),
-                xytext=(cost, avg_before),
-                arrowprops={"arrowstyle": "->", "color": "gray", "lw": 1.2, "ls": "--"},
-            )
-            pareto_points.append((cost, avg_after, agent_name))
-        else:
-            pareto_points.append((cost, avg_before, agent_name))
-
-    if pareto_points:
-        pareto_points.sort(key=lambda p: p[0])
-        frontier = []
-        for cost_val, quality, _name in pareto_points:
-            dominated = any(
-                fc <= cost_val and fq >= quality and (fc < cost_val or fq > quality)
-                for fc, fq, _ in pareto_points
-            )
-            if not dominated:
-                frontier.append((cost_val, quality))
-        frontier.sort(key=lambda p: p[0])
-        if frontier:
-            fx, fy = zip(*frontier, strict=False)
-            if len(frontier) >= 2:
-                ax.plot(fx, fy, color="#10B981", ls="-", lw=2.5, alpha=0.7, zorder=3)
-            ax.scatter(
-                fx, fy, s=80, c="#10B981", zorder=6, marker="s", edgecolors="black", linewidth=0.5
+                xytext=(8, 5),
+                fontsize=7,
+                color="gray",
             )
 
-    from matplotlib.lines import Line2D
+        # Only the monotone envelope gets a line. Connecting every non-dominated point in
+        # cost order draws a zigzag, and a line labelled "frontier" asserts a trade-off
+        # boundary -- paying more buys more. When arms are mutually non-dominated because
+        # they sit inside the resolution, no such boundary exists and the honest rendering
+        # is the markers alone.
+        ranked = sorted(
+            (p for p in after if p.arm in on_frontier and metric in p.quality),
+            key=lambda p: p.cost_usd,
+        )
+        edge: list = []
+        for point in ranked:
+            if not edge or point.quality[metric] > edge[-1].quality[metric]:
+                edge.append(point)
+        if len(edge) >= 2:
+            ax.plot(
+                [p.cost_usd for p in edge],
+                [p.quality[metric] for p in edge],
+                color="#10B981",
+                lw=2.0,
+                alpha=0.7,
+                zorder=2,
+            )
+        ax.set_title(f"{metric}  (resolution {resolutions[metric]:.3f})", fontsize=9)
+        ax.set_xlabel("estimated $ per run", fontsize=8)
+        ax.set_ylabel("score", fontsize=8)
+        ax.grid(alpha=0.2)
 
-    legend_items = [
-        Line2D(
-            [0],
-            [0],
-            marker="o",
-            color="w",
-            markerfacecolor="#93C5FD",
-            markeredgecolor="black",
-            markersize=10,
-            label="Gemini (Before)",
-        ),
-        Line2D(
-            [0],
-            [0],
-            marker="D",
-            color="w",
-            markerfacecolor="#2563EB",
-            markeredgecolor="black",
-            markersize=10,
-            label="Gemini (After)",
-        ),
-        Line2D(
-            [0],
-            [0],
-            marker="o",
-            color="w",
-            markerfacecolor="#FDBA74",
-            markeredgecolor="black",
-            markersize=10,
-            label="Claude (Before)",
-        ),
-        Line2D(
-            [0],
-            [0],
-            marker="D",
-            color="w",
-            markerfacecolor="#EA580C",
-            markeredgecolor="black",
-            markersize=10,
-            label="Claude (After)",
-        ),
-        Line2D([0], [0], color="gray", ls="--", lw=1.2, label="GEPA improvement"),
-        Line2D(
-            [0],
-            [0],
-            color="#10B981",
-            ls="-",
-            lw=2.5,
-            marker="s",
-            markersize=6,
-            markerfacecolor="#10B981",
-            markeredgecolor="black",
-            label="Pareto frontier",
-        ),
-    ]
-    ax.legend(handles=legend_items, loc="lower left", fontsize=8)
-    ax.set_xlabel("Blended Cost ($/M tokens, 4:1 in:out)")
-    ax.set_ylabel("Average Quality Score")
-    ax.set_title("Cost-Quality Tradeoff — Before & After GEPA Optimization")
-    ax.set_xscale("log")
-    ax.grid(True, alpha=0.3)
-    plt.tight_layout()
-    plt.savefig(charts_dir / "cost_quality.png", dpi=150)
-    plt.close()
-    print("  Generated: cost_quality.png")
+    for spare in range(len(metrics), rows * cols):
+        axes[spare // cols][spare % cols].axis("off")
+
+    fig.suptitle(
+        "Cost vs quality, per metric — diamonds are on that metric's frontier.\n"
+        "Costs are ESTIMATED (token counts are len(text)//4); bars show the design's "
+        "minimum detectable effect.",
+        fontsize=10,
+    )
+    fig.tight_layout()
+    fig.savefig(charts_dir / "cost_quality.png", dpi=150, bbox_inches="tight")
+    plt.close(fig)
 
 
 def generate_improvement_chart(results: dict, charts_dir: Path | None = None):

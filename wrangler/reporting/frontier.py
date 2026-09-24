@@ -476,3 +476,61 @@ def render_markdown(summary: dict) -> str:
 
     lines += ["### Caveats", ""] + [f"- {c}" for c in summary["caveats"]] + [""]
     return "\n".join(lines)
+
+
+def points_from_results(results: dict, phase: str = "after") -> list[ArmPoint]:
+    """`ArmPoint`s from the report's in-memory `results` dict, for the chart path.
+
+    The report builds `results` itself and already carries `token_usage` per arm, so the
+    charts can price from tokens without reaching back to GCS -- and without touching a KFP
+    component body to add a field.
+
+    **A different cost convention from `cost_for_arm`, deliberately.** The report's
+    `token_usage` is `_summed_usage(eval_before, optimize, eval_after)`, so it *includes* the
+    optimize stage; `cost_for_arm` sums the two eval sides only. Both are defensible and they
+    are not interchangeable, so each says which it is rather than being quietly averaged into
+    one "cost". `conv` on the returned points records it.
+    """
+    from ..core.models import measured_cost
+
+    points: list[ArmPoint] = []
+    for arm, data in results.items():
+        if arm.startswith("_"):
+            continue
+        model = data.get("model", "")
+        usage = data.get("token_usage") or {}
+        priced = measured_cost(
+            model,
+            int(usage.get("input_tokens") or 0),
+            int(usage.get("output_tokens") or 0),
+            data.get("costs") if isinstance(data.get("costs"), dict) else None,
+        )
+        scores = data.get(phase) or data.get("before") or {}
+        points.append(
+            ArmPoint(
+                arm=arm,
+                model=model or "unknown",
+                cost_usd=priced["total_usd"],
+                quality=dict(scores),
+                coverage=data.get(f"{phase}_coverage") or 1.0,
+                is_estimate=bool(usage.get("is_estimate", True)),
+                priced=priced["priced"],
+            )
+        )
+    return points
+
+
+def default_resolutions(points: list[ArmPoint], n_cases: int = 64, num_runs: int = 1) -> dict:
+    """Per-metric resolution for a set of points, from campaign 09's measured variance.
+
+    Only metrics that variance source actually covers get a resolution -- an unmeasured metric
+    is skipped by `frontier_membership` rather than being handed a zero, which would let noise
+    decide its frontier.
+    """
+    from .inference import campaign_09_variance, mde_for_design
+
+    design = mde_for_design(
+        n_cases=n_cases, num_runs=num_runs, variance_source=campaign_09_variance()
+    )
+    seen = {m for p in points for m in p.quality}
+    return {m: r for m, r in design.per_metric.items() if m in seen}
