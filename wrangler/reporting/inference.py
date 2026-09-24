@@ -70,7 +70,7 @@ import statistics as st
 import textwrap
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
@@ -481,15 +481,27 @@ def load_eval_sides(
             rows = payload.get("per_case") or []
             if not rows:
                 raise ValueError(f"{path} has no per_case rows; the MDE needs per-case scores")
-            sides[(phase, arm)] = EvalSide(
-                arm=arm,
-                phase=phase,
-                per_case={int(row["case_index"]): row for row in rows},
-                scores_std=payload.get("scores_std") or {},
-                num_runs=int(payload.get("num_runs") or 1),
-                score_repeats=int(payload.get("score_repeats") or 1),
-            )
+            sides[(phase, arm)] = eval_side_from_payload(arm, phase, payload)
     return sides
+
+
+def eval_side_from_payload(arm: str, phase: str, payload: Mapping[str, Any]) -> EvalSide:
+    """Build an `EvalSide` from an already-loaded stage artifact.
+
+    Split out of `load_eval_sides` so callers holding the payload -- `frontier.py` gets its
+    artifacts from `campaign_floor.fetch_arms` rather than from disk -- reuse this conversion
+    instead of re-deriving the case-index keying. The repo already carries several hand-synced
+    pairs and guards them with tests; this is one that did not need to exist.
+    """
+    rows = payload.get("per_case") or []
+    return EvalSide(
+        arm=arm,
+        phase=phase,
+        per_case={int(row["case_index"]): row for row in rows},
+        scores_std=payload.get("scores_std") or {},
+        num_runs=int(payload.get("num_runs") or 1),
+        score_repeats=int(payload.get("score_repeats") or 1),
+    )
 
 
 def measured_variance(

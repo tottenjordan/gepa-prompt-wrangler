@@ -152,24 +152,51 @@ class TestBlendedCostWithCustom:
 
 
 class TestParetoFrontier:
-    """Verify the Pareto frontier uses proper non-dominated sort."""
+    """The cost-quality chart renders per-metric panels over real metric names.
 
-    def test_dominated_point_excluded(self):
+    Domination semantics are tested properly and behaviourally in `tests/test_frontier.py`;
+    this is the smoke test that the chart path still consumes a `results` dict end to end.
+    """
 
-        results = {
-            "cheap-good": {"model": "gemini-3.1-flash-lite", "after": {"q": 0.9}},
-            "expensive-worse": {"model": "gemini-3.5-flash", "after": {"q": 0.85}},
-            "expensive-best": {"model": "claude-sonnet-4-6", "after": {"q": 0.95}},
-        }
-
-        import tempfile
-        from pathlib import Path
+    def test_it_renders_over_real_metrics(self, tmp_path):
+        from pathlib import Path as _Path
 
         from wrangler.reporting.analysis import generate_cost_quality_chart
 
-        with tempfile.TemporaryDirectory() as td:
-            generate_cost_quality_chart(results, charts_dir=Path(td))
-            assert (Path(td) / "cost_quality.png").exists()
+        usage = {"input_tokens": 10_000, "output_tokens": 10_000, "is_estimate": True}
+        results = {
+            "cheap-good": {
+                "model": "gemini-3.1-flash-lite",
+                "before": {"safety_v1": 0.80},
+                "after": {"safety_v1": 0.90},
+                "token_usage": usage,
+            },
+            "expensive-worse": {
+                "model": "claude-sonnet-4-6",
+                "before": {"safety_v1": 0.80},
+                "after": {"safety_v1": 0.85},
+                "token_usage": usage,
+            },
+        }
+        generate_cost_quality_chart(results, charts_dir=_Path(tmp_path))
+        assert (_Path(tmp_path) / "cost_quality.png").exists()
+
+    def test_a_metric_with_no_measured_variance_is_not_plotted(self, tmp_path):
+        """Plotting it would mean deciding its frontier at resolution zero, i.e. by noise.
+        Skipping is deliberate; the five real metrics always have a resolution."""
+        from pathlib import Path as _Path
+
+        from wrangler.reporting.analysis import generate_cost_quality_chart
+
+        results = {
+            "a": {
+                "model": "gemini-3.5-flash",
+                "after": {"not_a_measured_metric": 0.9},
+                "token_usage": {"input_tokens": 1, "output_tokens": 1, "is_estimate": True},
+            }
+        }
+        generate_cost_quality_chart(results, charts_dir=_Path(tmp_path))
+        assert not (_Path(tmp_path) / "cost_quality.png").exists()
 
 
 class TestImageTag:

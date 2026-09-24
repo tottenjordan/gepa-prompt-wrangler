@@ -8,7 +8,7 @@ import subprocess
 import tempfile
 from pathlib import Path
 
-from ..core.config import MODEL_COSTS, PAPERBANANA_API_KEY
+from ..core.config import PAPERBANANA_API_KEY
 from ..core.models import (
     AGENT_ORDER,
     DEFAULT_FIGURE_IMAGE_MODEL,
@@ -16,7 +16,6 @@ from ..core.models import (
     MODEL_MAP,
     PROVIDERS,
 )
-from ..core.models import blended_cost_for_report as blended_cost
 from .analysis import (
     METRIC_LABELS,
     generate_comparison_chart,
@@ -266,47 +265,70 @@ def generate_cost_quality_chart_pb(
     charts_dir: Path | None = None,
     use_paperbanana: bool = True,
 ):
+    """Per-metric cost-quality panels via PaperBanana, falling back to matplotlib.
+
+    Both paths must show the same thing. This one used to average five metrics into one
+    scalar and plot it against `blended_cost` -- list price at an assumed 4:1 ratio -- and the
+    fallback did the same. Changing only one would have made the report's content depend on
+    whether an API call succeeded.
+
+    Quality is now per metric and cost is priced from the run's own token counts, which are
+    themselves estimates (`len(text)//4`) and are labelled as such in the figure.
+    """
+    from .frontier import default_resolutions, frontier_for_metric, points_from_results
+
     charts_dir = Path(charts_dir or "outputs/reports/charts")
     if not use_paperbanana:
         generate_cost_quality_chart(results, charts_dir)
         return
 
-    agents = _get_agents(results)
-    data = {"agents": []}
-    for a in agents:
-        model = results[a].get("model", MODEL_MAP.get(a, ""))
-        blend = blended_cost(model)
-        cost_info = MODEL_COSTS.get(model, {"input": 0, "output": 0})
-        before = results[a].get("before", {})
-        after = results[a].get("after", before)
-        avg_before = sum(before.values()) / max(len(before), 1) if before else 0
-        avg_after = sum(after.values()) / max(len(after), 1) if after else 0
-        provider = PROVIDERS.get(model, "Unknown")
+    after = points_from_results(results, "after")
+    before = {p.arm: p for p in points_from_results(results, "before")}
+    resolutions = default_resolutions(after)
+    if not after or not resolutions:
+        generate_cost_quality_chart(results, charts_dir)
+        return
 
-        data["agents"].append(
+    panels = []
+    for metric in sorted(resolutions):
+        on_frontier = set(frontier_for_metric(after, metric, resolutions[metric]))
+        panels.append(
             {
-                "name": a.title(),
-                "blended_cost_per_million": round(blend, 2),
-                "input_cost_per_million": round(cost_info["input"], 2),
-                "output_cost_per_million": round(cost_info["output"], 2),
-                "before_quality": round(avg_before, 4),
-                "after_quality": round(avg_after, 4),
-                "provider": provider,
+                "metric": metric,
+                "resolution": round(resolutions[metric], 4),
+                "points": [
+                    {
+                        "name": p.arm,
+                        "provider": PROVIDERS.get(p.model, "Unknown"),
+                        "estimated_cost_usd": round(p.cost_usd, 4),
+                        "before_quality": round(before[p.arm].quality.get(metric, 0.0), 4)
+                        if p.arm in before
+                        else None,
+                        "after_quality": round(p.quality[metric], 4),
+                        "on_frontier": p.arm in on_frontier,
+                    }
+                    for p in after
+                    if metric in p.quality
+                ],
             }
         )
 
     intent = (
-        "Scatter plot of model cost vs average quality score with Pareto frontier. "
-        "X-axis: blended cost per million tokens (4:1 input:output ratio, log scale). "
-        "Y-axis: average quality score (0 to 1). "
-        "Show before (circle) and after (diamond) points for each model with dashed arrows "
-        "connecting them. Color by provider: blue shades for Google, orange shades for "
-        "Anthropic. Draw a green Pareto frontier line connecting non-dominated after points "
-        "(sorted by cost ascending, quality must be non-decreasing). Label each point."
+        "Small multiples: one scatter panel per metric, laid out in a grid. "
+        "X-axis: ESTIMATED dollars per run (label it 'estimated $ per run'). "
+        "Y-axis: that panel's metric score. "
+        "Plot each arm's after_quality as a large marker -- a diamond when on_frontier is "
+        "true, a circle otherwise -- with a dashed grey arrow from its before_quality point. "
+        "Draw a vertical grey error bar of height `resolution` centred on each after point; "
+        "it is the smallest difference this design can detect. "
+        "Colour by provider: blue shades for Google, orange shades for Anthropic. "
+        "Connect only frontier points whose quality increases with cost, and draw no line at "
+        "all when no such pair exists. Title each panel with its metric name and resolution. "
+        "Caption: costs are estimated from character counts, not metered."
     )
 
     _try_paperbanana(
-        data,
+        {"panels": panels},
         intent,
         charts_dir / "cost_quality.png",
         fallback_fn=generate_cost_quality_chart,
