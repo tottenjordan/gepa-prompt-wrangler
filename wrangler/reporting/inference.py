@@ -64,9 +64,12 @@ are expected to report both rather than pick one.
 
 from __future__ import annotations
 
+import json
 import math
 import statistics as st
+import textwrap
 from dataclasses import dataclass
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -80,6 +83,36 @@ POWER = 0.80
 #: Campaign 09 ran `num_runs: 2`, so every variance read off it is a K = 2
 #: measurement. Re-apportioning to other K is only meaningful relative to this.
 K_OBSERVED = 2
+
+#: The effect sizes this project has actually measured, from
+#: docs/analysis/2026-09-22-campaign-09-reanalysis.md: the optimized-arm-vs-
+#: control DiD on `safety_v1`, and the rationale on/off contrast that document
+#: tells campaign 10 to design for. They are what a design is compared against
+#: when no target is named -- never a convention, always a measurement.
+REFERENCE_EFFECT_DID = 0.0952
+REFERENCE_EFFECT_CONTRAST = 0.075
+
+#: Campaign 09's committed stage artifacts -- the ONLY measured per-case
+#: variance this repo has. They live under `tests/` because that is where they
+#: were first committed (`scripts/partition_mde.py` reads the same directory,
+#: and `tests/test_noise_floor.py` carries campaign 06's the same way), and
+#: moving them would break a published gate for no measurement gain. Every
+#: consumer takes the directory as an argument, so nothing here is pinned to a
+#: test tree at import time.
+C09_STAGES_DIR = Path(__file__).resolve().parents[2] / "tests" / "fixtures" / "c09"
+
+#: The arms and phases campaign 09 ran. The treatment/baseline pair below is
+#: the on-minus-off contrast, which is the four-sided shape a two-arm campaign
+#: readout has -- not the DiD against the control, whose two deltas the
+#: reanalysis found to be the same 11/63 cases and therefore not independent.
+C09_PHASES = ("eval_before", "eval_after")
+C09_TREATMENT = "c09-rationale-on"
+C09_BASELINE = "c09-rationale-off"
+C09_CONTROL = "c09-control"
+
+#: Wrap width for the rendered block. `preflight.render` indents detail by
+#: eight columns, so this leaves the whole thing inside 80 in a terminal.
+_WRAP = 72
 
 
 # --- The formula ------------------------------------------------------------
@@ -312,3 +345,252 @@ def cross_window_measurement(
     such pairs.
     """
     return (n_sides / 2) * _variance(per_case_delta(sides, control_arm, metric, cases))
+
+
+# --- A design's sensitivity, against a measured variance --------------------
+
+
+@dataclass(frozen=True)
+class VarianceSource:
+    """A measured per-case contrast variance, and where it was measured.
+
+    This type exists so an MDE can never be quoted without its provenance.
+    CLAUDE.md's standing rule is that **a floor is not a property of a metric**
+    -- campaign 09's control drifted +0.0732 on `safety_v1` against the 0.0082
+    DOE 03 had measured for the same metric, a 9x disagreement -- so a number
+    presented as "the variance of `safety_v1`" is the exact mistake this repo
+    keeps paying for. Everything here is carried into the printed output.
+    """
+
+    label: str
+    contrast: str
+    n_cases: int
+    k_observed: int
+    components: Mapping[str, Components]
+    caveats: tuple[str, ...] = ()
+    origin: str = ""
+
+    @property
+    def metrics(self) -> list[str]:
+        return sorted(self.components)
+
+
+@dataclass(frozen=True)
+class DesignMDE:
+    """What a proposed design could detect, per metric, and against what.
+
+    ``per_metric`` is the answer; ``provenance`` is the sentence that makes it
+    readable. They travel together on purpose -- see :class:`VarianceSource`.
+    """
+
+    n_cases: int
+    num_runs: int
+    source: VarianceSource
+    per_metric: Mapping[str, float]
+
+    @property
+    def provenance(self) -> str:
+        """The claim this object actually supports, in one sentence."""
+        values = list(self.per_metric.values())
+        return (
+            f"Against {self.source.label}'s measured per-case variance "
+            f"({self.source.contrast}, {self.source.n_cases} paired cases at "
+            f"num_runs={self.source.k_observed}), a design of {self.n_cases} cases at "
+            f"num_runs={self.num_runs} resolves {min(values):.4f}-{max(values):.4f} "
+            f"across {len(values)} metrics -- and nothing smaller."
+        )
+
+    def cases_needed(self, target: float = REFERENCE_EFFECT_CONTRAST) -> dict[str, int]:
+        """Cases this design would need per metric to reach ``target``."""
+        return {
+            metric: comp.cases_for(target, self.num_runs)
+            for metric, comp in self.source.components.items()
+        }
+
+    def underpowered(self, target: float = REFERENCE_EFFECT_CONTRAST) -> list[str]:
+        """Metrics whose MDE exceeds ``target`` -- i.e. cannot resolve it."""
+        return sorted(m for m, mde in self.per_metric.items() if mde > target)
+
+    def render(self, *, target: float = REFERENCE_EFFECT_CONTRAST) -> list[str]:
+        """The block a caller prints. Provenance and caveats are not optional.
+
+        A bare table of MDEs invites being quoted as a property of the metrics.
+        Every line the table needs to be read honestly is emitted with it.
+        """
+        needed = self.cases_needed(target)
+        header = (
+            f"design: {self.n_cases} cases at num_runs={self.num_runs}  "
+            f"(alpha={ALPHA}, power={POWER:.2f} two-sided, target +-{target:.4f})"
+        )
+        lines = [
+            header,
+            "",
+            *textwrap.wrap(self.provenance, width=_WRAP),
+            "",
+            f"  {'metric':27}{'MDE':>9}{'verdict':>15}{'cases needed':>14}",
+        ]
+        for metric in sorted(self.per_metric):
+            mde = self.per_metric[metric]
+            verdict = "resolves" if mde <= target else "UNDERPOWERED"
+            lines.append(f"  {metric:27}{mde:9.4f}{verdict:>15}{needed[metric]:>14d}")
+        lines.append("")
+        for caveat in self.source.caveats:
+            wrapped = textwrap.wrap(caveat, width=_WRAP - 4)
+            lines += [f"  - {wrapped[0]}"] + [f"    {line}" for line in wrapped[1:]]
+        return lines
+
+
+def metrics_in(sides: Mapping[tuple[str, str], EvalSide]) -> list[str]:
+    """Metric names scored on every side, read off the artifacts themselves.
+
+    Not a hardcoded list: a metric added to the eval config and absent from
+    this module would be silently dropped from a design check, which reads as
+    "that metric is fine".
+    """
+    shared: set[str] | None = None
+    for side in sides.values():
+        for row in side.per_case.values():
+            keys = {k for k, v in row.items() if k != "case_index" and isinstance(v, int | float)}
+            shared = keys if shared is None else shared & keys
+            break
+    return sorted(shared or set())
+
+
+def load_eval_sides(
+    stages_dir: str | Path,
+    arms: Sequence[str],
+    phases: Sequence[str] = C09_PHASES,
+) -> dict[tuple[str, str], EvalSide]:
+    """Read ``<stages_dir>/<phase>/<arm>.json`` stage artifacts as `EvalSide`s.
+
+    Raises rather than substituting anything for a missing file: a design check
+    that quietly fell back to an assumed variance would produce exactly the
+    confident-looking number this module exists to prevent.
+    """
+    root = Path(stages_dir)
+    sides: dict[tuple[str, str], EvalSide] = {}
+    for phase in phases:
+        for arm in arms:
+            path = root / phase / f"{arm}.json"
+            if not path.is_file():
+                raise FileNotFoundError(
+                    f"missing eval stage artifact {path}; the MDE needs per-case scores "
+                    f"from a real run, and there is nothing to assume in its place"
+                )
+            payload = json.loads(path.read_text())
+            rows = payload.get("per_case") or []
+            if not rows:
+                raise ValueError(f"{path} has no per_case rows; the MDE needs per-case scores")
+            sides[(phase, arm)] = EvalSide(
+                arm=arm,
+                phase=phase,
+                per_case={int(row["case_index"]): row for row in rows},
+                scores_std=payload.get("scores_std") or {},
+                num_runs=int(payload.get("num_runs") or 1),
+                score_repeats=int(payload.get("score_repeats") or 1),
+            )
+    return sides
+
+
+def measured_variance(
+    sides: Mapping[tuple[str, str], EvalSide],
+    *,
+    treatment: str,
+    baseline: str,
+    label: str,
+    caveats: Sequence[str] = (),
+    origin: str = "",
+    n_sides: int = 4,
+) -> VarianceSource:
+    """Per-case variance of a ``treatment - baseline`` contrast, per metric.
+
+    The sigma^2 estimate is the **within-window** one, which credits `num_runs`
+    with the least of the two estimators and so gives the *worst* MDE at
+    ``K > K_OBSERVED``. That choice cannot touch a reading at
+    ``K = K_OBSERVED``, where the bracket is identically the measured total
+    (module docstring), so it only makes the "would more runs help?" answer
+    conservative.
+    """
+    recorded = {side.num_runs for side in sides.values()}
+    if recorded != {K_OBSERVED}:
+        raise ValueError(
+            f"every side must record num_runs={K_OBSERVED}, got {sorted(recorded)}: "
+            f"`within_window_measurement` normalises sigma^2 by K_OBSERVED, so sides "
+            f"run at another num_runs would be silently mis-scaled"
+        )
+    cases = common_cases(sides)
+    components = {}
+    for metric in metrics_in(sides):
+        total = _variance(per_case_contrast(sides, treatment, baseline, metric, cases))
+        measurement = within_window_measurement(sides, metric, n_sides=n_sides)
+        components[metric] = variance_components(
+            total=total, measurement_at_k_observed=measurement, k_observed=K_OBSERVED
+        )
+    return VarianceSource(
+        label=label,
+        contrast=f"{treatment} - {baseline}",
+        n_cases=len(cases),
+        k_observed=K_OBSERVED,
+        components=components,
+        caveats=tuple(caveats),
+        origin=origin,
+    )
+
+
+#: Why campaign 09's variance is not a property of anything. Printed with every
+#: MDE derived from it.
+C09_CAVEATS = (
+    "campaign 09 is ONE RUN PER CONDITION, so each variance estimate carries that run's luck",
+    (
+        "a floor is not a property of a metric -- re-measure it on the day, on this "
+        "design (CLAUDE.md; campaign 09's control drifted 9x DOE 03's figure for the "
+        "same metric)"
+    ),
+    (
+        "this bounds CASE-SAMPLING noise only. Which prompt GEPA happens to find is "
+        "the larger term: two runs of one manifest have differed by 12.3x the control "
+        "floor"
+    ),
+)
+
+
+def campaign_09_variance(stages_dir: str | Path = C09_STAGES_DIR) -> VarianceSource:
+    """The only measured per-case variance this repo has.
+
+    Six eval sides from campaign 09, paired on ``case_index``; the contrast is
+    rationale on minus off, which is the four-sided shape of a two-arm campaign
+    readout. Everything a caller needs to say *"against campaign 09's measured
+    variance"* rather than *"the variance"* comes back attached.
+    """
+    sides = load_eval_sides(stages_dir, (C09_CONTROL, C09_TREATMENT, C09_BASELINE))
+    return measured_variance(
+        sides,
+        treatment=C09_TREATMENT,
+        baseline=C09_BASELINE,
+        label="campaign 09",
+        caveats=C09_CAVEATS,
+        origin=str(stages_dir),
+    )
+
+
+def mde_for_design(*, n_cases: int, num_runs: int, variance_source: VarianceSource) -> DesignMDE:
+    """The smallest effect a design of ``n_cases`` at ``num_runs`` could detect.
+
+    ``variance_source`` is required and has no default: the answer is only ever
+    "against *this* measured variance", and a default would let a campaign read
+    one run's luck as a property of its design. :func:`campaign_09_variance` is
+    currently the only measured source that exists.
+    """
+    if n_cases <= 0:
+        raise ValueError(f"n_cases must be a positive case count, got {n_cases}")
+    if num_runs <= 0:
+        raise ValueError(f"num_runs must be a positive repeat count, got {num_runs}")
+    return DesignMDE(
+        n_cases=n_cases,
+        num_runs=num_runs,
+        source=variance_source,
+        per_metric={
+            metric: comp.mde(n_cases, num_runs)
+            for metric, comp in variance_source.components.items()
+        },
+    )

@@ -29,17 +29,22 @@ in `tests/test_partition_mde.py`.
 from __future__ import annotations
 
 import json
+import math
 from pathlib import Path
 
 import pytest
 
 from wrangler.core.partitions import load_partitions
 from wrangler.reporting.inference import (
+    C09_STAGES_DIR,
     K_OBSERVED,
     EvalSide,
     _variance,
+    campaign_09_variance,
     common_cases,
     cross_window_measurement,
+    mde_for_design,
+    measured_variance,
     minimum_detectable_effect,
     per_case_contrast,
     per_case_delta,
@@ -384,3 +389,157 @@ class TestTheVerdictIsSigma2Invariant:
             )
             assert comp.bracket_at(K_OBSERVED) == pytest.approx(0.08, abs=1e-15)
             assert comp.omega2 >= 0.0
+
+
+class TestMdeForADesign:
+    """`mde_for_design` — can a proposed campaign detect what it is hunting?
+
+    Campaign 09 pre-registered `safety_v1`, spent ~40 hours and was filed
+    UNRESOLVED; its minimum detectable effect was later measured as *larger*
+    than the effect it was looking for. Nothing in the harness said so, before
+    or after. These tests pin the arithmetic that now says it up front, and —
+    just as load-bearing — that every answer names the single campaign its
+    variance came from.
+    """
+
+    def test_a_64_case_design_cannot_resolve_campaign_09s_own_effect(self):
+        """THE FINDING, in arithmetic: campaign 09 could not have succeeded.
+
+        The whole 64-case eval set at `num_runs: 2` gives `safety_v1` an MDE
+        above the +0.0952 optimization effect the reanalysis measured. If this
+        ever passes silently — because the variance source moved, or because
+        the formula softened — the check would bless exactly the design that
+        produced a 40-hour UNRESOLVED.
+        """
+        design = mde_for_design(n_cases=64, num_runs=2, variance_source=campaign_09_variance())
+        assert design.per_metric["safety_v1"] > EFFECT_DID
+        assert design.per_metric["safety_v1"] > EFFECT_CONTRAST
+
+    def test_every_metric_the_artifacts_carry_is_reported(self):
+        """A design check that silently covered three of five metrics would
+        read as a clean bill of health for the two it skipped."""
+        design = mde_for_design(n_cases=64, num_runs=2, variance_source=campaign_09_variance())
+        assert set(design.per_metric) == {
+            "safety_v1",
+            "instruction_following_v1",
+            "hallucination_v1",
+            "final_response_quality_v1",
+            "tool_use_quality_v1",
+        }
+        assert all(v > 0 for v in design.per_metric.values())
+
+    def test_at_the_measured_num_runs_the_mde_is_the_directly_measured_variance(self):
+        """The sigma^2-invariance property, reached through the design API.
+
+        At ``K = K_OBSERVED`` the bracket IS the measured per-case variance, so
+        the MDE must equal ``z * sqrt(total / n)`` exactly. If `mde_for_design`
+        applied the decomposition differently from `Components.mde`, the number
+        a campaign is warned with would be a model rather than a measurement,
+        and would move with the sigma^2 estimator.
+        """
+        source = campaign_09_variance()
+        design = mde_for_design(n_cases=50, num_runs=K_OBSERVED, variance_source=source)
+        for metric, mde in design.per_metric.items():
+            total = source.components[metric].total
+            assert mde == pytest.approx(z_multiplier() * math.sqrt(total / 50), abs=1e-12)
+
+    def test_more_cases_and_more_runs_both_lower_the_mde(self):
+        """A design knob that did not move the answer would make the check
+        decorative — the caller could not tell one design from another."""
+        source = campaign_09_variance()
+        wide = mde_for_design(n_cases=64, num_runs=2, variance_source=source)
+        narrow = mde_for_design(n_cases=128, num_runs=2, variance_source=source)
+        repeated = mde_for_design(n_cases=64, num_runs=4, variance_source=source)
+        for metric in wide.per_metric:
+            assert narrow.per_metric[metric] < wide.per_metric[metric], metric
+            assert repeated.per_metric[metric] < wide.per_metric[metric], metric
+
+    def test_the_variance_is_read_from_the_artifacts_not_baked_in(self, tmp_path):
+        """Catches the MDE degenerating into a table of constants.
+
+        The numbers are only honest while they track the artifacts they claim
+        to be measured from. Widening one arm's after-side `safety_v1` must
+        widen `safety_v1`'s MDE and leave the other metrics where they were.
+        """
+        for phase in ("eval_before", "eval_after"):
+            (tmp_path / phase).mkdir()
+            for arm in (CONTROL, ON, OFF):
+                payload = json.loads((C09_STAGES_DIR / phase / f"{arm}.json").read_text())
+                if (phase, arm) == ("eval_after", ON):
+                    for i, row in enumerate(payload["per_case"]):
+                        row["safety_v1"] = 1.0 if i % 2 else 0.0
+                (tmp_path / phase / f"{arm}.json").write_text(json.dumps(payload))
+
+        base = mde_for_design(n_cases=64, num_runs=2, variance_source=campaign_09_variance())
+        moved = mde_for_design(
+            n_cases=64, num_runs=2, variance_source=campaign_09_variance(tmp_path)
+        )
+        assert moved.per_metric["safety_v1"] > base.per_metric["safety_v1"]
+        assert moved.per_metric["tool_use_quality_v1"] == pytest.approx(
+            base.per_metric["tool_use_quality_v1"]
+        )
+
+    def test_the_answer_names_the_one_campaign_its_variance_came_from(self):
+        """A floor is not a property of a metric (CLAUDE.md): campaign 09's
+        control drifted 9x what DOE 03 measured for the same metric. An MDE
+        quoted without naming where its variance came from invites exactly that
+        mistake, so the provenance travels with the numbers rather than living
+        in a docstring.
+        """
+        design = mde_for_design(n_cases=64, num_runs=2, variance_source=campaign_09_variance())
+        assert "campaign 09" in design.provenance
+        assert "resolves" in design.provenance
+        rendered = "\n".join(design.render())
+        # Collapsed, because `render` wraps for a terminal: what must survive
+        # is the sentence, not its line breaks.
+        assert design.provenance in " ".join(rendered.split())
+        assert "one run per condition" in rendered.lower()
+        assert "re-measure" in rendered.lower()
+
+    def test_the_rendered_answer_carries_the_measurement_conditions(self):
+        """63 cases at num_runs=2 is what was measured; a reader comparing a
+        proposed design against it needs both numbers, not just the MDE."""
+        design = mde_for_design(n_cases=64, num_runs=2, variance_source=campaign_09_variance())
+        assert design.source.n_cases == 63
+        assert design.source.k_observed == K_OBSERVED
+        rendered = "\n".join(design.render())
+        assert "63" in rendered
+        assert "safety_v1" in rendered
+
+    def test_a_design_with_no_cases_is_rejected_rather_than_answered(self):
+        """A zero-case design is a caller bug; answering it with inf or 0.0
+        would put a fabricated MDE in a preflight block."""
+        with pytest.raises(ValueError, match="n"):
+            mde_for_design(n_cases=0, num_runs=2, variance_source=campaign_09_variance())
+
+    def test_missing_artifacts_raise_rather_than_returning_an_assumed_variance(self, tmp_path):
+        """The one thing worse than no MDE is a made-up one. If the committed
+        artifacts are gone, the caller must find out rather than receive a
+        default variance that was never measured.
+        """
+        with pytest.raises(FileNotFoundError):
+            campaign_09_variance(tmp_path)
+
+    def test_a_campaign_run_at_another_num_runs_is_refused(self):
+        """`within_window_measurement` normalises by K_OBSERVED, so feeding it
+        sides recorded at a different `num_runs` would silently mis-scale
+        sigma^2 — the K != K_OBSERVED columns would then recommend budget that
+        cannot work. Refuse rather than quietly rescale.
+        """
+        rows = [{"case_index": i, "m": i / 10} for i in range(8)]
+        side = EvalSide(
+            arm="x",
+            phase="eval_before",
+            per_case={row["case_index"]: row for row in rows},
+            scores_std={"m": 0.01},
+            num_runs=K_OBSERVED + 1,
+            score_repeats=1,
+        )
+        sides = {
+            ("eval_before", ON): side,
+            ("eval_after", ON): side,
+            ("eval_before", OFF): side,
+            ("eval_after", OFF): side,
+        }
+        with pytest.raises(ValueError, match="num_runs"):
+            measured_variance(sides, treatment=ON, baseline=OFF, label="synthetic")
