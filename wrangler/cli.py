@@ -1017,7 +1017,13 @@ def evaluators_cleanup():
 
 
 @main.command("preflight")
-def preflight_cmd():
+@click.option(
+    "--manifest",
+    type=click.Path(exists=True, dir_okay=False),
+    default=None,
+    help="Also report the minimum detectable effect of this manifest's design (warn-only).",
+)
+def preflight_cmd(manifest: str | None):
     """Resolve the agent and pipeline-image dependency sets before a campaign.
 
     Both previous campaign 07 launches died in a GEAP build on a set that
@@ -1028,10 +1034,17 @@ def preflight_cmd():
     Caveat, stated rather than implied: uv resolves here, pip resolves on the
     GEAP builder. A pass reduces the risk of a build-time ResolutionImpossible
     -- it does not eliminate it.
+
+    With --manifest it also prints what that design could detect, measured
+    against campaign 09's variance. That block is ADVISORY and never changes
+    the exit code: campaign 09 itself was underpowered for the effect it
+    pre-registered, so a blocking version would fire on every campaign this
+    repo has ever run and be switched off within a week. Without --manifest
+    the check is skipped rather than computed over a guessed design.
     """
     from .tools.preflight import render, run_preflight
 
-    results = run_preflight()
+    results = run_preflight(manifest=manifest)
     for line in render(results):
         click.echo(line)
     if any(not r.ok for r in results):
