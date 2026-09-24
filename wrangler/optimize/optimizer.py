@@ -130,6 +130,16 @@ def _enrich_with_rationales(extracted: dict | None, eval_results: list) -> dict 
 # that is both lint-discouraged and easy to get wrong under re-import.
 _GEPA_PATCH_STATE: dict[str, bool] = {"optimize": False}
 
+# Per-run arguments for `gepa.optimize()`, set by `optimize()` and cleared in its
+# `finally`. Separate from the patch-idempotence marker above because the lifetimes
+# differ: the patch is applied once per process, while these change per run and must
+# not leak from one arm into the next when a single container optimizes several.
+#
+# Read at call time rather than captured at patch time -- `_patch_gepa_optimize` wraps
+# `gepa.optimize` once, but the wrapper calls `_gepa_extra_kwargs()` fresh on every
+# invocation, so a value set after patching still takes effect.
+_GEPA_RUN_KWARGS: dict[str, object] = {}
+
 
 def _gepa_extra_kwargs() -> dict:
     """Arguments we want on `gepa.optimize()` that ADK's config has nowhere to put.
@@ -161,10 +171,14 @@ def _gepa_extra_kwargs() -> dict:
     bump, is the trigger to re-run `scripts/check_merge_eligibility.py`;
     `tests/test_merge_is_inert.py` pins the upstream semantics this rests on.
 
+    **Per-run additions** (`seed`, `stop_callbacks`) come from `_GEPA_RUN_KWARGS`, which
+    `optimize()` populates and clears. They are merged over the constants rather than
+    under them, because a run that explicitly asks for a seed must get that seed.
+
     Filtered against the live signature below, so an argument gepa drops in a future
     version degrades to "not passed" instead of a `TypeError` nine hours into a stage.
     """
-    return {"use_merge": True}
+    return {"use_merge": True, **_GEPA_RUN_KWARGS}
 
 
 def _patch_gepa_optimize():
@@ -584,6 +598,31 @@ def gepa_run_dir(agent_module_path: str) -> Path:
     return Path("outputs") / "gepa_runs" / Path(agent_module_path).name
 
 
+def seed_for_arm(agent_name: str) -> int:
+    """A stable per-arm seed for `gepa.optimize()`.
+
+    **Why derive rather than plumb.** `components.py` already passes the pair id in as
+    `agent_name`, so computing the seed here keeps the whole replicate feature out of
+    the KFP component bodies — and a change to a component body busts its cache and, per
+    silent-failures #13, cannot merge under a live driver. Nothing about the seed needs
+    to cross that boundary.
+
+    **md5, not `hash()`.** `hash()` on a str is salted by `PYTHONHASHSEED`, so it differs
+    between processes; two stages of one campaign would then disagree about an arm's
+    seed, and a "replicate" would be unreproducible for the opposite reason to the one we
+    are fixing.
+
+    Until this existed, every optimize run in the project's history used gepa's default
+    `seed=0`, so two replicates of an arm would have shared a minibatch schedule and been
+    less independent than they looked. Distinct pair ids now give distinct schedules,
+    which is what makes `replicates:` produce genuine draws.
+    """
+    import hashlib
+
+    digest = hashlib.md5(agent_name.encode(), usedforsecurity=False).hexdigest()
+    return int(digest[:8], 16)
+
+
 def optimize(
     agent_module_path: str,
     evalset_path: str | None = None,
@@ -596,6 +635,7 @@ def optimize(
     initial_instruction: str | None = None,
     model: str = "",
     forward_rationale: bool = True,
+    patience: int | None = None,
 ) -> str:
     """Run GEPA optimization. Returns the optimized instruction string.
 
@@ -609,6 +649,10 @@ def optimize(
             built when no sampler_config_path is given. When a sampler_config.json
             exists it is authoritative and these are ignored.
         judge_model: Judge model for eval metrics
+        patience: Stop after this many GEPA iterations without an improvement in the
+            best validation score. `None` (the default) passes no stopper and behaves
+            exactly as before. Opt-in because it re-baselines an arm's budget: a
+            campaign run with a patience is not budget-comparable to one without.
     """
     tag = f"  [{agent_name}] " if agent_name else "  "
     print(f"{tag}[1/3] Applying ADK patches...", flush=True)
@@ -801,6 +845,25 @@ def optimize(
     toolset_failures = _ToolsetFailureCounter()
     adk_agent_log = logging.getLogger("google_adk.google.adk.agents.llm_agent")
     adk_agent_log.addHandler(toolset_failures)
+
+    # Per-run arguments ADK has nowhere to put. Set here rather than at patch time
+    # because the patch is applied once per process while these are per arm; cleared in
+    # the `finally` so one arm's seed cannot leak into the next in a shared container.
+    _GEPA_RUN_KWARGS.clear()
+    if agent_name:
+        _GEPA_RUN_KWARGS["seed"] = seed_for_arm(agent_name)
+        print(f"{tag}  GEPA seed: {_GEPA_RUN_KWARGS['seed']} (derived from arm id)", flush=True)
+    if patience is not None:
+        from gepa.utils.stop_condition import NoImprovementStopper
+
+        # `max_metric_calls` stays the ceiling; this can only stop earlier. Measured on
+        # campaign 09: patience 15 returns a byte-identical prompt on both arms while
+        # spending 62% fewer metric calls, because gepa's `best_idx` is the FIRST argmax
+        # and both runs saturated their 15-case validation subset early.
+        # docs/analysis/2026-09-24-stopping-replay.md
+        _GEPA_RUN_KWARGS["stop_callbacks"] = NoImprovementStopper(patience)
+        print(f"{tag}  Early stopping: patience {patience} iterations", flush=True)
+
     try:
 
         async def _run_with_warmup():
@@ -874,6 +937,7 @@ def optimize(
         raise
     finally:
         adk_agent_log.removeHandler(toolset_failures)
+        _GEPA_RUN_KWARGS.clear()
 
     if toolset_failures.count:
         print(
