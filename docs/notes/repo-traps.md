@@ -196,7 +196,23 @@ migration). It has had no feature work while `stages.py` gained all three knobs 
 replacement and the missing gate. Deleting it would break a documented flag mid-cycle and
 nothing proves no one relies on it. `tests/test_legacy_runner_is_deprecated.py` pins the
 evidence, so if the runner ever catches up the test fails and the deprecation gets revisited
-rather than outliving its reason.
+rather than outliving its reason. Deletion is tracked in issue #116.
+
+**A result that came out of this path has unknown engine reach, and nothing on the file says
+so.** The runner writes `outputs/results_<timestamp>.json` and gates nothing, so any number it
+produced sits on an engine that had a ~40% chance of silently dropping cases — a confound
+larger than any prompt effect this repo has measured. The supported path records a `health`
+verdict in its stage artifact; this one records nothing.
+
+None exist on disk today (checked 2026-09-23: zero `results_*.json` anywhere), so this is a
+note for anything that surfaces later — an old branch, an archived output directory, a figure
+in a doc whose source nobody can place. **Treat such a number as uninterpretable rather than
+comparable**, and do not diff it against a `stages.py` result: the two paths differ by the
+health gate and three knobs, which is not a difference any prompt effect survives.
+
+After the runner is deleted, `git log -- wrangler/orchestration/runner.py` still finds it and
+`git show <sha>:wrangler/orchestration/runner.py` still reads it. Deleting code does not delete
+history, which is why the deletion needs no archival step beyond this paragraph.
 
 ## `wrangler run --max-concurrent` is silently ignored on the default path
 
