@@ -444,6 +444,45 @@ return **old-prompt** tool-use scores. Without a deliberate bust (a `cache_bust`
 manifest) a campaign can silently mix pre- and post-re-baseline numbers. Details:
 [docs/analysis/2026-09-16-doe-02-result.md](docs/analysis/2026-09-16-doe-02-result.md).
 
+### Cost-quality frontiers
+
+**`wrangler frontier <run-ids>` reports which metrics each tier is on the frontier for, not a
+pooled score.** It replaced a chart that averaged all five metrics into one scalar and plotted it
+against `blended_cost` — list price at an assumed 4:1 ratio, with no uncertainty. Per-metric floors
+span 3.4x and campaign 09 measured metrics moving in opposite directions, so the average hid the
+tradeoff the chart existed to show. Standalone like `wrangler floor`, and for the same reason: a
+cross-run analysis whose inputs are chosen by hand should not run implicitly.
+
+**NO COST IN THIS HARNESS IS METERED.** `evaluator.py:_estimate_token_usage` counts
+`len(text) // 4`, every stage artifact carries `is_estimate: True`, and **`usage_metadata` is read
+nowhere in `wrangler/`** — the managed `run_inference()` returns no usage columns and none are
+nested in `agent_data` or `intermediate_events`. Every dollar figure is an estimate and says so.
+Pricing estimated tokens still beats list price because it reflects response verbosity: campaign
+09's three arms are **the same model** and span **$0.40–$0.63**, which `blended_cost` renders as
+three identical points. Note two conventions, both stated in their output and not interchangeable —
+`cost_for_arm` sums the two eval sides, while `points_from_results` (the chart path) uses the
+report's `token_usage`, which **includes the optimize stage**.
+
+**Domination requires the gap to exceed the design's MDE, not merely to be positive.** Arms closer
+than that both stay on the frontier. There is no confidence-interval machinery for these metrics
+and that is deliberate — idea 2 deferred choosing one, because CLT and bootstrap are both
+miscalibrated below a few hundred datapoints and our metrics span 4 distinct values (`safety_v1`)
+to 187 (`instruction_following_v1`). `wilson_interval` in `boot_probe.py` is for **binary** reach
+data and does not apply. The MDE says "this design cannot tell these apart" without inventing the
+interval that question needs.
+
+**`complementarity()` conflates real disagreement with judge noise, and on one metric it is almost
+all noise.** Read it per metric against DOE 02's self-disagreement rates: `safety_v1` is 0/64 and
+`instruction_following_v1` is 64/64. Measured on campaign 07, 98% of cases have a "winner" on the
+holdout against 18% on safety — the first is the judge, not the models.
+
+Campaign 07 measured: the **cheapest arm is on 5 of 5 frontiers** (HAL's result reproduced on our
+data), and the optimized cheap tier crosses the expensive tier untuned on `safety_v1` (+0.1668)
+while landing resolvably **behind** it on `instruction_following_v1` (−0.1088) — this repo's
+criterion-versus-holdout signature, from one command. Those numbers are a demonstration, not a
+finding: campaign 07 predates the silent-failure-12 fix and is one run per condition.
+[docs/analysis/2026-09-24-cost-quality-frontier.md](docs/analysis/2026-09-24-cost-quality-frontier.md)
+
 ### GCP Labels
 
 All GCP resources (agents, eval runs, pipelines, Artifact Registry) use label `{"solution": "promp-wrangler"}`.
