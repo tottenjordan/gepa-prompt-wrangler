@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
 
@@ -44,6 +44,17 @@ class AgentPromptPair:
     # disable ADK patch 4b for a campaign that never asked to.
     forward_rationale: bool = True
     skip_optimize: bool = False
+    # Set when this pair was expanded from a `replicates: N` entry; holds the manifest
+    # id the replicates share. Recorded rather than parsed back out of the suffixed id,
+    # so grouping replicates of one condition never depends on a regex over ids that
+    # users also choose by hand.
+    replicate_of: str = ""
+    # Stop GEPA after this many iterations with no improvement in the best validation
+    # score. Resolved at load time from the pair, then `defaults:`, then `pipeline:`, so
+    # a campaign sets it once but an arm can still differ -- which is how a stopping
+    # rule gets validated against an unstopped arm in the same job. None = no stopper,
+    # exactly as every run before 2026-09-24.
+    patience: int | None = None
 
     def summary(self) -> str:
         """One-line summary for display."""
@@ -145,6 +156,13 @@ class PairFactory:
             if key not in raw:
                 raise ValueError(f"Manifest is missing required field: {key!r}")
 
+        # One campaign-wide patience, honoured by both run paths. The local path reads
+        # `defaults:` and the pipeline reads `pipeline:` for every other knob, so accept
+        # either here rather than making the key depend on how the campaign is launched.
+        default_patience = raw.get("defaults", {}).get("patience") or raw.get("pipeline", {}).get(
+            "patience"
+        )
+
         pairs = []
         for i, entry in enumerate(raw["pairs"]):
             pair_id = entry.get("id", f"pair-{i + 1}")
@@ -170,23 +188,55 @@ class PairFactory:
             if isinstance(raw_costs, dict) and "input" in raw_costs and "output" in raw_costs:
                 costs = {"input": float(raw_costs["input"]), "output": float(raw_costs["output"])}
 
-            pairs.append(
-                AgentPromptPair(
-                    id=pair_id,
-                    model=entry["model"],
-                    system_prompt=entry["system_prompt"],
-                    temperature=temperature,
-                    description=entry.get("description", ""),
-                    tags=entry.get("tags", []),
-                    engine_id=entry.get("engine_id", ""),
-                    agent_module=entry.get("agent_module", ""),
-                    costs=costs,
-                    enabled=entry.get("enabled", True),
-                    disabled_reason=entry.get("disabled_reason", ""),
-                    forward_rationale=entry.get("forward_rationale", True),
-                    skip_optimize=entry.get("skip_optimize", False),
+            replicates = entry.get("replicates", 1)
+            if not isinstance(replicates, int) or isinstance(replicates, bool) or replicates < 1:
+                raise ValueError(
+                    f"Pair {pair_id!r} sets replicates={replicates!r}; it must be an integer >= 1."
                 )
+            if replicates > 1 and entry.get("engine_id"):
+                # Replicates exist to draw the search more than once. Pointing them all
+                # at one pinned engine would deploy nothing new and have every replicate
+                # evaluate the same deployment, which measures the opposite of the point.
+                raise ValueError(
+                    f"Pair {pair_id!r} sets both replicates={replicates} and an "
+                    f"engine_id. Replicates each need their own deployment; drop the "
+                    f"engine_id, or drop replicates and name the arms separately."
+                )
+
+            pair = AgentPromptPair(
+                id=pair_id,
+                model=entry["model"],
+                system_prompt=entry["system_prompt"],
+                temperature=temperature,
+                description=entry.get("description", ""),
+                tags=entry.get("tags", []),
+                engine_id=entry.get("engine_id", ""),
+                agent_module=entry.get("agent_module", ""),
+                costs=costs,
+                enabled=entry.get("enabled", True),
+                disabled_reason=entry.get("disabled_reason", ""),
+                forward_rationale=entry.get("forward_rationale", True),
+                skip_optimize=entry.get("skip_optimize", False),
+                patience=entry.get("patience", default_patience),
             )
+
+            # A replicate is just another pair. Everything downstream then works
+            # untouched: `run_id` hashes the pair-id list, stage artifacts are keyed
+            # `{run_id}/stages/{stage}/{pair_id}.json`, `_pairs_json` iterates
+            # `enabled_pairs`, and `PairAnalysis.is_control` keys off the prompt rather
+            # than an id convention, so a replicated control still registers as one.
+            # No DAG change, no component change, no new artifact layout.
+            #
+            # `replicates: 1` must leave the id alone -- every existing manifest omits
+            # the key, and a suffix would change `run_id` and silently invalidate the
+            # cache of every campaign in flight.
+            if replicates == 1:
+                pairs.append(pair)
+            else:
+                pairs.extend(
+                    replace(pair, id=f"{pair_id}-r{n}", replicate_of=pair_id)
+                    for n in range(1, replicates + 1)
+                )
 
         return Manifest(
             name=raw["name"],

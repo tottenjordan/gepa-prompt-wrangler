@@ -858,6 +858,10 @@ def stage_optimize(exp: Experiment, pair_id: str | None = None) -> None:
             # ADK patch 4b, per pair. Pipeline-only until now, so a manifest declaring
             # `forward_rationale: false` still ran with the rationale attached here.
             forward_rationale=pair.forward_rationale,
+            # Stop once the best validation score has not moved for this many
+            # iterations. Resolved per pair at manifest load; `max_metric_calls` is
+            # still the ceiling and this can only stop earlier.
+            patience=pair.patience,
         )
         elapsed = time.time() - t0
         print(f"  [{pair.id}] Done ({_fmt_duration(elapsed)}) — {len(optimized)} chars")

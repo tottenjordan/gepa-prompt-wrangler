@@ -562,6 +562,25 @@ class TestOptimizeForwardsThePerPairFactors:
         assert gepa.call_args.kwargs["sampler_config_path"] is None
 
 
+class TestOptimizeForwardsPerPairCampaignFactors:
+    """These ride in `pair_json`, which the DAG forwards verbatim, so a factor that is
+    parsed but never read looks identical to one that works until you read the logs."""
+
+    def test_patience_reaches_the_optimizer(self, tmp_path, gepa):
+        with component_io(tmp_path) as io:
+            _run_optimize(io, pair_json=_pair(patience=15))
+
+        assert gepa.call_args.kwargs["patience"] == 15
+
+    def test_absent_patience_passes_none_rather_than_a_default(self, tmp_path, gepa):
+        """Early stopping is opt-in. A pair that says nothing must run unstopped, or
+        every in-flight campaign silently changes its budget."""
+        with component_io(tmp_path) as io:
+            _run_optimize(io, pair_json=_pair())
+
+        assert gepa.call_args.kwargs["patience"] is None
+
+
 @pytest.fixture
 def gepa_with_run_dir(tmp_path):
     """A GEPA run that left real files behind, so the shipping loop actually runs.
@@ -592,6 +611,53 @@ class TestOptimizeShipsGepasRunDir:
             f"pipeline-runs/{RUN}/stages/optimize/gepa_run/sonnet/candidates.json",
             f"pipeline-runs/{RUN}/stages/optimize/gepa_run/sonnet/nested/state.pkl",
         ]
+
+    def test_the_state_file_is_uploaded_before_anything_that_can_grow(self, tmp_path):
+        """`gepa_state.bin` must go first, ahead of generated_best_outputs_valset/.
+
+        Plain alphabetical order puts "generated..." before "gepa_state.bin", and that
+        directory is the one that grows with the eval set -- so the file carrying every
+        candidate's validation subscores was first in line to be dropped by the size cap.
+        """
+        run_dir = tmp_path / "gepa_run"
+        (run_dir / "generated_best_outputs_valset").mkdir(parents=True)
+        (run_dir / "generated_best_outputs_valset" / "0.json").write_text("{}")
+        (run_dir / "candidates.json").write_text("{}")
+        (run_dir / "gepa_state.bin").write_bytes(b"state")
+
+        with (
+            mock.patch("wrangler.optimize.optimizer.optimize", return_value="EVOLVED"),
+            mock.patch("wrangler.optimize.optimizer.gepa_run_dir", return_value=run_dir),
+            component_io(tmp_path) as io,
+        ):
+            _run_optimize(io, pair_json=_pair())
+
+        shipped = [p.rsplit("/", 1)[-1] for p in io.gcs.blobs if "gepa_run" in p]
+        assert shipped[:2] == ["gepa_state.bin", "candidates.json"]
+
+    def test_the_state_file_survives_a_blown_size_budget(self, tmp_path):
+        """The failure the ordering prevents, reproduced rather than argued.
+
+        A sparse file reports its full size to `stat()` without occupying disk, so the
+        100 MB cap can be exhausted for real in a test that costs nothing.
+        """
+        run_dir = tmp_path / "gepa_run"
+        (run_dir / "generated_best_outputs_valset").mkdir(parents=True)
+        huge = run_dir / "generated_best_outputs_valset" / "0.json"
+        with open(huge, "wb") as f:
+            f.truncate(101 * 1024 * 1024)
+        (run_dir / "gepa_state.bin").write_bytes(b"state")
+
+        with (
+            mock.patch("wrangler.optimize.optimizer.optimize", return_value="EVOLVED"),
+            mock.patch("wrangler.optimize.optimizer.gepa_run_dir", return_value=run_dir),
+            component_io(tmp_path) as io,
+        ):
+            _run_optimize(io, pair_json=_pair())
+
+        shipped = [p.rsplit("/", 1)[-1] for p in io.gcs.blobs if "gepa_run" in p]
+        assert "gepa_state.bin" in shipped
+        assert "0.json" not in shipped, "the oversized file should still be skipped"
 
     def test_a_failure_shipping_them_does_not_lose_the_stage(self, tmp_path, gepa_with_run_dir):
         """Nine hours of compute must not be thrown away because a diagnostics upload

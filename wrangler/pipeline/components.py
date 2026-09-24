@@ -727,6 +727,10 @@ def optimize_single_agent(
             # Per-pair, so one job can run patch 4b on in one arm and off in another.
             # Defaults True when the manifest omits it, matching every prior campaign.
             forward_rationale=pair.get("forward_rationale", True),
+            # Stop once the best validation score has not moved for this many GEPA
+            # iterations. Resolved per pair at manifest load; None means no stopper and
+            # the pre-2026-09-24 behaviour. max_metric_calls above is still the ceiling.
+            patience=pair.get("patience"),
             # The manifest's model, not the one the _opt module happens to import.
             # stage_optimize has passed this since 7219295; this path did not, so
             # two c07 arms pointing at sonnet_agent -- claude-sonnet-5 and
@@ -791,7 +795,17 @@ def optimize_single_agent(
         run_dir_path = gepa_run_dir(str(agent_path))
         uploaded = 0
         budget = 100 * 1024 * 1024  # ~27x the 3.7 MB observed; a cap, not a target
-        for f in sorted(run_dir_path.rglob("*")) if run_dir_path.is_dir() else []:
+
+        # Upload the irreplaceable files FIRST, before the budget can be spent.
+        # Plain `sorted()` is alphabetical, which puts generated_best_outputs_valset/
+        # ahead of gepa_state.bin -- so the directory the warning below says "grows with
+        # the eval set" was first in line to consume the cap, and the per-candidate
+        # record this comment calls the only one of its kind was first to be dropped.
+        # 27x headroom today, so this was a latent ordering trap rather than a live bug.
+        # scripts/replay_stopping.py reads gepa_state.bin and is the reason it matters.
+        priority = {"gepa_state.bin": 0, "candidates.json": 1}
+        files = sorted(run_dir_path.rglob("*")) if run_dir_path.is_dir() else []
+        for f in sorted(files, key=lambda p: (priority.get(p.name, 2), p)):
             if not f.is_file():
                 continue
             size = f.stat().st_size
