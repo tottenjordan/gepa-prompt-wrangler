@@ -127,12 +127,13 @@ so the window is open now and closes when it starts.
 
 Sequence:
 
-1. **Measure A's benefit before building it.** This analysis *cannot* say how much spread the
-   continuous score would recover, because only the binary scores were archived. Patch 4 already
-   logs per-metric continuous means per batch, so the cheapest probe is to recover those log lines
-   from campaign 09's optimize stage, or to run the smoke manifest and read them live. **Do not
-   implement A without a number for how much gradient is actually there** — if the metrics are
-   themselves near-binary, A buys nothing.
+1. ~~**Measure A's benefit before building it.**~~ **DONE 2026-09-24 — GO.** Patch 4's logged
+   per-metric means were recovered from campaign 09's optimize stage via Cloud Logging. Three of
+   four criteria are continuous per case (54–77% of batch means are not expressible as k/n); a
+   continuous composite gives **25 distinct values instead of 8** and cuts tied candidates from
+   **29 of 37 to 7**. `safety_v1` is the exception and is genuinely binary, so A improves the
+   signal GEPA *selects* on, not the metric it reports.
+   [2026-09-24-continuous-score-gradient.md](2026-09-24-continuous-score-gradient.md)
 2. **Implement A at the existing hook.** `optimizer.py:881–922` already wraps
    `sampler.sample_and_score` on the instance for MCP session refresh, so this needs no new
    class-level monkey-patch. Per CLAUDE.md, anything touching the patch set re-runs the per-patch
@@ -157,8 +158,9 @@ Sequence:
 
 ## What this analysis cannot say
 
-- **Whether A helps, and by how much.** Unmeasured, for want of archived continuous scores. Step 1
-  above exists to settle it, and the recommendation is conditional on it.
+- ~~**Whether A helps, and by how much.**~~ Settled 2026-09-24: 3.1x the distinguishable levels,
+  ties down from 29 to 7. What remains unknown is how to *weight* the criteria in the composite —
+  the resolution gain is robust to that choice but the resulting ranking is not.
 - **Whether either fix reduces the run-to-run spread.** That is the motivating hypothesis and it
   needs replicates, which the same freed budget pays for.
 - **What B costs in optimization quality.** Moving 15 cases from train to validation shrinks the
