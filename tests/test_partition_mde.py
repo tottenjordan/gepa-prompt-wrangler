@@ -13,11 +13,18 @@ The failures these tests exist to prevent, concretely:
 
 - the MDE formula quietly drifting from Miller (arXiv 2024-11-01) -- checked
   against a hand computation, not against itself;
+- the verdict starting to depend on the sigma^2 decomposition. It does not
+  today: it is read at ``K = K_OBSERVED``, where the bracket is IDENTICALLY the
+  directly measured per-case variance for any sigma^2 estimate. That identity
+  is what makes the no-go a measurement rather than a model, and
+  `TestTheVerdictIsSigma2Invariant` pins it;
 - `score_repeats`/`num_runs` appearing to buy resolution that the
-  question-sampling term makes impossible, which is the error that would turn
-  a no-go into a go;
+  question-sampling term makes impossible -- which misdirects the *secondary*
+  "spend more budget" answer, and cannot move the verdict itself;
 - an estimator degenerating to a constant, so the gate stops depending on the
   data it claims to measure;
+- a missing artifact exiting like a NO-GO, so a caller acts on a verdict that
+  was never computed;
 - the 12-case verdict silently flipping if the partition, the fixtures, or the
   arithmetic move.
 """
@@ -31,11 +38,17 @@ import pytest
 from scripts.partition_mde import (
     EFFECT_CONTRAST,
     EFFECT_DID,
+    EXIT_NO_GO,
+    EXIT_UNMEASURABLE,
     K_OBSERVED,
     METRICS,
+    SCENARIOS,
     EvalSide,
+    Unmeasurable,
+    _variance,
     build_report,
     common_cases,
+    cross_window_measurement,
     doe03_agreement,
     load_sides,
     minimum_detectable_effect,
@@ -181,11 +194,27 @@ class TestTheEstimatorsReadTheData:
         delta variance is measurement. If an identical-sided control produced a
         non-zero estimate, the estimator would be reading question sampling
         into sigma2 and crediting `num_runs` with reducing it.
+
+        The assertions go through `cross_window_measurement` itself, and both
+        directions are checked: an earlier version of this test only
+        differenced two identical dicts, which tests subtraction and can never
+        fail.
         """
-        rows = [{"case_index": i, "m": i / 10} for i in range(8)]
-        twin = {("eval_before", "c"): _side(rows), ("eval_after", "c"): _side(rows)}
-        deltas = per_case_delta(twin, "c", "m", list(range(8)))
-        assert deltas == pytest.approx([0.0] * 8)
+        cases = list(range(8))
+        rows = [{"case_index": i, "m": i / 10} for i in cases]
+        twin = {("eval_before", CONTROL): _side(rows), ("eval_after", CONTROL): _side(rows)}
+
+        assert per_case_delta(twin, CONTROL, "m", cases) == pytest.approx([0.0] * 8)
+        assert cross_window_measurement(twin, "m", cases, n_sides=4) == 0.0
+
+        # ... and it must not be a constant zero: move one case and the
+        # estimator must report exactly n_sides/2 pairs' worth of that spread.
+        moved = [dict(row) for row in rows]
+        moved[0]["m"] += 0.4
+        drifted = {("eval_before", CONTROL): _side(rows), ("eval_after", CONTROL): _side(moved)}
+        expected = 2 * _variance([0.4, *[0.0] * 7])
+        assert cross_window_measurement(drifted, "m", cases, n_sides=4) == pytest.approx(expected)
+        assert expected > 0
 
     def test_omega2_is_clamped_at_zero_and_says_so(self):
         """Measurement can exceed the observed spread; a negative omega2 is not a result.
@@ -313,22 +342,78 @@ class TestAgainstCampaign09:
         assert n > 64
 
 
-def _variance(values: list[float]) -> float:
-    mean = sum(values) / len(values)
-    return sum((v - mean) ** 2 for v in values) / (len(values) - 1)
+class TestTheVerdictIsSigma2Invariant:
+    """The strongest property this gate has: its verdict is a DIRECT measurement.
+
+    The two sigma^2 estimators disagree by ~2x and drive omega^2 negative on
+    two metrics, so if the headline MDEs depended on that split the no-go would
+    be arguable. They do not: the split is defined as omega^2 = max(0, total-m)
+    and sigma^2_combined = min(m, total) * K_OBSERVED, so the bracket at
+    K = K_OBSERVED collapses back to `total` for every m >= 0.
+    """
+
+    def test_the_two_sigma2_estimators_give_the_same_held_out_verdict(self, sides):
+        """No sigma^2 estimate -- inverted, mis-scaled or absent -- can flip the gate.
+
+        If this fails, the decomposition has stopped reproducing the measured
+        total and the printed verdict has quietly become a modelled number
+        whose value depends on which of two ~2x-apart estimators was picked.
+        """
+        report = build_report(sides)
+        n = len(report["test_cases"])
+        for contrast in ("DiD vs control (on)", "rationale on - off"):
+            for metric in METRICS:
+                comps = [
+                    report["test_components"][(contrast, metric, scenario)]
+                    for scenario in SCENARIOS
+                ]
+                for comp in comps:
+                    assert comp.bracket_at(K_OBSERVED) == pytest.approx(comp.total, abs=1e-15)
+                mdes = [comp.mde(n, K_OBSERVED) for comp in comps]
+                assert mdes[0] == pytest.approx(mdes[1], abs=1e-12), (contrast, metric)
+
+    def test_the_identity_holds_for_any_measurement_estimate(self):
+        """Including absurd ones, which is what makes the invariance structural.
+
+        A future estimator that returned zero, or a hundred times the total,
+        would still have to reproduce the measured variance at K_OBSERVED. A
+        decomposition that only happened to agree on campaign 09's numbers
+        would not be an identity, and the guarantee above would be luck.
+        """
+        for measurement in (0.0, 1e-9, 0.079, 0.08, 0.081, 8.0, 1e6):
+            comp = variance_components(
+                total=0.08, measurement_at_k_observed=measurement, k_observed=K_OBSERVED
+            )
+            assert comp.bracket_at(K_OBSERVED) == pytest.approx(0.08, abs=1e-15)
+            assert comp.omega2 >= 0.0
 
 
 class TestAgainstDOE03:
-    """The sigma^2 estimator has to agree with a measurement taken another way."""
+    """A weak directional cross-check on the BUDGET columns, pinned as a regression."""
 
     def test_the_k_reducible_share_ranks_metrics_the_way_doe_03_did(self, sides):
-        """Catches a sigma^2 estimator that reads question sampling as measurement.
+        """A REGRESSION PIN against the frozen fixtures, NOT evidence.
 
-        DOE 03 measured, from resampled captures, how fast each metric's floor
-        falls with `num_runs`. That is the same physical quantity as the share
-        of variance this script calls K-reducible. If the two were uncorrelated
-        the K=1/K=2 columns would be recommending budget that cannot work --
-        the exact error that would turn this no-go into a go.
+        What it catches: a sigma^2 estimator that has changed shape against
+        known inputs and started reading question sampling as measurement,
+        which would misdirect the "would more `num_runs` help?" columns.
+
+        What it does NOT do, despite how it reads:
+
+        - It cannot guard the verdict. That is taken at K = K_OBSERVED, where
+          the bracket equals the measured total for any sigma^2 whatsoever --
+          see `TestTheVerdictIsSigma2Invariant`. No inversion of this estimator
+          can turn the no-go into a go.
+        - It is not statistically meaningful on its own. r = +0.81 across five
+          metrics is t = 2.41 on 3 df, two-sided p ~ 0.095. A
+          leave-one-eval-side-out jackknife holds near +0.8 on five of six
+          replicates and collapses to +0.17 on the sixth
+          (`eval_after/c09-rationale-on`, which alone carries 75% of
+          `safety_v1`'s within-window sigma^2 pool through one 1-df standard
+          deviation).
+
+        The 0.7 threshold is therefore a tripwire on fixed data, not a claim
+        that the decomposition has been independently confirmed.
         """
         report = build_report(sides)
         assert doe03_agreement(report) > 0.7
@@ -369,19 +454,51 @@ class TestTheReportIsHonest:
         """
         from scripts.partition_mde import main
 
-        assert main(["--stages-dir", str(FIXTURE)]) == 1
+        assert main(["--stages-dir", str(FIXTURE)]) == EXIT_NO_GO
         out = capsys.readouterr().out
         assert "NO-GO" in out
         assert "Bowyer" in out
+
+    def test_it_runs_with_no_arguments_at_all(self, capsys):
+        """The first documented invocation has to work, or the docs are decoration.
+
+        It defaulted to /tmp/c09, so `uv run python scripts/partition_mde.py`
+        exited with the missing-artifact message on a clean checkout while the
+        real artifacts sat committed in tests/fixtures/c09.
+        """
+        from scripts.partition_mde import main
+
+        assert main([]) == EXIT_NO_GO
+        assert "NO-GO" in capsys.readouterr().out
+
+    def test_unmeasurable_and_no_go_have_different_exit_codes(self, tmp_path, capsys):
+        """A caller must be able to tell "underpowered" from "never measured".
+
+        Both were exit 1, so a gate wired to this script read a failed fetch or
+        a wrong --stages-dir as a NO-GO verdict -- acting on a measurement
+        nobody took. Fails closed either way, but the two mean opposite things
+        about what to do next.
+        """
+        from scripts.partition_mde import main
+
+        assert main(["--stages-dir", str(FIXTURE)]) == EXIT_NO_GO
+        capsys.readouterr()
+
+        assert main(["--stages-dir", str(tmp_path)]) == EXIT_UNMEASURABLE
+        captured = capsys.readouterr()
+        assert "missing" in captured.err
+        assert "NO-GO" not in captured.out
 
     def test_the_bucket_is_not_hardcoded(self):
         """Fetching must read the staging bucket from the environment.
 
         A bucket baked into committed source is both a leak and a lie the next
-        project inherits.
+        project inherits. An unset bucket is unmeasurable, not a verdict, so it
+        carries the distinct exit code.
         """
         from scripts.partition_mde import staging_bucket
 
-        with pytest.raises(SystemExit, match="GCP_STAGING_BUCKET"):
+        with pytest.raises(Unmeasurable, match="GCP_STAGING_BUCKET") as caught:
             staging_bucket(env={})
+        assert caught.value.code == EXIT_UNMEASURABLE
         assert staging_bucket(env={"GCP_STAGING_BUCKET": "some-bucket"}) == "some-bucket"

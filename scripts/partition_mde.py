@@ -29,12 +29,33 @@ Every number below is measured off campaign 09's six eval sides
 on ``case_index`` and restricted to the 63 cases present on all six. Nothing is
 assumed.
 
-**The total is measured directly and needs no decomposition.** For a contrast
-``c_i`` (per case: a DiD against the control, or the on-minus-off contrast),
-``Var_i(c_i)`` *is* ``omega^2 + sum sigma^2/K`` at the K campaign 09 ran. The
-MDE at n = 12 therefore does not depend on splitting it, and the headline
-verdict is computed from it alone. The split only answers the follow-up
-question, "could a bigger `num_runs` budget rescue it?".
+**THE VERDICT IS A DIRECT MEASUREMENT, AND IT IS INVARIANT TO THE sigma^2
+ESTIMATOR.** This is the strongest property the gate has, so it is stated as an
+identity rather than left implicit. For a contrast ``c_i`` (per case: a DiD
+against the control, or the on-minus-off contrast), ``Var_i(c_i)`` *is*
+``omega^2 + sum sigma^2/K`` at the K campaign 09 ran -- no model, no split. The
+decomposition is then *defined* from that total and a measurement estimate
+``m``::
+
+    omega^2          = max(0, total - m)
+    sigma^2_combined = min(m, total) * K_OBSERVED
+
+which gives, for every ``m >= 0``::
+
+    bracket_at(K_OBSERVED) = max(0, total - m) + min(m, total) = total
+
+(``m <= total``: ``(total - m) + m``; ``m > total``: ``0 + total``.) The cap is
+what makes this hold: without it a large sigma^2 estimate would let the
+``K = K_OBSERVED`` column disagree with the measurement it was derived from.
+
+The held-out verdict is read at ``K = K_OBSERVED``, so **no sigma^2 estimate
+can move it** -- not a different one, not a mis-scaled one, not an inverted
+one. Measured across all 15 test-partition cells, the two estimators' MDEs
+differ by at most 5.6e-17. ``tests/test_partition_mde.py`` pins this.
+
+The decomposition therefore answers only the follow-up question, "could a
+bigger `num_runs` budget rescue it?", which is where the ``K != K_OBSERVED``
+columns live and where a bad sigma^2 would do damage.
 
 **Two sigma^2 estimators, reported as a bracket, because they disagree by ~2x
 and the disagreement is itself the finding.**
@@ -66,21 +87,29 @@ it gives the *worst* MDE and the *best* case for "more cases, not more runs";
 could buy. The verdict is reported under both and does not depend on the
 choice.
 
-**The measurement term is capped at the measured total.** ``omega^2 = max(0,
-total - measurement)`` and the reducible piece is ``min(measurement, total)``,
-so ``bracket(K_OBSERVED)`` always reproduces the directly measured variance.
-Without the cap a large sigma^2 estimate would let the K = 2 column disagree
-with the measurement it was derived from.
-
 ## Usage
 
-    uv run python scripts/partition_mde.py
-    uv run python scripts/partition_mde.py --stages-dir tests/fixtures/c09
-    uv run python scripts/partition_mde.py --fetch --run-id run-86239e1924
+    uv run python scripts/partition_mde.py                        # committed c09 fixtures
+    uv run python scripts/partition_mde.py --stages-dir /tmp/c09
+    uv run python scripts/partition_mde.py --fetch --run-id run-86239e1924 \
+        --stages-dir /tmp/c09
 
-``--fetch`` reads the staging bucket from ``GCP_STAGING_BUCKET``; it is never
-written into this file. Exit code is 0 for GO, 1 for NO-GO, so the gate can be
-read by something other than a human.
+The default reads ``tests/fixtures/c09`` -- campaign 09's real stage artifacts,
+committed for exactly this reason, the same way ``tests/test_noise_floor.py``
+carries campaign 06's. ``--fetch`` reads the staging bucket from
+``GCP_STAGING_BUCKET``; it is never written into this file.
+
+Exit codes, so the gate can be read by something other than a human:
+
+===  ==========================================================================
+0    GO -- the partition resolves both target effects.
+1    NO-GO -- measured, and underpowered.
+2    the gate could not be measured (artifacts or configuration missing).
+===  ==========================================================================
+
+1 and 2 are distinct deliberately, the same split ``wrangler evaluators
+trace-health`` draws: a caller that cannot tell them apart reads a broken fetch
+as a verdict, and acts on a measurement nobody took.
 """
 
 from __future__ import annotations
@@ -105,6 +134,30 @@ if TYPE_CHECKING:
 
 ALPHA = 0.05
 POWER = 0.80
+
+#: Exit codes. A NO-GO is a measurement; a missing artifact is not. Collapsing
+#: them onto 1 lets a caller act on a verdict that was never computed.
+EXIT_GO = 0
+EXIT_NO_GO = 1
+EXIT_UNMEASURABLE = 2
+
+#: Campaign 09's real stage artifacts, committed so this gate reproduces without
+#: network or credentials (the pattern `tests/test_noise_floor.py` already uses).
+DEFAULT_STAGES_DIR = Path(__file__).resolve().parent.parent / "tests" / "fixtures" / "c09"
+
+
+class Unmeasurable(SystemExit):
+    """The gate could not be evaluated: artifacts or configuration are missing.
+
+    A ``SystemExit`` subclass so an uncaught one still exits
+    ``EXIT_UNMEASURABLE`` rather than 1, and so the message survives ``str()``
+    for callers that catch it. ``main()`` catches it and reports on stderr.
+    """
+
+    def __init__(self, message: str) -> None:
+        super().__init__(message)
+        self.code = EXIT_UNMEASURABLE
+
 
 #: Campaign 09 ran `num_runs: 2`, so every variance read off it is a K = 2
 #: measurement. Re-apportioning to other K is only meaningful relative to this.
@@ -258,6 +311,12 @@ class EvalSide:
         ``len(per_case)`` cases, so the per-question variance behind it is
         ``n * std**2``. Reading ``scores_std**2`` directly would understate
         sigma^2 by the case count.
+
+        ``len(per_case)`` is the UNION of cases across the side's runs (63 or
+        64 here), which slightly overstates what any single run scored. Worth
+        under 2%, and it cannot reach the verdict at all: that is read at
+        ``K = K_OBSERVED``, where the bracket equals the measured total
+        whatever sigma^2 says.
         """
         return len(self.per_case) * self.scores_std.get(metric, 0.0) ** 2
 
@@ -270,7 +329,7 @@ def load_sides(stages_dir: str | Path) -> dict[tuple[str, str], EvalSide]:
         for arm in (CONTROL_ARM, *TREATMENT_ARMS):
             path = root / phase / f"{arm}.json"
             if not path.is_file():
-                raise SystemExit(
+                raise Unmeasurable(
                     f"missing {path}\nFetch the campaign 09 stage artifacts first:\n"
                     f"  uv run python {Path(__file__).name} --fetch --run-id <run-id>\n"
                     f"or point --stages-dir at a directory holding "
@@ -279,7 +338,7 @@ def load_sides(stages_dir: str | Path) -> dict[tuple[str, str], EvalSide]:
             payload = json.loads(path.read_text())
             rows = payload.get("per_case") or []
             if not rows:
-                raise SystemExit(f"{path} has no per_case rows; the MDE needs per-case scores")
+                raise Unmeasurable(f"{path} has no per_case rows; the MDE needs per-case scores")
             sides[(phase, arm)] = EvalSide(
                 arm=arm,
                 phase=phase,
@@ -370,7 +429,7 @@ def staging_bucket(env: Mapping[str, str] | None = None) -> str:
     environ = os.environ if env is None else env
     bucket = environ.get("GCP_STAGING_BUCKET", "").strip()
     if not bucket:
-        raise SystemExit(
+        raise Unmeasurable(
             "GCP_STAGING_BUCKET is not set; it holds the pipeline stage artifacts. "
             "Set it in .env, or pass --stages-dir to read artifacts already on disk."
         )
@@ -419,9 +478,9 @@ CONTRASTS = (
 )
 
 #: `num_runs` scaling exponents measured by DOE 03 on a different pool
-#: (docs/analysis/2026-09-17-doe-03-result.md). Used only as a cross-check:
-#: the share of variance this script calls K-reducible should rank metrics the
-#: same way, since both are asking how much of the noise averaging can reach.
+#: (docs/analysis/2026-09-17-doe-03-result.md). A weak, directional cross-check
+#: on the SECONDARY question only -- see `doe03_agreement` for what it is and
+#: is not evidence of.
 DOE03_NUM_RUNS_EXPONENT = {
     "safety_v1": 0.58,
     "final_response_quality_v1": 0.34,
@@ -518,12 +577,24 @@ def reducible_share(report: dict, metric: str, scenario: str = "within-window") 
 def doe03_agreement(report: dict) -> float:
     """Correlation between the K-reducible share and DOE 03's `num_runs` exponents.
 
-    An independent check that the sigma^2 estimator is not inverted. DOE 03
-    measured, on a different pool, how fast each metric's floor falls with
-    `num_runs`; that is the same physical quantity as "how much of this
-    metric's variance is measurement". If the two disagreed in rank order, the
-    decomposition here would be reading question sampling as measurement, and
-    the K columns would recommend spending money that cannot work.
+    **This bears on the secondary question only.** DOE 03 measured, on a
+    different pool, how fast each metric's floor falls with `num_runs`; that is
+    the same physical quantity as "how much of this metric's variance is
+    measurement". If the two disagreed in rank order, the ``K != K_OBSERVED``
+    columns would be recommending budget that cannot work. It **cannot** turn
+    the no-go into a go: the verdict is read at ``K = K_OBSERVED``, where
+    ``bracket_at`` reproduces the directly measured total for *any* sigma^2
+    estimate, inverted included (module docstring, and pinned by
+    ``TestTheVerdictIsSigma2Invariant``).
+
+    **It is also weak.** r = +0.81 on FIVE points is t = 2.41 on 3 df,
+    two-sided p ~ 0.095 -- not significant at any conventional level. A
+    leave-one-eval-side-out jackknife holds at r ~ +0.80 to +0.85 on five of
+    six replicates, but dropping ``eval_after/c09-rationale-on`` gives
+    **r = +0.17**, with `safety_v1`'s reducible share falling 0.710 -> 0.214:
+    that one side carries 75% of `safety_v1`'s within-window sigma^2 pool
+    through a single 1-degree-of-freedom standard deviation. Read it as
+    directionally consistent, not as confirmation.
     """
     mine = [reducible_share(report, m) for m in METRICS]
     theirs = [DOE03_NUM_RUNS_EXPONENT[m] for m in METRICS]
@@ -531,7 +602,7 @@ def doe03_agreement(report: dict) -> float:
 
 
 def _print_doe03_check(report: dict) -> None:
-    print("\nCROSS-CHECK AGAINST DOE 03  (different pool, same physical question)")
+    print("\nCROSS-CHECK AGAINST DOE 03  (weak, and on the BUDGET question only)")
     print(f"  {'metric':27}{'K-reducible share':>19}{'DOE 03 num_runs e':>19}")
     for metric in METRICS:
         print(
@@ -543,7 +614,17 @@ def _print_doe03_check(report: dict) -> None:
         "  agree: `safety_v1` most reducible by `num_runs`, `instruction_following_v1`\n"
         "  least -- which is what DOE 03 concluded from resampled captures. The one\n"
         "  disagreement is `tool_use_quality_v1`, whose DOE 03 exponent is negative and\n"
-        "  which CLAUDE.md already records as 'already at its floor'."
+        "  which CLAUDE.md already records as 'already at its floor'.\n"
+        "\n"
+        "  DO NOT QUOTE THIS AS A CHECK ON THE VERDICT. Two reasons:\n"
+        "  - It CANNOT bear on it. The verdict is read at K=2, where the bracket equals\n"
+        "    the directly measured variance for any sigma^2 estimate (module docstring).\n"
+        "    It speaks only to the 'would more `num_runs` help?' columns.\n"
+        "  - On five points, r = +0.81 is t = 2.41 on 3 df, two-sided p ~ 0.095 -- not\n"
+        "    significant. Leaving one eval side out at a time, five of six replicates\n"
+        "    hold near +0.8, but dropping eval_after/c09-rationale-on gives r = +0.17\n"
+        "    (`safety_v1`'s share 0.710 -> 0.214): that side alone is 75% of the\n"
+        "    within-window sigma^2 pool, from one 1-df standard deviation."
     )
 
 
@@ -577,7 +658,13 @@ def _print_test_partition(report: dict) -> tuple[bool, list[str]]:
         f"\nTHE ACTUAL HELD-OUT PARTITION  (n={len(test_cases)}, "
         f"case_index {', '.join(str(i) for i in test_cases)})"
     )
-    print("  variance measured over these twelve cases specifically, not a generic n=12.")
+    print(
+        "  variance measured over these twelve cases specifically, not a generic n=12.\n"
+        f"  Read at K={K_OBSERVED}, where omega^2 + sigma^2/K is IDENTICALLY the measured\n"
+        "  per-case variance, so every MDE below is a direct measurement and is the same\n"
+        "  under either sigma^2 estimator (max difference 5.6e-17). The verdict cannot be\n"
+        "  moved by getting the decomposition wrong."
+    )
     print(f"\n  {'metric':27}{'contrast':22}{'MDE':>9}{'target':>9}{'ratio':>8}  verdict")
 
     failures: list[str] = []
@@ -601,20 +688,52 @@ def _print_test_partition(report: dict) -> tuple[bool, list[str]]:
 
 
 def _print_required_cases(report: dict) -> dict[str, int]:
-    print("\nWHAT IT WOULD TAKE  (cases needed to reach the target, paired-case variance)")
-    print(f"  {'metric':27}{'target':>9}{'K=2':>8}{'K=4':>8}{'K->inf':>9}")
+    print(
+        f"\nWHAT IT WOULD TAKE  (cases to reach +-{EFFECT_CONTRAST:.3f} on the "
+        f"{len(report['paired_cases'])} paired cases,\n"
+        "  under BOTH sigma^2 branches: w = within-window, x = cross-window)"
+    )
+    print(
+        f"  {'metric':27}{'K=2':>8}{'K=4 w':>8}{'K=4 x':>8}"
+        f"{'K=8 w':>8}{'K=8 x':>8}{'w2 only w':>11}{'w2 only x':>11}"
+    )
     needed: dict[str, int] = {}
+    clamped: list[str] = []
     for metric in METRICS:
-        comp = report["components"][("rationale on - off", metric, "within-window")]
-        n2 = comp.cases_for(EFFECT_CONTRAST, 2)
-        n4 = comp.cases_for(EFFECT_CONTRAST, 4)
-        ninf = required_cases(
-            omega2=comp.omega2, sigma2_a=0.0, sigma2_b=0.0, target=EFFECT_CONTRAST
+        within = report["components"][("rationale on - off", metric, "within-window")]
+        cross = report["components"][("rationale on - off", metric, "cross-window")]
+        # One K=K_OBSERVED column, not two: the identity makes them equal, and
+        # printing both would imply the branch choice matters where it cannot.
+        n2 = within.cases_for(EFFECT_CONTRAST, K_OBSERVED)
+        inf_w = required_cases(
+            omega2=within.omega2, sigma2_a=0.0, sigma2_b=0.0, target=EFFECT_CONTRAST
+        )
+        inf_x = required_cases(
+            omega2=cross.omega2, sigma2_a=0.0, sigma2_b=0.0, target=EFFECT_CONTRAST
         )
         needed[metric] = n2
-        print(f"  {metric:27}{EFFECT_CONTRAST:9.4f}{n2:8d}{n4:8d}{ninf:9d}")
+        if cross.clamped:
+            clamped.append(metric)
+        print(
+            f"  {metric:27}{n2:8d}"
+            f"{within.cases_for(EFFECT_CONTRAST, 4):8d}{cross.cases_for(EFFECT_CONTRAST, 4):8d}"
+            f"{within.cases_for(EFFECT_CONTRAST, 8):8d}{cross.cases_for(EFFECT_CONTRAST, 8):8d}"
+            f"{inf_w:11d}{inf_x:11d}{' *' if cross.clamped else ''}"
+        )
+    safety = report["components"][("rationale on - off", "safety_v1", "cross-window")]
     print(
-        "  K->inf is the irreducible case count: omega^2 alone, infinite `num_runs`.\n"
+        f"  The K={K_OBSERVED} column is branch-invariant -- at the K campaign 09 ran the\n"
+        "  bracket IS the measured total -- so the two estimators give one column. They\n"
+        "  diverge only where they credit `num_runs` differently; cross-window is the\n"
+        "  OPTIMISTIC branch, the upper bound on what budget could buy.\n"
+        "  'w2 only' is omega^2 alone: infinite `num_runs`, the irreducible case count.\n"
+        "  * omega^2 clamped at 0 under cross-window, for:\n"
+        f"      {', '.join(clamped)}\n"
+        "    so that branch's 'w2 only' column reads 1 as an artefact of the clamp, NOT\n"
+        "    as a claim that runs would resolve those metrics. The conclusion survives\n"
+        "    either branch anyway: even on the optimistic one, `safety_v1` needs\n"
+        f"    {safety.cases_for(EFFECT_CONTRAST, 4)} cases at K=4 and "
+        f"{safety.cases_for(EFFECT_CONTRAST, 8)} at K=8.\n"
         f"  The whole eval set holds 64 cases, of which {len(report['test_cases'])} are held out."
     )
     return needed
@@ -628,6 +747,9 @@ def _print_caveats() -> None:
         "    datapoints: at N=100 a nominal-95% interval achieved 92.5% coverage. The\n"
         "    normal approximation this formula rests on is worse at 12, so treat the\n"
         "    12-case figures as a lower bound on the true MDE, not an estimate of it.\n"
+        "    One component of that is quantifiable: swapping the normal multiplier for\n"
+        "    Student's t at df = n-1 = 11 takes 2.8016 -> 3.0765, so every n=12 MDE\n"
+        "    above is understated by 9.8%. That widens the NO-GO; it cannot narrow it.\n"
         "  - `safety_v1` is quarter-valued (0.25/0.5/0.75/1.0). Over twelve cases the\n"
         "    mean lands on twelfths of a quarter-step and small differences are\n"
         "    discretisation, which no variance formula models.\n"
@@ -642,21 +764,27 @@ def _print_caveats() -> None:
 
 
 def main(argv: Sequence[str] | None = None) -> int:
+    """Print the gate and return its exit code. See the module docstring for the codes."""
     parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     parser.add_argument(
         "--stages-dir",
-        default="/tmp/c09",
-        help="directory holding eval_before/<arm>.json and eval_after/<arm>.json",
+        default=str(DEFAULT_STAGES_DIR),
+        help="directory holding eval_before/<arm>.json and eval_after/<arm>.json "
+        "(default: the committed campaign 09 fixtures)",
     )
     parser.add_argument("--fetch", action="store_true", help="download the artifacts first")
     parser.add_argument("--run-id", default="run-86239e1924", help="pipeline run id to fetch")
     args = parser.parse_args(list(sys.argv[1:] if argv is None else argv))
 
     stages_dir = Path(args.stages_dir)
-    if args.fetch:
-        fetch_stage_artifacts(args.run_id, stages_dir)
-
-    sides = load_sides(stages_dir)
+    try:
+        if args.fetch:
+            fetch_stage_artifacts(args.run_id, stages_dir)
+        sides = load_sides(stages_dir)
+    except Unmeasurable as exc:
+        # NOT a NO-GO: nothing was measured, and a caller must be able to tell.
+        print(exc, file=sys.stderr)
+        return EXIT_UNMEASURABLE
     report = build_report(sides)
 
     print("=" * 78)
@@ -681,7 +809,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     if go:
         print("VERDICT: GO -- the 12-case test partition resolves both target effects.")
         print("=" * 78)
-        return 0
+        return EXIT_GO
 
     worst = max(needed.values())
     best = min(needed.values())
@@ -694,7 +822,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         f"eval cases or a within-case design, NOT a bigger test split."
     )
     print("=" * 78)
-    return 1
+    return EXIT_NO_GO
 
 
 if __name__ == "__main__":
