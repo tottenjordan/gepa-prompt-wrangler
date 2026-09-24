@@ -1,28 +1,31 @@
-"""The held-out test partition's minimum detectable effect, pinned.
+"""The held-out test partition's NO-GO verdict, pinned end to end.
 
 `scripts/partition_mde.py` is a DECISION GATE: it says whether the checked-in
 12-case `test` partition can resolve the two effect sizes this project needs to
 detect (+0.0952 and +-0.075, both from
 `docs/analysis/2026-09-22-campaign-09-reanalysis.md`). A gate that answers from
 assumed variance is worse than no gate, because it produces a plausible number
-with nothing behind it -- so every estimator here is fed the real campaign 09
+with nothing behind it -- so every estimator is fed the real campaign 09
 per-case artifacts in `tests/fixtures/c09/`, the same way
 `tests/test_noise_floor.py` pins the floor to campaign 06's.
 
+The arithmetic those estimators are built from now lives in
+`wrangler.reporting.inference`, and `tests/test_inference.py` guards it. This
+file guards the layer the script kept: loading the artifacts, assembling the
+report, and the printed verdict with its exit code.
+
 The failures these tests exist to prevent, concretely:
 
-- the MDE formula quietly drifting from Miller (arXiv 2024-11-01) -- checked
-  against a hand computation, not against itself;
 - the verdict starting to depend on the sigma^2 decomposition. It does not
   today: it is read at ``K = K_OBSERVED``, where the bracket is IDENTICALLY the
   directly measured per-case variance for any sigma^2 estimate. That identity
   is what makes the no-go a measurement rather than a model, and
-  `TestTheVerdictIsSigma2Invariant` pins it;
-- `score_repeats`/`num_runs` appearing to buy resolution that the
-  question-sampling term makes impossible -- which misdirects the *secondary*
-  "spend more budget" answer, and cannot move the verdict itself;
-- an estimator degenerating to a constant, so the gate stops depending on the
-  data it claims to measure;
+  `TestTheVerdictIsSigma2Invariant` pins that the assembled report still
+  exhibits it on real data;
+- the report being wired to the wrong campaign's numbers, so the variance
+  behind the gate is not campaign 09's;
+- an estimator degenerating against known inputs and misdirecting the
+  *secondary* "would more `num_runs` help?" columns;
 - a missing artifact exiting like a NO-GO, so a caller acts on a verdict that
   was never computed;
 - the 12-case verdict silently flipping if the partition, the fixtures, or the
@@ -40,26 +43,22 @@ from scripts.partition_mde import (
     EFFECT_DID,
     EXIT_NO_GO,
     EXIT_UNMEASURABLE,
-    K_OBSERVED,
     METRICS,
     SCENARIOS,
-    EvalSide,
     Unmeasurable,
-    _variance,
     build_report,
-    common_cases,
-    cross_window_measurement,
     doe03_agreement,
     load_sides,
-    minimum_detectable_effect,
-    per_case_contrast,
-    per_case_delta,
     reducible_share,
-    required_cases,
-    variance_components,
-    z_multiplier,
 )
 from wrangler.core.partitions import load_partitions
+from wrangler.reporting.inference import (
+    K_OBSERVED,
+    EvalSide,
+    common_cases,
+    minimum_detectable_effect,
+    per_case_contrast,
+)
 
 FIXTURE = Path(__file__).parent / "fixtures" / "c09"
 
@@ -71,176 +70,6 @@ OFF = "c09-rationale-off"
 @pytest.fixture
 def sides() -> dict[tuple[str, str], EvalSide]:
     return load_sides(FIXTURE)
-
-
-def _side(per_case: list[dict], std: float = 0.0) -> EvalSide:
-    return EvalSide(
-        arm="a",
-        phase="eval_before",
-        per_case={row["case_index"]: row for row in per_case},
-        scores_std={"m": std},
-        num_runs=2,
-        score_repeats=2,
-    )
-
-
-class TestTheFormula:
-    """Miller's MDE, checked against arithmetic done by hand."""
-
-    def test_matches_a_hand_computed_value(self):
-        """Guards the formula itself against a silent algebra change.
-
-        omega2=0.01, sigma2_a=sigma2_b=0.02, n=25, K_A=K_B=2:
-            bracket = 0.01 + 0.02/2 + 0.02/2 = 0.03
-            0.03 / 25 = 0.0012 ; sqrt = 0.0346410161514
-            x (1.959963985 + 0.841621234 = 2.801585219) = 0.0970497588
-        """
-        got = minimum_detectable_effect(
-            omega2=0.01, sigma2_a=0.02, sigma2_b=0.02, n=25, k_a=2, k_b=2
-        )
-        assert got == pytest.approx(0.0970497588, abs=1e-9)
-
-    def test_z_multiplier_is_the_two_sided_95_percent_80_power_constant(self):
-        """A one-sided z, or 90% power, would shrink the MDE by ~15-30%.
-
-        That is the difference between a go and a no-go at the margin, so the
-        constant is pinned rather than left to a default somewhere.
-        """
-        assert z_multiplier() == pytest.approx(1.959963985 + 0.841621234, abs=1e-6)
-
-    def test_mde_shrinks_as_cases_are_added(self):
-        """The whole question the gate asks is 'would more cases help?'."""
-        args = {"omega2": 0.05, "sigma2_a": 0.01, "sigma2_b": 0.01, "k_a": 2, "k_b": 2}
-        curve = [minimum_detectable_effect(n=n, **args) for n in (12, 16, 20, 24)]
-        assert curve == sorted(curve, reverse=True)
-
-    def test_mde_shrinks_as_repeats_are_added(self):
-        """If K had no effect the per-question term would be mis-wired."""
-        args = {"omega2": 0.05, "sigma2_a": 0.02, "sigma2_b": 0.02, "n": 12}
-        assert minimum_detectable_effect(k_a=2, k_b=2, **args) < minimum_detectable_effect(
-            k_a=1, k_b=1, **args
-        )
-
-    def test_repeats_can_never_cross_the_question_sampling_floor(self):
-        """The finding the gate turns on: budget cannot buy past omega2.
-
-        DOE 03 measured `score_repeats` buying essentially nothing for
-        `safety_v1` (exponent 0.02). Miller's formula is why -- K divides
-        sigma2 and leaves omega2 alone. A formula that let a large K drive the
-        MDE toward zero would recommend spending money that cannot work.
-        """
-        floor = minimum_detectable_effect(omega2=0.05, sigma2_a=0.0, sigma2_b=0.0, n=12)
-        huge = minimum_detectable_effect(
-            omega2=0.05, sigma2_a=0.02, sigma2_b=0.02, n=12, k_a=10_000, k_b=10_000
-        )
-        assert huge > floor
-        assert huge == pytest.approx(floor, abs=1e-4)
-
-    def test_required_cases_inverts_the_formula(self):
-        """`n` reported as 'what it would take' must actually get there."""
-        args = {"omega2": 0.05, "sigma2_a": 0.01, "sigma2_b": 0.01, "k_a": 2, "k_b": 2}
-        n = required_cases(target=EFFECT_CONTRAST, **args)
-        assert minimum_detectable_effect(n=n, **args) <= EFFECT_CONTRAST
-        assert minimum_detectable_effect(n=n - 1, **args) > EFFECT_CONTRAST
-
-    def test_zero_cases_is_rejected_rather_than_dividing_by_zero(self):
-        """A ZeroDivisionError from inside a gate reads as a crash, not a verdict."""
-        with pytest.raises(ValueError, match="n"):
-            minimum_detectable_effect(omega2=0.05, sigma2_a=0.0, sigma2_b=0.0, n=0)
-
-
-class TestTheEstimatorsReadTheData:
-    """Every component must move when the measurements move."""
-
-    def test_within_side_variance_tracks_the_recorded_spread(self):
-        """Pins sigma2 to `scores_std`, not to a constant.
-
-        `scores_std` is the across-`num_runs` spread of the ARM MEAN, so the
-        per-question variance behind it is n * std**2. Dropping the n turns a
-        per-question variance into a standard error of the mean and understates
-        sigma2 by ~63x here.
-        """
-        rows = [{"case_index": i, "m": 0.5} for i in range(9)]
-        assert _side(rows, std=0.1).within_side_variance("m") == pytest.approx(9 * 0.01)
-        assert _side(rows, std=0.2).within_side_variance("m") == pytest.approx(9 * 0.04)
-
-    def test_contrast_variance_moves_when_one_case_score_moves(self, sides):
-        """Catches an estimator that has degenerated to a constant."""
-        cases = common_cases(sides)
-        base = per_case_contrast(sides, ON, OFF, "safety_v1", cases)
-
-        nudged = dict(sides)
-        arm_side = sides[("eval_after", ON)]
-        per_case = {i: dict(row) for i, row in arm_side.per_case.items()}
-        per_case[cases[0]]["safety_v1"] += 0.25
-        nudged[("eval_after", ON)] = EvalSide(
-            arm=arm_side.arm,
-            phase=arm_side.phase,
-            per_case=per_case,
-            scores_std=arm_side.scores_std,
-            num_runs=arm_side.num_runs,
-            score_repeats=arm_side.score_repeats,
-        )
-        moved = per_case_contrast(nudged, ON, OFF, "safety_v1", cases)
-
-        assert moved[0] == pytest.approx(base[0] + 0.25)
-        assert moved[1:] == pytest.approx(base[1:])
-
-    def test_a_control_whose_sides_are_identical_has_no_measurement_variance(self):
-        """The load-bearing property of the control-arm sigma2 estimator.
-
-        The control's prompt is byte-identical across both sides, so its true
-        per-question effect is zero for every case and ALL of its per-case
-        delta variance is measurement. If an identical-sided control produced a
-        non-zero estimate, the estimator would be reading question sampling
-        into sigma2 and crediting `num_runs` with reducing it.
-
-        The assertions go through `cross_window_measurement` itself, and both
-        directions are checked: an earlier version of this test only
-        differenced two identical dicts, which tests subtraction and can never
-        fail.
-        """
-        cases = list(range(8))
-        rows = [{"case_index": i, "m": i / 10} for i in cases]
-        twin = {("eval_before", CONTROL): _side(rows), ("eval_after", CONTROL): _side(rows)}
-
-        assert per_case_delta(twin, CONTROL, "m", cases) == pytest.approx([0.0] * 8)
-        assert cross_window_measurement(twin, "m", cases, n_sides=4) == 0.0
-
-        # ... and it must not be a constant zero: move one case and the
-        # estimator must report exactly n_sides/2 pairs' worth of that spread.
-        moved = [dict(row) for row in rows]
-        moved[0]["m"] += 0.4
-        drifted = {("eval_before", CONTROL): _side(rows), ("eval_after", CONTROL): _side(moved)}
-        expected = 2 * _variance([0.4, *[0.0] * 7])
-        assert cross_window_measurement(drifted, "m", cases, n_sides=4) == pytest.approx(expected)
-        assert expected > 0
-
-    def test_omega2_is_clamped_at_zero_and_says_so(self):
-        """Measurement can exceed the observed spread; a negative omega2 is not a result.
-
-        An unclamped negative omega2 makes sqrt() raise or, worse, makes the
-        bracket shrink and the MDE look better than measured. Clamping silently
-        would hide that the decomposition failed, so the flag is part of the
-        return value and the printed table.
-        """
-        comp = variance_components(total=0.01, measurement_at_k_observed=0.05, k_observed=2)
-        assert comp.omega2 == 0.0
-        assert comp.clamped is True
-        assert comp.bracket_at(K_OBSERVED) == pytest.approx(0.01)
-
-    def test_the_bracket_reproduces_the_measured_total_at_the_measured_k(self):
-        """The decomposition may re-apportion variance but never invent it.
-
-        Campaign 09 ran `num_runs: 2`; at K=2 the bracket must equal the
-        directly measured per-case variance, whichever sigma2 estimator was
-        used. Otherwise the K=1/K=2 columns and the measured column disagree
-        and neither can be trusted.
-        """
-        comp = variance_components(total=0.08, measurement_at_k_observed=0.03, k_observed=2)
-        assert comp.bracket_at(2) == pytest.approx(0.08)
-        assert comp.bracket_at(1) == pytest.approx(0.08 + 0.03)
-        assert comp.bracket_at(4) == pytest.approx(0.08 - 0.015)
 
 
 class TestAgainstCampaign09:
@@ -291,56 +120,6 @@ class TestAgainstCampaign09:
         assert len(test) == 12
         assert set(test) <= set(common_cases(sides))
 
-    def test_twelve_cases_cannot_resolve_either_target_effect(self, sides):
-        """THE DECISION. Pinned so it cannot be softened without a red test.
-
-        Both target effects come from the campaign 09 reanalysis: +0.0952 for
-        the DiD-vs-control optimization effect, +-0.075 for the rationale
-        on/off contrast. Measured on the twelve held-out cases, the MDE is
-        roughly 2-3x either target, and it stays above both even at K=2.
-        """
-        test = load_partitions()["test"]
-        for metric in ("safety_v1", "instruction_following_v1"):
-            values = per_case_contrast(sides, ON, OFF, metric, test)
-            total = _variance(values)
-            comp = variance_components(
-                total=total,
-                measurement_at_k_observed=0.0,
-                k_observed=K_OBSERVED,
-            )
-            mde = minimum_detectable_effect(
-                omega2=comp.omega2,
-                sigma2_a=comp.sigma2_combined / 2,
-                sigma2_b=comp.sigma2_combined / 2,
-                n=len(test),
-                k_a=K_OBSERVED,
-                k_b=K_OBSERVED,
-            )
-            assert mde > EFFECT_CONTRAST, metric
-            assert mde > EFFECT_DID, metric
-
-    def test_more_cases_are_needed_than_the_whole_eval_set_holds(self, sides):
-        """Says how far short 12 is, and pins that 64 is also short.
-
-        The actionable half of a no-go. If this ever passes at n<=64 the gate's
-        recommendation ("a bigger test partition cannot be carved out of these
-        64 cases") is wrong and must be rewritten.
-        """
-        cases = common_cases(sides)
-        values = per_case_contrast(sides, ON, OFF, "instruction_following_v1", cases)
-        comp = variance_components(
-            total=_variance(values), measurement_at_k_observed=0.0, k_observed=K_OBSERVED
-        )
-        n = required_cases(
-            omega2=comp.omega2,
-            sigma2_a=comp.sigma2_combined / 2,
-            sigma2_b=comp.sigma2_combined / 2,
-            target=EFFECT_CONTRAST,
-            k_a=K_OBSERVED,
-            k_b=K_OBSERVED,
-        )
-        assert n > 64
-
 
 class TestTheVerdictIsSigma2Invariant:
     """The strongest property this gate has: its verdict is a DIRECT measurement.
@@ -371,21 +150,6 @@ class TestTheVerdictIsSigma2Invariant:
                     assert comp.bracket_at(K_OBSERVED) == pytest.approx(comp.total, abs=1e-15)
                 mdes = [comp.mde(n, K_OBSERVED) for comp in comps]
                 assert mdes[0] == pytest.approx(mdes[1], abs=1e-12), (contrast, metric)
-
-    def test_the_identity_holds_for_any_measurement_estimate(self):
-        """Including absurd ones, which is what makes the invariance structural.
-
-        A future estimator that returned zero, or a hundred times the total,
-        would still have to reproduce the measured variance at K_OBSERVED. A
-        decomposition that only happened to agree on campaign 09's numbers
-        would not be an identity, and the guarantee above would be luck.
-        """
-        for measurement in (0.0, 1e-9, 0.079, 0.08, 0.081, 8.0, 1e6):
-            comp = variance_components(
-                total=0.08, measurement_at_k_observed=measurement, k_observed=K_OBSERVED
-            )
-            assert comp.bracket_at(K_OBSERVED) == pytest.approx(0.08, abs=1e-15)
-            assert comp.omega2 >= 0.0
 
 
 class TestAgainstDOE03:
