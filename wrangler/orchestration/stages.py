@@ -862,6 +862,7 @@ def stage_optimize(exp: Experiment, pair_id: str | None = None) -> None:
             # iterations. Resolved per pair at manifest load; `max_metric_calls` is
             # still the ceiling and this can only stop earlier.
             patience=pair.patience,
+            continuous_val_score=pair.continuous_val_score,
         )
         elapsed = time.time() - t0
         print(f"  [{pair.id}] Done ({_fmt_duration(elapsed)}) — {len(optimized)} chars")

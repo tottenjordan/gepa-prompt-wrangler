@@ -55,6 +55,10 @@ class AgentPromptPair:
     # rule gets validated against an unstopped arm in the same job. None = no stopper,
     # exactly as every run before 2026-09-24.
     patience: int | None = None
+    # Score cases on continuous metric means rather than ADK's pass/fail collapse.
+    # Resolved like `patience`: pair, then `defaults:`, then `pipeline:`. Off by default
+    # because it changes what GEPA selects on, and so re-baselines a campaign.
+    continuous_val_score: bool = False
 
     def summary(self) -> str:
         """One-line summary for display."""
@@ -162,6 +166,9 @@ class PairFactory:
         default_patience = raw.get("defaults", {}).get("patience") or raw.get("pipeline", {}).get(
             "patience"
         )
+        default_continuous = raw.get("defaults", {}).get("continuous_val_score") or raw.get(
+            "pipeline", {}
+        ).get("continuous_val_score", False)
 
         pairs = []
         for i, entry in enumerate(raw["pairs"]):
@@ -218,6 +225,7 @@ class PairFactory:
                 forward_rationale=entry.get("forward_rationale", True),
                 skip_optimize=entry.get("skip_optimize", False),
                 patience=entry.get("patience", default_patience),
+                continuous_val_score=bool(entry.get("continuous_val_score", default_continuous)),
             )
 
             # A replicate is just another pair. Everything downstream then works

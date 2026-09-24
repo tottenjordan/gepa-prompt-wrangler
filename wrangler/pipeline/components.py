@@ -731,6 +731,8 @@ def optimize_single_agent(
             # iterations. Resolved per pair at manifest load; None means no stopper and
             # the pre-2026-09-24 behaviour. max_metric_calls above is still the ceiling.
             patience=pair.get("patience"),
+            # Option A. Off unless the manifest asks; changes what GEPA selects on.
+            continuous_val_score=bool(pair.get("continuous_val_score", False)),
             # The manifest's model, not the one the _opt module happens to import.
             # stage_optimize has passed this since 7219295; this path did not, so
             # two c07 arms pointing at sonnet_agent -- claude-sonnet-5 and

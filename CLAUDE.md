@@ -277,6 +277,28 @@ stage, **not** that rationale text appears in the reflective dataset.
 
 Analysis: [docs/analysis/2026-09-17-gepa-argument-surface.md](docs/analysis/2026-09-17-gepa-argument-surface.md).
 
+**Option A — `continuous_val_score`, added 2026-09-24, OPT-IN.** ADK scores each case
+`1.0 if final_eval_status == PASSED else 0.0` (`local_eval_sampler.py:358`), and PASSED needs
+*every* criterion over its threshold — so each metric is thresholded, the criteria are ANDed, and
+only then averaged. All three archived runs therefore picked their winning prompt from **six
+distinct values**, with **29 of 37 candidates tied**; `best_idx` is the first argmax, so ties go to
+discovery order, i.e. the search's luck. Recovering the continuous scores gives **25 distinct
+values and 7 ties**. `wrangler/optimize/continuous_score.py` does it; the optimizer stashes
+`_evaluate_agent`'s results (the single funnel, unlike `_extract_eval_data`, which only runs when
+`capture_full_eval_data` is set) and substitutes per key, so a case the recovery missed keeps ADK's
+verdict rather than raising a `KeyError` nine hours in.
+
+**It is an unweighted mean, and that does NOT preserve pass/fail ordering.** A candidate failing
+several thresholds narrowly can outrank one that passes them, because the mean does not know where
+the cliffs are. The criteria carry different thresholds but no declared weights, so weighting would
+invent a preference nobody stated. A lexicographic variant — pass count first, mean as tie-break —
+would preserve the ordering and still break ties; it was not chosen because the 3.1x gain was
+measured on the plain mean. Switch to it if a campaign's results look driven by near-misses.
+`safety_v1` is unaffected either way: it is genuinely binary per case (0% of its batch means are
+inconsistent with k/n, matching DOE 02's 0/64 judge disagreement), so this improves the signal GEPA
+**selects** with, not the metric a campaign reports.
+[docs/analysis/2026-09-24-continuous-score-gradient.md](docs/analysis/2026-09-24-continuous-score-gradient.md)
+
 **Two more injected arguments (added 2026-09-24), through the same hook.** ADK forwards 8
 of `gepa.optimize()`'s 46 arguments and neither of these is among them, so both ride
 `_gepa_extra_kwargs()` with no ADK patch. `_GEPA_RUN_KWARGS` carries the per-run ones and

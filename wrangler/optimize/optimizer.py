@@ -636,6 +636,7 @@ def optimize(
     model: str = "",
     forward_rationale: bool = True,
     patience: int | None = None,
+    continuous_val_score: bool = False,
 ) -> str:
     """Run GEPA optimization. Returns the optimized instruction string.
 
@@ -653,6 +654,11 @@ def optimize(
             best validation score. `None` (the default) passes no stopper and behaves
             exactly as before. Opt-in because it re-baselines an arm's budget: a
             campaign run with a patience is not budget-comparable to one without.
+        continuous_val_score: Score each case on the mean of its metrics' continuous
+            scores instead of ADK's `1.0 if PASSED else 0.0`. Off by default. Opt-in
+            because it changes what GEPA selects on, which is a comparability boundary
+            of the same kind as the 2026-09-17 judge re-baseline. See
+            `wrangler/optimize/continuous_score.py`.
     """
     tag = f"  [{agent_name}] " if agent_name else "  "
     print(f"{tag}[1/3] Applying ADK patches...", flush=True)
@@ -863,6 +869,12 @@ def optimize(
         # docs/analysis/2026-09-24-stopping-replay.md
         _GEPA_RUN_KWARGS["stop_callbacks"] = NoImprovementStopper(patience)
         print(f"{tag}  Early stopping: patience {patience} iterations", flush=True)
+    if continuous_val_score:
+        print(
+            f"{tag}  Continuous per-case scoring ON — GEPA selects on metric means, "
+            f"not pass/fail. Not comparable with runs scored the old way.",
+            flush=True,
+        )
 
     try:
 
@@ -880,6 +892,23 @@ def optimize(
             # used to refresh MCP sessions here as well; see the note below.
             _orig_sample = sampler.sample_and_score
             _gen_count = [0]
+
+            # Option A: recover the continuous per-case score ADK collapses to pass/fail.
+            # `_evaluate_agent` is the single funnel -- `sample_and_score` calls it exactly
+            # once and awaits it before scoring -- so stashing its result here is enough,
+            # and it works regardless of `capture_full_eval_data`, which `_extract_eval_data`
+            # (patch 4b's hook) depends on and which GEPA does not always set.
+            _last_results: list = []
+            _orig_evaluate = sampler._evaluate_agent
+
+            async def _capturing_evaluate(*a, **kw):
+                results = await _orig_evaluate(*a, **kw)
+                _last_results.clear()
+                _last_results.extend(results or [])
+                return results
+
+            if continuous_val_score:
+                sampler._evaluate_agent = _capturing_evaluate  # ty: ignore[invalid-assignment]
 
             async def _refreshed_sample(candidate, *args, **kwargs):
                 _gen_count[0] += 1
@@ -914,6 +943,12 @@ def optimize(
                 print(f"{tag}  Generation {gen}: evaluating candidate...", flush=True)
 
                 result = await _orig_sample(candidate, *args, **kwargs)
+
+                if continuous_val_score and _last_results:
+                    from .continuous_score import apply_continuous_scores
+
+                    result.scores = apply_continuous_scores(result.scores, _last_results)
+
                 gen_elapsed = time.time() - gen_t0
                 print(f"{tag}  Generation {gen}: scored in {gen_elapsed:.1f}s", flush=True)
                 return result
