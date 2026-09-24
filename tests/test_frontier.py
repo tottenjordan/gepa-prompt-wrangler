@@ -304,9 +304,11 @@ class TestIncomparableArmsAreExcludedLoudly:
         assert any("lopsided" in e for e in s["excluded"])
         assert any("coverage" in e.lower() for e in s["excluded"])
 
-    def test_a_contaminated_arm_is_flagged_beside_its_tool_use_number(self):
-        """Campaign 07 predates the silent-failure-12 fix; its tool-use numbers are
-        uninterpretable and the note must travel with the table."""
+    def test_a_contaminated_arm_is_flagged_for_every_metric_not_just_tool_use(self):
+        """Campaign 07 predates the silent-failure-12 fix, and the note must travel with the
+        table. Warned at the arm level: an invocation handed zero tools also answers the
+        question badly, so scoping the caveat to tool use would imply the rest of the row is
+        clean when it is not."""
         from wrangler.reporting.frontier import summarize_frontier
 
         arms = {
@@ -316,7 +318,12 @@ class TestIncomparableArmsAreExcludedLoudly:
             )
         }
         s = summarize_frontier(arms, {"c07-pro": "gemini-3.5-flash"}, pre_fix_arms={"c07-pro"})
-        assert any("c07-pro" in w and "tool_use" in w for w in s["warnings"])
+        assert any("c07-pro" in w and "EVERY metric" in w for w in s["warnings"])
+
+        # An arm that never scored tool use is still contaminated and still warned.
+        no_tool = {"c07-pro": (_arm_side({M: 0.9}), _arm_side({M: 0.95}))}
+        s2 = summarize_frontier(no_tool, {"c07-pro": "gemini-3.5-flash"}, pre_fix_arms={"c07-pro"})
+        assert s2["warnings"]
 
 
 def _pc(rows):

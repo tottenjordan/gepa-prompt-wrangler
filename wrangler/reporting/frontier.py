@@ -234,11 +234,16 @@ def summarize_frontier(
             )
 
         if arm in pre_fix_arms:
-            warnings.extend(
-                f"{arm}: {metric} predates the 2026-09-18 silent-failure-12 fix — "
-                f"12-24% of cases scored a toolless agent; not retrospectively cleaned"
-                for metric in PRE_FIX_SUSPECT_METRICS
-                if metric in (after.get("scores") or {})
+            # Warned at the ARM level, not per metric. CLAUDE.md frames silent failure #12
+            # as a tool-use problem because that is the metric it most obviously wrecks, but
+            # an invocation handed zero tools also answers the question badly -- so response
+            # quality and hallucination on those cases are suspect too. Scoping the warning
+            # to tool use would imply the rest of the row is clean.
+            worst = ", ".join(PRE_FIX_SUSPECT_METRICS)
+            warnings.append(
+                f"{arm}: predates the 2026-09-18 silent-failure-12 fix — 12-24% of cases "
+                f"scored an agent handed zero tools, so EVERY metric on this row is "
+                f"affected ({worst} worst); not retrospectively cleaned"
             )
 
     design = mde_for_design(

@@ -400,8 +400,18 @@ def floor_cmd(run_ids: tuple[str, ...], bucket: str | None, markdown: bool):
 @click.option("--bucket", default=None, help="GCS bucket (default: GCP_STAGING_BUCKET).")
 @click.option("--cheap", default=None, help="Cheap tier arm id, for the crossing test.")
 @click.option("--expensive", default=None, help="Expensive tier arm id, for the crossing test.")
+@click.option(
+    "--chart",
+    default=None,
+    type=click.Path(file_okay=False, path_type=Path),
+    help="Also render per-metric panels to this directory (PNG).",
+)
 def frontier_cmd(
-    run_ids: tuple[str, ...], bucket: str | None, cheap: str | None, expensive: str | None
+    run_ids: tuple[str, ...],
+    bucket: str | None,
+    cheap: str | None,
+    expensive: str | None,
+    chart: Path | None,
 ):
     """Per-metric cost-quality frontier across pipeline runs.
 
@@ -448,6 +458,30 @@ def frontier_cmd(
         for metric, resolution in sorted(summary["resolutions"].items()):
             got = crosses_tier(arms, cheap, expensive, metric, resolution)
             click.echo(f"- **{metric}** — {got['verdict']}")
+
+    if chart:
+        # Opt-in: the table is the readout and stands alone, so a cross-run analysis should
+        # not write files into the working tree unless asked. Reuses the report's chart path
+        # so there is one renderer, not a third.
+        from .reporting.analysis import generate_cost_quality_chart
+
+        results = {
+            p.arm: {
+                "model": p.model,
+                "before": next((q.quality for q in summary["points_before"] if q.arm == p.arm), {}),
+                "after": p.quality,
+                "token_usage": {
+                    "input_tokens": 0,
+                    "output_tokens": 0,
+                    "is_estimate": p.is_estimate,
+                },
+                "costs": None,
+                "_cost_usd": p.cost_usd,
+            }
+            for p in summary["points_after"]
+        }
+        generate_cost_quality_chart(results, chart)
+        click.echo(f"\nchart: {chart / 'cost_quality.png'}")
 
 
 @main.command("probe")
