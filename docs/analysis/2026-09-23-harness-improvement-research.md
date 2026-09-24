@@ -40,6 +40,25 @@ We spend a flat `max_metric_calls: 600`.
 
 ## Idea 1 — Give the harness a real held-out test set
 
+> **OUTCOME (2026-09-24): attempted, and blocked — by eval-set size, not by partitioning.**
+> The diagnosis below is correct: there is no held-out test set and every published number is
+> in-sample. The *remedy* is not. A stratified 40/12/12 partition was built and its minimum
+> detectable effect measured (PR #124): **0.2634 on `safety_v1` against a +0.0952 effect**, with
+> all 10 metric/contrast pairs underpowered by 1.4–3.1×. Giving the test partition all 64 cases
+> still fails on 3 of 5 metrics, and more runs cannot help because ω² is untouched by K.
+>
+> The finding is larger than this idea: **the full 64-case eval set is already underpowered for
+> the effect campaign 09 published.** Decision taken — do not grow the eval set; state the
+> limitation instead. See [the plan's stop notice](../plans/2026-09-23-held-out-test-set.md) and
+> [the composition measurement](2026-09-23-train-validation-composition.md).
+>
+> One claim below is also weakened by what followed. "In-sample optimization is a simpler
+> explanation for the holdout degradation than Goodharting" remains *possible*, but the cheap
+> proxy that could have tested it turned out to be confounded by subset composition — the
+> control arm, which cannot overfit, showed the largest train/validation gap. The two
+> explanations are still not distinguishable, and now we know they cannot be distinguished on
+> this eval set at all.
+
 **The gap.** `sampler_config.json` splits the 64 eval cases **49 train / 15 validation**
 (49+15 = 64 exactly). `eval_before` and `eval_after` score **all 64**. So ~77% of every number
 this project has published is measured on cases GEPA directly optimized against, and the other
@@ -233,8 +252,14 @@ also the only path to knowing whether our metrics are *right*, as opposed to mer
 
 ## What I would do first
 
-**Idea 1, then idea 2.** Idea 1 is cheap and every published result depends on it; until there is
-a held-out test set, the repo's central finding has two explanations and no way to choose. Idea 2
+> **SUPERSEDED 2026-09-24.** Idea 1 was tried first and is blocked (see its outcome note above).
+> **Idea 2 is now the front of the queue**, and the reason is stronger than when this was
+> written: the MDE gate built for idea 1 is already half of it, and it produced the finding that
+> the *existing* published results sit at the boundary of 80% power. The immediate piece is to
+> run that calculation at campaign pre-registration rather than after the fact.
+
+~~**Idea 1, then idea 2.** Idea 1 is cheap and every published result depends on it; until there is
+a held-out test set, the repo's central finding has two explanations and no way to choose.~~ Idea 2
 is the one that converts campaigns from "unresolved" into decisions, and it retroactively improves
 every existing artifact because the per-case data is already there.
 
