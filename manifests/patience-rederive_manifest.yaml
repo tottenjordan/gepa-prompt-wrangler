@@ -1,0 +1,45 @@
+name: "patience-rederive"
+description: >
+  One optimize run under the post-2026-09-24 selection signal, to re-derive the
+  early-stopping patience. Patience 15 was chosen by replaying three archived runs
+  (docs/analysis/2026-09-24-stopping-replay.md), but every one of those was scored the old
+  way: a 15-case validation subset collapsed to pass/fail per case. Both halves have since
+  changed -- a 34/30 stratified split (#131) and continuous per-case scoring (#133) -- and a
+  different signal plateaus differently, so the default cannot be carried across.
+
+  DELIBERATELY NO `patience` HERE. The run must go past its own plateau for the replay to
+  see where a stopper would have fired; setting one would truncate the trajectory that is
+  the whole product of this run.
+
+  Read the result with:
+    scripts/replay_stopping.py --extract <gepa_state.bin> --out tests/fixtures/gepa_trajectories/
+    uv run python scripts/replay_stopping.py
+
+agent_module: "examples/multi_model_agents/agents/sonnet_agent"
+eval_data: "examples/multi_model_agents/eval_data/eval_cases.yaml"
+
+pairs:
+  - id: "patience-rederive-sonnet"
+    model: "claude-sonnet-5"
+    description: "Sonnet 5 under the 34/30 split with continuous per-case scoring"
+    agent_module: "examples/multi_model_agents/agents/sonnet_agent"
+    system_prompt: "You are a helpful assistant. Use the available tools to answer user questions."
+
+eval_config:
+  response_match_threshold: 0.5
+  safety_threshold: 0.8
+
+pipeline:
+  secret_id: wrangler-agent-env
+  # The shipping configuration: this measures the signal future campaigns will use, so both
+  # changes are on together rather than separated. Attribution between them is not the
+  # question -- what patience suits the signal we will actually run is.
+  continuous_val_score: true
+  # ~14 candidates at the new cost of ~36 calls each (30 validation + 6 overhead). Campaign
+  # 09 plateaued by its 4th-6th candidate, so this clears the plateau with room to test a
+  # patience of 15 iterations against it. A full 600 buys nothing this measurement needs.
+  max_metric_calls: 400
+  # The eval sides are not the product here -- the optimize trajectory is -- so do not pay
+  # for averaging them.
+  num_runs: 1
+  cache_bust: "continuous-v1"

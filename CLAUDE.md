@@ -277,6 +277,28 @@ stage, **not** that rationale text appears in the reflective dataset.
 
 Analysis: [docs/analysis/2026-09-17-gepa-argument-surface.md](docs/analysis/2026-09-17-gepa-argument-surface.md).
 
+**Option A — `continuous_val_score`, added 2026-09-24, OPT-IN.** ADK scores each case
+`1.0 if final_eval_status == PASSED else 0.0` (`local_eval_sampler.py:358`), and PASSED needs
+*every* criterion over its threshold — so each metric is thresholded, the criteria are ANDed, and
+only then averaged. All three archived runs therefore picked their winning prompt from **six
+distinct values**, with **29 of 37 candidates tied**; `best_idx` is the first argmax, so ties go to
+discovery order, i.e. the search's luck. Recovering the continuous scores gives **25 distinct
+values and 7 ties**. `wrangler/optimize/continuous_score.py` does it; the optimizer stashes
+`_evaluate_agent`'s results (the single funnel, unlike `_extract_eval_data`, which only runs when
+`capture_full_eval_data` is set) and substitutes per key, so a case the recovery missed keeps ADK's
+verdict rather than raising a `KeyError` nine hours in.
+
+**It is an unweighted mean, and that does NOT preserve pass/fail ordering.** A candidate failing
+several thresholds narrowly can outrank one that passes them, because the mean does not know where
+the cliffs are. The criteria carry different thresholds but no declared weights, so weighting would
+invent a preference nobody stated. A lexicographic variant — pass count first, mean as tie-break —
+would preserve the ordering and still break ties; it was not chosen because the 3.1x gain was
+measured on the plain mean. Switch to it if a campaign's results look driven by near-misses.
+`safety_v1` is unaffected either way: it is genuinely binary per case (0% of its batch means are
+inconsistent with k/n, matching DOE 02's 0/64 judge disagreement), so this improves the signal GEPA
+**selects** with, not the metric a campaign reports.
+[docs/analysis/2026-09-24-continuous-score-gradient.md](docs/analysis/2026-09-24-continuous-score-gradient.md)
+
 **Two more injected arguments (added 2026-09-24), through the same hook.** ADK forwards 8
 of `gepa.optimize()`'s 46 arguments and neither of these is among them, so both ride
 `_gepa_extra_kwargs()` with no ADK patch. `_GEPA_RUN_KWARGS` carries the per-run ones and
@@ -321,6 +343,22 @@ campaign, and the budget early stopping frees is what would pay for one.
 Default patience is **15**, not 10, because the lossless threshold is run-dependent (5, 8, 10) and
 15 clears all three by 5–10 iterations for ~4 points of pooled saving. Re-run
 `scripts/replay_stopping.py` when replicated runs exist.
+
+**Re-derived against the continuous signal (2026-09-24): 15 still holds, and is conservative by
+about 3x.** Campaign 09's continuous validation scores were recovered from the optimize logs rather
+than re-run — ordering verified against an independent quantity, seconds-between-batches vs
+calls-between-discoveries, at r = +0.971 and +0.993. Patience **5** is lossless on both arms where
+the binary signal needed 10, because more distinguishable levels identify the winner sooner. 15 is
+kept: it is lossless under both signals on all five measured arms, and the evidence for cutting it
+is one informative arm at the *old* 15-case subset.
+
+**The same replay found that the binary and continuous signals rank candidates almost
+independently** — r = **+0.071** and **+0.274** between the archived binary aggregate and the
+continuous composite over the same candidates. The ordering check rules out a data artifact. So
+option A does not merely separate candidates more finely, it **selects substantially different
+prompts**, which makes the one-arm-on/one-arm-off validation the thing that should gate adopting it
+as a default rather than a nicety.
+[docs/analysis/2026-09-24-patience-under-continuous-scoring.md](docs/analysis/2026-09-24-patience-under-continuous-scoring.md)
 [docs/analysis/2026-09-24-stopping-replay.md](docs/analysis/2026-09-24-stopping-replay.md)
 
 **Racing the arms was evaluated and REJECTED — do not rebuild it.** Idea 3 of the harness

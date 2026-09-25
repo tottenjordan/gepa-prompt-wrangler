@@ -211,3 +211,37 @@ class TestRoundTrip:
         traj = Trajectory("x", [0.1, 0.9], {0: 0, 1: 2}, [0, 12], 5, 40)
         loaded = load_trajectory(save_trajectory(traj, tmp_path / "t.json"))
         assert loaded.candidates_before(3) == 2
+
+
+class TestContinuousSignalRegression:
+    """Pins the continuous-signal replay published in
+    docs/analysis/2026-09-24-patience-under-continuous-scoring.md."""
+
+    @pytest.mark.parametrize(
+        ("arm", "candidates", "lossless_at_5"),
+        [
+            ("c09-rationale-on-continuous", 20, True),
+            ("c09-rationale-off-continuous", 15, True),
+        ],
+    )
+    def test_patience_5_is_lossless_under_continuous_scoring(self, arm, candidates, lossless_at_5):
+        traj = load_trajectory(FIXTURES / f"{arm}.json")
+        assert len(traj.scores) == candidates
+        assert replay(traj, 5).same_candidate is lossless_at_5
+
+    def test_the_shipped_default_is_still_lossless_on_the_continuous_signal(self):
+        """15 is kept because it holds under BOTH signals; if that stops being true the
+        default is wrong, not merely conservative."""
+        for arm in ("c09-rationale-on-continuous", "c09-rationale-off-continuous"):
+            traj = load_trajectory(FIXTURES / f"{arm}.json")
+            point = replay(traj, 15)
+            assert point.same_candidate
+            assert point.calls_at_stop < traj.total_calls
+
+    def test_the_continuous_signal_has_more_levels_than_the_binary_one(self):
+        """The reason patience can be shorter: the winner is identified sooner because the
+        signal can tell candidates apart."""
+        for arm in ("c09-rationale-on", "c09-rationale-off"):
+            binary = load_trajectory(FIXTURES / f"{arm}.json")
+            cont = load_trajectory(FIXTURES / f"{arm}-continuous.json")
+            assert len(set(cont.scores)) > len(set(binary.scores))
