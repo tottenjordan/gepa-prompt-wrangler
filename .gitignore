@@ -50,3 +50,16 @@ eval_outputs/
 !.claude/skills/
 
 MagicMock/
+
+# Frozen canary captures. Large (~700 KB each) and full of base64 `thought_signature`
+# blobs that trip detect-secrets on every commit -- they are model thought signatures,
+# not credentials, but allowlisting dozens of them per canary would bury the baseline.
+#
+# Not committing them costs nothing that matters: the pipeline's code tarball is built
+# from the working directory and does not consult .gitignore, so a canary still ships to
+# the run that needs it; the drift READING is written into the eval stage artifact in GCS,
+# which is what a later comparison reads; and the source capture stays in outputs/captures/.
+# Regenerate with:
+#   uv run wrangler capture --engine-id <id> --eval-data <eval.yaml> --label <name>
+#   uv run wrangler canary freeze outputs/captures/<name>_*.pkl --label <name>
+data/canaries/*.json

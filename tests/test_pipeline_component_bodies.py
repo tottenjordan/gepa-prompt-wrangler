@@ -578,6 +578,18 @@ class TestOptimizeForwardsPerPairCampaignFactors:
 
         assert gepa.call_args.kwargs["continuous_val_score"] is True
 
+    def test_a_pinned_seed_reaches_the_optimizer(self, tmp_path, gepa):
+        with component_io(tmp_path) as io:
+            _run_optimize(io, pair_json=_pair(gepa_seed=4242))
+
+        assert gepa.call_args.kwargs["gepa_seed"] == 4242
+
+    def test_an_unpinned_seed_passes_none_so_derivation_still_happens(self, tmp_path, gepa):
+        with component_io(tmp_path) as io:
+            _run_optimize(io, pair_json=_pair())
+
+        assert gepa.call_args.kwargs["gepa_seed"] is None
+
     def test_continuous_val_score_defaults_off(self, tmp_path, gepa):
         """It changes what GEPA selects on, so a pair that says nothing must run the old
         scoring or every in-flight campaign silently re-baselines."""

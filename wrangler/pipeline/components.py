@@ -733,6 +733,8 @@ def optimize_single_agent(
             patience=pair.get("patience"),
             # Option A. Off unless the manifest asks; changes what GEPA selects on.
             continuous_val_score=bool(pair.get("continuous_val_score", False)),
+            # Pinned only for paired contrasts; otherwise derived from the arm id.
+            gepa_seed=pair.get("gepa_seed"),
             # The manifest's model, not the one the _opt module happens to import.
             # stage_optimize has passed this since 7219295; this path did not, so
             # two c07 arms pointing at sonnet_agent -- claude-sonnet-5 and

@@ -59,6 +59,12 @@ class AgentPromptPair:
     # Resolved like `patience`: pair, then `defaults:`, then `pipeline:`. Off by default
     # because it changes what GEPA selects on, and so re-baselines a campaign.
     continuous_val_score: bool = False
+    # Pin GEPA's search seed instead of deriving it from the pair id. Normally derivation is
+    # what makes replicates independent, but a PAIRED contrast needs the opposite: two arms
+    # that differ only in the factor under test. Without this, arms differ in the search
+    # schedule too, and CLAUDE.md measures run-to-run search variance at 12.3x the control
+    # floor -- large enough to swamp whatever is being compared.
+    gepa_seed: int | None = None
 
     def summary(self) -> str:
         """One-line summary for display."""
@@ -169,6 +175,9 @@ class PairFactory:
         default_continuous = raw.get("defaults", {}).get("continuous_val_score") or raw.get(
             "pipeline", {}
         ).get("continuous_val_score", False)
+        default_seed = raw.get("defaults", {}).get("gepa_seed") or raw.get("pipeline", {}).get(
+            "gepa_seed"
+        )
 
         pairs = []
         for i, entry in enumerate(raw["pairs"]):
@@ -226,6 +235,7 @@ class PairFactory:
                 skip_optimize=entry.get("skip_optimize", False),
                 patience=entry.get("patience", default_patience),
                 continuous_val_score=bool(entry.get("continuous_val_score", default_continuous)),
+                gepa_seed=entry.get("gepa_seed", default_seed),
             )
 
             # A replicate is just another pair. Everything downstream then works

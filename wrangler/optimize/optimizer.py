@@ -637,6 +637,7 @@ def optimize(
     forward_rationale: bool = True,
     patience: int | None = None,
     continuous_val_score: bool = False,
+    gepa_seed: int | None = None,
 ) -> str:
     """Run GEPA optimization. Returns the optimized instruction string.
 
@@ -856,7 +857,12 @@ def optimize(
     # because the patch is applied once per process while these are per arm; cleared in
     # the `finally` so one arm's seed cannot leak into the next in a shared container.
     _GEPA_RUN_KWARGS.clear()
-    if agent_name:
+    if gepa_seed is not None:
+        # A paired contrast needs both arms on one search schedule, or they differ in the
+        # factor under test AND in GEPA's luck -- and the luck is the larger term.
+        _GEPA_RUN_KWARGS["seed"] = int(gepa_seed)
+        print(f"{tag}  GEPA seed: {gepa_seed} (PINNED by manifest)", flush=True)
+    elif agent_name:
         _GEPA_RUN_KWARGS["seed"] = seed_for_arm(agent_name)
         print(f"{tag}  GEPA seed: {_GEPA_RUN_KWARGS['seed']} (derived from arm id)", flush=True)
     if patience is not None:

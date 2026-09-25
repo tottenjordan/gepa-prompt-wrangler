@@ -203,6 +203,9 @@ class TestManifestPlumbing:
         # Measures the plateau under the new signal so patience can be re-derived.
         # docs/analysis/2026-09-24-patience-under-continuous-scoring.md
         "patience-rederive_manifest.yaml",
+        # The gate on adopting it: one arm on, one off, one control, seeds pinned so the
+        # arms differ only in the selection signal.
+        "onoff-validation_manifest.yaml",
     }
 
     def test_no_manifest_acquires_continuous_scoring_by_accident(self):
@@ -262,3 +265,69 @@ class TestSubstitutionSemantics:
         got = continuous_case_scores(cases)
         assert len(got) == 15
         assert len(set(got.values())) == 15, "should separate cases the binary collapse ties"
+
+
+class TestPinnedSeed:
+    """A paired contrast needs both arms on one search schedule.
+
+    Without pinning, two arms differ in the factor under test AND in GEPA's luck -- and
+    CLAUDE.md measures run-to-run search variance at 12.3x the control floor, so the luck
+    is the larger term. An unpinned A/B cannot answer its own question.
+    """
+
+    def _load(self, tmp_path, pairs, top=None):
+        import yaml
+
+        doc = {"name": "t", "agent_module": "a", "pairs": pairs, **(top or {})}
+        path = tmp_path / "m.yaml"
+        path.write_text(yaml.safe_dump(doc))
+        from wrangler.core.factory import PairFactory
+
+        return PairFactory.load(path)
+
+    def _pair(self, pid, **extra):
+        return {"id": pid, "model": "gemini-3.5-flash", "system_prompt": "p", **extra}
+
+    def test_unpinned_arms_get_different_seeds(self):
+        """The behaviour that makes pinning necessary."""
+        from wrangler.optimize.optimizer import seed_for_arm
+
+        assert seed_for_arm("onoff-continuous") != seed_for_arm("onoff-binary")
+
+    def test_a_campaign_seed_puts_every_arm_on_one_schedule(self, tmp_path):
+        m = self._load(
+            tmp_path,
+            [self._pair("a"), self._pair("b")],
+            {"defaults": {"gepa_seed": 4242}},
+        )
+        assert {p.gepa_seed for p in m.pairs} == {4242}
+
+    def test_a_pair_can_override_the_campaign_seed(self, tmp_path):
+        m = self._load(
+            tmp_path,
+            [self._pair("a"), self._pair("b", gepa_seed=7)],
+            {"defaults": {"gepa_seed": 4242}},
+        )
+        assert [p.gepa_seed for p in m.pairs] == [4242, 7]
+
+    def test_absent_means_derive_as_before(self, tmp_path):
+        """Replicates rely on derivation to be independent draws; pinning must stay opt-in."""
+        m = self._load(tmp_path, [self._pair("a")])
+        assert m.pairs[0].gepa_seed is None
+
+    def test_it_reaches_the_pipeline_payload(self, tmp_path):
+        from wrangler.pipeline.deploy_pipeline import _pairs_json
+
+        m = self._load(tmp_path, [self._pair("a", gepa_seed=11)])
+        assert _pairs_json(m)[0]["gepa_seed"] == 11
+
+    def test_no_shipped_manifest_pins_a_seed_except_the_paired_contrast(self):
+        """Pinning defeats replicate independence, so it must be deliberate and rare."""
+        from wrangler.core.factory import PairFactory
+
+        pinned = {
+            path.name
+            for path in sorted(Path("manifests").glob("*.yaml"))
+            if any(p.gepa_seed is not None for p in PairFactory.load(path).pairs)
+        }
+        assert pinned <= {"onoff-validation_manifest.yaml"}

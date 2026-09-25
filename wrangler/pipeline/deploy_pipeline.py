@@ -51,6 +51,7 @@ def _pairs_json(manifest) -> list[dict]:
             "skip_optimize": p.skip_optimize,
             "patience": p.patience,
             "continuous_val_score": p.continuous_val_score,
+            "gepa_seed": p.gepa_seed,
         }
         for p in manifest.enabled_pairs
     ]
