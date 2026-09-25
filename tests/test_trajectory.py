@@ -245,3 +245,43 @@ class TestContinuousSignalRegression:
             binary = load_trajectory(FIXTURES / f"{arm}.json")
             cont = load_trajectory(FIXTURES / f"{arm}-continuous.json")
             assert len(set(cont.scores)) > len(set(binary.scores))
+
+
+class TestNewSignalRemovesTheFreeLunch:
+    """The first real run under the 30-case + continuous signal (run-d55b159050).
+
+    Pins docs/analysis/2026-09-25-patience-is-not-free-anymore.md. The early-stopping default
+    rested on the old signal saturating; these assertions fail if that basis quietly returns.
+    """
+
+    ARM = "c10probe-30case-continuous"
+
+    def test_the_new_signal_does_not_saturate(self):
+        traj = load_trajectory(FIXTURES / f"{self.ARM}.json")
+        assert traj.val_subset_size == 30
+        assert max(traj.scores) < 1.0
+
+    def test_it_resolves_nearly_every_candidate(self):
+        """9 distinct values from 10 candidates, against 6 from 16-22 under the old signal."""
+        traj = load_trajectory(FIXTURES / f"{self.ARM}.json")
+        assert len(set(traj.scores)) >= len(traj.scores) - 1
+
+    def test_the_best_candidate_is_the_last_one(self):
+        """A late gain after a long plateau -- the shape early stopping is worst at, and the
+        one the saturated signal could not produce."""
+        traj = load_trajectory(FIXTURES / f"{self.ARM}.json")
+        assert traj.best_idx == len(traj.scores) - 1
+
+    @pytest.mark.parametrize("patience", DEFAULT_PATIENCES)
+    def test_every_patience_returns_a_different_prompt(self, patience):
+        """The load-bearing reversal: stopping is no longer free at any tested patience."""
+        point = replay(load_trajectory(FIXTURES / f"{self.ARM}.json"), patience)
+        assert point.fired
+        assert not point.same_candidate
+
+    def test_the_quality_concession_is_nonetheless_tiny(self):
+        """Stated so the result is not over-read: the margin is far below any per-metric
+        resolution in this repo (0.058-0.103), so 'worse prompt' is not 'much worse'."""
+        traj = load_trajectory(FIXTURES / f"{self.ARM}.json")
+        point = replay(traj, 15)
+        assert traj.scores[traj.best_idx] - point.best_score_at_stop < 0.01
