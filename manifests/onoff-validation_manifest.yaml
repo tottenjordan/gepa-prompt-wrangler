@@ -1,0 +1,84 @@
+name: "onoff-validation"
+description: >
+  Does continuous per-case scoring select BETTER prompts, or merely different ones?
+
+  Option A (#133) recovers GEPA's continuous per-case score instead of ADK's pass/fail
+  collapse, and it measurably works: 25 distinct values against 8, ties down from 29 of 37 to
+  7. But two later measurements showed it does not merely sharpen the existing ranking -- it
+  substitutes a different one. The binary and continuous signals rank candidates almost
+  independently (r = +0.071 / +0.274), and the first run under the new signal picked a
+  different winner at every patience. Nothing yet shows the prompts it picks are better.
+
+  This is the gate on turning it on anywhere.
+
+  UNDERPOWERED BY DESIGN, AND THAT IS STILL DECISIVE. `wrangler preflight --manifest` puts
+  this design at 0.060-0.103 across the five metrics, resolving only hallucination_v1 and
+  tool_use_quality_v1 against a +-0.075 target; the eval set cannot grow (idea 1 closed
+  2026-09-24) and more num_runs buys little at DOE 03's measured exponents. That is
+  acceptable here because of which way the decision runs: adopting continuous scoring costs
+  a re-baselining boundary, so "no resolvable difference" is an actionable answer -- it means
+  do not adopt. Only a clear win justifies the switch, and a clear win is what this design
+  can still see.
+
+agent_module: "examples/multi_model_agents/agents/sonnet_agent"
+eval_data: "examples/multi_model_agents/eval_data/eval_cases.yaml"
+
+pairs:
+  # The contrast. These two differ in EXACTLY ONE THING: the selection signal.
+  - id: "onoff-continuous"
+    model: "claude-sonnet-5"
+    description: "Optimized, selecting on continuous per-case scores"
+    agent_module: "examples/multi_model_agents/agents/sonnet_agent"
+    system_prompt: "You are a helpful assistant. Use the available tools to answer user questions."
+    continuous_val_score: true
+
+  - id: "onoff-binary"
+    model: "claude-sonnet-5"
+    description: "Optimized, selecting on ADK's pass/fail collapse"
+    agent_module: "examples/multi_model_agents/agents/sonnet_agent"
+    system_prompt: "You are a helpful assistant. Use the available tools to answer user questions."
+    continuous_val_score: false
+
+  # The control. CLAUDE.md requires one on every sweep, and campaign 09 is the reason: all
+  # three of its arms rose together, so the movement was common-mode and only a contrast
+  # against an unoptimized arm separated a prompt effect from drift. `skip_optimize` runs both
+  # eval sides on a byte-identical prompt, so whatever it moves is the floor.
+  - id: "onoff-control"
+    model: "claude-sonnet-5"
+    description: "Control — prompt unchanged, no optimize stage"
+    agent_module: "examples/multi_model_agents/agents/sonnet_agent"
+    system_prompt: "You are a helpful assistant. Use the available tools to answer user questions."
+    skip_optimize: true
+
+eval_config:
+  response_match_threshold: 0.5
+  safety_threshold: 0.8
+
+pipeline:
+  secret_id: wrangler-agent-env
+
+  # THE POINT OF THIS SETTING: both optimized arms share one search schedule, so they differ
+  # only in the factor under test. Seeds are normally derived from the arm id -- which is what
+  # makes replicates independent -- and that derivation would give these two different
+  # schedules on top of different scoring. CLAUDE.md measures run-to-run search variance at
+  # 12.3x the control floor, so an unpinned A/B would mostly measure GEPA's luck.
+  gepa_seed: 20260925
+
+  # Matches run-d55b159050, so its trajectory is comparable with the binary arm here.
+  max_metric_calls: 400
+
+  # DOE 03's recommended setting: same cost as the old (3,1) default, wins or ties on three
+  # metrics, never worst. score_repeats also recovers coverage, and a case missing from one
+  # side is the dropout silent-failures #5 showed reads as a prompt effect.
+  num_runs: 2
+  score_repeats: 2
+
+  # Frozen from engine 2222996457328214016 on 2026-09-25 (64/64 cases). Scored on every eval
+  # side, so judge drift over this campaign's own window is measured rather than assumed. The
+  # judge was measured stable in September, but a floor is not a property of a metric and
+  # CLAUDE.md is explicit that it must be re-measured on the day.
+  canary: data/canaries/onoff.json
+
+  # No `patience`: it is lossy under this signal (2026-09-25) and would confound the contrast
+  # by stopping the two arms at different points.
+  cache_bust: "onoff-v1"
