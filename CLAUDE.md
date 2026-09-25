@@ -324,7 +324,22 @@ and an absent key are byte-identical — a suffix would change `run_id` and inva
 in-flight campaign's cache. Adding `replicates:` to an existing manifest *does* change
 `run_id`, which is correct but means the first replicated run pays full price for every stage.
 
-**Early stopping is free on every run we can still measure, and the reason is a defect.**
+**EARLY STOPPING IS NO LONGER FREE — options A and B removed the defect that made it so
+(2026-09-25).** On `run-d55b159050`, the first real run under the 30-case stratified subset with
+continuous scoring, **every patience value tested returns a different, worse prompt**. The signal
+no longer saturates (best 0.9512, headroom left), it resolves 9 of 10 candidates rather than 6 of
+21, and **the best candidate is the LAST one** — a late gain after a long plateau, which is the
+shape early stopping is worst at and which a ceilinged signal could not produce. **Patience stays
+off**, which is the default; the case for 15 was never "a good trade" but "provably free", and that
+is gone. The concession is nonetheless small — **+0.0019**, far under any per-metric resolution —
+and the run was budget-limited rather than converged, so a 600-call follow-up could reopen it.
+**The general lesson for campaign 10: any result derived from the selection signal must be
+re-derived when that signal changes, including results that looked like clean wins.**
+[docs/analysis/2026-09-25-patience-is-not-free-anymore.md](docs/analysis/2026-09-25-patience-is-not-free-anymore.md)
+
+The superseded result, kept because it explains the default that is still in the code:
+
+**Early stopping was free on every run measured under the OLD signal, and the reason was a defect.**
 Replaying gepa's real stopper against all three archived `gepa_state.bin` files — campaign 09's
 two arms and m01; 07 and 08 predate run_dir archiving — **patience ≥ 10 returns a byte-identical
 prompt on all three**, pooled **64.1% of metric calls saved** at the shipped default of 15. It is
