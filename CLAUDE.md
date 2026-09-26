@@ -374,6 +374,19 @@ option A does not merely separate candidates more finely, it **selects substanti
 prompts**, which makes the one-arm-on/one-arm-off validation the thing that should gate adopting it
 as a default rather than a nicety.
 [docs/analysis/2026-09-24-patience-under-continuous-scoring.md](docs/analysis/2026-09-24-patience-under-continuous-scoring.md)
+
+**THAT VALIDATION RAN (2026-09-26) AND OPTION A IS NOT ADOPTED — it stays opt-in.**
+`run-413630e488`: continuous vs binary, one shared pinned seed, a control arm, 63 paired cases.
+**No win on any quality metric.** The primary contrast is null on three metrics. It leans
+*against* continuous on `safety_v1` (−0.0595, CI [−0.135, +0.016]; the direct after-side
+comparison −0.032 excludes zero). It favours continuous on `tool_use_quality_v1` (+0.038) only
+because the binary arm regressed there. The finer signal changed the search as designed —
+all-perfect minibatch skips fell from 26 of 40 iterations to 10 of 32 — but did not remove
+saturation, and the prompt it kept was not better on the 64-case eval. **A different ranking, not a sharper one.**
+Both arms beat the control on `safety_v1` (**+0.131** and **+0.191**, both CIs exclude zero), and
+the holdout did **not** regress for once. One run per arm; the untested lexicographic variant is
+the remaining form of option A worth a run.
+[docs/analysis/2026-09-26-onoff-validation-result.md](docs/analysis/2026-09-26-onoff-validation-result.md)
 [docs/analysis/2026-09-24-stopping-replay.md](docs/analysis/2026-09-24-stopping-replay.md)
 
 **Racing the arms was evaluated and REJECTED — do not rebuild it.** Idea 3 of the harness
