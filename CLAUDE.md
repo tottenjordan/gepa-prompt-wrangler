@@ -778,6 +778,17 @@ For multi-model agents: `SEARCH_MCP_SERVER`, `BOOKING_MCP_SERVER`, `EXPENSE_MCP_
   ~2.8 min per side, and it touches no engine, so it carries none of the deployment lottery
   that makes `num_runs` expensive.
 
+  **Readings carry per-case scores and drift is PAIRED (2026-09-28).** Until then a reading
+  stored only per-metric means, so `run-413630e488`'s six readings — 36 to 64 cases per metric
+  — could not be restricted to common cases, the one comparison in that write-up left unpaired.
+  `canary_drift` now pairs on `case_index` when both readings have `per_case` (`basis:
+  "paired"`, with `n_paired` and `cases_changed` per metric), so moved coverage no longer
+  disqualifies a metric. Older readings fall back to the difference of means (`basis: "means"`)
+  with the uneven-coverage exclusion. **The canary is scored at the eval's own
+  `score_repeats`** on both paths — passes are unioned, which recovers coverage — so it costs
+  ~2.8 min *per pass* per side, and the one-line change to `eval_single_agent` means the first
+  pipeline run after it pays for its eval stages instead of hitting the KFP cache.
+
   **FIRST RESULT (2026-09-22): the autorater is NOT what drifted.** Two DOE 03 captures were
   frozen and re-scored five days after their original five-pass scoring. `safety_v1` moved
   **exactly 0.0000** on one (1.0000 both dates, sd 0.0000 across the original five passes) and

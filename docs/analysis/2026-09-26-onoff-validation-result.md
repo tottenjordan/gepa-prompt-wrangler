@@ -115,9 +115,10 @@ so the readings cannot be restricted to common cases. The four readings with ful
 coverage span 0.959–0.979, a spread of 0.020 over 14 h. That is far below the +0.13 and +0.19 safety
 effects, so judge drift does not explain them. It cannot be stated more precisely than that.
 
-**Follow-up:** record per-case canary scores so drift can be paired, as every other comparison
-here is. Scoring the canary at `score_repeats: 2` would also recover the coverage, the same way it
-does for the eval sides.
+**Follow-up (done 2026-09-28):** canary readings now record per-case scores and
+`canary_drift` pairs them on case index, and the canary is scored at the eval's
+`score_repeats`, which recovers coverage the same way it does for the eval sides. Readings
+from this run predate that and stay approximate.
 
 ## What this does not cover
 

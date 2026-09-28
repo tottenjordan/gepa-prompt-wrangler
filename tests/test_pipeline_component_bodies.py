@@ -392,6 +392,22 @@ class TestEvalRecordsCoverage:
         assert _stage(f"eval_{other}") not in io.gcs.blobs
 
 
+class TestEvalScoresTheCanaryAtItsOwnScoreRepeats:
+    def test_the_canary_gets_the_same_number_of_passes_as_the_eval(self, tmp_path, eval_patches):
+        """Passes drop different cases and a reading unions them. At one pass
+        run-413630e488's canary scored as few as 36 of 64 cases on a metric."""
+        seed = {_stage("deploy"): json.dumps({"engine_id": "eng-1", "original_prompt": "p"})}
+        with (
+            component_io(tmp_path, seed=seed) as io,
+            mock.patch(
+                "wrangler.eval.canary.score_canary", return_value={"scores": {}, "label": "c"}
+            ) as scorer,
+        ):
+            _run_eval(io, phase="before", canary_path="data/canaries/c.json")
+
+        assert scorer.call_args.kwargs["repeats"] == 2, "_run_eval passes score_repeats=2"
+
+
 # ── Component 4: optimize (control-arm path only) ─────────────────
 
 
