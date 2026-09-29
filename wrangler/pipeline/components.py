@@ -737,6 +737,8 @@ def optimize_single_agent(
             patience=pair.get("patience"),
             # Option A. Off unless the manifest asks; changes what GEPA selects on.
             continuous_val_score=bool(pair.get("continuous_val_score", False)),
+            # Pass/fail first, continuous mean as tie-break. Absent from `pair_json` unless on.
+            lexicographic_val_score=bool(pair.get("lexicographic_val_score", False)),
             # Pinned only for paired contrasts; otherwise derived from the arm id.
             gepa_seed=pair.get("gepa_seed"),
             # The manifest's model, not the one the _opt module happens to import.

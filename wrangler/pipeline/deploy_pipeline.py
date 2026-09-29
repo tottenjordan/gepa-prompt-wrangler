@@ -52,6 +52,9 @@ def _pairs_json(manifest) -> list[dict]:
             "patience": p.patience,
             "continuous_val_score": p.continuous_val_score,
             "gepa_seed": p.gepa_seed,
+            # Only when on: `pair_json` is a KFP input, so adding the key to every pair would
+            # change every existing manifest's inputs and miss the cache on resubmission.
+            **({"lexicographic_val_score": True} if p.lexicographic_val_score else {}),
         }
         for p in manifest.enabled_pairs
     ]

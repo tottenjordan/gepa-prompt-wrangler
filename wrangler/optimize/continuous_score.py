@@ -22,9 +22,10 @@ thresholds (0.95 for safety, 0.85 for response quality) but no declared weights,
 them would invent a preference nobody stated. The consequence worth knowing: this **does not
 preserve the pass/fail ordering**. A candidate failing several thresholds narrowly can outrank
 one passing them, because the mean does not know where the cliffs are. A lexicographic variant
-(pass count first, continuous mean as tie-break) would preserve it and still break ties, and
-is the obvious fallback if a campaign's results look driven by near-misses. It was not chosen
-because the 3.1x resolution gain above was measured on the plain mean.
+(pass count first, continuous mean as tie-break) preserves it and still breaks ties; it is
+`apply_lexicographic_scores`, added 2026-09-29 after the plain mean was validated and not
+adopted (docs/analysis/2026-09-26-onoff-validation-result.md). The plain mean was chosen first
+because the 3.1x resolution gain above was measured on it.
 
 **Opt-in.** This changes what GEPA optimizes, so it is a comparability boundary of the same
 kind as the 2026-09-17 judge re-baseline. Off unless a manifest asks.
@@ -34,7 +35,19 @@ from __future__ import annotations
 
 from typing import Any
 
-__all__ = ["apply_continuous_scores", "continuous_case_scores"]
+__all__ = [
+    "LEXICOGRAPHIC_EPSILON",
+    "apply_continuous_scores",
+    "apply_lexicographic_scores",
+    "continuous_case_scores",
+]
+
+#: Weight of the continuous tie-break in a lexicographic score, `(1 - e) * pass + e * mean`.
+#: Small enough that no continuous gain can outweigh one more passing case: over n cases the
+#: pass term moves by at least `(1 - e) / n` and the tie-break by at most `e`, so the ordering
+#: is exactly pass/fail's for any n < (1 - e) / e = 99. GEPA aggregates over the 30-case
+#: validation subset and 3-case minibatches.
+LEXICOGRAPHIC_EPSILON = 0.01
 
 
 def _binary_fallback(case: Any) -> float:
@@ -94,3 +107,27 @@ def apply_continuous_scores(scores: dict[str, float], eval_results: list[Any]) -
     """
     recovered = continuous_case_scores(eval_results)
     return {key: recovered.get(key, value) for key, value in scores.items()}
+
+
+def apply_lexicographic_scores(
+    scores: dict[str, float], eval_results: list[Any], *, epsilon: float = LEXICOGRAPHIC_EPSILON
+) -> dict[str, float]:
+    """ADK's pass/fail verdict first, the continuous mean only as a tie-break.
+
+    The variant the plain mean was not: it **preserves the pass/fail ordering** -- a candidate
+    passing more cases always wins -- and among candidates passing the same cases, the one
+    nearer the thresholds wins instead of the one GEPA happened to discover first. The on/off
+    validation (2026-09-26) found the plain mean selected *different* prompts rather than
+    better ones; this asks whether breaking ties alone helps.
+
+    A case scores 1.0 only when it passes AND every metric is perfect, so GEPA's
+    all-perfect-minibatch skip fires as it does under the plain mean, not as under binary.
+
+    Same per-key merge as `apply_continuous_scores`: a case the recovery missed keeps ADK's
+    verdict unchanged.
+    """
+    recovered = continuous_case_scores(eval_results)
+    return {
+        key: (1 - epsilon) * value + epsilon * recovered[key] if key in recovered else value
+        for key, value in scores.items()
+    }

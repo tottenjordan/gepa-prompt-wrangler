@@ -59,6 +59,10 @@ class AgentPromptPair:
     # Resolved like `patience`: pair, then `defaults:`, then `pipeline:`. Off by default
     # because it changes what GEPA selects on, and so re-baselines a campaign.
     continuous_val_score: bool = False
+    # Pass/fail first, continuous mean only as a tie-break. Resolved like
+    # `continuous_val_score` and mutually exclusive with it. Off by default for the same
+    # reason: it changes what GEPA selects on.
+    lexicographic_val_score: bool = False
     # Pin GEPA's search seed instead of deriving it from the pair id. Normally derivation is
     # what makes replicates independent, but a PAIRED contrast needs the opposite: two arms
     # that differ only in the factor under test. Without this, arms differ in the search
@@ -175,6 +179,9 @@ class PairFactory:
         default_continuous = raw.get("defaults", {}).get("continuous_val_score") or raw.get(
             "pipeline", {}
         ).get("continuous_val_score", False)
+        default_lexicographic = raw.get("defaults", {}).get("lexicographic_val_score") or raw.get(
+            "pipeline", {}
+        ).get("lexicographic_val_score", False)
         default_seed = raw.get("defaults", {}).get("gepa_seed") or raw.get("pipeline", {}).get(
             "gepa_seed"
         )
@@ -235,8 +242,20 @@ class PairFactory:
                 skip_optimize=entry.get("skip_optimize", False),
                 patience=entry.get("patience", default_patience),
                 continuous_val_score=bool(entry.get("continuous_val_score", default_continuous)),
+                lexicographic_val_score=bool(
+                    entry.get("lexicographic_val_score", default_lexicographic)
+                ),
                 gepa_seed=entry.get("gepa_seed", default_seed),
             )
+
+            if pair.continuous_val_score and pair.lexicographic_val_score:
+                # Two scorings for one case cannot both apply, and silently preferring one
+                # would run a different experiment from the one the manifest describes.
+                raise ValueError(
+                    f"Pair {pair_id!r} sets both continuous_val_score and "
+                    f"lexicographic_val_score; choose one (a campaign default can be "
+                    f"overridden per pair with `false`)."
+                )
 
             # A replicate is just another pair. Everything downstream then works
             # untouched: `run_id` hashes the pair-id list, stage artifacts are keyed

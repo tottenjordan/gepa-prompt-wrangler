@@ -387,6 +387,16 @@ Both arms beat the control on `safety_v1` (**+0.131** and **+0.191**, both CIs e
 the holdout did **not** regress for once. One run per arm; the untested lexicographic variant is
 the remaining form of option A worth a run.
 [docs/analysis/2026-09-26-onoff-validation-result.md](docs/analysis/2026-09-26-onoff-validation-result.md)
+
+**The lexicographic variant now exists, opt-in (2026-09-29): `lexicographic_val_score: true`.**
+Each case scores `(1 − ε)·pass + ε·mean` with ε = 0.01 (`apply_lexicographic_scores`), which
+keeps ADK's pass/fail ordering **exactly** for any aggregate over fewer than 99 cases — GEPA
+aggregates over 3 and 30 — and uses the continuous mean only among candidates passing the same
+cases. A case scores 1.0 only if it passes *and* every metric is perfect, so the all-perfect skip
+behaves as under the plain mean. Resolved like `continuous_val_score` (pair → `defaults:` →
+`pipeline:`), mutually exclusive with it (`PairFactory.load` raises, naming the pair), and
+emitted into `pair_json` **only when on**, so existing manifests keep their KFP inputs and cache.
+Untested on a real run; campaign 10 is where it gets one.
 [docs/analysis/2026-09-24-stopping-replay.md](docs/analysis/2026-09-24-stopping-replay.md)
 
 **Racing the arms was evaluated and REJECTED — do not rebuild it.** Idea 3 of the harness

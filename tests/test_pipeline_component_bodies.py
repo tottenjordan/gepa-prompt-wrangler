@@ -594,6 +594,19 @@ class TestOptimizeForwardsPerPairCampaignFactors:
 
         assert gepa.call_args.kwargs["continuous_val_score"] is True
 
+    def test_lexicographic_val_score_reaches_the_optimizer(self, tmp_path, gepa):
+        with component_io(tmp_path) as io:
+            _run_optimize(io, pair_json=_pair(lexicographic_val_score=True))
+
+        assert gepa.call_args.kwargs["lexicographic_val_score"] is True
+
+    def test_lexicographic_val_score_defaults_off(self, tmp_path, gepa):
+        """`_pairs_json` omits the key unless it is on, so absence must mean off."""
+        with component_io(tmp_path) as io:
+            _run_optimize(io, pair_json=_pair())
+
+        assert gepa.call_args.kwargs["lexicographic_val_score"] is False
+
     def test_a_pinned_seed_reaches_the_optimizer(self, tmp_path, gepa):
         with component_io(tmp_path) as io:
             _run_optimize(io, pair_json=_pair(gepa_seed=4242))

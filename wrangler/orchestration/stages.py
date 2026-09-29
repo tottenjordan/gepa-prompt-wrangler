@@ -868,6 +868,7 @@ def stage_optimize(exp: Experiment, pair_id: str | None = None) -> None:
             # still the ceiling and this can only stop earlier.
             patience=pair.patience,
             continuous_val_score=pair.continuous_val_score,
+            lexicographic_val_score=pair.lexicographic_val_score,
             gepa_seed=pair.gepa_seed,
         )
         elapsed = time.time() - t0
