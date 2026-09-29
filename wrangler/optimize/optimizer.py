@@ -638,6 +638,7 @@ def optimize(
     patience: int | None = None,
     continuous_val_score: bool = False,
     gepa_seed: int | None = None,
+    lexicographic_val_score: bool = False,
 ) -> str:
     """Run GEPA optimization. Returns the optimized instruction string.
 
@@ -660,7 +661,13 @@ def optimize(
             because it changes what GEPA selects on, which is a comparability boundary
             of the same kind as the 2026-09-17 judge re-baseline. See
             `wrangler/optimize/continuous_score.py`.
+        lexicographic_val_score: Score each case on ADK's pass/fail verdict with the
+            continuous mean as a tie-break only, so the pass/fail ordering is preserved.
+            Off by default, and mutually exclusive with `continuous_val_score`.
     """
+    if continuous_val_score and lexicographic_val_score:
+        msg = "continuous_val_score and lexicographic_val_score are mutually exclusive"
+        raise ValueError(msg)
     tag = f"  [{agent_name}] " if agent_name else "  "
     print(f"{tag}[1/3] Applying ADK patches...", flush=True)
     _patch_adk(forward_rationale=forward_rationale)
@@ -875,6 +882,12 @@ def optimize(
         # docs/analysis/2026-09-24-stopping-replay.md
         _GEPA_RUN_KWARGS["stop_callbacks"] = NoImprovementStopper(patience)
         print(f"{tag}  Early stopping: patience {patience} iterations", flush=True)
+    if lexicographic_val_score:
+        print(
+            f"{tag}  Lexicographic per-case scoring ON — pass/fail first, metric mean as "
+            f"tie-break. Not comparable with runs scored the old way.",
+            flush=True,
+        )
     if continuous_val_score:
         print(
             f"{tag}  Continuous per-case scoring ON — GEPA selects on metric means, "
@@ -913,7 +926,7 @@ def optimize(
                 _last_results.extend(results or [])
                 return results
 
-            if continuous_val_score:
+            if continuous_val_score or lexicographic_val_score:
                 sampler._evaluate_agent = _capturing_evaluate  # ty: ignore[invalid-assignment]
 
             async def _refreshed_sample(candidate, *args, **kwargs):
@@ -954,6 +967,10 @@ def optimize(
                     from .continuous_score import apply_continuous_scores
 
                     result.scores = apply_continuous_scores(result.scores, _last_results)
+                elif lexicographic_val_score and _last_results:
+                    from .continuous_score import apply_lexicographic_scores
+
+                    result.scores = apply_lexicographic_scores(result.scores, _last_results)
 
                 gen_elapsed = time.time() - gen_t0
                 print(f"{tag}  Generation {gen}: scored in {gen_elapsed:.1f}s", flush=True)
