@@ -414,7 +414,11 @@ def eval_single_agent(
     # `canary_path` yields {} and costs nothing.
     from wrangler.eval.canary import canary_reading_for_stage
 
-    canary = canary_reading_for_stage(canary_path, root="/app", tag=f"{pair_id} {phase}")
+    # Scored at the eval's own `score_repeats`: passes drop different cases and the reading
+    # unions them, which is what recovers the 36/64 coverage run-413630e488's canary saw.
+    canary = canary_reading_for_stage(
+        canary_path, repeats=score_repeats, root="/app", tag=f"{pair_id} {phase}"
+    )
 
     stage_data = {
         "scores": result.scores,

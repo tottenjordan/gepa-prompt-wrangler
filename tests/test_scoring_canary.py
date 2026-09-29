@@ -159,15 +159,21 @@ class TestTheFileOutlivesTheSdk:
         assert "cases" not in meta
 
 
-def _fake_score(*score_sets, coverage=None):
+def _fake_score(*score_sets, coverage=None, per_case=None):
     """Patch `_score_dataset` to return fixed scores, one per call.
 
     `coverage` defaults to full (64 cases per metric), because the interesting case is the
-    uneven one and it should have to be asked for.
+    uneven one and it should have to be asked for. `per_case` is one list of rows per call,
+    empty by default.
     """
+    per_case = per_case or [[] for _ in score_sets]
     results = [
-        mock.Mock(scores=s, coverage=coverage if coverage is not None else dict.fromkeys(s, 64))
-        for s in score_sets
+        mock.Mock(
+            scores=s,
+            coverage=coverage if coverage is not None else dict.fromkeys(s, 64),
+            per_case=rows,
+        )
+        for s, rows in zip(score_sets, per_case, strict=True)
     ]
     return mock.patch("wrangler.eval.evaluator._score_dataset", side_effect=results)
 
@@ -409,3 +415,144 @@ class TestCoverageIsRecordedAndGuardsTheDrift:
 
         assert drift["uneven_coverage"] == []
         assert drift["max_abs_drift"] == pytest.approx(0.07)
+
+
+def _rows(scores: dict[int, float], metric: str = "safety_v1") -> list[dict]:
+    """Per-case rows as the evaluator writes them: case index plus metric scores."""
+    return [{"case_index": i, metric: v} for i, v in scores.items()]
+
+
+class TestAReadingKeepsItsPerCaseScores:
+    """run-413630e488's six canary readings ranged 36-64 cases per metric and stored only
+    means, so they could not be restricted to common cases -- the one comparison in that
+    write-up that could not be paired."""
+
+    def test_the_reading_carries_per_case_rows(self, frame, tmp_path):
+        path = cn.freeze_canary(frame, tmp_path / "c.json", label="probe")
+        with (
+            _fake_score({"safety_v1": 0.5}, per_case=[_rows({0: 1.0, 1: 0.0})]),
+            mock.patch("wrangler.eval.evaluator.agent_client"),
+        ):
+            reading = cn.score_canary(path)
+
+        assert reading["per_case"] == _rows({0: 1.0, 1: 0.0})
+
+    def test_repeated_passes_union_their_cases(self, frame, tmp_path):
+        """Passes drop different cases. A case scored in any pass survives, and a case scored
+        in both is averaged -- the same rule `score_repeats` applies to an eval side, which is
+        what makes repeats recover a canary's coverage."""
+        path = cn.freeze_canary(frame, tmp_path / "c.json", label="probe")
+        with (
+            _fake_score(
+                {"safety_v1": 0.5},
+                {"safety_v1": 0.5},
+                per_case=[_rows({0: 1.0, 1: 0.0}), _rows({1: 1.0, 2: 1.0})],
+            ),
+            mock.patch("wrangler.eval.evaluator.agent_client"),
+        ):
+            reading = cn.score_canary(path, repeats=2)
+
+        by_case = {r["case_index"]: r["safety_v1"] for r in reading["per_case"]}
+        assert by_case == {0: 1.0, 1: pytest.approx(0.5), 2: 1.0}
+
+
+class TestDriftIsPairedWhenBothReadingsCanBe:
+    def test_the_drift_is_over_common_cases_only(self):
+        """Case 2 scored only before. Unpaired, its 0.0 drags the before mean down and reads
+        as the judge getting kinder; paired, it is simply not part of the comparison."""
+        before = {
+            "canary_path": "c",
+            "scores": {"safety_v1": 1 / 3},
+            "per_case": _rows({0: 1.0, 1: 0.0, 2: 0.0}),
+        }
+        after = {
+            "canary_path": "c",
+            "scores": {"safety_v1": 1.0},
+            "per_case": _rows({0: 1.0, 1: 1.0}),
+        }
+
+        drift = cn.canary_drift(before, after)
+
+        assert drift["basis"] == "paired"
+        assert drift["deltas"]["safety_v1"] == pytest.approx(0.5)
+        assert drift["n_paired"]["safety_v1"] == 2
+        assert drift["cases_changed"]["safety_v1"] == 1
+        assert drift["mean_deltas"]["safety_v1"] == pytest.approx(2 / 3), "kept for reference"
+
+    def test_uneven_coverage_no_longer_disqualifies_a_metric(self):
+        """The means-basis drift had to exclude a metric whose coverage moved. Pairing removes
+        the reason: the comparison is restricted to cases in common, so it still counts."""
+        before = {
+            "canary_path": "c",
+            "scores": {"safety_v1": 0.5},
+            "coverage": {"safety_v1": 64},
+            "per_case": _rows({0: 1.0, 1: 0.0}),
+        }
+        after = {
+            "canary_path": "c",
+            "scores": {"safety_v1": 0.0},
+            "coverage": {"safety_v1": 36},
+            "per_case": _rows({1: 0.0}),
+        }
+
+        drift = cn.canary_drift(before, after)
+
+        assert drift["uneven_coverage"] == []
+        assert drift["deltas"]["safety_v1"] == 0.0, "the judge did not move on the shared case"
+        assert drift["max_abs_drift"] == 0.0
+
+    def test_cancelling_moves_show_up_as_changed_cases(self):
+        """A mean can sit still while the judge re-scores cases in both directions. The
+        per-case count is where that becomes visible."""
+        before = {
+            "canary_path": "c",
+            "scores": {"safety_v1": 0.5},
+            "per_case": _rows({0: 1.0, 1: 0.0}),
+        }
+        after = {
+            "canary_path": "c",
+            "scores": {"safety_v1": 0.5},
+            "per_case": _rows({0: 0.0, 1: 1.0}),
+        }
+
+        drift = cn.canary_drift(before, after)
+
+        assert drift["deltas"]["safety_v1"] == 0.0
+        assert drift["cases_changed"]["safety_v1"] == 2
+
+    def test_a_metric_with_no_common_case_is_named(self):
+        before = {"canary_path": "c", "scores": {"safety_v1": 1.0}, "per_case": _rows({0: 1.0})}
+        after = {"canary_path": "c", "scores": {"safety_v1": 1.0}, "per_case": _rows({1: 1.0})}
+
+        drift = cn.canary_drift(before, after)
+
+        assert drift["unpaired"] == ["safety_v1"]
+        assert "safety_v1" not in drift["deltas"]
+
+    def test_a_reading_without_per_case_scores_falls_back_to_means(self):
+        """Every canary reading written before this change has no per-case rows. Mixed with a
+        new one, pairing is impossible, so the old rule applies -- including its coverage
+        exclusion."""
+        before = {"canary_path": "c", "scores": {"safety_v1": 0.8}, "coverage": {"safety_v1": 64}}
+        after = {
+            "canary_path": "c",
+            "scores": {"safety_v1": 0.9},
+            "coverage": {"safety_v1": 61},
+            "per_case": _rows({0: 1.0}),
+        }
+
+        drift = cn.canary_drift(before, after)
+
+        assert drift["basis"] == "means"
+        assert drift["uneven_coverage"] == ["safety_v1"]
+        assert drift["max_abs_drift"] == 0.0
+
+
+class TestTheStageHelperForwardsRepeats:
+    def test_repeats_reach_the_scorer(self):
+        with mock.patch(
+            "wrangler.eval.canary.score_canary", return_value={"scores": {}, "label": ""}
+        ) as scorer:
+            cn.canary_reading_for_stage("c.json", repeats=2)
+
+        assert scorer.call_args.kwargs["repeats"] == 2

@@ -763,8 +763,13 @@ def stage_eval(
                 "num_runs": result.num_runs,
                 "score_repeats": score_repeats,
                 # Empty dict when no canary is configured, which is the default.
+                # Scored at the eval's own score_repeats, as the pipeline does, so
+                # repeated passes recover the canary's coverage too.
                 "canary": canary_reading_for_stage(
-                    canary_path, root=str(mdir), tag=f"{pair.id} {phase}"
+                    canary_path,
+                    repeats=score_repeats,
+                    root=str(mdir),
+                    tag=f"{pair.id} {phase}",
                 ),
                 "elapsed": elapsed,
                 "token_usage": result.token_usage,

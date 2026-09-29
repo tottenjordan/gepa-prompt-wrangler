@@ -153,7 +153,7 @@ def score_canary(
     from agentplatform import types
 
     from ..core.config import GCP_PROJECT_ID, GCP_REGION
-    from .evaluator import DEFAULT_METRICS, _score_dataset, agent_client
+    from .evaluator import DEFAULT_METRICS, _score_dataset, agent_client, average_per_case
 
     frame = load_canary(path)
     dataset = types.EvaluationDataset(eval_dataset_df=frame)
@@ -161,6 +161,7 @@ def score_canary(
 
     passes: list[dict[str, float]] = []
     coverages: list[dict[str, int]] = []
+    per_case_passes: list[list[dict]] = []
     for i in range(max(1, repeats)):
         # agent_resource is None: a canary's engine may be long deleted, and engine ids are
         # never pinned in this repo. `_score_dataset` already treats it as optional.
@@ -173,6 +174,7 @@ def score_canary(
         )
         passes.append(dict(result.scores))
         coverages.append(dict(result.coverage))
+        per_case_passes.append(list(result.per_case or []))
 
     keys = sorted({k for p in passes for k in p})
     scores = {
@@ -184,6 +186,13 @@ def score_canary(
     # Measured on the first real run: a 2026-09-22 re-score of a 2026-09-17 capture came
     # back 61/64 on `instruction_following_v1` against 64/64 originally.
     coverage = {k: min((c[k] for c in coverages if k in c), default=0) for k in keys}
+    # Per-case scores, so two readings can be PAIRED on case index like every other
+    # comparison in this repo. Without them a drift is a difference of two means over
+    # whatever cases each side happened to score: on run-413630e488 the six readings ranged
+    # 36-64 cases per metric and could not be restricted to common cases. Passes are unioned
+    # by `average_per_case`, the same rule `score_repeats` uses on an eval side, so repeats
+    # recover coverage rather than compounding the loss.
+    per_case = average_per_case([p for p in per_case_passes if p])
     return {
         "label": canary_metadata(path).get("label", ""),
         "canary_path": str(path),
@@ -193,7 +202,27 @@ def score_canary(
         "scores": scores,
         "coverage": coverage,
         "passes": passes,
+        "per_case": per_case,
     }
+
+
+def _paired_drift(before: list[dict], after: list[dict], metrics: list[str]) -> dict:
+    """Per metric: mean after-minus-before over cases both readings scored, and how many."""
+    from .evaluator import pair_per_case
+
+    paired = pair_per_case(before, after)
+    out: dict[str, dict] = {}
+    for m in metrics:
+        pairs = [(b[m], a[m]) for b, a in paired.values() if m in b and m in a]
+        if pairs:
+            out[m] = {
+                "delta": sum(y - x for x, y in pairs) / len(pairs),
+                "n": len(pairs),
+                # Cases the judge scored differently on identical bytes. A mean can sit still
+                # while cases move in both directions; this is where that shows.
+                "changed": sum(x != y for x, y in pairs),
+            }
+    return out
 
 
 def canary_drift(before: dict, after: dict) -> dict:
@@ -202,6 +231,13 @@ def canary_drift(before: dict, after: dict) -> dict:
     This is the number a campaign could not produce. The responses are identical by
     construction, so whatever moved is the judge -- and any campaign delta smaller than this
     is not a prompt effect, whatever the control arm says.
+
+    **Paired when both readings carry per-case scores** (`basis == "paired"`): each metric's
+    drift is the mean change over the cases both sides scored, so differing coverage no longer
+    disqualifies a metric -- the comparison is simply restricted to the cases in common, and
+    `n_paired` says how many that was. Readings from before per-case scores were recorded fall
+    back to the difference of means (`basis == "means"`), where a metric whose coverage moved
+    is excluded from `max_abs_drift` because its two means are over different case sets.
 
     Refuses to compare readings of different canaries: two different response sets scored at
     two different times measure nothing.
@@ -213,7 +249,33 @@ def canary_drift(before: dict, after: dict) -> dict:
 
     s_before, s_after = before.get("scores", {}), after.get("scores", {})
     shared = sorted(set(s_before) & set(s_after))
-    deltas = {k: s_after[k] - s_before[k] for k in shared}
+    mean_deltas = {k: s_after[k] - s_before[k] for k in shared}
+    # Named rather than silently dropped: a metric present on one side only usually means
+    # the metric set changed between readings, which invalidates the comparison for it.
+    unmatched = sorted(set(s_before) ^ set(s_after))
+    common = {
+        "label": before.get("label", ""),
+        "from": before.get("scored_at", ""),
+        "to": after.get("scored_at", ""),
+        "mean_deltas": mean_deltas,
+        "unmatched": unmatched,
+    }
+
+    pc_before, pc_after = before.get("per_case") or [], after.get("per_case") or []
+    if pc_before and pc_after:
+        paired = _paired_drift(pc_before, pc_after, shared)
+        deltas = {k: v["delta"] for k, v in paired.items()}
+        return {
+            **common,
+            "basis": "paired",
+            "deltas": deltas,
+            "n_paired": {k: v["n"] for k, v in paired.items()},
+            "cases_changed": {k: v["changed"] for k, v in paired.items()},
+            # A shared metric no case carries on both sides cannot be read at all.
+            "unpaired": sorted(set(shared) - set(paired)),
+            "uneven_coverage": [],
+            "max_abs_drift": max((abs(v) for v in deltas.values()), default=0.0),
+        }
 
     # A metric whose coverage moved is NOT a drift reading: the two means are over different
     # case sets, so the difference mixes dropout with the judge. Reported separately rather
@@ -222,17 +284,13 @@ def canary_drift(before: dict, after: dict) -> dict:
     uneven = sorted(
         k for k in shared if k in c_before and k in c_after and c_before[k] != c_after[k]
     )
-    comparable = {k: v for k, v in deltas.items() if k not in uneven}
+    comparable = {k: v for k, v in mean_deltas.items() if k not in uneven}
     return {
-        "label": before.get("label", ""),
-        "from": before.get("scored_at", ""),
-        "to": after.get("scored_at", ""),
-        "deltas": deltas,
+        **common,
+        "basis": "means",
+        "deltas": mean_deltas,
         "uneven_coverage": uneven,
         "max_abs_drift": max((abs(v) for v in comparable.values()), default=0.0),
-        # Named rather than silently dropped: a metric present on one side only usually means
-        # the metric set changed between readings, which invalidates the comparison for it.
-        "unmatched": sorted(set(s_before) ^ set(s_after)),
     }
 
 

@@ -1236,9 +1236,21 @@ def canary_drift_cmd(readings_path: str):
     drift = canary_drift(readings[0], readings[-1])
     click.echo(f"\n  Autorater drift for '{drift['label']}'")
     click.echo(f"    {drift['from']}  ->  {drift['to']}")
+    paired = drift["basis"] == "paired"
+    click.echo(
+        "    paired on case index" if paired else "    difference of means (no per-case scores)"
+    )
     for metric, delta in sorted(drift["deltas"].items()):
-        click.echo(f"    {metric:40s} {delta:+.4f}")
+        detail = ""
+        if paired:
+            n, changed = drift["n_paired"][metric], drift["cases_changed"][metric]
+            detail = f"  (n={n}, {changed} case(s) re-scored differently)"
+        click.echo(f"    {metric:40s} {delta:+.4f}{detail}")
     click.echo(f"\n    max |drift| = {drift['max_abs_drift']:.4f}")
     click.echo("    A campaign delta smaller than this is not a prompt effect.")
+    if drift["uneven_coverage"]:
+        click.echo(f"    EXCLUDED (coverage moved): {', '.join(drift['uneven_coverage'])}")
+    if drift.get("unpaired"):
+        click.echo(f"    NOT COMPARED (no common cases): {', '.join(drift['unpaired'])}")
     if drift["unmatched"]:
         click.echo(f"    NOT COMPARED (metric set changed): {', '.join(drift['unmatched'])}")
