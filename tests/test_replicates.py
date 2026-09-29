@@ -42,13 +42,16 @@ class TestBackwardCompatibility:
         assert manifest.pairs[0].replicate_of == ""
 
     def test_every_checked_in_manifest_is_unaffected(self):
-        """The load-bearing regression guard: no shipped manifest uses `replicates`,
-        so every one of them must still produce the pair ids it produced before."""
+        """The load-bearing regression guard: every shipped manifest produces the ids its
+        entries name, and only an entry with `replicates > 1` is expanded -- so adding the
+        key to one manifest cannot change another's `run_id`."""
         for path in sorted(MANIFESTS.glob("*.yaml")):
             raw = yaml.safe_load(path.read_text())
-            expected = [
-                entry.get("id", f"pair-{i + 1}") for i, entry in enumerate(raw.get("pairs", []))
-            ]
+            expected = []
+            for i, entry in enumerate(raw.get("pairs", [])):
+                pid = entry.get("id", f"pair-{i + 1}")
+                n = entry.get("replicates", 1)
+                expected += [pid] if n == 1 else [f"{pid}-r{k}" for k in range(1, n + 1)]
             assert [p.id for p in PairFactory.load(path).pairs] == expected, path.name
 
 

@@ -154,7 +154,11 @@ class TestManifestPlumbing:
         assert "lexicographic_val_score" not in _pairs_json(self._load(tmp_path))[0]
 
     #: Manifests that turn it on deliberately; see the matching guard for the plain mean.
-    DELIBERATELY_ON: ClassVar[set[str]] = set()
+    DELIBERATELY_ON: ClassVar[set[str]] = {
+        # Its first real run, as one arm beside three binary replicates and a control.
+        # docs/analysis/2026-09-29-campaign-10-design.md
+        "campaign-10_manifest.yaml",
+    }
 
     def test_no_manifest_acquires_lexicographic_scoring_by_accident(self):
         on = {
