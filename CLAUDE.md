@@ -760,8 +760,9 @@ For multi-model agents: `SEARCH_MCP_SERVER`, `BOOKING_MCP_SERVER`, `EXPENSE_MCP_
   uv run wrangler canary freeze outputs/captures/c10_*.pkl --label c10   # -> data/canaries/c10.json
   ```
 
-  Then set `canary: data/canaries/c10.json` under `defaults:` (local) or `pipeline:`
-  (pipeline). Both paths score it on every eval side — including the **control arm's**, which
+  Then set `canary: data/canaries/c10.json` under `pipeline:` — **one key for both paths**.
+  Until 2026-09-29 this said `defaults:` for the local path, and nothing carried that key into
+  the experiment config, so a local run silently scored no canary. Both paths score it on every eval side — including the **control arm's**, which
   is the one campaign 09 misread — and write the reading into the eval stage artifact under
   `canary`, beside `health`. Drift is `eval_after.canary` minus `eval_before.canary`.
 

@@ -1,5 +1,7 @@
 """Tests for wrangler.orchestration.stages — modular pipeline stage functions."""
 
+from unittest import mock
+
 import pytest
 import yaml
 
@@ -218,6 +220,61 @@ class TestStageEvalGating:
 
         stage_eval(exp, phase="before")
         assert exp.read_stage("eval_before") == {}
+
+
+class TestTheLocalPathScoresTheManifestsCanary:
+    """The pipeline read `pipeline.canary`; the local path read `defaults.canary` from the
+    experiment config, which `Experiment.create` never wrote. A local campaign with a canary
+    in its manifest therefore had no drift measurement and said nothing about it."""
+
+    def _run(self, tmp_path, pipeline_block):
+        from wrangler.orchestration.experiment import Experiment
+        from wrangler.orchestration.stages import stage_eval
+
+        manifest_data = {
+            "name": "test-canary",
+            "agent_module": "agents/example_agent",
+            "eval_data": "eval_data/test.yaml",
+            "pairs": [{"id": "flash", "model": "gemini-3.5-flash", "system_prompt": "Hi"}],
+            "pipeline": pipeline_block,
+        }
+        manifest_path = tmp_path / "manifest.yaml"
+        manifest_path.write_text(yaml.dump(manifest_data))
+        exp = Experiment.create(
+            str(manifest_path), name="test-canary", base_dir=str(tmp_path / "experiments")
+        )
+        exp.merge_pair("deploy", "flash", {"engine_id": "eng-1", "model": "gemini-3.5-flash"})
+
+        from wrangler.eval.evaluator import EvalResult
+
+        with (
+            mock.patch("wrangler.orchestration.stages.load_eval_file", return_value=[{}] * 4),
+            mock.patch(
+                "wrangler.orchestration.stages.run_batch_eval_averaged",
+                return_value=EvalResult(scores={"safety_v1": 1.0}),
+            ),
+            mock.patch(
+                "wrangler.eval.canary.score_canary", return_value={"scores": {}, "label": "c"}
+            ) as scorer,
+        ):
+            stage_eval(exp, phase="before")
+        return scorer, exp
+
+    def test_the_canary_is_scored_at_the_evals_score_repeats(self, tmp_path):
+        scorer, exp = self._run(
+            tmp_path, {"canary": "data/canaries/c.json", "score_repeats": 2, "num_runs": 1}
+        )
+
+        scorer.assert_called_once()
+        assert scorer.call_args.args[0].endswith("data/canaries/c.json")
+        assert scorer.call_args.kwargs["repeats"] == 2
+        assert exp.read_stage("eval_before")["flash"]["canary"]["label"] == "c"
+
+    def test_no_canary_in_the_manifest_scores_nothing(self, tmp_path):
+        scorer, exp = self._run(tmp_path, {"num_runs": 1})
+
+        scorer.assert_not_called()
+        assert exp.read_stage("eval_before")["flash"]["canary"] == {}
 
 
 class TestCoveragePersisted:
