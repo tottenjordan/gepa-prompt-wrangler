@@ -80,6 +80,10 @@ class Experiment:
                 # DOE 03 made this a first-class knob (coverage, not variance). Absent
                 # here it silently stays 1 and safety_v1 loses ~6 of 64 cases a side.
                 "score_repeats": (manifest.pipeline or {}).get("score_repeats", 1),
+                # The autorater canary, from the same `pipeline:` key the pipeline reads.
+                # `stage_eval` looked for it here and nothing ever put it here, so on the
+                # local path a manifest's canary was silently never scored.
+                "canary": (manifest.pipeline or {}).get("canary", ""),
                 "judge_model": manifest.eval_config.get(
                     "judge_model", DEFAULT_MANIFEST_JUDGE_MODEL
                 ),
