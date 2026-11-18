@@ -69,7 +69,10 @@ class ModelSpec:
 #   - Google publishes two dates for the 2.x shutdown: 2026-10-16 for the Gemini
 #     Developer API and 2026-10-20 for Agent Platform. We record the earlier one.
 MODELS: dict[str, ModelSpec] = {
-    # --- Gemini 2.x — RETIRING 2026-10-16, regional endpoints ---
+    # --- Gemini 2.x — RETIRED 2026-10-16, regional endpoints ---
+    # Kept registered so historical artifacts still price and route, but flagged
+    # so nothing new is pointed at them. No role default, manifest or agent uses
+    # either; the example prompts' "judge_model" fields are provenance only.
     "gemini-2.5-flash": ModelSpec(
         "gemini-2.5-flash",
         "gemini",
@@ -77,6 +80,7 @@ MODELS: dict[str, ModelSpec] = {
         2.50,
         100,
         retirement_date=dt.date(2026, 10, 16),
+        retired=True,
         notes="Successor: gemini-3.6-flash",
     ),
     "gemini-2.5-pro": ModelSpec(
@@ -86,6 +90,7 @@ MODELS: dict[str, ModelSpec] = {
         10.0,
         80,
         retirement_date=dt.date(2026, 10, 16),
+        retired=True,
         notes="Successor: gemini-3.1-pro-preview",
     ),
     # --- Gemini 3.x — global endpoint ---
