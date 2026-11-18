@@ -17,6 +17,12 @@ updates:
           - "ty"
           - "pytest*"
     open-pull-requests-limit: 5
+    ignore:
+      # fastmcp 4.x speaks the mcp 2.x protocol; ADK's `mcp` extra pins
+      # mcp<2, so a 4.x server cannot talk to any agent. Revisit when ADK
+      # ships mcp 2.x support (CLAUDE.md, "ADK pins mcp>=1.24,<2").
+      - dependency-name: "fastmcp"
+        update-types: ["version-update:semver-major"]
 
   - package-ecosystem: "github-actions"
     directory: "/"
@@ -27,9 +33,21 @@ updates:
   # layer. Those are held to uv.lock by tests/test_pipeline_image_pins.py, so a
   # uv bump that moves a version turns the build red rather than drifting the
   # containers silently, which is what happened to google-adk on 2026-09-08.
+  #
+  # Dockerfile.pipeline is split out because its interpreter is not free to
+  # move: it must equal preflight.TARGET_PYTHON (3.11, GEAP's runtime), and
+  # test_pipeline_image_pins.py forbids exempting it -- it runs the ADK
+  # monkey-patches. Patch-level 3.11.x bumps are still wanted.
+  - package-ecosystem: "docker"
+    directory: "/"
+    schedule:
+      interval: "monthly"
+    ignore:
+      - dependency-name: "python"
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
+
   - package-ecosystem: "docker"
     directories:
-      - "/"
       - "/examples/multi_model_agents/mcp_servers/search"
       - "/examples/multi_model_agents/mcp_servers/booking"
       - "/examples/multi_model_agents/mcp_servers/expense"
