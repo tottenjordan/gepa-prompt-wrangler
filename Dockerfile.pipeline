@@ -46,7 +46,7 @@ RUN pip install --no-cache-dir \
     "paperbanana==0.3.0" \
     "rouge-score==0.1.2" \
     "markdown-it-py==4.2.0" \
-    "google-cloud-storage==3.14.1" \
+    "google-cloud-storage==3.17.1" \
     "google-cloud-secret-manager==2.30.0" \
     "anthropic[vertex]==1.6.0" \
     "fastmcp==3.4.7"
