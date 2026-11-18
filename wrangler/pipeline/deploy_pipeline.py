@@ -1,6 +1,6 @@
 """Pipeline deployment: image build, code packaging, compilation, and Vertex AI submission."""
 
-import datetime
+import datetime as dt
 import hashlib
 import json
 import logging
@@ -451,7 +451,7 @@ def deploy_pipeline(
     aiplatform.init(project=project_id, location=location)
 
     pipeline_root = f"gs://{bucket_name}/pipeline-runs/{run_id}/pipeline_root"
-    timestamp = datetime.datetime.now(tz=datetime.UTC).strftime("%Y%m%d-%H%M%S")
+    timestamp = dt.datetime.now(tz=dt.UTC).strftime("%Y%m%d-%H%M%S")
     job_id = f"gepa-{run_id}-{timestamp}"
     display_name = f"gepa-{manifest.name}-{run_id}"
 
