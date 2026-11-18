@@ -39,10 +39,10 @@ RUN pip install --no-cache-dir \
     "google-adk[a2a,agent-identity,eval,mcp]==2.9.1" \
     "google-genai==2.24.0" \
     "litellm==1.85.7" \
-    "python-dotenv==1.2.3" \
+    "python-dotenv==1.2.4" \
     "pyyaml==6.0.3" \
     "matplotlib==3.11.2" \
-    "pandas==3.0.6" \
+    "pandas==3.1.0" \
     "paperbanana==0.3.0" \
     "rouge-score==0.1.2" \
     "markdown-it-py==4.2.0" \
